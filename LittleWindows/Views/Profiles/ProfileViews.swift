@@ -338,10 +338,20 @@ struct ManageProfilesView: View {
     @Query(sort: \CareProfile.createdAt) private var allProfiles: [CareProfile]
     @StateObject private var profileService = ProfileService.shared
     @State private var editingProfile: CareProfile?
+    @State private var profileToArchive: CareProfile?
+    @State private var profileToDelete: CareProfile?
     @State private var showingAdd = false
 
-    private var activeProfiles: [CareProfile] {
+    private var sortedProfiles: [CareProfile] {
         allProfiles.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private var activeProfiles: [CareProfile] {
+        profileService.allActiveProfiles(in: allProfiles)
+    }
+
+    private var archivedProfiles: [CareProfile] {
+        sortedProfiles.filter { $0.isArchived }
     }
 
     var body: some View {
@@ -357,10 +367,16 @@ struct ManageProfilesView: View {
                     manageRows(activeProfiles.filter { $0.profileType == .dog })
                 }
             }
+
+            if !archivedProfiles.isEmpty {
+                Section("Archived") {
+                    manageRows(archivedProfiles)
+                }
+            }
         }
         .navigationTitle("Profiles")
         .safeAreaInset(edge: .bottom) {
-            Text("Tap a profile to switch. Use the pencil to edit details.")
+            Text("Tap an active profile to switch. Use the pencil to edit details.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -380,12 +396,43 @@ struct ManageProfilesView: View {
         .sheet(item: $editingProfile) { profile in
             NavigationStack { ProfileEditorView(profile: profile) }
         }
+        .confirmationDialog(
+            "Archive Profile?",
+            isPresented: Binding(
+                get: { profileToArchive != nil },
+                set: { if !$0 { profileToArchive = nil } }
+            ),
+            presenting: profileToArchive
+        ) { profile in
+            Button("Archive \(profile.name)", role: .destructive) {
+                archive(profile)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { profile in
+            Text("\(profile.name) will be hidden from daily tracking, but all history will be kept.")
+        }
+        .confirmationDialog(
+            "Delete Profile?",
+            isPresented: Binding(
+                get: { profileToDelete != nil },
+                set: { if !$0 { profileToDelete = nil } }
+            ),
+            presenting: profileToDelete
+        ) { profile in
+            Button("Delete \(profile.name)", role: .destructive) {
+                delete(profile)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { profile in
+            Text("This permanently deletes \(profile.name) and that profile's events, milestones, appointments, predictions, and guide progress.")
+        }
     }
 
     private func manageRows(_ values: [CareProfile]) -> some View {
         ForEach(values) { profile in
             let isSelected = profileService.selectedProfileID == profile.id
             Button {
+                guard !profile.isArchived else { return }
                 profileService.switchProfile(profile)
                 dismiss()
             } label: {
@@ -434,22 +481,60 @@ struct ManageProfilesView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Edit \(profile.name)")
+                    if profile.isArchived {
+                        Button {
+                            restore(profile)
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppTheme.accent)
+                                .frame(width: 34, height: 34)
+                                .background(AppTheme.accent.opacity(0.10), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Restore \(profile.name)")
+                    }
                 }
             }
             .buttonStyle(.plain)
             .swipeActions {
                 Button(role: .destructive) {
-                    profileService.archiveChildProfile(
-                        profile,
-                        profiles: allProfiles,
-                        context: modelContext
-                    )
+                    profileToDelete = profile
                 } label: {
-                    Label("Archive", systemImage: "archivebox.fill")
+                    Label("Delete", systemImage: "trash.fill")
                 }
-                .disabled(profileService.allActiveProfiles(in: allProfiles).count <= 1)
+                if profile.isArchived {
+                    Button {
+                        restore(profile)
+                    } label: {
+                        Label("Restore", systemImage: "arrow.uturn.backward")
+                    }
+                    .tint(AppTheme.accent)
+                } else {
+                    Button {
+                        profileToArchive = profile
+                    } label: {
+                        Label("Archive", systemImage: "archivebox.fill")
+                    }
+                    .tint(.orange)
+                    .disabled(activeProfiles.count <= 1)
+                }
             }
         }
+    }
+
+    private func archive(_ profile: CareProfile) {
+        profileService.archiveProfile(profile, profiles: allProfiles, context: modelContext)
+        profileToArchive = nil
+    }
+
+    private func restore(_ profile: CareProfile) {
+        profileService.restoreProfile(profile, context: modelContext)
+    }
+
+    private func delete(_ profile: CareProfile) {
+        profileService.deleteProfile(profile, profiles: allProfiles, context: modelContext)
+        profileToDelete = nil
     }
 }
 

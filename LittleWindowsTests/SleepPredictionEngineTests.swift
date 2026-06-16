@@ -1,9 +1,127 @@
+import CloudKit
 import XCTest
 import SwiftData
 import SwiftUI
 @testable import LittleWindows
 
 final class SleepPredictionEngineTests: XCTestCase {
+    @MainActor
+    func testManualCloudKitSyncSmoke() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let mode = Self.smokeConfigurationValue(
+            "LW_CLOUDKIT_SYNC_SMOKE",
+            environment: environment
+        ) else {
+            throw XCTSkip("Set LW_CLOUDKIT_SYNC_SMOKE=write or read to run the manual CloudKit sync smoke test.")
+        }
+        let testID = Self.smokeConfigurationValue(
+            "LW_CLOUDKIT_SYNC_ID",
+            environment: environment
+        ) ?? UUID().uuidString
+        let profileName = "CloudKit Smoke \(testID)"
+        let container = CKContainer(identifier: PersistenceService.iCloudContainerIdentifier)
+        let status = try await container.accountStatus()
+        print("LW_CLOUDKIT_SYNC accountStatus=\(Self.description(for: status)) mode=\(mode) id=\(testID)")
+        guard status == .available else {
+            XCTFail("Simulator must be signed in to iCloud before sync can be tested. Status: \(Self.description(for: status))")
+            return
+        }
+
+        let modelContainer = PersistenceService.makeModelContainer()
+        let context = modelContainer.mainContext
+        switch mode {
+        case "write":
+            let profile = try fetchOrCreateSmokeProfile(named: profileName, context: context)
+            let event = BabyEvent(
+                profileID: profile.id,
+                type: .custom,
+                title: "CloudKit sync smoke",
+                startDate: Date(),
+                endDate: Date(),
+                caregiverName: "Sync Smoke"
+            )
+            event.notes = "Created by simulator \(environment["RUN_DESTINATION_DEVICE_NAME"] ?? "unknown")"
+            context.insert(event)
+            try context.save()
+            PersistenceService.recordLocalSave()
+            print("LW_CLOUDKIT_SYNC wrote profile=\(profile.name) profileID=\(profile.id) eventID=\(event.id)")
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+        case "read":
+            let deadline = Date().addingTimeInterval(180)
+            while Date() < deadline {
+                if let profile = try fetchSmokeProfile(named: profileName, context: context) {
+                    let eventCount = try smokeEventCount(profileID: profile.id, context: context)
+                    print("LW_CLOUDKIT_SYNC read profile=\(profile.name) profileID=\(profile.id) events=\(eventCount)")
+                    XCTAssertGreaterThanOrEqual(eventCount, 1)
+                    return
+                }
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+            XCTFail("Timed out waiting for \(profileName) to sync to this simulator.")
+        default:
+            XCTFail("Unsupported LW_CLOUDKIT_SYNC_SMOKE mode: \(mode)")
+        }
+    }
+
+    @MainActor
+    private func fetchOrCreateSmokeProfile(
+        named name: String,
+        context: ModelContext
+    ) throws -> BabyProfile {
+        if let existing = try fetchSmokeProfile(named: name, context: context) {
+            return existing
+        }
+        let profile = BabyProfile(name: name, birthDate: Date(), sex: .unknown)
+        context.insert(profile)
+        return profile
+    }
+
+    @MainActor
+    private func fetchSmokeProfile(
+        named name: String,
+        context: ModelContext
+    ) throws -> BabyProfile? {
+        let descriptor = FetchDescriptor<BabyProfile>(
+            predicate: #Predicate<BabyProfile> { profile in
+                profile.name == name
+            }
+        )
+        return try context.fetch(descriptor).first
+    }
+
+    @MainActor
+    private func smokeEventCount(
+        profileID: UUID,
+        context: ModelContext
+    ) throws -> Int {
+        let descriptor = FetchDescriptor<BabyEvent>(
+            predicate: #Predicate<BabyEvent> { event in
+                event.profileID == profileID
+            }
+        )
+        return try context.fetchCount(descriptor)
+    }
+
+    private static func description(for status: CKAccountStatus) -> String {
+        switch status {
+        case .available: "available"
+        case .noAccount: "noAccount"
+        case .restricted: "restricted"
+        case .couldNotDetermine: "couldNotDetermine"
+        case .temporarilyUnavailable: "temporarilyUnavailable"
+        @unknown default: "unknown"
+        }
+    }
+
+    private static func smokeConfigurationValue(
+        _ key: String,
+        environment: [String: String]
+    ) -> String? {
+        environment[key]
+            ?? UserDefaults.standard.string(forKey: key)
+            ?? UserDefaults(suiteName: "com.debidia.LittleWindows")?.string(forKey: key)
+    }
+
     func testNursingSideIsAlwaysLeftOrRight() {
         XCTAssertEqual(NursingSide.allCases, [.left, .right])
     }
@@ -195,6 +313,76 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         let selected = ProfileService.shared.ensureSelection(in: [testChild, sibling])
         XCTAssertEqual(selected?.id, sibling.id)
+    }
+
+    @MainActor
+    func testArchivedProfileCanBeRestoredAndSelected() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        context.insert(testChild)
+        context.insert(sibling)
+        try context.save()
+
+        ProfileService.shared.archiveProfile(
+            testChild,
+            profiles: [testChild, sibling],
+            context: context
+        )
+        XCTAssertTrue(testChild.isArchived)
+        XCTAssertEqual(ProfileService.shared.selectedProfile(in: [testChild, sibling])?.id, sibling.id)
+
+        ProfileService.shared.restoreProfile(testChild, context: context)
+        XCTAssertFalse(testChild.isArchived)
+        XCTAssertEqual(ProfileService.shared.selectedProfile(in: [testChild, sibling])?.id, testChild.id)
+    }
+
+    @MainActor
+    func testDeleteProfileRemovesScopedHistoryAndKeepsSiblingData() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        context.insert(testChild)
+        context.insert(sibling)
+
+        context.insert(BabyEvent(profileID: testChild.id, type: .sleep))
+        context.insert(BabyEvent(profileID: sibling.id, type: .feed))
+        context.insert(SleepPredictionRecord(
+            prediction: makeLittleWindowPrediction(),
+            basedOnLastSleepEventID: nil,
+            profileID: testChild.id
+        ))
+        context.insert(MilestoneEntry(profileID: testChild.id, title: "First smile", date: Date()))
+        context.insert(DoctorAppointment(profileID: testChild.id, title: "Wellness Check"))
+        context.insert(AgeGuideReadState(profileID: testChild.id, guideID: "month-1"))
+        context.insert(PuppyStageGuideReadState(profileID: testChild.id, guideID: "puppy-8-weeks"))
+        try context.save()
+
+        ProfileService.shared.switchProfile(testChild)
+        ProfileService.shared.deleteProfile(
+            testChild,
+            profiles: [testChild, sibling],
+            context: context
+        )
+
+        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        let events = try context.fetch(FetchDescriptor<BabyEvent>())
+        let records = try context.fetch(FetchDescriptor<SleepPredictionRecord>())
+        let milestones = try context.fetch(FetchDescriptor<MilestoneEntry>())
+        let appointments = try context.fetch(FetchDescriptor<DoctorAppointment>())
+        let ageGuideStates = try context.fetch(FetchDescriptor<AgeGuideReadState>())
+        let puppyGuideStates = try context.fetch(FetchDescriptor<PuppyStageGuideReadState>())
+
+        XCTAssertEqual(profiles.map(\.id), [sibling.id])
+        XCTAssertEqual(events.map(\.profileID), [sibling.id])
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(milestones.isEmpty)
+        XCTAssertTrue(appointments.isEmpty)
+        XCTAssertTrue(ageGuideStates.isEmpty)
+        XCTAssertTrue(puppyGuideStates.isEmpty)
+        XCTAssertEqual(ProfileService.shared.selectedProfile(in: profiles)?.id, sibling.id)
     }
 
     @MainActor
