@@ -164,13 +164,13 @@ struct WidgetSnapshot: Codable, Hashable {
     static let empty = WidgetSnapshot(
         generatedAt: Date(),
         profileID: nil,
-        profileName: "Ethan",
-        babyName: "Ethan",
+        profileName: "Baby",
+        babyName: "Baby",
         activeTimer: nil,
         prediction: nil,
         todaySummary: TodaySummarySnapshot(
             profileID: nil,
-            profileName: "Ethan",
+            profileName: "Baby",
             totalSleepSeconds: 0,
             napCount: 0,
             careSessionCount: 0,

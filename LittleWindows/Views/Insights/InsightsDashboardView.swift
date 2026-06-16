@@ -322,7 +322,7 @@ struct InsightsDashboardView: View {
         }
 
         viewModel.refresh(
-            profileName: profile?.name ?? "Ethan",
+            profileName: profile?.name ?? "Baby",
             events: scopedEvents.filter { !$0.isTimerDraft },
             records: scopedRecords,
             now: now
@@ -333,7 +333,7 @@ struct InsightsDashboardView: View {
         Group {
             PredictionCard(
                 prediction: currentPrediction,
-                babyName: profile?.name ?? "Ethan",
+                babyName: profile?.name ?? "Baby",
                 alertStatusText: notificationManager.statusText(
                     prediction: currentPrediction,
                     settings: .current,

@@ -20,7 +20,6 @@
 		B0000000000000000000000B /* Services/NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000B /* Services/NotificationManager.swift */; };
 		B0000000000000000000000C /* Services/PredictionTuningService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000C /* Services/PredictionTuningService.swift */; };
 		B0000000000000000000000D /* Services/SleepPredictionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000D /* Services/SleepPredictionEngine.swift */; };
-		B0000000000000000000000E /* Services/SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000E /* Services/SyncService.swift */; };
 		B0000000000000000000000F /* Utilities/Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000F /* Utilities/Formatting.swift */; };
 		B00000000000000000000010 /* Utilities/SampleData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000010 /* Utilities/SampleData.swift */; };
 		B00000000000000000000011 /* Views/RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000011 /* Views/RootView.swift */; };
@@ -35,7 +34,6 @@
 		B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* SleepPredictionEngineTests.swift */; };
 		B0000000000000000000001C /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
 		B0000000000000000000001D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* Assets.xcassets */; };
-		B0000000000000000000001E /* SeedData/Ethan-Huckleberry-Backup.json in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000020 /* SeedData/Ethan-Huckleberry-Backup.json */; };
 		B0000000000000000000001F /* Models/InsightMetric.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000021 /* Models/InsightMetric.swift */; };
 		B00000000000000000000020 /* Models/InsightTrend.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000022 /* Models/InsightTrend.swift */; };
 		B00000000000000000000021 /* Models/ChartDataPoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000023 /* Models/ChartDataPoint.swift */; };
@@ -170,7 +168,6 @@
 		F0000000000000000000000B /* Services/NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NotificationManager.swift; sourceTree = "<group>"; };
 		F0000000000000000000000C /* Services/PredictionTuningService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/PredictionTuningService.swift; sourceTree = "<group>"; };
 		F0000000000000000000000D /* Services/SleepPredictionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SleepPredictionEngine.swift; sourceTree = "<group>"; };
-		F0000000000000000000000E /* Services/SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SyncService.swift; sourceTree = "<group>"; };
 		F0000000000000000000000F /* Utilities/Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/Formatting.swift; sourceTree = "<group>"; };
 		F00000000000000000000010 /* Utilities/SampleData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/SampleData.swift; sourceTree = "<group>"; };
 		F00000000000000000000011 /* Views/RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/RootView.swift; sourceTree = "<group>"; };
@@ -187,7 +184,7 @@
 		F0000000000000000000001D /* LittleWindows.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LittleWindows.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F0000000000000000000001E /* LittleWindowsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LittleWindowsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F0000000000000000000001F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		F00000000000000000000020 /* SeedData/Ethan-Huckleberry-Backup.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "SeedData/Ethan-Huckleberry-Backup.json"; sourceTree = "<group>"; };
+		F00000000000000000000020 /* SeedData/Sample-Legacy-Tracker-Backup.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "SeedData/Sample-Legacy-Tracker-Backup.json"; sourceTree = "<group>"; };
 		F00000000000000000000021 /* Models/InsightMetric.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/InsightMetric.swift; sourceTree = "<group>"; };
 		F00000000000000000000022 /* Models/InsightTrend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/InsightTrend.swift; sourceTree = "<group>"; };
 		F00000000000000000000023 /* Models/ChartDataPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/ChartDataPoint.swift; sourceTree = "<group>"; };
@@ -343,7 +340,6 @@
 				F0000000000000000000000B /* Services/NotificationManager.swift */,
 				F0000000000000000000000C /* Services/PredictionTuningService.swift */,
 				F0000000000000000000000D /* Services/SleepPredictionEngine.swift */,
-				F0000000000000000000000E /* Services/SyncService.swift */,
 				F00000000000000000000024 /* Services/InsightsAnalyticsService.swift */,
 				F00000000000000000000031 /* Services/EventTimerService.swift */,
 				F00000000000000000000032 /* Services/WidgetSnapshotService.swift */,
@@ -411,7 +407,7 @@
 				F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */,
 				F0000000000000000000006C /* Views/NightLight/NightLightView.swift */,
 				F0000000000000000000001F /* Assets.xcassets */,
-				F00000000000000000000020 /* SeedData/Ethan-Huckleberry-Backup.json */,
+				F00000000000000000000020 /* SeedData/Sample-Legacy-Tracker-Backup.json */,
 				F0000000000000000000005B /* Resources/GrowthCharts */,
 				F00000000000000000000074 /* Resources/AgeGuides */,
 			);
@@ -570,7 +566,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				B0000000000000000000001D /* Assets.xcassets in Resources */,
-				B0000000000000000000001E /* SeedData/Ethan-Huckleberry-Backup.json in Resources */,
 				B0000000000000000000005C /* Resources/GrowthCharts in Resources */,
 				B00000000000000000000074 /* Resources/AgeGuides in Resources */,
 			);
@@ -622,7 +617,6 @@
 				B0000000000000000000000B /* Services/NotificationManager.swift in Sources */,
 				B0000000000000000000000C /* Services/PredictionTuningService.swift in Sources */,
 				B0000000000000000000000D /* Services/SleepPredictionEngine.swift in Sources */,
-				B0000000000000000000000E /* Services/SyncService.swift in Sources */,
 				B00000000000000000000022 /* Services/InsightsAnalyticsService.swift in Sources */,
 				B0000000000000000000002E /* Services/EventTimerService.swift in Sources */,
 				B0000000000000000000002F /* Services/WidgetSnapshotService.swift in Sources */,

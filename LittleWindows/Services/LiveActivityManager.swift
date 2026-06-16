@@ -21,7 +21,7 @@ final class LiveActivityManager {
 
         let timer = WidgetSnapshotService.activeSnapshot(
             event: primary,
-            babyName: profile?.name ?? "Ethan",
+            babyName: profile?.name ?? "Baby",
             additionalActiveCount: max(0, activeEvents.count - 1)
         )
         let content = ActivityContent(

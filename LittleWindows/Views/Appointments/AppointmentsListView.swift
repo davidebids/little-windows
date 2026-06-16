@@ -31,7 +31,7 @@ struct AppointmentsListView: View {
                 ContentUnavailableView(
                     "No appointments yet",
                     systemImage: "stethoscope",
-                    description: Text("Add Ethan's pediatrician visits, vaccines, checkups, and follow-ups here.")
+                    description: Text("Add pediatrician visits, vaccines, checkups, and follow-ups here.")
                 )
                 .listRowBackground(Color.clear)
             } else {
@@ -60,7 +60,7 @@ struct AppointmentsListView: View {
         .sheet(isPresented: $showingEditor) {
             NavigationStack {
                 AppointmentEditorView(
-                    babyName: profile?.name ?? "Ethan",
+                    babyName: profile?.name ?? "Baby",
                     profileID: profile?.id,
                     profileType: profile?.profileType ?? .child
                 )
@@ -207,7 +207,7 @@ struct AppointmentEditorView: View {
 
     init(
         appointment: DoctorAppointment? = nil,
-        babyName: String = "Ethan",
+        babyName: String = "Baby",
         profileID: UUID? = nil,
         profileType: CareProfileType = .child
     ) {

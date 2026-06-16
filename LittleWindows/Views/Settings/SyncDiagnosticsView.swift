@@ -13,8 +13,8 @@ struct SyncDiagnosticsView: View {
 
             Section("Profile scope") {
                 LabeledContent("Orphaned records", value: "\(snapshot.orphanedProfileScopedRecordCount)")
-                LabeledContent("Duplicate Ethan risk", value: "\(snapshot.duplicateEthanProfileCount)")
-                Text("Records with missing or unknown profile IDs are assigned to the existing Ethan profile during migration when possible.")
+                LabeledContent("Duplicate child-name risk", value: "\(snapshot.duplicateChildProfileNameCount)")
+                Text("Records with missing or unknown profile IDs are assigned to an existing child profile during migration when possible.")
                     .foregroundStyle(.secondary)
             }
 

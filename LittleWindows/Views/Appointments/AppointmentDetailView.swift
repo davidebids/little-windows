@@ -145,7 +145,7 @@ struct AppointmentDetailView: View {
             NavigationStack {
                 AppointmentEditorView(
                     appointment: appointment,
-                    babyName: profile?.name ?? "Ethan",
+                    babyName: profile?.name ?? "Baby",
                     profileID: appointment.profileID ?? profile?.id,
                     profileType: profile?.profileType ?? .child
                 )

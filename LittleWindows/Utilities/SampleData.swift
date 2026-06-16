@@ -8,22 +8,13 @@ enum SampleData {
 
     @MainActor
     static func seedIfNeeded(in context: ModelContext) async {
-        _ = try? LegacyHuckleberryGrowthMigration.migrate(in: context)
-        let descriptor = FetchDescriptor<BabyProfile>()
-        if (try? context.fetchCount(descriptor)) == 0 {
-            do {
-                let data = try bundledHuckleberryHistory()
-                try DataExportImportService.importData(data, context: context)
-            } catch {
-                createStarterProfile(in: context)
-            }
-        }
+        _ = try? LegacyTrackerGrowthMigration.migrate(in: context)
         ProfileMigrationService.ensureProfilesAndAssignments(context: context)
     }
 
     @MainActor
     static func createStarterProfile(in context: ModelContext) {
-        context.insert(BabyProfile(name: "Ethan", birthDate: defaultBirthDate, sex: .male))
+        context.insert(BabyProfile(name: "Sample Child", birthDate: defaultBirthDate, sex: .unknown))
         if let profile = try? context.fetch(FetchDescriptor<BabyProfile>()).first {
             ProfileService.shared.switchProfile(profile)
         }
@@ -31,14 +22,25 @@ enum SampleData {
         PersistenceService.recordLocalSave()
     }
 
-    static func bundledHuckleberryHistory() throws -> Data {
-        guard let url = Bundle.main.url(
-            forResource: "Ethan-Huckleberry-Backup",
+    static func bundledLegacyTrackerHistory() throws -> Data {
+        if let url = Bundle.main.url(
+            forResource: "Sample-Legacy-Tracker-Backup",
             withExtension: "json"
-        ) else {
-            throw CocoaError(.fileNoSuchFile)
+        ) {
+            return try Data(contentsOf: url)
         }
-        return try Data(contentsOf: url)
+
+        #if DEBUG
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("SeedData/Sample-Legacy-Tracker-Backup.json")
+        if FileManager.default.fileExists(atPath: sourceURL.path) {
+            return try Data(contentsOf: sourceURL)
+        }
+        #endif
+
+        throw CocoaError(.fileNoSuchFile)
     }
 
     @MainActor
@@ -63,7 +65,7 @@ enum SampleData {
         let context = container.mainContext
         let calendar = Calendar.current
         let now = Date()
-        let profile = BabyProfile(name: "Ethan", birthDate: defaultBirthDate, sex: .male)
+        let profile = BabyProfile(name: "Sample Child", birthDate: defaultBirthDate, sex: .unknown)
         profile.displayColor = "indigo"
         context.insert(profile)
         let sampleBaby = BabyProfile(
@@ -73,9 +75,9 @@ enum SampleData {
             displayColor: "teal"
         )
         context.insert(sampleBaby)
-        let meso = BabyProfile(
+        let sampleDog = BabyProfile(
             profileType: .dog,
-            name: "Meso",
+            name: "Sample Dog",
             birthDate: calendar.date(byAdding: .weekOfYear, value: -12, to: now) ?? now,
             sex: .female,
             notes: "Preview dog profile",
@@ -85,7 +87,7 @@ enum SampleData {
             breed: "Mini Goldendoodle",
             coatColor: "Apricot"
         )
-        context.insert(meso)
+        context.insert(sampleDog)
         ProfileService.shared.switchProfile(profile)
 
         let wake = calendar.date(bySettingHour: 7, minute: 5, second: 0, of: now) ?? now

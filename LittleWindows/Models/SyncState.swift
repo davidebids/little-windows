@@ -48,7 +48,7 @@ struct SyncDiagnosticSnapshot: Equatable {
     var activeProfileCount: Int
     var recordCounts: [SyncDiagnosticCount]
     var orphanedProfileScopedRecordCount: Int
-    var duplicateEthanProfileCount: Int
+    var duplicateChildProfileNameCount: Int
     var migrationState: CloudMigrationState
     var lastLocalSaveAt: Date?
 }

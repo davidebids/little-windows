@@ -585,7 +585,7 @@ enum DataExportImportService {
         }
         try context.save()
         PersistenceService.recordLocalSave()
-        _ = try LegacyHuckleberryGrowthMigration.migrate(in: context)
+        _ = try LegacyTrackerGrowthMigration.migrate(in: context)
         ProfileMigrationService.ensureProfilesAndAssignments(context: context)
     }
 
@@ -604,7 +604,7 @@ enum DataExportImportService {
     }
 }
 
-enum LegacyHuckleberryGrowthMigration {
+enum LegacyTrackerGrowthMigration {
     struct ParsedMeasurement: Equatable {
         var weightPounds: Int?
         var weightOunces: Double?

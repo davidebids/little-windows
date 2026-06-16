@@ -147,7 +147,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let prediction = makeLittleWindowPrediction(kind: .nap)
         let copy = NotificationManager.notificationCopy(
             for: prediction,
-            babyName: "Ethan",
+            babyName: "Test Child",
             leadMinutes: 10
         )
 
@@ -157,7 +157,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testProfileMigrationCreatesEthanAndAssignsLegacyRecords() throws {
+    func testProfileMigrationCreatesImportedChildAndAssignsLegacyRecords() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
         let legacyEvent = BabyEvent(type: .feed, startDate: Date())
@@ -166,6 +166,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             date: Date(),
             category: .social
         )
+        legacyMilestone.profileID = UUID()
         context.insert(legacyEvent)
         context.insert(legacyMilestone)
         try context.save()
@@ -174,7 +175,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
         XCTAssertEqual(profiles.count, 1)
-        XCTAssertEqual(profiles.first?.name, "Ethan")
+        XCTAssertEqual(profiles.first?.name, "Imported Child")
         XCTAssertEqual(legacyEvent.profileID, profiles.first?.id)
         XCTAssertEqual(legacyMilestone.profileID, profiles.first?.id)
     }
@@ -183,16 +184,16 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testProfileSelectionFallsBackToActiveChild() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let ethan = BabyProfile(name: "Ethan", birthDate: Date(), sex: .male)
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
         let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
-        context.insert(ethan)
+        context.insert(testChild)
         context.insert(sibling)
         try context.save()
 
-        ProfileService.shared.switchProfile(ethan)
-        ethan.isArchived = true
+        ProfileService.shared.switchProfile(testChild)
+        testChild.isArchived = true
 
-        let selected = ProfileService.shared.ensureSelection(in: [ethan, sibling])
+        let selected = ProfileService.shared.ensureSelection(in: [testChild, sibling])
         XCTAssertEqual(selected?.id, sibling.id)
     }
 
@@ -246,13 +247,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         let snapshot = WidgetSnapshotService.activeSnapshot(
             event: event,
             profileID: profileID,
-            babyName: "Ethan",
+            babyName: "Test Child",
             additionalActiveCount: 0,
             now: Date(timeIntervalSinceReferenceDate: 1_300)
         )
 
         XCTAssertEqual(snapshot.profileID, profileID)
-        XCTAssertEqual(snapshot.profileName, "Ethan")
+        XCTAssertEqual(snapshot.profileName, "Test Child")
         XCTAssertTrue(snapshot.stopURL.absoluteString.contains("/profile/\(profileID.uuidString)/"))
     }
 
@@ -260,9 +261,9 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testProfileIDsRoundTripThroughJSONBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let ethan = BabyProfile(name: "Ethan", birthDate: Date(), sex: .male)
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
         let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
-        context.insert(ethan)
+        context.insert(testChild)
         context.insert(sibling)
         let event = BabyEvent(
             profileID: sibling.id,
@@ -291,25 +292,25 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testDogProfilesAreSelectableFamilyProfiles() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let ethan = BabyProfile(name: "Ethan", birthDate: Date(), sex: .male)
-        let meso = BabyProfile(
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let testDog = BabyProfile(
             profileType: .dog,
-            name: "Meso",
+            name: "Test Dog",
             birthDate: Date().addingTimeInterval(-12 * 7 * 24 * 60 * 60),
             sex: .female,
             displayColor: "teal",
             species: "dog",
             breed: "Mini Goldendoodle"
         )
-        context.insert(ethan)
-        context.insert(meso)
+        context.insert(testChild)
+        context.insert(testDog)
         try context.save()
 
-        ProfileService.shared.switchProfile(meso)
+        ProfileService.shared.switchProfile(testDog)
 
-        XCTAssertEqual(ProfileService.shared.selectedProfile(in: [ethan, meso])?.id, meso.id)
-        XCTAssertEqual(ProfileService.shared.allActiveProfiles(in: [ethan, meso]).map(\.id), [ethan.id, meso.id])
-        XCTAssertEqual(meso.profileSubtitle, "Mini Goldendoodle")
+        XCTAssertEqual(ProfileService.shared.selectedProfile(in: [testChild, testDog])?.id, testDog.id)
+        XCTAssertEqual(ProfileService.shared.allActiveProfiles(in: [testChild, testDog]).map(\.id), [testChild.id, testDog.id])
+        XCTAssertEqual(testDog.profileSubtitle, "Mini Goldendoodle")
     }
 
     func testDogEventDetailsDriveTimelineSummaries() {
@@ -347,14 +348,14 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testPuppyStageGuideMatchesDogAgeAndPersistsReadState() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let meso = BabyProfile(
+        let testDog = BabyProfile(
             profileType: .dog,
-            name: "Meso",
+            name: "Test Dog",
             birthDate: Date().addingTimeInterval(-12 * 7 * 24 * 60 * 60),
             sex: .female
         )
-        context.insert(meso)
-        let guide = try XCTUnwrap(PuppyStageGuideService.shared.currentGuide(for: meso))
+        context.insert(testDog)
+        let guide = try XCTUnwrap(PuppyStageGuideService.shared.currentGuide(for: testDog))
 
         XCTAssertEqual(guide.stageKey, "stage_12_weeks")
 
@@ -362,11 +363,11 @@ final class SleepPredictionEngineTests: XCTestCase {
             guide,
             in: context,
             readStates: [],
-            profileID: meso.id
+            profileID: testDog.id
         )
 
         let states = try context.fetch(FetchDescriptor<PuppyStageGuideReadState>())
-        XCTAssertEqual(states.first?.profileID, meso.id)
+        XCTAssertEqual(states.first?.profileID, testDog.id)
         XCTAssertEqual(states.first?.guideID, guide.id)
         XCTAssertNotNil(states.first?.firstOpenedAt)
     }
@@ -375,9 +376,9 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testDogProfileAndDogDetailsRoundTripThroughJSONBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let meso = BabyProfile(
+        let testDog = BabyProfile(
             profileType: .dog,
-            name: "Meso",
+            name: "Test Dog",
             birthDate: Date(timeIntervalSinceReferenceDate: 1_000),
             sex: .female,
             adoptionDate: Date(timeIntervalSinceReferenceDate: 2_000),
@@ -385,7 +386,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             breed: "Mini Goldendoodle",
             coatColor: "Apricot"
         )
-        context.insert(meso)
+        context.insert(testDog)
         var details = DogEventDetails()
         details.foodName = "Chicken and rice"
         details.foodAmount = 4
@@ -393,7 +394,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         details.mealType = .dinner
         details.eatenAmount = .most
         let food = BabyEvent(
-            profileID: meso.id,
+            profileID: testDog.id,
             type: .food,
             startDate: Date(timeIntervalSinceReferenceDate: 3_000)
         )
@@ -411,7 +412,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(importedDog.coatColor, "Apricot")
 
         let importedEvent = try XCTUnwrap(try context.fetch(FetchDescriptor<BabyEvent>()).first { $0.type == .food })
-        XCTAssertEqual(importedEvent.profileID, meso.id)
+        XCTAssertEqual(importedEvent.profileID, testDog.id)
         XCTAssertEqual(importedEvent.profileTypeSnapshot, .dog)
         XCTAssertEqual(importedEvent.dogDetails.foodName, "Chicken and rice")
         XCTAssertEqual(importedEvent.dogDetails.eatenAmount, .most)
@@ -888,7 +889,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testBundledHuckleberryHistoryImportsWithoutActiveTimers() throws {
+    func testBundledLegacyTrackerHistoryImportsWithoutActiveTimers() throws {
         let schema = Schema([
             BabyProfile.self,
             BabyEvent.self,
@@ -902,7 +903,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
 
-        let data = try SampleData.bundledHuckleberryHistory()
+        let data = try SampleData.bundledLegacyTrackerHistory()
         try DataExportImportService.importData(data, context: container.mainContext)
 
         let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>())
@@ -947,7 +948,22 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testLegacyHuckleberryGrowthMigrationRecoversMeasurements() throws {
+    func testFirstLaunchSeedDoesNotCreateProfileOrBundledHistory() async throws {
+        let container = try makeInMemoryContainer()
+
+        await SampleData.seedIfNeeded(in: container.mainContext)
+
+        let profiles = try container.mainContext.fetch(FetchDescriptor<BabyProfile>())
+        let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>())
+        let records = try container.mainContext.fetch(FetchDescriptor<SleepPredictionRecord>())
+
+        XCTAssertTrue(profiles.isEmpty)
+        XCTAssertTrue(events.isEmpty)
+        XCTAssertTrue(records.isEmpty)
+    }
+
+    @MainActor
+    func testLegacyTrackerGrowthMigrationRecoversMeasurements() throws {
         let schema = Schema([
             BabyProfile.self,
             BabyEvent.self,
@@ -960,7 +976,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
-        let profile = BabyProfile(name: "Ethan", birthDate: SampleData.defaultBirthDate)
+        let profile = BabyProfile(name: "Test Child", birthDate: SampleData.defaultBirthDate)
         container.mainContext.insert(profile)
         let event = BabyEvent(
             type: .custom,
@@ -973,7 +989,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         try container.mainContext.save()
 
         XCTAssertEqual(
-            try LegacyHuckleberryGrowthMigration.migrate(in: container.mainContext),
+            try LegacyTrackerGrowthMigration.migrate(in: container.mainContext),
             1
         )
         XCTAssertEqual(event.type, .growth)
@@ -1007,7 +1023,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         try DataExportImportService.importData(
-            SampleData.bundledHuckleberryHistory(),
+            SampleData.bundledLegacyTrackerHistory(),
             context: container.mainContext
         )
         let profile = try XCTUnwrap(
@@ -1226,7 +1242,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         }
 
         let snapshot = InsightsAnalyticsService.snapshot(
-            profileName: "Ethan",
+            profileName: "Test Child",
             events: events,
             records: [],
             periodStart: firstDay,
@@ -1257,7 +1273,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let viewModel = InsightsViewModel(now: now, calendar: calendar)
         viewModel.selectedRange = .custom
         viewModel.refresh(
-            profileName: "Ethan",
+            profileName: "Test Child",
             events: [],
             records: [],
             now: now
@@ -1421,7 +1437,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         bath.activityType = .bath
 
         let snapshot = WidgetSnapshotService.makeSnapshot(
-            babyName: "Ethan",
+            babyName: "Test Child",
             events: [bath, sleep],
             prediction: nil
         )
@@ -1450,7 +1466,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
 
         let snapshot = WidgetSnapshotService.makeSnapshot(
-            babyName: "Ethan",
+            babyName: "Test Child",
             events: [event],
             prediction: nil,
             now: now
@@ -1627,7 +1643,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         let snapshot = WidgetSnapshotService.activeSnapshot(
             event: event,
-            babyName: "Ethan",
+            babyName: "Test Child",
             additionalActiveCount: 0,
             now: now
         )
@@ -1844,7 +1860,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         let snapshot = WidgetSnapshotService.activeSnapshot(
             event: bath,
-            babyName: "Ethan",
+            babyName: "Test Child",
             additionalActiveCount: 0
         )
 
@@ -1871,7 +1887,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         outdoor.activityType = .outdoorPlay
 
         let snapshot = InsightsAnalyticsService.snapshot(
-            profileName: "Ethan",
+            profileName: "Test Child",
             events: [growth, temperature, outdoor],
             records: [],
             periodStart: day,
@@ -2019,7 +2035,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testGrowthChartDataUsesCanonicalValuesAndProfileSex() {
         let birthDate = Date(timeIntervalSince1970: 1_767_225_600)
-        let profile = BabyProfile(name: "Ethan", birthDate: birthDate, sex: .male)
+        let profile = BabyProfile(name: "Test Child", birthDate: birthDate, sex: .male)
         let event = BabyEvent(
             type: .growth,
             startDate: birthDate.addingTimeInterval(90 * 24 * 60 * 60),
@@ -2080,7 +2096,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let now = try XCTUnwrap(
             calendar.date(byAdding: .day, value: 305, to: birthDate)
         )
-        let profile = BabyProfile(name: "Ethan", birthDate: birthDate)
+        let profile = BabyProfile(name: "Test Child", birthDate: birthDate)
 
         let summaries = AutomaticMilestoneSummaryService.summaries(
             profile: profile,
@@ -2094,7 +2110,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             "automatic-days-200",
             "automatic-days-100"
         ])
-        XCTAssertEqual(summaries.last?.title, "Ethan is 100 days old!")
+        XCTAssertEqual(summaries.last?.title, "Test Child is 100 days old!")
     }
 
     func testAutomaticMilestoneSummaryAggregatesCareGrowthAndActivities() throws {
@@ -2104,7 +2120,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             calendar.date(from: DateComponents(year: 2025, month: 1, day: 1))
         )
         let profile = BabyProfile(
-            name: "Ethan",
+            name: "Test Child",
             birthDate: birthDate,
             birthWeightKilograms: 3
         )
@@ -2235,7 +2251,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let milestoneDate = birthDate.addingTimeInterval(21 * 24 * 60 * 60)
         let photoID = UUID()
 
-        context.insert(BabyProfile(name: "Ethan", birthDate: birthDate))
+        context.insert(BabyProfile(name: "Test Child", birthDate: birthDate))
         context.insert(MilestoneEntry(
             title: "First smile",
             date: milestoneDate,
@@ -2274,7 +2290,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let growthID = UUID()
         let temperatureID = UUID()
 
-        context.insert(BabyProfile(name: "Ethan", birthDate: birthDate))
+        context.insert(BabyProfile(name: "Test Child", birthDate: birthDate))
         context.insert(DoctorAppointment(
             title: "6-month wellness check",
             appointmentType: .wellnessCheck,
@@ -2340,7 +2356,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let birthDate = calendar.date(from: DateComponents(year: 2026, month: 1, day: 31))!
         let now = calendar.date(from: DateComponents(year: 2026, month: 5, day: 31))!
-        let profile = BabyProfile(name: "Ethan", birthDate: birthDate)
+        let profile = BabyProfile(name: "Test Child", birthDate: birthDate)
         let service = AgeGuideService(calendar: calendar)
 
         let guide = try XCTUnwrap(service.currentAgeGuide(for: profile, now: now))
@@ -2360,7 +2376,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let openedAt = Date(timeIntervalSince1970: 1_780_000_000)
         let notifiedAt = openedAt.addingTimeInterval(-60 * 60)
 
-        context.insert(BabyProfile(name: "Ethan", birthDate: SampleData.defaultBirthDate))
+        context.insert(BabyProfile(name: "Test Child", birthDate: SampleData.defaultBirthDate))
         context.insert(AgeGuideReadState(
             guideID: "age-04",
             firstOpenedAt: openedAt,

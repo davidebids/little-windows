@@ -39,6 +39,7 @@ struct TodayView: View {
     @State private var appointmentToOpen: DoctorAppointment?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
     @State private var puppyGuideToOpen: PuppyStageGuide?
+    @State private var showingProfileEditor = false
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -179,79 +180,80 @@ struct TodayView: View {
                 .listRowSeparator(.hidden)
             }
 
-            activeTimersSection(activeEvents)
-
-            if isDogProfile {
-                dogTodaySummarySection
-                puppyStageGuideSection
+            if profile == nil {
+                noProfileSection
             } else {
-                monthlyAgeGuideSection
-            }
+                activeTimersSection(activeEvents)
 
-            appointmentsSection
-
-            if !isDogProfile {
-                Section {
-                    PredictionCard(
-                        prediction: prediction,
-                        babyName: profile?.name ?? "Baby",
-                        alertStatusText: notificationManager.statusText(
-                            prediction: prediction,
-                            settings: .current,
-                            isSleeping: activeEvents.contains {
-                                $0.type == .sleep && $0.isTimerRunning
-                            }
-                        ),
-                        alertsEnabled: notificationsEnabled,
-                        toggleAlerts: toggleLittleWindowAlerts,
-                        showExplanation: { showingExplanation = true }
-                    )
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                }
-            }
-
-            if isDogProfile {
-                dogQuickActionsSection
-            } else {
-                childQuickActionsSection
-            }
-
-            Section {
-                if todayEvents.isEmpty {
-                    ContentUnavailableView(
-                        "No events yet",
-                        systemImage: "clock",
-                        description: Text(
-                            profile.map { "Use a quick action to start \($0.name)'s day." }
-                                ?? "Use a quick action to start the day."
-                        )
-                    )
+                if isDogProfile {
+                    dogTodaySummarySection
+                    puppyStageGuideSection
                 } else {
-                    ForEach(todayEvents) { event in
-                        Button {
-                            if event.isTimerDraft {
-                                activeTimerToEdit = event
-                            } else {
-                                editorRoute = EventEditorRoute(type: event.type, event: event)
+                    monthlyAgeGuideSection
+                }
+
+                appointmentsSection
+
+                if !isDogProfile {
+                    Section {
+                        PredictionCard(
+                            prediction: prediction,
+                            babyName: profile?.name ?? "Baby",
+                            alertStatusText: notificationManager.statusText(
+                                prediction: prediction,
+                                settings: .current,
+                                isSleeping: activeEvents.contains {
+                                    $0.type == .sleep && $0.isTimerRunning
+                                }
+                            ),
+                            alertsEnabled: notificationsEnabled,
+                            toggleAlerts: toggleLittleWindowAlerts,
+                            showExplanation: { showingExplanation = true }
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                }
+
+                if isDogProfile {
+                    dogQuickActionsSection
+                } else {
+                    childQuickActionsSection
+                }
+
+                Section {
+                    if todayEvents.isEmpty {
+                        ContentUnavailableView(
+                            "No events yet",
+                            systemImage: "clock",
+                            description: Text("Use a quick action to start \(profile?.name ?? "the profile")'s day.")
+                        )
+                    } else {
+                        ForEach(todayEvents) { event in
+                            Button {
+                                if event.isTimerDraft {
+                                    activeTimerToEdit = event
+                                } else {
+                                    editorRoute = EventEditorRoute(type: event.type, event: event)
+                                }
+                            } label: {
+                                EventRow(event: event)
                             }
-                        } label: {
-                            EventRow(event: event)
-                        }
-                        .buttonStyle(.plain)
-                        .swipeActions {
-                            Button(role: .destructive) { delete(event) } label: {
-                                Label("Delete", systemImage: "trash")
+                            .buttonStyle(.plain)
+                            .swipeActions {
+                                Button(role: .destructive) { delete(event) } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
+                } header: {
+                    AppSectionHeader(
+                        title: "Today's timeline",
+                        subtitle: todayEvents.isEmpty ? nil : "\(todayEvents.count) events"
+                    )
                 }
-            } header: {
-                AppSectionHeader(
-                    title: "Today's timeline",
-                    subtitle: todayEvents.isEmpty ? nil : "\(todayEvents.count) events"
-                )
             }
         }
         .listStyle(.insetGrouped)
@@ -307,6 +309,11 @@ struct TodayView: View {
         .sheet(item: $puppyGuideToOpen) { guide in
             NavigationStack {
                 PuppyStageGuideDetailView(guide: guide, profile: profile)
+            }
+        }
+        .sheet(isPresented: $showingProfileEditor) {
+            NavigationStack {
+                ProfileEditorView()
             }
         }
         .sheet(isPresented: $showingExplanation) {
@@ -385,6 +392,30 @@ struct TodayView: View {
         case 5..<12: "morning"
         case 12..<17: "afternoon"
         default: "evening"
+        }
+    }
+
+    private var noProfileSection: some View {
+        Section {
+            VStack(spacing: 14) {
+                ContentUnavailableView(
+                    "Create a profile",
+                    systemImage: "person.crop.circle.badge.plus",
+                    description: Text("Add a child or dog profile to start logging care, or import an existing backup from Settings.")
+                )
+                Button {
+                    showingProfileEditor = true
+                } label: {
+                    Label("Add Profile", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+            .padding(.vertical, 8)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         }
     }
 
@@ -1075,7 +1106,7 @@ struct TodayView: View {
         notificationsEnabled = true
         await notificationManager.rescheduleLittleWindowAlertIfNeeded(
             prediction: prediction,
-            babyName: profile?.name ?? "Ethan",
+            babyName: profile?.name ?? "Baby",
             profileID: selectedProfileID,
             settings: .current,
             isSleeping: activeEvents.contains {

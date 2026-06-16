@@ -122,6 +122,8 @@ final class ProfileService: ObservableObject {
     func updateChildProfile(_ profile: CareProfile) {
         profile.updatedAt = Date()
         switchProfile(profile)
+        try? profile.modelContext?.save()
+        PersistenceService.recordLocalSave()
     }
 
     func archiveChildProfile(
@@ -164,61 +166,85 @@ enum ProfileMigrationService {
     ) {
         let existingProfiles = profiles ?? ((try? context.fetch(FetchDescriptor<CareProfile>())) ?? [])
         let activeProfiles = existingProfiles.filter { !$0.isArchived && $0.profileType == .child }
-        let ethan: CareProfile
-        if let existing = activeProfiles.first {
-            ethan = existing
-        } else {
-            ethan = CareProfile(
-                name: "Ethan",
-                birthDate: SampleData.defaultBirthDate,
-                sex: .male
-            )
-            context.insert(ethan)
+        let existingProfileIDs = Set(existingProfiles.map(\.id))
+        guard hasOrphanedProfileScopedRecords(context: context, validProfileIDs: existingProfileIDs) else {
+            _ = ProfileService.shared.ensureSelection(in: existingProfiles)
+            return
         }
 
-        assignMissingProfileIDs(to: ethan.id, context: context)
-        let profilesForSelection = activeProfiles.isEmpty ? existingProfiles + [ethan] : existingProfiles
+        let childProfile: CareProfile
+        if let existing = activeProfiles.first {
+            childProfile = existing
+        } else {
+            childProfile = CareProfile(
+                name: "Imported Child",
+                birthDate: SampleData.defaultBirthDate,
+                sex: .unknown
+            )
+            context.insert(childProfile)
+        }
+
+        assignOrphanedProfileIDs(
+            to: childProfile.id,
+            validProfileIDs: existingProfileIDs.union([childProfile.id]),
+            context: context
+        )
+        let profilesForSelection = activeProfiles.isEmpty ? existingProfiles + [childProfile] : existingProfiles
         _ = ProfileService.shared.ensureSelection(in: profilesForSelection)
         try? context.save()
         PersistenceService.recordLocalSave()
     }
 
-    static func assignMissingProfileIDs(
+    static func hasOrphanedProfileScopedRecords(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        ((try? context.fetch(FetchDescriptor<BabyEvent>())) ?? []).containsOrphanedProfileID(validProfileIDs)
+            || ((try? context.fetch(FetchDescriptor<SleepPredictionRecord>())) ?? []).containsOrphanedProfileID(validProfileIDs)
+            || ((try? context.fetch(FetchDescriptor<MilestoneEntry>())) ?? []).containsOrphanedProfileID(validProfileIDs)
+            || ((try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? []).containsOrphanedProfileID(validProfileIDs)
+            || ((try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? []).containsOrphanedProfileID(validProfileIDs)
+            || ((try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? []).containsOrphanedProfileID(validProfileIDs)
+    }
+
+    static func assignOrphanedProfileIDs(
         to profileID: UUID,
+        validProfileIDs: Set<UUID>,
         context: ModelContext
     ) {
-        let eventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { $0.profileID == nil }
-        )
-        ((try? context.fetch(eventDescriptor)) ?? [])
+        ((try? context.fetch(FetchDescriptor<BabyEvent>())) ?? [])
+            .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach {
                 $0.profileID = profileID
                 $0.profileTypeSnapshot = $0.profileTypeSnapshot ?? .child
             }
-        let recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
-            predicate: #Predicate<SleepPredictionRecord> { $0.profileID == nil }
-        )
-        ((try? context.fetch(recordDescriptor)) ?? [])
+        ((try? context.fetch(FetchDescriptor<SleepPredictionRecord>())) ?? [])
+            .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach { $0.profileID = profileID }
-        let milestoneDescriptor = FetchDescriptor<MilestoneEntry>(
-            predicate: #Predicate<MilestoneEntry> { $0.profileID == nil }
-        )
-        ((try? context.fetch(milestoneDescriptor)) ?? [])
+        ((try? context.fetch(FetchDescriptor<MilestoneEntry>())) ?? [])
+            .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach { $0.profileID = profileID }
-        let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
-            predicate: #Predicate<DoctorAppointment> { $0.profileID == nil }
-        )
-        ((try? context.fetch(appointmentDescriptor)) ?? [])
+        ((try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? [])
+            .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach { $0.profileID = profileID }
-        let ageGuideDescriptor = FetchDescriptor<AgeGuideReadState>(
-            predicate: #Predicate<AgeGuideReadState> { $0.profileID == nil }
-        )
-        ((try? context.fetch(ageGuideDescriptor)) ?? [])
+        ((try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? [])
+            .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach { $0.profileID = profileID }
-        let puppyGuideDescriptor = FetchDescriptor<PuppyStageGuideReadState>(
-            predicate: #Predicate<PuppyStageGuideReadState> { $0.profileID == nil }
-        )
-        ((try? context.fetch(puppyGuideDescriptor)) ?? [])
+        ((try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? [])
+            .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach { $0.profileID = profileID }
+    }
+}
+
+private extension ProfileScopedRecord {
+    func hasOrphanedProfileID(_ validProfileIDs: Set<UUID>) -> Bool {
+        guard let profileID else { return true }
+        return !validProfileIDs.contains(profileID)
+    }
+}
+
+private extension Array where Element: ProfileScopedRecord {
+    func containsOrphanedProfileID(_ validProfileIDs: Set<UUID>) -> Bool {
+        contains { $0.hasOrphanedProfileID(validProfileIDs) }
     }
 }

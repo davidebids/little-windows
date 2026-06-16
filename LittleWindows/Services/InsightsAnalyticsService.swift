@@ -163,7 +163,7 @@ struct InsightsSnapshot {
     var pooAmountShare: [CategoryValue] = []
 
     static let empty = InsightsSnapshot(
-        profileName: "Ethan",
+        profileName: "Baby",
         periodStart: Date(),
         periodEnd: Date(),
         comparisonLabel: nil,

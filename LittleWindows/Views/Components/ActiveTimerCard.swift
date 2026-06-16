@@ -268,7 +268,7 @@ struct ActiveTimerEditorView: View {
                                 switchNursingSide: switchNursingSide
                             )
 
-                            Text("Tap Left or Right whenever Ethan changes sides. Each side keeps its own running total until you save the event.")
+                            Text("Tap Left or Right whenever sides change. Each side keeps its own running total until you save the event.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

@@ -21,11 +21,13 @@ enum SyncDiagnosticsService {
             + ageGuideStates.orphanedCount(profileIDs: profileIDs)
             + puppyGuideStates.orphanedCount(profileIDs: profileIDs)
 
-        let duplicateEthanProfiles = profiles.filter {
+        let duplicateChildProfiles = Dictionary(grouping: profiles.filter {
             !$0.isArchived
                 && $0.profileType == .child
-                && $0.name.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare("Ethan") == .orderedSame
-        }.count
+        }, by: { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+            .values
+            .map { max(0, $0.count - 1) }
+            .reduce(0, +)
 
         return SyncDiagnosticSnapshot(
             generatedAt: Date(),
@@ -41,7 +43,7 @@ enum SyncDiagnosticsService {
                 SyncDiagnosticCount(name: "Puppy guide states", count: puppyGuideStates.count)
             ],
             orphanedProfileScopedRecordCount: orphanedCount,
-            duplicateEthanProfileCount: max(0, duplicateEthanProfiles - 1),
+            duplicateChildProfileNameCount: duplicateChildProfiles,
             migrationState: CloudMigrationService.state(),
             lastLocalSaveAt: PersistenceService.lastLocalSaveAt()
         )

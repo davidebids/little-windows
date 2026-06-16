@@ -10,7 +10,7 @@ enum WidgetSnapshotService {
     ) {
         let snapshot = makeSnapshot(
             profileID: profile?.id,
-            babyName: profile?.name ?? "Ethan",
+            babyName: profile?.name ?? "Baby",
             events: events,
             prediction: prediction
         )

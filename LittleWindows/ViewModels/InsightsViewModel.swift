@@ -61,7 +61,7 @@ final class InsightsViewModel: ObservableObject {
     @Published var customEndDate: Date
     @Published private(set) var snapshot = InsightsSnapshot.empty
 
-    private var profileName = "Ethan"
+    private var profileName = "Baby"
     private var events = [BabyEvent]()
     private var records = [SleepPredictionRecord]()
     private var now = Date()

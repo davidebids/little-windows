@@ -1,4 +1,4 @@
-# Huckleberry Import Summary
+# Legacy Import Summary
 
 - Source rows: 4442
 - Converted Little Windows events: 4774

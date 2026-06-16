@@ -97,7 +97,7 @@ struct LittleWindowsApp: App {
         Task { @MainActor in
             await NotificationManager.shared.rescheduleLittleWindowAlertIfNeeded(
                 prediction: prediction,
-                babyName: profile?.name ?? "Ethan",
+                babyName: profile?.name ?? "Baby",
                 profileID: profile?.id,
                 isSleeping: events.contains { $0.type == .sleep && $0.isTimerRunning }
             )

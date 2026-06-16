@@ -61,7 +61,7 @@ struct DogInsightsView: View {
                 title: "Weight",
                 subtitle: "Logged weight over time",
                 isEmpty: weightPoints.isEmpty,
-                emptyMessage: "Log weight to see Meso's trend."
+                emptyMessage: "Log weight to see your dog's trend."
             ) {
                 Chart(weightPoints) { point in
                     LineMark(

@@ -239,7 +239,7 @@ enum EventMutationService {
         if scheduleNotification {
             await NotificationManager.shared.schedule(
                 prediction: prediction,
-                babyName: profile?.name ?? "Ethan",
+                babyName: profile?.name ?? "Baby",
                 profileID: profile?.id,
                 leadMinutes: notificationLeadMinutes,
                 enabled: notificationsEnabled

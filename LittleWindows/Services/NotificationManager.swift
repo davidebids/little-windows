@@ -367,7 +367,7 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func scheduleAppointmentReminders(
         appointment: DoctorAppointment,
-        babyName: String = "Ethan",
+        babyName: String = "Baby",
         now: Date = Date()
     ) async {
         await rescheduleAppointmentReminders(
@@ -379,7 +379,7 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func rescheduleAppointmentReminders(
         appointment: DoctorAppointment,
-        babyName: String = "Ethan",
+        babyName: String = "Baby",
         now: Date = Date()
     ) async {
         await cancelAppointmentReminders(appointmentID: appointment.id)
@@ -440,7 +440,7 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func buildAppointmentNotificationContent(
         appointment: DoctorAppointment,
-        babyName: String = "Ethan",
+        babyName: String = "Baby",
         profileID: UUID? = nil,
         leadTime: AppointmentReminderLeadTime
     ) -> UNMutableNotificationContent {

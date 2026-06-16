@@ -58,12 +58,12 @@ System actions open the app and execute through the same `EventTimerService` use
 
 The project includes a bundled legacy import archive converted from a third-party baby-tracking export. It is used as seed data when explicitly loaded from Settings and is useful for exercising prediction, insights, growth, and history behavior with a large data set.
 
-Existing installations can load the bundled archive from **Settings -> Data -> Load bundled history**. This replaces current local data after confirmation.
+The converted archive is kept as a development/test fixture in the repository, but it is not bundled into production app builds. To load a personal archive on a device, use **Settings -> Data -> Import JSON backup**.
 
 Regenerate a compatible archive from a new CSV export with:
 
 ```sh
-ruby Scripts/convert_huckleberry.rb /path/to/export.csv \
+ruby Scripts/convert_legacy_tracker.rb /path/to/export.csv \
   --output LittleWindows/SeedData/Imported-History-Backup.json \
   --summary LittleWindows/SeedData/Import-Summary.md \
   --birth-date 2026-01-31 \
@@ -87,7 +87,7 @@ Private iCloud Sync keeps Little Windows data available on devices signed into t
 Migration notes:
 
 1. Export a JSON backup from Settings > Data before changing CloudKit containers or resetting development data.
-2. On first launch of the CloudKit-backed build, `CloudMigrationService` marks local-to-CloudKit migration and assigns old profile-less records to the existing Ethan profile.
+2. On first launch of the CloudKit-backed build, `CloudMigrationService` marks local-to-CloudKit migration and assigns old profile-less records to an existing child profile when possible.
 3. Settings > iCloud Sync shows account status, container identifier, migration state, local save time, and record counts.
 4. Settings > Family Sync distinguishes private iCloud sync from shared family sync and does not claim multi-caregiver sharing works yet.
 5. Use CloudKit Dashboard to verify private database record types in development, then deploy the schema to production before TestFlight/App Store distribution.

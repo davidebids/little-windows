@@ -26,9 +26,9 @@ enum CareProfileType: String, Codable, CaseIterable, Identifiable {
 final class CareProfile {
     var id: UUID = UUID()
     var profileTypeRawValue: String = CareProfileType.child.rawValue
-    var name: String = "Ethan"
+    var name: String = "Child"
     var birthDate: Date = Date()
-    var sexRawValue: String = BabySex.male.rawValue
+    var sexRawValue: String = BabySex.unknown.rawValue
     var birthWeightKilograms: Double?
     var birthLengthCentimeters: Double?
     var birthHeadCircumferenceCentimeters: Double?

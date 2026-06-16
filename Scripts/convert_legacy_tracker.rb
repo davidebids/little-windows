@@ -12,11 +12,11 @@ ENV["TZ"] = "America/Los_Angeles"
 
 options = {
   birth_date: "2026-01-31",
-  baby_name: "Ethan"
+  baby_name: "Sample Child"
 }
 
 OptionParser.new do |parser|
-  parser.banner = "Usage: convert_huckleberry.rb INPUT.csv --output BACKUP.json --summary SUMMARY.md"
+  parser.banner = "Usage: convert_legacy_tracker.rb INPUT.csv --output BACKUP.json --summary SUMMARY.md"
   parser.on("--output PATH", "Little Windows JSON backup path") { |value| options[:output] = value }
   parser.on("--summary PATH", "Markdown import report path") { |value| options[:summary] = value }
   parser.on("--birth-date DATE", "Baby birth date (YYYY-MM-DD)") { |value| options[:birth_date] = value }
@@ -51,7 +51,7 @@ end
 
 def base_event(index:, suffix:, type:, start_time:, end_time: nil, title: nil, notes: nil)
   {
-    "id" => deterministic_uuid("huckleberry-event-#{index}-#{suffix}"),
+    "id" => deterministic_uuid("legacy-tracker-event-#{index}-#{suffix}"),
     "typeRawValue" => type,
     "title" => title,
     "startDate" => iso8601(start_time),
@@ -194,7 +194,7 @@ rows.each_with_index do |row, offset|
           type: "feed",
           start_time: start_time,
           end_time: source_end || start_time,
-          notes: combined_notes(source_notes, "Breast feed; side was not recorded in Huckleberry.")
+          notes: combined_notes(source_notes, "Breast feed; side was not recorded in the source export.")
         )
         event["feedKindRawValue"] = "other"
         event["foodDescription"] = "Breast feed"
@@ -245,7 +245,7 @@ rows.each_with_index do |row, offset|
       notes: combined_notes(
         source_notes,
         row["Start Location"] && "Condition: #{row["Start Location"]}",
-        details.empty? ? nil : "Huckleberry details: #{details}"
+        details.empty? ? nil : "Imported details: #{details}"
       )
     )
     event["diaperKindRawValue"] =
@@ -362,14 +362,14 @@ birth_time = Time.strptime(options[:birth_date], "%Y-%m-%d")
 latest_time = events.map { |event| Time.iso8601(event["updatedAt"]) }.max
 
 profile = {
-  "id" => deterministic_uuid("huckleberry-profile-#{options[:baby_name]}"),
+  "id" => deterministic_uuid("legacy-tracker-profile-#{options[:baby_name]}"),
   "name" => options[:baby_name],
   "birthDate" => iso8601(birth_time),
   "sexRawValue" => "male",
   "birthWeightKilograms" => nil,
   "birthLengthCentimeters" => nil,
   "birthHeadCircumferenceCentimeters" => nil,
-  "notes" => "History imported from Huckleberry. Birth date inferred from the first newborn growth entry.",
+  "notes" => "History imported from a legacy tracker. Birth date inferred from the first newborn growth entry.",
   "createdAt" => iso8601(birth_time),
   "updatedAt" => iso8601(latest_time)
 }
@@ -398,7 +398,7 @@ source_end_date = Date.parse(rows.map { |row| row["Start"] }.max)
 if options[:summary]
   FileUtils.mkdir_p(File.dirname(options[:summary])) unless File.dirname(options[:summary]) == "."
   lines = [
-    "# Huckleberry Import Summary",
+    "# Legacy Import Summary",
     "",
     "- Source rows: #{rows.length}",
     "- Converted Little Windows events: #{events.length}",

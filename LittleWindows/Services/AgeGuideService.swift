@@ -174,7 +174,7 @@ struct AgeGuideService {
             playIdeas: playIdeas(month),
             careNotes: [
                 "Keep using your logs as a parent memory aid, not as a scorecard.",
-                "Bring questions or patterns that concern you to Ethan's pediatrician."
+                "Bring questions or patterns that concern you to your baby's pediatrician."
             ],
             sleepNotes: [
                 "Sleep can shift quickly during growth, travel, illness, and new skills.",
@@ -216,7 +216,7 @@ struct AgeGuideService {
                 id: "social-\(month)",
                 category: .socialEmotional,
                 title: "Faces, voices, and connection",
-                body: "You may notice new ways Ethan responds to familiar people, expressions, songs, or daily routines.",
+                body: "You may notice new ways your baby responds to familiar people, expressions, songs, or daily routines.",
                 sourceReferenceIDs: ["cdc-act-early", "healthychildren"]
             ),
             AgeGuideTopic(
@@ -246,26 +246,26 @@ struct AgeGuideService {
     private static func prompts(_ month: Int) -> [MilestonePrompt] {
         let base: [(String, MilestoneCategory, String)] = [
             ("New favorite sound", .communication, "What sound, squeal, laugh, or coo stood out this month?"),
-            ("Reached for a toy", .motor, "Did Ethan reach, swipe, grab, or show a new favorite toy?"),
+            ("Reached for a toy", .motor, "Did your baby reach, swipe, grab, or show a new favorite toy?"),
             ("New funny habit", .funny, "What tiny habit made you laugh this month?"),
             ("New favorite book", .firsts, "Was there a book, song, or story that got a reaction?"),
-            ("Sized up diapers or clothes", .growth, "Did Ethan move into a new diaper or clothing size?")
+            ("Sized up diapers or clothes", .growth, "Did your baby move into a new diaper or clothing size?")
         ]
         let monthSpecific: [(String, MilestoneCategory, String)]
         switch month {
         case 2:
             monthSpecific = [
-                ("First social smile", .social, "Did Ethan give a smile that felt especially connected?"),
-                ("First coo conversation", .communication, "Did Ethan start a little back-and-forth with coos or sounds?")
+                ("First social smile", .social, "Did your baby give a smile that felt especially connected?"),
+                ("First coo conversation", .communication, "Did your baby start a little back-and-forth with coos or sounds?")
             ]
         case 4:
             monthSpecific = [
-                ("First big laugh", .social, "Did Ethan laugh, squeal, or light up in a new way?"),
-                ("Held hands together at center", .motor, "Did Ethan bring hands together or to the mouth?")
+                ("First big laugh", .social, "Did your baby laugh, squeal, or light up in a new way?"),
+                ("Held hands together at center", .motor, "Did your baby bring hands together or to the mouth?")
             ]
         case 6:
             monthSpecific = [
-                ("Tried a new food", .feeding, "Did Ethan explore a new taste, texture, or feeding routine?"),
+                ("Tried a new food", .feeding, "Did your baby explore a new taste, texture, or feeding routine?"),
                 ("Sat with support", .motor, "Was there a new sitting, rolling, or reaching moment?")
             ]
         default:
@@ -285,23 +285,23 @@ struct AgeGuideService {
 
     private static func playIdeas(_ month: Int) -> [String] {
         [
-            "Talk or sing during diaper changes and wait for Ethan's response.",
+            "Talk or sing during diaper changes and wait for your baby's response.",
             "Offer a safe toy slightly to the side and watch for looking, reaching, or batting.",
             "Read one short book and log any new reaction as a memory.",
-            "Try a few minutes of supervised tummy time when Ethan is calm and alert."
+            "Try a few minutes of supervised tummy time when your baby is calm and alert."
         ]
     }
 
     private static func feeding(_ month: Int) -> [String] {
         if month >= 6 {
             return [
-                "If solids are part of Ethan's care plan, this can be a good place to capture first tastes and reactions.",
+                "If solids are part of your baby's care plan, this can be a good place to capture first tastes and reactions.",
                 "Use feeding notes for memories and questions to bring to the pediatrician."
             ]
         }
         return [
             "Feeding patterns can change during growth and routine shifts.",
-            "If you have concerns about intake, comfort, or growth, ask Ethan's pediatrician."
+            "If you have concerns about intake, comfort, or growth, ask your baby's pediatrician."
         ]
     }
 }

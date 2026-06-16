@@ -33,10 +33,11 @@ struct SettingsView: View {
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
     @State private var showingDeleteConfirmation = false
-    @State private var showingHuckleberryConfirmation = false
     @State private var showingExporter = false
     @State private var showingImporter = false
+    @State private var showingImportConfirmation = false
     @State private var exportDocument = BackupDocument()
+    @State private var pendingImportData: Data?
     @State private var statusMessage: String?
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
@@ -197,7 +198,7 @@ struct SettingsView: View {
             } header: {
                 Label("Little Window Alerts", systemImage: "bell.badge.fill")
             } footer: {
-                Text("Little Windows can remind you before Ethan's next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
+                Text("Little Windows can remind you before the next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
             }
 
             SyncSettingsSection()
@@ -220,7 +221,7 @@ struct SettingsView: View {
                                 for appointment in appointments.filter({ $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id) }) where !appointment.isCompleted {
                                     await notificationManager.rescheduleAppointmentReminders(
                                         appointment: appointment,
-                                        babyName: profileService.selectedProfile(in: profiles)?.name ?? "Ethan"
+                                        babyName: profileService.selectedProfile(in: profiles)?.name ?? "Baby"
                                     )
                                 }
                             } else {
@@ -300,9 +301,6 @@ struct SettingsView: View {
                 Button("Import JSON backup", systemImage: "square.and.arrow.down") {
                     showingImporter = true
                 }
-                Button("Load Ethan's Huckleberry history", systemImage: "clock.arrow.circlepath") {
-                    showingHuckleberryConfirmation = true
-                }
                 Button("Delete all data", systemImage: "trash", role: .destructive) {
                     showingDeleteConfirmation = true
                 }
@@ -339,16 +337,18 @@ struct SettingsView: View {
             importBackup(result)
         }
         .confirmationDialog(
-            "Replace current data with Ethan's Huckleberry history?",
-            isPresented: $showingHuckleberryConfirmation,
+            "Replace current data with this backup?",
+            isPresented: $showingImportConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Load Huckleberry History", role: .destructive) {
-                importBundledHistory()
+            Button("Import Backup", role: .destructive) {
+                performPendingImport()
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {
+                pendingImportData = nil
+            }
         } message: {
-            Text("This replaces the current profile, events, and prediction history with the bundled 4,774-event archive.")
+            Text("This replaces every current profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.")
         }
         .confirmationDialog(
             "Delete every profile, event, and prediction?",
@@ -380,7 +380,7 @@ struct SettingsView: View {
             }
             Button("Not Now", role: .cancel) {}
         } message: {
-            Text("Little Windows can remind you before Ethan's next likely nap or bedtime window.")
+            Text("Little Windows can remind you before the next likely nap or bedtime window.")
         }
         .alert("Notifications are turned off", isPresented: $showingPermissionDenied) {
             Button("Open Settings") {
@@ -456,13 +456,13 @@ struct SettingsView: View {
         if let currentPrediction {
             return NotificationManager.notificationCopy(
                 for: currentPrediction,
-                babyName: profileService.selectedProfile(in: profiles)?.name ?? "Ethan",
+                babyName: profileService.selectedProfile(in: profiles)?.name ?? "Baby",
                 leadMinutes: notificationLeadMinutes
             )
         }
         return LittleWindowNotificationCopy(
             title: "Nap window soon",
-            body: "Ethan's Little Window is estimated for 1:55-2:35 PM."
+            body: "Baby's Little Window is estimated for 1:55-2:35 PM."
         )
     }
 
@@ -505,28 +505,29 @@ struct SettingsView: View {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: url)
-            try DataExportImportService.importData(data, context: modelContext)
-            statusMessage = "Backup imported."
+            pendingImportData = data
+            showingImportConfirmation = true
         } catch {
             statusMessage = "Import failed: \(error.localizedDescription)"
         }
     }
 
-    private func importBundledHistory() {
+    private func performPendingImport() {
+        guard let data = pendingImportData else { return }
         do {
-            let data = try SampleData.bundledHuckleberryHistory()
             try DataExportImportService.importData(data, context: modelContext)
-            statusMessage = "Imported 4,774 Huckleberry events for Ethan."
+            pendingImportData = nil
+            statusMessage = "Backup imported."
         } catch {
-            statusMessage = "Huckleberry import failed: \(error.localizedDescription)"
+            pendingImportData = nil
+            statusMessage = "Import failed: \(error.localizedDescription)"
         }
     }
 
     private func deleteAll() {
         do {
             try DataExportImportService.deleteAll(context: modelContext)
-            SampleData.createStarterProfile(in: modelContext)
-            statusMessage = "All history was deleted and the starter profile was recreated."
+            statusMessage = "All history was deleted."
         } catch {
             statusMessage = "Delete failed: \(error.localizedDescription)"
         }
