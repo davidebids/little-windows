@@ -1,0 +1,974 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B00000000000000000000001 /* LittleWindowsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000001 /* LittleWindowsApp.swift */; };
+		B00000000000000000000002 /* Models/BabyProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000002 /* Models/BabyProfile.swift */; };
+		B00000000000000000000003 /* Models/BabyEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003 /* Models/BabyEvent.swift */; };
+		B00000000000000000000004 /* Models/EventType.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000004 /* Models/EventType.swift */; };
+		B00000000000000000000005 /* Models/EventSubtypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000005 /* Models/EventSubtypes.swift */; };
+		B00000000000000000000006 /* Models/PredictionFactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000006 /* Models/PredictionFactor.swift */; };
+		B00000000000000000000007 /* Models/SleepPredictionRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000007 /* Models/SleepPredictionRecord.swift */; };
+		B00000000000000000000008 /* Services/DailySummaryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000008 /* Services/DailySummaryService.swift */; };
+		B00000000000000000000009 /* Services/DataExportImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000009 /* Services/DataExportImportService.swift */; };
+		B0000000000000000000000A /* Services/EventMutationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000A /* Services/EventMutationService.swift */; };
+		B0000000000000000000000B /* Services/NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000B /* Services/NotificationManager.swift */; };
+		B0000000000000000000000C /* Services/PredictionTuningService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000C /* Services/PredictionTuningService.swift */; };
+		B0000000000000000000000D /* Services/SleepPredictionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000D /* Services/SleepPredictionEngine.swift */; };
+		B0000000000000000000000E /* Services/SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000E /* Services/SyncService.swift */; };
+		B0000000000000000000000F /* Utilities/Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000F /* Utilities/Formatting.swift */; };
+		B00000000000000000000010 /* Utilities/SampleData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000010 /* Utilities/SampleData.swift */; };
+		B00000000000000000000011 /* Views/RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000011 /* Views/RootView.swift */; };
+		B00000000000000000000012 /* Views/TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000012 /* Views/TodayView.swift */; };
+		B00000000000000000000013 /* Views/HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000013 /* Views/HistoryView.swift */; };
+		B00000000000000000000014 /* Views/EventEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000014 /* Views/EventEditorView.swift */; };
+		B00000000000000000000016 /* Views/SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000016 /* Views/SettingsView.swift */; };
+		B00000000000000000000017 /* Views/PredictionExplanationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000017 /* Views/PredictionExplanationView.swift */; };
+		B00000000000000000000018 /* Views/Components/ActiveTimerCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */; };
+		B00000000000000000000019 /* Views/Components/EventRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* Views/Components/EventRow.swift */; };
+		B0000000000000000000001A /* Views/Components/PredictionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* Views/Components/PredictionCard.swift */; };
+		B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* SleepPredictionEngineTests.swift */; };
+		B0000000000000000000001C /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
+		B0000000000000000000001D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* Assets.xcassets */; };
+		B0000000000000000000001E /* SeedData/Ethan-Huckleberry-Backup.json in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000020 /* SeedData/Ethan-Huckleberry-Backup.json */; };
+		B0000000000000000000001F /* Models/InsightMetric.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000021 /* Models/InsightMetric.swift */; };
+		B00000000000000000000020 /* Models/InsightTrend.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000022 /* Models/InsightTrend.swift */; };
+		B00000000000000000000021 /* Models/ChartDataPoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000023 /* Models/ChartDataPoint.swift */; };
+		B00000000000000000000022 /* Services/InsightsAnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000024 /* Services/InsightsAnalyticsService.swift */; };
+		B00000000000000000000023 /* ViewModels/InsightsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000025 /* ViewModels/InsightsViewModel.swift */; };
+		B00000000000000000000024 /* Views/Insights/InsightMetricCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000026 /* Views/Insights/InsightMetricCard.swift */; };
+		B00000000000000000000025 /* Views/Insights/InsightChartCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000027 /* Views/Insights/InsightChartCard.swift */; };
+		B00000000000000000000026 /* Views/Insights/InsightsDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000028 /* Views/Insights/InsightsDashboardView.swift */; };
+		B00000000000000000000027 /* Views/Insights/SleepInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000029 /* Views/Insights/SleepInsightsView.swift */; };
+		B00000000000000000000028 /* Views/Insights/WakeWindowInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002A /* Views/Insights/WakeWindowInsightsView.swift */; };
+		B00000000000000000000029 /* Views/Insights/FeedingInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002B /* Views/Insights/FeedingInsightsView.swift */; };
+		B0000000000000000000002A /* Views/Insights/DiaperInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002C /* Views/Insights/DiaperInsightsView.swift */; };
+		B0000000000000000000002B /* Views/Insights/ActivityInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002D /* Views/Insights/ActivityInsightsView.swift */; };
+		B0000000000000000000002C /* Views/Insights/PredictionAccuracyInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002E /* Views/Insights/PredictionAccuracyInsightsView.swift */; };
+		B0000000000000000000002D /* Models/SystemIntegrationSnapshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000030 /* Models/SystemIntegrationSnapshots.swift */; };
+		B0000000000000000000002E /* Services/EventTimerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000031 /* Services/EventTimerService.swift */; };
+		B0000000000000000000002F /* Services/WidgetSnapshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000032 /* Services/WidgetSnapshotService.swift */; };
+		B00000000000000000000030 /* Services/IntegrationCommandStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000033 /* Services/IntegrationCommandStore.swift */; };
+		B00000000000000000000031 /* Services/LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000034 /* Services/LiveActivityManager.swift */; };
+		B00000000000000000000032 /* Services/DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000035 /* Services/DeepLinkRouter.swift */; };
+		B00000000000000000000033 /* AppIntents/LittleWindowsIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000036 /* AppIntents/LittleWindowsIntents.swift */; };
+		B00000000000000000000040 /* LittleWindowsWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000040 /* LittleWindowsWidgetsBundle.swift */; };
+		B00000000000000000000041 /* WidgetSnapshotReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000041 /* WidgetSnapshotReader.swift */; };
+		B00000000000000000000042 /* ActiveTimerWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000042 /* ActiveTimerWidget.swift */; };
+		B00000000000000000000043 /* NextSleepWindowWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000043 /* NextSleepWindowWidget.swift */; };
+		B00000000000000000000044 /* TodaySummaryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000044 /* TodaySummaryWidget.swift */; };
+		B00000000000000000000045 /* QuickLogWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000045 /* QuickLogWidget.swift */; };
+		B00000000000000000000046 /* LittleWindowsLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000046 /* LittleWindowsLiveActivity.swift */; };
+		B00000000000000000000047 /* Models/SystemIntegrationSnapshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000030 /* Models/SystemIntegrationSnapshots.swift */; };
+		B00000000000000000000048 /* Models/EventSubtypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000005 /* Models/EventSubtypes.swift */; };
+		B00000000000000000000049 /* Services/IntegrationCommandStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000033 /* Services/IntegrationCommandStore.swift */; };
+		B0000000000000000000004A /* AppIntents/LittleWindowsIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000036 /* AppIntents/LittleWindowsIntents.swift */; };
+		B0000000000000000000004B /* Utilities/Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000F /* Utilities/Formatting.swift */; };
+		B00000000000000000000050 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F00000000000000000000050 /* WidgetKit.framework */; };
+		B00000000000000000000051 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F00000000000000000000051 /* SwiftUI.framework */; };
+		B00000000000000000000052 /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F00000000000000000000052 /* ActivityKit.framework */; };
+		B00000000000000000000053 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F00000000000000000000053 /* AppIntents.framework */; };
+		B00000000000000000000054 /* LittleWindowsWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000049 /* LittleWindowsWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B00000000000000000000055 /* LittleWindowsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000054 /* LittleWindowsControls.swift */; };
+		B00000000000000000000056 /* Models/MilestoneEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000055 /* Models/MilestoneEntry.swift */; };
+		B00000000000000000000057 /* Views/MilestonesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000056 /* Views/MilestonesView.swift */; };
+		B00000000000000000000058 /* Views/Insights/MilestoneInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000057 /* Views/Insights/MilestoneInsightsView.swift */; };
+		B00000000000000000000059 /* Models/GrowthReferenceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000058 /* Models/GrowthReferenceModels.swift */; };
+		B0000000000000000000005A /* Services/GrowthReferenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000059 /* Services/GrowthReferenceService.swift */; };
+		B0000000000000000000005B /* Views/Insights/GrowthInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005A /* Views/Insights/GrowthInsightsView.swift */; };
+		B0000000000000000000005C /* Resources/GrowthCharts in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005B /* Resources/GrowthCharts */; };
+		B0000000000000000000005D /* Services/IntegrationCommandProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000039 /* Services/IntegrationCommandProcessor.swift */; };
+		B00000000000000000000060 /* Models/NightLightModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000060 /* Models/NightLightModels.swift */; };
+		B00000000000000000000061 /* Services/NightLightPresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000061 /* Services/NightLightPresetService.swift */; };
+		B00000000000000000000062 /* Services/NightLightTimerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000062 /* Services/NightLightTimerService.swift */; };
+		B00000000000000000000063 /* Services/NightLightAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000063 /* Services/NightLightAudioService.swift */; };
+		B00000000000000000000064 /* ViewModels/NightLightViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000064 /* ViewModels/NightLightViewModel.swift */; };
+		B00000000000000000000065 /* Views/NightLight/NightLightShapeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000065 /* Views/NightLight/NightLightShapeView.swift */; };
+		B00000000000000000000066 /* Views/NightLight/NightLightPresetPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000066 /* Views/NightLight/NightLightPresetPicker.swift */; };
+		B00000000000000000000067 /* Views/NightLight/NightLightShapePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000067 /* Views/NightLight/NightLightShapePicker.swift */; };
+		B00000000000000000000068 /* Views/NightLight/NightLightSoundPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000068 /* Views/NightLight/NightLightSoundPicker.swift */; };
+		B00000000000000000000069 /* Views/NightLight/NightLightTimerPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000069 /* Views/NightLight/NightLightTimerPicker.swift */; };
+		B0000000000000000000006A /* Views/NightLight/NightLightControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006A /* Views/NightLight/NightLightControlsView.swift */; };
+		B0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */; };
+		B0000000000000000000006C /* Views/NightLight/NightLightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006C /* Views/NightLight/NightLightView.swift */; };
+		B0000000000000000000006D /* Models/DoctorAppointment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006D /* Models/DoctorAppointment.swift */; };
+		B0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */; };
+		B0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */; };
+		B00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift */; };
+		B00000000000000000000071 /* Models/AgeGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000071 /* Models/AgeGuide.swift */; };
+		B00000000000000000000072 /* Services/AgeGuideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000072 /* Services/AgeGuideService.swift */; };
+		B00000000000000000000073 /* Views/AgeGuides/AgeGuideViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000073 /* Views/AgeGuides/AgeGuideViews.swift */; };
+		B00000000000000000000074 /* Resources/AgeGuides in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000074 /* Resources/AgeGuides */; };
+		B00000000000000000000075 /* Services/ProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000075 /* Services/ProfileService.swift */; };
+		B00000000000000000000076 /* Views/Profiles/ProfileViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000076 /* Views/Profiles/ProfileViews.swift */; };
+		B00000000000000000000077 /* Utilities/ProfileScoping.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000077 /* Utilities/ProfileScoping.swift */; };
+		B00000000000000000000078 /* Models/DogEventDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000078 /* Models/DogEventDetails.swift */; };
+		B00000000000000000000079 /* Models/PuppyStageGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000079 /* Models/PuppyStageGuide.swift */; };
+		B0000000000000000000007A /* Services/PuppyStageGuideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000007A /* Services/PuppyStageGuideService.swift */; };
+		B0000000000000000000007B /* Views/Insights/DogInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000007B /* Views/Insights/DogInsightsView.swift */; };
+		B0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C00000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D00000000000000000000002;
+			remoteInfo = LittleWindows;
+		};
+		C00000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D00000000000000000000020;
+			remoteInfo = LittleWindowsWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D00000000000000000000025 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B00000000000000000000054 /* LittleWindowsWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		F00000000000000000000001 /* LittleWindowsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsApp.swift; sourceTree = "<group>"; };
+		F00000000000000000000002 /* Models/BabyProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BabyProfile.swift; sourceTree = "<group>"; };
+		F00000000000000000000003 /* Models/BabyEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BabyEvent.swift; sourceTree = "<group>"; };
+		F00000000000000000000004 /* Models/EventType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/EventType.swift; sourceTree = "<group>"; };
+		F00000000000000000000005 /* Models/EventSubtypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/EventSubtypes.swift; sourceTree = "<group>"; };
+		F00000000000000000000006 /* Models/PredictionFactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/PredictionFactor.swift; sourceTree = "<group>"; };
+		F00000000000000000000007 /* Models/SleepPredictionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SleepPredictionRecord.swift; sourceTree = "<group>"; };
+		F00000000000000000000008 /* Services/DailySummaryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/DailySummaryService.swift; sourceTree = "<group>"; };
+		F00000000000000000000009 /* Services/DataExportImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/DataExportImportService.swift; sourceTree = "<group>"; };
+		F0000000000000000000000A /* Services/EventMutationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/EventMutationService.swift; sourceTree = "<group>"; };
+		F0000000000000000000000B /* Services/NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NotificationManager.swift; sourceTree = "<group>"; };
+		F0000000000000000000000C /* Services/PredictionTuningService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/PredictionTuningService.swift; sourceTree = "<group>"; };
+		F0000000000000000000000D /* Services/SleepPredictionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SleepPredictionEngine.swift; sourceTree = "<group>"; };
+		F0000000000000000000000E /* Services/SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SyncService.swift; sourceTree = "<group>"; };
+		F0000000000000000000000F /* Utilities/Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/Formatting.swift; sourceTree = "<group>"; };
+		F00000000000000000000010 /* Utilities/SampleData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/SampleData.swift; sourceTree = "<group>"; };
+		F00000000000000000000011 /* Views/RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/RootView.swift; sourceTree = "<group>"; };
+		F00000000000000000000012 /* Views/TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/TodayView.swift; sourceTree = "<group>"; };
+		F00000000000000000000013 /* Views/HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HistoryView.swift; sourceTree = "<group>"; };
+		F00000000000000000000014 /* Views/EventEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/EventEditorView.swift; sourceTree = "<group>"; };
+		F00000000000000000000016 /* Views/SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/SettingsView.swift; sourceTree = "<group>"; };
+		F00000000000000000000017 /* Views/PredictionExplanationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/PredictionExplanationView.swift; sourceTree = "<group>"; };
+		F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/ActiveTimerCard.swift; sourceTree = "<group>"; };
+		F00000000000000000000019 /* Views/Components/EventRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/EventRow.swift; sourceTree = "<group>"; };
+		F0000000000000000000001A /* Views/Components/PredictionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/PredictionCard.swift; sourceTree = "<group>"; };
+		F0000000000000000000001B /* SleepPredictionEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepPredictionEngineTests.swift; sourceTree = "<group>"; };
+		F0000000000000000000001C /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		F0000000000000000000001D /* LittleWindows.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LittleWindows.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0000000000000000000001E /* LittleWindowsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LittleWindowsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0000000000000000000001F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F00000000000000000000020 /* SeedData/Ethan-Huckleberry-Backup.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "SeedData/Ethan-Huckleberry-Backup.json"; sourceTree = "<group>"; };
+		F00000000000000000000021 /* Models/InsightMetric.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/InsightMetric.swift; sourceTree = "<group>"; };
+		F00000000000000000000022 /* Models/InsightTrend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/InsightTrend.swift; sourceTree = "<group>"; };
+		F00000000000000000000023 /* Models/ChartDataPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/ChartDataPoint.swift; sourceTree = "<group>"; };
+		F00000000000000000000024 /* Services/InsightsAnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/InsightsAnalyticsService.swift; sourceTree = "<group>"; };
+		F00000000000000000000025 /* ViewModels/InsightsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/InsightsViewModel.swift; sourceTree = "<group>"; };
+		F00000000000000000000026 /* Views/Insights/InsightMetricCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/InsightMetricCard.swift; sourceTree = "<group>"; };
+		F00000000000000000000027 /* Views/Insights/InsightChartCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/InsightChartCard.swift; sourceTree = "<group>"; };
+		F00000000000000000000028 /* Views/Insights/InsightsDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/InsightsDashboardView.swift; sourceTree = "<group>"; };
+		F00000000000000000000029 /* Views/Insights/SleepInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/SleepInsightsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000002A /* Views/Insights/WakeWindowInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/WakeWindowInsightsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000002B /* Views/Insights/FeedingInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/FeedingInsightsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000002C /* Views/Insights/DiaperInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/DiaperInsightsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000002D /* Views/Insights/ActivityInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/ActivityInsightsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000002E /* Views/Insights/PredictionAccuracyInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/PredictionAccuracyInsightsView.swift; sourceTree = "<group>"; };
+		F00000000000000000000030 /* Models/SystemIntegrationSnapshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SystemIntegrationSnapshots.swift; sourceTree = "<group>"; };
+		F00000000000000000000031 /* Services/EventTimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/EventTimerService.swift; sourceTree = "<group>"; };
+		F00000000000000000000032 /* Services/WidgetSnapshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WidgetSnapshotService.swift; sourceTree = "<group>"; };
+		F00000000000000000000033 /* Services/IntegrationCommandStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/IntegrationCommandStore.swift; sourceTree = "<group>"; };
+		F00000000000000000000034 /* Services/LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LiveActivityManager.swift; sourceTree = "<group>"; };
+		F00000000000000000000035 /* Services/DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/DeepLinkRouter.swift; sourceTree = "<group>"; };
+		F00000000000000000000036 /* AppIntents/LittleWindowsIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents/LittleWindowsIntents.swift; sourceTree = "<group>"; };
+		F00000000000000000000039 /* Services/IntegrationCommandProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/IntegrationCommandProcessor.swift; sourceTree = "<group>"; };
+		F00000000000000000000040 /* LittleWindowsWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsWidgetsBundle.swift; sourceTree = "<group>"; };
+		F00000000000000000000041 /* WidgetSnapshotReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotReader.swift; sourceTree = "<group>"; };
+		F00000000000000000000042 /* ActiveTimerWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveTimerWidget.swift; sourceTree = "<group>"; };
+		F00000000000000000000043 /* NextSleepWindowWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextSleepWindowWidget.swift; sourceTree = "<group>"; };
+		F00000000000000000000044 /* TodaySummaryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodaySummaryWidget.swift; sourceTree = "<group>"; };
+		F00000000000000000000045 /* QuickLogWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLogWidget.swift; sourceTree = "<group>"; };
+		F00000000000000000000046 /* LittleWindowsLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsLiveActivity.swift; sourceTree = "<group>"; };
+		F00000000000000000000047 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F00000000000000000000048 /* LittleWindowsWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LittleWindowsWidgets.entitlements; sourceTree = "<group>"; };
+		F00000000000000000000049 /* LittleWindowsWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LittleWindowsWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F00000000000000000000050 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		F00000000000000000000051 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		F00000000000000000000052 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
+		F00000000000000000000053 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		F00000000000000000000054 /* LittleWindowsControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsControls.swift; sourceTree = "<group>"; };
+		F00000000000000000000055 /* Models/MilestoneEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/MilestoneEntry.swift; sourceTree = "<group>"; };
+		F00000000000000000000056 /* Views/MilestonesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/MilestonesView.swift; sourceTree = "<group>"; };
+		F00000000000000000000057 /* Views/Insights/MilestoneInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/MilestoneInsightsView.swift; sourceTree = "<group>"; };
+		F00000000000000000000058 /* Models/GrowthReferenceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/GrowthReferenceModels.swift; sourceTree = "<group>"; };
+		F00000000000000000000059 /* Services/GrowthReferenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/GrowthReferenceService.swift; sourceTree = "<group>"; };
+		F0000000000000000000005A /* Views/Insights/GrowthInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/GrowthInsightsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000005B /* Resources/GrowthCharts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/GrowthCharts; sourceTree = "<group>"; };
+		F00000000000000000000060 /* Models/NightLightModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/NightLightModels.swift; sourceTree = "<group>"; };
+		F00000000000000000000061 /* Services/NightLightPresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightPresetService.swift; sourceTree = "<group>"; };
+		F00000000000000000000062 /* Services/NightLightTimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightTimerService.swift; sourceTree = "<group>"; };
+		F00000000000000000000063 /* Services/NightLightAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightAudioService.swift; sourceTree = "<group>"; };
+		F00000000000000000000064 /* ViewModels/NightLightViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/NightLightViewModel.swift; sourceTree = "<group>"; };
+		F00000000000000000000065 /* Views/NightLight/NightLightShapeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightShapeView.swift; sourceTree = "<group>"; };
+		F00000000000000000000066 /* Views/NightLight/NightLightPresetPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightPresetPicker.swift; sourceTree = "<group>"; };
+		F00000000000000000000067 /* Views/NightLight/NightLightShapePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightShapePicker.swift; sourceTree = "<group>"; };
+		F00000000000000000000068 /* Views/NightLight/NightLightSoundPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightSoundPicker.swift; sourceTree = "<group>"; };
+		F00000000000000000000069 /* Views/NightLight/NightLightTimerPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightTimerPicker.swift; sourceTree = "<group>"; };
+		F0000000000000000000006A /* Views/NightLight/NightLightControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightControlsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightFullScreenView.swift; sourceTree = "<group>"; };
+		F0000000000000000000006C /* Views/NightLight/NightLightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightView.swift; sourceTree = "<group>"; };
+		F0000000000000000000006D /* Models/DoctorAppointment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/DoctorAppointment.swift; sourceTree = "<group>"; };
+		F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Appointments/AppointmentsListView.swift; sourceTree = "<group>"; };
+		F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Appointments/AppointmentDetailView.swift; sourceTree = "<group>"; };
+		F00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/AppointmentInsightsView.swift; sourceTree = "<group>"; };
+		F00000000000000000000071 /* Models/AgeGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/AgeGuide.swift; sourceTree = "<group>"; };
+		F00000000000000000000072 /* Services/AgeGuideService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AgeGuideService.swift; sourceTree = "<group>"; };
+		F00000000000000000000073 /* Views/AgeGuides/AgeGuideViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/AgeGuides/AgeGuideViews.swift; sourceTree = "<group>"; };
+		F00000000000000000000074 /* Resources/AgeGuides */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/AgeGuides; sourceTree = "<group>"; };
+		F00000000000000000000075 /* Services/ProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ProfileService.swift; sourceTree = "<group>"; };
+		F00000000000000000000076 /* Views/Profiles/ProfileViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Profiles/ProfileViews.swift; sourceTree = "<group>"; };
+		F00000000000000000000077 /* Utilities/ProfileScoping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities/ProfileScoping.swift; sourceTree = "<group>"; };
+		F00000000000000000000078 /* Models/DogEventDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/DogEventDetails.swift; sourceTree = "<group>"; };
+		F00000000000000000000079 /* Models/PuppyStageGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/PuppyStageGuide.swift; sourceTree = "<group>"; };
+		F0000000000000000000007A /* Services/PuppyStageGuideService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/PuppyStageGuideService.swift; sourceTree = "<group>"; };
+		F0000000000000000000007B /* Views/Insights/DogInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/DogInsightsView.swift; sourceTree = "<group>"; };
+		F0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Dog/PuppyStageGuideViews.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D00000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000001C /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000022 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000050 /* WidgetKit.framework in Frameworks */,
+				B00000000000000000000051 /* SwiftUI.framework in Frameworks */,
+				B00000000000000000000052 /* ActivityKit.framework in Frameworks */,
+				B00000000000000000000053 /* AppIntents.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D00000000000000000000005 = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000006 /* LittleWindows */,
+				D00000000000000000000027 /* LittleWindowsWidgets */,
+				D00000000000000000000007 /* LittleWindowsTests */,
+				D00000000000000000000008 /* Frameworks */,
+				D00000000000000000000009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D00000000000000000000006 /* LittleWindows */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000001 /* LittleWindowsApp.swift */,
+				F00000000000000000000002 /* Models/BabyProfile.swift */,
+				F00000000000000000000003 /* Models/BabyEvent.swift */,
+				F00000000000000000000004 /* Models/EventType.swift */,
+				F00000000000000000000005 /* Models/EventSubtypes.swift */,
+				F00000000000000000000006 /* Models/PredictionFactor.swift */,
+				F00000000000000000000007 /* Models/SleepPredictionRecord.swift */,
+				F00000000000000000000021 /* Models/InsightMetric.swift */,
+				F00000000000000000000022 /* Models/InsightTrend.swift */,
+				F00000000000000000000023 /* Models/ChartDataPoint.swift */,
+				F00000000000000000000030 /* Models/SystemIntegrationSnapshots.swift */,
+				F00000000000000000000055 /* Models/MilestoneEntry.swift */,
+				F00000000000000000000058 /* Models/GrowthReferenceModels.swift */,
+				F00000000000000000000060 /* Models/NightLightModels.swift */,
+				F0000000000000000000006D /* Models/DoctorAppointment.swift */,
+				F00000000000000000000071 /* Models/AgeGuide.swift */,
+				F00000000000000000000078 /* Models/DogEventDetails.swift */,
+				F00000000000000000000079 /* Models/PuppyStageGuide.swift */,
+				F00000000000000000000008 /* Services/DailySummaryService.swift */,
+				F00000000000000000000009 /* Services/DataExportImportService.swift */,
+				F0000000000000000000000A /* Services/EventMutationService.swift */,
+				F0000000000000000000000B /* Services/NotificationManager.swift */,
+				F0000000000000000000000C /* Services/PredictionTuningService.swift */,
+				F0000000000000000000000D /* Services/SleepPredictionEngine.swift */,
+				F0000000000000000000000E /* Services/SyncService.swift */,
+				F00000000000000000000024 /* Services/InsightsAnalyticsService.swift */,
+				F00000000000000000000031 /* Services/EventTimerService.swift */,
+				F00000000000000000000032 /* Services/WidgetSnapshotService.swift */,
+				F00000000000000000000033 /* Services/IntegrationCommandStore.swift */,
+				F00000000000000000000039 /* Services/IntegrationCommandProcessor.swift */,
+				F00000000000000000000034 /* Services/LiveActivityManager.swift */,
+				F00000000000000000000035 /* Services/DeepLinkRouter.swift */,
+				F00000000000000000000059 /* Services/GrowthReferenceService.swift */,
+				F00000000000000000000061 /* Services/NightLightPresetService.swift */,
+				F00000000000000000000062 /* Services/NightLightTimerService.swift */,
+				F00000000000000000000063 /* Services/NightLightAudioService.swift */,
+				F00000000000000000000072 /* Services/AgeGuideService.swift */,
+				F00000000000000000000075 /* Services/ProfileService.swift */,
+				F0000000000000000000007A /* Services/PuppyStageGuideService.swift */,
+				F00000000000000000000025 /* ViewModels/InsightsViewModel.swift */,
+				F00000000000000000000064 /* ViewModels/NightLightViewModel.swift */,
+				F00000000000000000000036 /* AppIntents/LittleWindowsIntents.swift */,
+				F0000000000000000000000F /* Utilities/Formatting.swift */,
+				F00000000000000000000010 /* Utilities/SampleData.swift */,
+				F00000000000000000000077 /* Utilities/ProfileScoping.swift */,
+				F00000000000000000000011 /* Views/RootView.swift */,
+				F00000000000000000000012 /* Views/TodayView.swift */,
+				F00000000000000000000013 /* Views/HistoryView.swift */,
+				F00000000000000000000056 /* Views/MilestonesView.swift */,
+				F00000000000000000000014 /* Views/EventEditorView.swift */,
+				F00000000000000000000016 /* Views/SettingsView.swift */,
+				F00000000000000000000017 /* Views/PredictionExplanationView.swift */,
+				F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */,
+				F00000000000000000000019 /* Views/Components/EventRow.swift */,
+				F0000000000000000000001A /* Views/Components/PredictionCard.swift */,
+				F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */,
+				F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */,
+				F00000000000000000000073 /* Views/AgeGuides/AgeGuideViews.swift */,
+				F00000000000000000000076 /* Views/Profiles/ProfileViews.swift */,
+				F0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift */,
+				F0000000000000000000007B /* Views/Insights/DogInsightsView.swift */,
+				F00000000000000000000026 /* Views/Insights/InsightMetricCard.swift */,
+				F00000000000000000000027 /* Views/Insights/InsightChartCard.swift */,
+				F00000000000000000000028 /* Views/Insights/InsightsDashboardView.swift */,
+				F00000000000000000000029 /* Views/Insights/SleepInsightsView.swift */,
+				F0000000000000000000002A /* Views/Insights/WakeWindowInsightsView.swift */,
+				F0000000000000000000002B /* Views/Insights/FeedingInsightsView.swift */,
+				F0000000000000000000002C /* Views/Insights/DiaperInsightsView.swift */,
+				F0000000000000000000002D /* Views/Insights/ActivityInsightsView.swift */,
+				F0000000000000000000002E /* Views/Insights/PredictionAccuracyInsightsView.swift */,
+				F00000000000000000000057 /* Views/Insights/MilestoneInsightsView.swift */,
+				F0000000000000000000005A /* Views/Insights/GrowthInsightsView.swift */,
+				F00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift */,
+				F00000000000000000000065 /* Views/NightLight/NightLightShapeView.swift */,
+				F00000000000000000000066 /* Views/NightLight/NightLightPresetPicker.swift */,
+				F00000000000000000000067 /* Views/NightLight/NightLightShapePicker.swift */,
+				F00000000000000000000068 /* Views/NightLight/NightLightSoundPicker.swift */,
+				F00000000000000000000069 /* Views/NightLight/NightLightTimerPicker.swift */,
+				F0000000000000000000006A /* Views/NightLight/NightLightControlsView.swift */,
+				F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */,
+				F0000000000000000000006C /* Views/NightLight/NightLightView.swift */,
+				F0000000000000000000001F /* Assets.xcassets */,
+				F00000000000000000000020 /* SeedData/Ethan-Huckleberry-Backup.json */,
+				F0000000000000000000005B /* Resources/GrowthCharts */,
+				F00000000000000000000074 /* Resources/AgeGuides */,
+			);
+			path = LittleWindows;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000007 /* LittleWindowsTests */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000001B /* SleepPredictionEngineTests.swift */,
+			);
+			path = LittleWindowsTests;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000008 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000001C /* XCTest.framework */,
+				F00000000000000000000050 /* WidgetKit.framework */,
+				F00000000000000000000051 /* SwiftUI.framework */,
+				F00000000000000000000052 /* ActivityKit.framework */,
+				F00000000000000000000053 /* AppIntents.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000001D /* LittleWindows.app */,
+				F0000000000000000000001E /* LittleWindowsTests.xctest */,
+				F00000000000000000000049 /* LittleWindowsWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000027 /* LittleWindowsWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000040 /* LittleWindowsWidgetsBundle.swift */,
+				F00000000000000000000041 /* WidgetSnapshotReader.swift */,
+				F00000000000000000000042 /* ActiveTimerWidget.swift */,
+				F00000000000000000000043 /* NextSleepWindowWidget.swift */,
+				F00000000000000000000044 /* TodaySummaryWidget.swift */,
+				F00000000000000000000045 /* QuickLogWidget.swift */,
+				F00000000000000000000046 /* LittleWindowsLiveActivity.swift */,
+				F00000000000000000000054 /* LittleWindowsControls.swift */,
+				F00000000000000000000047 /* Info.plist */,
+				F00000000000000000000048 /* LittleWindowsWidgets.entitlements */,
+			);
+			path = LittleWindowsWidgets;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D00000000000000000000002 /* LittleWindows */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0000000000000000000000A /* Build configuration list for PBXNativeTarget "LittleWindows" */;
+			buildPhases = (
+				D0000000000000000000000B /* Sources */,
+				D00000000000000000000003 /* Frameworks */,
+				D0000000000000000000000C /* Resources */,
+				D00000000000000000000025 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00000000000000000000026 /* PBXTargetDependency */,
+			);
+			name = LittleWindows;
+			productName = LittleWindows;
+			productReference = F0000000000000000000001D /* LittleWindows.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D0000000000000000000000D /* LittleWindowsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0000000000000000000000E /* Build configuration list for PBXNativeTarget "LittleWindowsTests" */;
+			buildPhases = (
+				D0000000000000000000000F /* Sources */,
+				D00000000000000000000004 /* Frameworks */,
+				D00000000000000000000010 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00000000000000000000011 /* PBXTargetDependency */,
+			);
+			name = LittleWindowsTests;
+			productName = LittleWindowsTests;
+			productReference = F0000000000000000000001E /* LittleWindowsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D00000000000000000000020 /* LittleWindowsWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D00000000000000000000024 /* Build configuration list for PBXNativeTarget "LittleWindowsWidgets" */;
+			buildPhases = (
+				D00000000000000000000021 /* Sources */,
+				D00000000000000000000022 /* Frameworks */,
+				D00000000000000000000023 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LittleWindowsWidgets;
+			productName = LittleWindowsWidgets;
+			productReference = F00000000000000000000049 /* LittleWindowsWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					D00000000000000000000002 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					D0000000000000000000000D = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = D00000000000000000000002;
+					};
+					D00000000000000000000020 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = D00000000000000000000012 /* Build configuration list for PBXProject "LittleWindows" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D00000000000000000000005;
+			productRefGroup = D00000000000000000000009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D00000000000000000000002 /* LittleWindows */,
+				D00000000000000000000020 /* LittleWindowsWidgets */,
+				D0000000000000000000000D /* LittleWindowsTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D0000000000000000000000C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000001D /* Assets.xcassets in Resources */,
+				B0000000000000000000001E /* SeedData/Ethan-Huckleberry-Backup.json in Resources */,
+				B0000000000000000000005C /* Resources/GrowthCharts in Resources */,
+				B00000000000000000000074 /* Resources/AgeGuides in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000010 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D0000000000000000000000B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000001 /* LittleWindowsApp.swift in Sources */,
+				B00000000000000000000002 /* Models/BabyProfile.swift in Sources */,
+				B00000000000000000000003 /* Models/BabyEvent.swift in Sources */,
+				B00000000000000000000004 /* Models/EventType.swift in Sources */,
+				B00000000000000000000005 /* Models/EventSubtypes.swift in Sources */,
+				B00000000000000000000006 /* Models/PredictionFactor.swift in Sources */,
+				B00000000000000000000007 /* Models/SleepPredictionRecord.swift in Sources */,
+				B0000000000000000000001F /* Models/InsightMetric.swift in Sources */,
+				B00000000000000000000020 /* Models/InsightTrend.swift in Sources */,
+				B00000000000000000000021 /* Models/ChartDataPoint.swift in Sources */,
+				B0000000000000000000002D /* Models/SystemIntegrationSnapshots.swift in Sources */,
+				B00000000000000000000056 /* Models/MilestoneEntry.swift in Sources */,
+				B00000000000000000000059 /* Models/GrowthReferenceModels.swift in Sources */,
+				B00000000000000000000060 /* Models/NightLightModels.swift in Sources */,
+				B0000000000000000000006D /* Models/DoctorAppointment.swift in Sources */,
+				B00000000000000000000071 /* Models/AgeGuide.swift in Sources */,
+				B00000000000000000000078 /* Models/DogEventDetails.swift in Sources */,
+				B00000000000000000000079 /* Models/PuppyStageGuide.swift in Sources */,
+				B00000000000000000000008 /* Services/DailySummaryService.swift in Sources */,
+				B00000000000000000000009 /* Services/DataExportImportService.swift in Sources */,
+				B0000000000000000000000A /* Services/EventMutationService.swift in Sources */,
+				B0000000000000000000000B /* Services/NotificationManager.swift in Sources */,
+				B0000000000000000000000C /* Services/PredictionTuningService.swift in Sources */,
+				B0000000000000000000000D /* Services/SleepPredictionEngine.swift in Sources */,
+				B0000000000000000000000E /* Services/SyncService.swift in Sources */,
+				B00000000000000000000022 /* Services/InsightsAnalyticsService.swift in Sources */,
+				B0000000000000000000002E /* Services/EventTimerService.swift in Sources */,
+				B0000000000000000000002F /* Services/WidgetSnapshotService.swift in Sources */,
+				B00000000000000000000030 /* Services/IntegrationCommandStore.swift in Sources */,
+				B0000000000000000000005D /* Services/IntegrationCommandProcessor.swift in Sources */,
+				B00000000000000000000031 /* Services/LiveActivityManager.swift in Sources */,
+				B00000000000000000000032 /* Services/DeepLinkRouter.swift in Sources */,
+				B0000000000000000000005A /* Services/GrowthReferenceService.swift in Sources */,
+				B00000000000000000000061 /* Services/NightLightPresetService.swift in Sources */,
+				B00000000000000000000062 /* Services/NightLightTimerService.swift in Sources */,
+				B00000000000000000000063 /* Services/NightLightAudioService.swift in Sources */,
+				B00000000000000000000072 /* Services/AgeGuideService.swift in Sources */,
+				B00000000000000000000075 /* Services/ProfileService.swift in Sources */,
+				B0000000000000000000007A /* Services/PuppyStageGuideService.swift in Sources */,
+				B00000000000000000000023 /* ViewModels/InsightsViewModel.swift in Sources */,
+				B00000000000000000000064 /* ViewModels/NightLightViewModel.swift in Sources */,
+				B00000000000000000000033 /* AppIntents/LittleWindowsIntents.swift in Sources */,
+				B0000000000000000000000F /* Utilities/Formatting.swift in Sources */,
+				B00000000000000000000010 /* Utilities/SampleData.swift in Sources */,
+				B00000000000000000000077 /* Utilities/ProfileScoping.swift in Sources */,
+				B00000000000000000000011 /* Views/RootView.swift in Sources */,
+				B00000000000000000000012 /* Views/TodayView.swift in Sources */,
+				B00000000000000000000013 /* Views/HistoryView.swift in Sources */,
+				B00000000000000000000057 /* Views/MilestonesView.swift in Sources */,
+				B00000000000000000000014 /* Views/EventEditorView.swift in Sources */,
+				B00000000000000000000016 /* Views/SettingsView.swift in Sources */,
+				B00000000000000000000017 /* Views/PredictionExplanationView.swift in Sources */,
+				B00000000000000000000018 /* Views/Components/ActiveTimerCard.swift in Sources */,
+				B00000000000000000000019 /* Views/Components/EventRow.swift in Sources */,
+				B0000000000000000000001A /* Views/Components/PredictionCard.swift in Sources */,
+				B0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift in Sources */,
+				B0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift in Sources */,
+				B00000000000000000000073 /* Views/AgeGuides/AgeGuideViews.swift in Sources */,
+				B00000000000000000000076 /* Views/Profiles/ProfileViews.swift in Sources */,
+				B0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift in Sources */,
+				B0000000000000000000007B /* Views/Insights/DogInsightsView.swift in Sources */,
+				B00000000000000000000024 /* Views/Insights/InsightMetricCard.swift in Sources */,
+				B00000000000000000000025 /* Views/Insights/InsightChartCard.swift in Sources */,
+				B00000000000000000000026 /* Views/Insights/InsightsDashboardView.swift in Sources */,
+				B00000000000000000000027 /* Views/Insights/SleepInsightsView.swift in Sources */,
+				B00000000000000000000028 /* Views/Insights/WakeWindowInsightsView.swift in Sources */,
+				B00000000000000000000029 /* Views/Insights/FeedingInsightsView.swift in Sources */,
+				B0000000000000000000002A /* Views/Insights/DiaperInsightsView.swift in Sources */,
+				B0000000000000000000002B /* Views/Insights/ActivityInsightsView.swift in Sources */,
+				B0000000000000000000002C /* Views/Insights/PredictionAccuracyInsightsView.swift in Sources */,
+				B00000000000000000000058 /* Views/Insights/MilestoneInsightsView.swift in Sources */,
+				B0000000000000000000005B /* Views/Insights/GrowthInsightsView.swift in Sources */,
+				B00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift in Sources */,
+				B00000000000000000000065 /* Views/NightLight/NightLightShapeView.swift in Sources */,
+				B00000000000000000000066 /* Views/NightLight/NightLightPresetPicker.swift in Sources */,
+				B00000000000000000000067 /* Views/NightLight/NightLightShapePicker.swift in Sources */,
+				B00000000000000000000068 /* Views/NightLight/NightLightSoundPicker.swift in Sources */,
+				B00000000000000000000069 /* Views/NightLight/NightLightTimerPicker.swift in Sources */,
+				B0000000000000000000006A /* Views/NightLight/NightLightControlsView.swift in Sources */,
+				B0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift in Sources */,
+				B0000000000000000000006C /* Views/NightLight/NightLightView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0000000000000000000000F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000021 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000040 /* LittleWindowsWidgetsBundle.swift in Sources */,
+				B00000000000000000000041 /* WidgetSnapshotReader.swift in Sources */,
+				B00000000000000000000042 /* ActiveTimerWidget.swift in Sources */,
+				B00000000000000000000043 /* NextSleepWindowWidget.swift in Sources */,
+				B00000000000000000000044 /* TodaySummaryWidget.swift in Sources */,
+				B00000000000000000000045 /* QuickLogWidget.swift in Sources */,
+				B00000000000000000000046 /* LittleWindowsLiveActivity.swift in Sources */,
+				B00000000000000000000055 /* LittleWindowsControls.swift in Sources */,
+				B00000000000000000000047 /* Models/SystemIntegrationSnapshots.swift in Sources */,
+				B00000000000000000000048 /* Models/EventSubtypes.swift in Sources */,
+				B00000000000000000000049 /* Services/IntegrationCommandStore.swift in Sources */,
+				B0000000000000000000004A /* AppIntents/LittleWindowsIntents.swift in Sources */,
+				B0000000000000000000004B /* Utilities/Formatting.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D00000000000000000000011 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D00000000000000000000002 /* LittleWindows */;
+			targetProxy = C00000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		D00000000000000000000026 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D00000000000000000000020 /* LittleWindowsWidgets */;
+			targetProxy = C00000000000000000000002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		E00000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = A3H3Y9PUP3;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		E00000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = A3H3Y9PUP3;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		E00000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LittleWindows/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E00000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LittleWindows/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E00000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindowsTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LittleWindows.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LittleWindows";
+			};
+			name = Debug;
+		};
+		E00000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindowsTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LittleWindows.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LittleWindows";
+			};
+			name = Release;
+		};
+		E00000000000000000000020 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E00000000000000000000021 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D0000000000000000000000A /* Build configuration list for PBXNativeTarget "LittleWindows" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000003 /* Debug */,
+				E00000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0000000000000000000000E /* Build configuration list for PBXNativeTarget "LittleWindowsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000005 /* Debug */,
+				E00000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D00000000000000000000012 /* Build configuration list for PBXProject "LittleWindows" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000001 /* Debug */,
+				E00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D00000000000000000000024 /* Build configuration list for PBXNativeTarget "LittleWindowsWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000020 /* Debug */,
+				E00000000000000000000021 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D00000000000000000000001 /* Project object */;
+}

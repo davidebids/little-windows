@@ -1,0 +1,1087 @@
+[
+  {
+    "id": "age-02",
+    "ageMonth": 2,
+    "title": "Ethan at 2 Months",
+    "subtitle": "A checkpoint-style guide for early smiles, sounds, and connection.",
+    "overview": "Around 2 months, many babies become more alert, more responsive to faces and voices, and more expressive in small ways. Every baby develops on their own timeline.",
+    "developmentalTopics": [
+      {
+        "id": "age-02-social",
+        "category": "socialEmotional",
+        "title": "Faces and smiles",
+        "body": "You may start to notice more alert face-watching, calmer moments with familiar voices, and early smiles that feel social.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      },
+      {
+        "id": "age-02-communication",
+        "category": "communication",
+        "title": "Tiny conversations",
+        "body": "Listen for coos, soft sounds, and little pauses when you talk. Capture the moments that feel new or especially Ethan.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-02-movement",
+        "category": "movementPhysical",
+        "title": "Head, hands, and tummy time",
+        "body": "Many babies around this age are still building head control and body strength. Short, supervised tummy time can create memory-worthy effort.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-02-prompt-smile",
+        "title": "First social smile",
+        "suggestedCategory": "social",
+        "promptText": "Did Ethan give a smile that felt especially connected?",
+        "ageMonth": 2,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-02-prompt-coo",
+        "title": "First coo conversation",
+        "suggestedCategory": "communication",
+        "promptText": "Did Ethan start a little back-and-forth with coos or sounds?",
+        "ageMonth": 2,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-02-prompt-book",
+        "title": "New favorite book",
+        "suggestedCategory": "firsts",
+        "promptText": "Was there a book, song, or voice that got a new reaction?",
+        "ageMonth": 2,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Talk face-to-face and pause as if you are having a tiny conversation.",
+      "Try a short book, song, or high-contrast toy during a calm awake window.",
+      "Use short, supervised tummy time when Ethan is alert and comfortable."
+    ],
+    "careNotes": [
+      "Keep notes gentle: these are memory prompts, not a scorecard.",
+      "Bring questions or patterns that concern you to Ethan's pediatrician."
+    ],
+    "sleepNotes": [
+      "Sleep can change quickly around growth, illness, and routine shifts.",
+      "Look for patterns over several days rather than one difficult nap or night."
+    ],
+    "feedingNotes": [
+      "Feeding rhythms can shift as Ethan grows.",
+      "Ask the pediatrician if you have concerns about intake, comfort, or growth."
+    ],
+    "safetyNotes": [
+      "Keep floor and sleep spaces simple and safe.",
+      "Re-check surfaces where Ethan lies or is changed as movement increases."
+    ],
+    "sourceReferences": [
+      {
+        "id": "cdc-act-early",
+        "sourceName": "CDC Learn the Signs. Act Early.",
+        "sourceURL": "https://www.cdc.gov/act-early/milestones/index.html",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used as the preferred basis for checkpoint-age milestone themes."
+      },
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": true,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-01T00:00:00Z",
+    "updatedAt": "2026-06-01T00:00:00Z"
+  },
+  {
+    "id": "age-03",
+    "ageMonth": 3,
+    "title": "Ethan at 3 Months",
+    "subtitle": "A between-checkpoint guide for play, hands, sounds, and routines.",
+    "overview": "Around 3 months, you may notice more social interaction, stronger head control, and new interest in hands, sounds, and nearby toys.",
+    "developmentalTopics": [
+      {
+        "id": "age-03-social",
+        "category": "socialEmotional",
+        "title": "More interactive moments",
+        "body": "Watch for new expressions, attention to familiar people, and moments where Ethan seems to anticipate a routine or game.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-03-communication",
+        "category": "communication",
+        "title": "Sounds with personality",
+        "body": "This can be a lovely month to capture favorite coos, squeals, pauses, or reactions to songs.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-03-play",
+        "category": "play",
+        "title": "Hands and simple play",
+        "body": "Many babies become more interested in their hands and nearby toys. Notice what Ethan looks toward, bats at, or seems to enjoy.",
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-03-prompt-hands",
+        "title": "Held hands together at center",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan bring hands together, study them, or hold them at center?",
+        "ageMonth": 3,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-03-prompt-sound",
+        "title": "New favorite sound",
+        "suggestedCategory": "communication",
+        "promptText": "What sound, squeal, coo, or little noise stood out this month?",
+        "ageMonth": 3,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-03-prompt-habit",
+        "title": "New funny habit",
+        "suggestedCategory": "funny",
+        "promptText": "What tiny habit made you laugh this month?",
+        "ageMonth": 3,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Offer a safe toy slightly to the side and watch for looking, reaching, or batting.",
+      "Narrate diaper changes or outfit changes and wait for Ethan's response.",
+      "Try a short book or song and capture any new reaction as a memory."
+    ],
+    "careNotes": [
+      "Use the guide to notice patterns and memories, not to grade development.",
+      "Save questions for the next pediatrician visit if something worries you."
+    ],
+    "sleepNotes": [
+      "Sleep rhythms can be uneven while babies grow and practice new skills.",
+      "Use your logs to spot patterns over time."
+    ],
+    "feedingNotes": [
+      "Feeding patterns may vary with growth, distraction, or routine changes.",
+      "Ask the pediatrician if feeding or growth concerns come up."
+    ],
+    "safetyNotes": [
+      "As Ethan gets more active, keep changing surfaces guarded and never leave him unattended on raised surfaces.",
+      "Check toys and play spaces for small parts or loose pieces."
+    ],
+    "sourceReferences": [
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": false,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-01T00:00:00Z",
+    "updatedAt": "2026-06-01T00:00:00Z"
+  },
+  {
+    "id": "age-04",
+    "ageMonth": 4,
+    "title": "Ethan at 4 Months",
+    "subtitle": "What to expect around 4 months, with playful memory prompts.",
+    "overview": "Around this age, many babies become more expressive, more interested in faces and voices, and more active with their hands and body. Every baby develops on their own timeline.",
+    "developmentalTopics": [
+      {
+        "id": "age-04-social",
+        "category": "socialEmotional",
+        "title": "More expressive connection",
+        "body": "You may start to notice bigger reactions to familiar people, playful expressions, or moments that feel like real back-and-forth.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      },
+      {
+        "id": "age-04-communication",
+        "category": "communication",
+        "title": "Laughs, squeals, and favorite sounds",
+        "body": "Many babies around this age experiment with sounds. Capture the first sounds that feel especially memorable.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-04-movement",
+        "category": "movementPhysical",
+        "title": "Hands, reaching, and body practice",
+        "body": "You may notice reaching, hands to mouth, body wiggles, rolling attempts, or stronger head and chest lifting during supervised play.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-04-routine",
+        "category": "sleep",
+        "title": "Routines can shift",
+        "body": "Sleep and feeding patterns can change around new skills, growth, and daily rhythm shifts. The logs are useful for patterns, not single-day verdicts.",
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-04-prompt-laugh",
+        "title": "First big laugh",
+        "suggestedCategory": "social",
+        "promptText": "Did Ethan laugh, squeal, or light up in a new way?",
+        "ageMonth": 4,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-04-prompt-hands",
+        "title": "Held hands together at center",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan bring hands together or to the mouth?",
+        "ageMonth": 4,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-04-prompt-reach",
+        "title": "Reached for a toy",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan reach, swipe, grab, or show a new favorite toy?",
+        "ageMonth": 4,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-04-prompt-size",
+        "title": "Sized up diapers or clothes",
+        "suggestedCategory": "growth",
+        "promptText": "Did Ethan move into a new diaper or clothing size?",
+        "ageMonth": 4,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Read one short book and watch for smiles, sounds, or focused looking.",
+      "Offer a safe toy nearby and notice reaching, batting, or grabbing attempts.",
+      "Try a few minutes of supervised tummy time with a favorite face or toy in view.",
+      "Sing the same little song for a few days and capture any new reaction."
+    ],
+    "careNotes": [
+      "Capture memories in your own words; the guide is here to prompt, not pressure.",
+      "Bring questions or concerns to Ethan's pediatrician."
+    ],
+    "sleepNotes": [
+      "Some babies have shifting sleep around this stage. Look for multi-day patterns in logs.",
+      "If sleep changes feel sudden or concerning, use notes for the pediatrician."
+    ],
+    "feedingNotes": [
+      "Feeding can be affected by distraction, growth, or routine changes.",
+      "Ask the pediatrician before making major feeding changes."
+    ],
+    "safetyNotes": [
+      "Rolling attempts can surprise you; re-check changing tables, couches, beds, and play spaces.",
+      "Keep small objects and loose pieces away from play areas."
+    ],
+    "sourceReferences": [
+      {
+        "id": "cdc-act-early",
+        "sourceName": "CDC Learn the Signs. Act Early.",
+        "sourceURL": "https://www.cdc.gov/act-early/milestones/index.html",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used as the preferred basis for checkpoint-age milestone themes."
+      },
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": true,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-01T00:00:00Z",
+    "updatedAt": "2026-06-01T00:00:00Z"
+  },
+  {
+    "id": "age-05",
+    "ageMonth": 5,
+    "title": "Ethan at 5 Months",
+    "subtitle": "A between-checkpoint guide for curiosity, reaching, and routines.",
+    "overview": "Around 5 months, this can be a playful in-between stage: more reaching, more sound-making, and more curiosity about routines and people.",
+    "developmentalTopics": [
+      {
+        "id": "age-05-play",
+        "category": "play",
+        "title": "Curiosity and repetition",
+        "body": "Many babies enjoy simple repeated games, familiar songs, and toys they can look at or reach toward.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-05-communication",
+        "category": "communication",
+        "title": "Sounds with rhythm",
+        "body": "You may notice favorite sounds, louder reactions, or little sound routines that happen during play or care.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-05-movement",
+        "category": "movementPhysical",
+        "title": "Practice, attempts, and almosts",
+        "body": "This is a good month to capture attempts: almost rolling, reaching with more purpose, or new body positions.",
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-05-prompt-toy",
+        "title": "New favorite toy",
+        "suggestedCategory": "firsts",
+        "promptText": "Did Ethan clearly prefer a toy, book, song, or game?",
+        "ageMonth": 5,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-05-prompt-roll",
+        "title": "Rolled or tried to roll",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan roll, twist, or work hard toward rolling?",
+        "ageMonth": 5,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-05-prompt-habit",
+        "title": "New funny habit",
+        "suggestedCategory": "funny",
+        "promptText": "What new face, sound, or routine made everyone laugh?",
+        "ageMonth": 5,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Place a safe toy within reach and wait before helping.",
+      "Repeat a favorite song and watch for anticipation.",
+      "Use mirror play or face-to-face play during a calm awake window."
+    ],
+    "careNotes": [
+      "Between-checkpoint months are perfect for small memories and questions.",
+      "Ask Ethan's pediatrician if you have concerns."
+    ],
+    "sleepNotes": [
+      "New movement practice can show up around sleep.",
+      "Look for patterns across several days."
+    ],
+    "feedingNotes": [
+      "Feeding interest and distraction can shift at this age.",
+      "Use notes to track questions for the pediatrician."
+    ],
+    "safetyNotes": [
+      "Assume movement can change quickly and keep raised surfaces guarded.",
+      "Check play spaces for small objects before floor time."
+    ],
+    "sourceReferences": [
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": false,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-01T00:00:00Z",
+    "updatedAt": "2026-06-01T00:00:00Z"
+  },
+  {
+    "id": "age-06",
+    "ageMonth": 6,
+    "title": "Ethan at 6 Months",
+    "subtitle": "A checkpoint-style guide for interaction, movement, feeding notes, and memories.",
+    "overview": "Around 6 months, many babies are increasingly interactive and physical. This is often a helpful month to capture new sounds, movement, feeding changes, and favorite games.",
+    "developmentalTopics": [
+      {
+        "id": "age-06-social",
+        "category": "socialEmotional",
+        "title": "Big reactions and familiar people",
+        "body": "Notice the faces, voices, songs, and people that reliably get a reaction from Ethan.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      },
+      {
+        "id": "age-06-communication",
+        "category": "communication",
+        "title": "Babbling and sound play",
+        "body": "Many babies around this age experiment with repeated sounds and expressive noises. Capture the sounds you never want to forget.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-06-feeding",
+        "category": "feeding",
+        "title": "Feeding memories and questions",
+        "body": "If solids are part of Ethan's care plan, this can be a good place to capture first tastes and reactions. Ask the pediatrician about feeding questions.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-06-movement",
+        "category": "movementPhysical",
+        "title": "Rolling, sitting, and reaching",
+        "body": "You may notice new attempts with rolling, sitting with support, reaching, or transferring toys. Capture attempts and surprises.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-06-prompt-food",
+        "title": "Tried a new food",
+        "suggestedCategory": "feeding",
+        "promptText": "Did Ethan explore a new taste, texture, or feeding routine?",
+        "ageMonth": 6,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-06-prompt-sit",
+        "title": "Sat with support",
+        "suggestedCategory": "motor",
+        "promptText": "Was there a new sitting, rolling, or reaching moment?",
+        "ageMonth": 6,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-06-prompt-sound",
+        "title": "New babble or sound",
+        "suggestedCategory": "communication",
+        "promptText": "What new sound or repeated noise showed up this month?",
+        "ageMonth": 6,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      }
+    ],
+    "playIdeas": [
+      "Put a safe toy just out of reach and let Ethan work toward it.",
+      "Read a book with faces, rhythm, or repeated sounds.",
+      "Capture first food reactions if solids are part of Ethan's care plan.",
+      "Try supported sitting play on the floor with close supervision."
+    ],
+    "careNotes": [
+      "This guide is for noticing and remembering, not diagnosing.",
+      "Bring development, feeding, or sleep questions to Ethan's pediatrician."
+    ],
+    "sleepNotes": [
+      "New mobility and routines can affect sleep for a while.",
+      "Compare patterns across days instead of reacting to one rough stretch."
+    ],
+    "feedingNotes": [
+      "If solids are part of Ethan's care plan, log first tastes as memories.",
+      "Ask the pediatrician before major feeding changes or if you have concerns."
+    ],
+    "safetyNotes": [
+      "Re-check floor spaces, small objects, cords, and furniture as movement increases.",
+      "Use safe, supervised positioning for sitting and play."
+    ],
+    "sourceReferences": [
+      {
+        "id": "cdc-act-early",
+        "sourceName": "CDC Learn the Signs. Act Early.",
+        "sourceURL": "https://www.cdc.gov/act-early/milestones/index.html",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used as the preferred basis for checkpoint-age milestone themes."
+      },
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-01T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": true,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-01T00:00:00Z",
+    "updatedAt": "2026-06-01T00:00:00Z"
+  },
+  {
+    "id": "age-07",
+    "ageMonth": 7,
+    "title": "Ethan at 7 Months",
+    "subtitle": "A between-checkpoint guide for sitting practice, curiosity, and first food memories.",
+    "overview": "Around 7 months, many babies are busy practicing body control, exploring objects, and getting more opinionated about favorite people, games, and routines.",
+    "developmentalTopics": [
+      {
+        "id": "age-07-movement",
+        "category": "movementPhysical",
+        "title": "Sitting, rolling, and reaching practice",
+        "body": "This can be a month of almosts: longer sitting moments, rolling with more intention, reaching across the body, or working toward a toy.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-07-cognitive",
+        "category": "cognitive",
+        "title": "Exploring objects",
+        "body": "Notice what Ethan studies, mouths, shakes, drops, bangs, or reaches for again and again.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-07-feeding",
+        "category": "feeding",
+        "title": "Food reactions and family routines",
+        "body": "If solids are part of Ethan's care plan, this is a sweet time to capture favorite tastes, dramatic faces, and mealtime firsts.",
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-07-prompt-sit",
+        "title": "Longest sitting moment so far",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan sit, balance, wobble, or recover in a new way?",
+        "ageMonth": 7,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-07-prompt-food",
+        "title": "A memorable food face",
+        "suggestedCategory": "feeding",
+        "promptText": "Was there a taste, texture, or reaction you want to remember?",
+        "ageMonth": 7,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-07-prompt-object",
+        "title": "New favorite object",
+        "suggestedCategory": "firsts",
+        "promptText": "What toy, spoon, book, cup, or everyday object kept getting Ethan's attention?",
+        "ageMonth": 7,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Place a safe toy just out of reach and give Ethan time to problem-solve.",
+      "Try floor play with sitting support nearby and close supervision.",
+      "Name objects Ethan is touching, shaking, or mouthing.",
+      "Capture funny food reactions if solids are part of Ethan's routine."
+    ],
+    "careNotes": [
+      "Use this month for small memories, not comparisons.",
+      "Bring feeding, movement, or routine questions to Ethan's pediatrician."
+    ],
+    "sleepNotes": [
+      "Movement practice and feeding changes can coincide with sleep shifts.",
+      "Look at patterns across several days before changing routines."
+    ],
+    "feedingNotes": [
+      "Follow Ethan's pediatrician's guidance for solids, allergens, and textures.",
+      "Log new foods as memories and as useful context for care conversations."
+    ],
+    "safetyNotes": [
+      "Re-check floor spaces for small objects, cords, furniture edges, and reachable items.",
+      "Keep sitting and feeding practice supervised and age-appropriate."
+    ],
+    "sourceReferences": [
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": false,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-15T00:00:00Z",
+    "updatedAt": "2026-06-15T00:00:00Z"
+  },
+  {
+    "id": "age-08",
+    "ageMonth": 8,
+    "title": "Ethan at 8 Months",
+    "subtitle": "A between-checkpoint guide for movement attempts, object play, and familiar routines.",
+    "overview": "Around 8 months, babies may be more mobile in their own way, more curious about cause and effect, and more expressive about familiar people and routines.",
+    "developmentalTopics": [
+      {
+        "id": "age-08-social",
+        "category": "socialEmotional",
+        "title": "Familiar people and big reactions",
+        "body": "Notice how Ethan responds to favorite people, peekaboo, songs, greetings, and daily routines.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-08-cognitive",
+        "category": "cognitive",
+        "title": "Cause and effect",
+        "body": "Dropping, banging, shaking, and repeating actions can be part of learning how the world responds.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-08-movement",
+        "category": "movementPhysical",
+        "title": "Scooting, pivoting, reaching, or trying",
+        "body": "Capture Ethan's movement style without needing it to fit a label: pivoting, rolling, pushing up, scooting, rocking, or reaching all count as memories.",
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-08-prompt-move",
+        "title": "New way of moving",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan find a new way to get closer to something interesting?",
+        "ageMonth": 8,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-08-prompt-game",
+        "title": "Favorite repeated game",
+        "suggestedCategory": "funny",
+        "promptText": "What game, sound, or routine did Ethan want again and again?",
+        "ageMonth": 8,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-08-prompt-person",
+        "title": "Special person reaction",
+        "suggestedCategory": "family",
+        "promptText": "Was there a greeting, laugh, reach, or expression for someone special?",
+        "ageMonth": 8,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Play peekaboo or a repeated song and pause for Ethan's reaction.",
+      "Offer two safe objects and notice which one Ethan chooses.",
+      "Use sturdy floor play spaces for supervised reaching and movement practice.",
+      "Narrate cause and effect: shake, drop, bang, open, close."
+    ],
+    "careNotes": [
+      "This guide is a memory prompt, not a developmental grade.",
+      "Save questions for Ethan's pediatrician if something feels concerning."
+    ],
+    "sleepNotes": [
+      "Separation, new skills, illness, or schedule changes can affect sleep.",
+      "Use the logs to notice whether a change is temporary or becoming a pattern."
+    ],
+    "feedingNotes": [
+      "Feeding interest can vary with distraction, teething, growth, and routine.",
+      "Ask the pediatrician about food texture, allergen, or intake questions."
+    ],
+    "safetyNotes": [
+      "Assume reach and movement can change overnight; re-check babyproofing often.",
+      "Keep cords, small objects, hot drinks, and unstable furniture out of reach."
+    ],
+    "sourceReferences": [
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": false,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-15T00:00:00Z",
+    "updatedAt": "2026-06-15T00:00:00Z"
+  },
+  {
+    "id": "age-09",
+    "ageMonth": 9,
+    "title": "Ethan at 9 Months",
+    "subtitle": "A checkpoint-style guide for gestures, object play, movement, and memory-worthy routines.",
+    "overview": "Around 9 months, many babies show more back-and-forth interaction, more purposeful object play, and more determined movement practice. Every baby develops on their own timeline.",
+    "developmentalTopics": [
+      {
+        "id": "age-09-social",
+        "category": "socialEmotional",
+        "title": "Connection, preferences, and reactions",
+        "body": "You may notice stronger reactions to familiar people, favorite games, or moments when Ethan looks for a response from you.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      },
+      {
+        "id": "age-09-communication",
+        "category": "communication",
+        "title": "Sounds, gestures, and attention",
+        "body": "Capture new babbles, gestures, reaching to be picked up, or moments when Ethan responds to a name, song, or familiar phrase.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-09-cognitive",
+        "category": "cognitive",
+        "title": "Looking, finding, and object play",
+        "body": "Many babies around this age are interested in finding hidden objects, passing toys between hands, and exploring containers or cause and effect.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-09-movement",
+        "category": "movementPhysical",
+        "title": "Sitting and moving with purpose",
+        "body": "Notice Ethan's own movement style: sitting, pivoting, scooting, crawling attempts, pulling toward things, or reaching with more control.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-09-prompt-gesture",
+        "title": "New gesture or signal",
+        "suggestedCategory": "communication",
+        "promptText": "Did Ethan wave, reach, lift arms, point, clap, or use a new signal?",
+        "ageMonth": 9,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-09-prompt-find",
+        "title": "Found a hidden object",
+        "suggestedCategory": "firsts",
+        "promptText": "Did Ethan look for something after it disappeared or play a new hiding game?",
+        "ageMonth": 9,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-09-prompt-move",
+        "title": "Moved with purpose",
+        "suggestedCategory": "motor",
+        "promptText": "What movement got Ethan closer to a person, toy, or place?",
+        "ageMonth": 9,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-09-prompt-babble",
+        "title": "Favorite babble",
+        "suggestedCategory": "communication",
+        "promptText": "What repeated sound or babble felt especially Ethan this month?",
+        "ageMonth": 9,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      }
+    ],
+    "playIdeas": [
+      "Hide a toy partly under a cloth and watch what Ethan tries.",
+      "Play turn-taking games with clapping, waving, peekaboo, or repeating sounds.",
+      "Offer safe containers for putting objects in and taking them out.",
+      "Create supervised floor space for movement practice."
+    ],
+    "careNotes": [
+      "A checkpoint guide is a prompt for noticing and questions, not a diagnosis.",
+      "Bring any development, hearing, vision, feeding, or movement concerns to Ethan's pediatrician."
+    ],
+    "sleepNotes": [
+      "New mobility, separation feelings, illness, or travel can affect sleep.",
+      "Compare sleep over several days and keep notes for care conversations."
+    ],
+    "feedingNotes": [
+      "If solids are part of Ethan's care plan, mealtime may become more interactive.",
+      "Ask the pediatrician about textures, allergens, choking safety, or intake concerns."
+    ],
+    "safetyNotes": [
+      "Re-check babyproofing for movement, pulling, reaching, and exploring.",
+      "Keep small objects, cords, hot drinks, medicines, and cleaning products out of reach."
+    ],
+    "sourceReferences": [
+      {
+        "id": "cdc-act-early",
+        "sourceName": "CDC Learn the Signs. Act Early.",
+        "sourceURL": "https://www.cdc.gov/act-early/milestones/index.html",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used as the preferred basis for checkpoint-age milestone themes."
+      },
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": true,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-15T00:00:00Z",
+    "updatedAt": "2026-06-15T00:00:00Z"
+  },
+  {
+    "id": "age-10",
+    "ageMonth": 10,
+    "title": "Ethan at 10 Months",
+    "subtitle": "A between-checkpoint guide for exploring, sounds, routines, and little preferences.",
+    "overview": "Around 10 months, many babies are deep into exploration: moving toward favorite things, testing cause and effect, practicing sounds, and showing very specific preferences.",
+    "developmentalTopics": [
+      {
+        "id": "age-10-cognitive",
+        "category": "cognitive",
+        "title": "Little experiments",
+        "body": "Dropping, opening, closing, banging, handing things over, or repeating a trick can all become memorable experiments.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-10-communication",
+        "category": "communication",
+        "title": "Sounds that mean something",
+        "body": "Listen for favorite syllables, emphatic noises, gestures, or sounds that seem tied to a person, object, or routine.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-10-movement",
+        "category": "movementPhysical",
+        "title": "Moving through the day",
+        "body": "Whether Ethan is rolling, scooting, crawling, pulling, cruising attempts, or doing something entirely his own, capture the style and the story.",
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-10-prompt-experiment",
+        "title": "Favorite experiment",
+        "suggestedCategory": "funny",
+        "promptText": "What did Ethan repeat until everyone noticed?",
+        "ageMonth": 10,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-10-prompt-wordlike",
+        "title": "Word-like sound",
+        "suggestedCategory": "communication",
+        "promptText": "Was there a sound that seemed attached to a person, object, or moment?",
+        "ageMonth": 10,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-10-prompt-cruise",
+        "title": "Pulling or standing attempt",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan try to pull up, stand with help, cruise, or reach higher?",
+        "ageMonth": 10,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Use simple containers for in-and-out play.",
+      "Name people and objects during repeated routines.",
+      "Offer safe furniture-free floor space for movement.",
+      "Read books with flaps, faces, rhythm, or repeated phrases."
+    ],
+    "careNotes": [
+      "Capture what Ethan loves, not just what he achieves.",
+      "Bring questions or concerns to the pediatrician."
+    ],
+    "sleepNotes": [
+      "Practice with movement, standing, or separation can show up at bedtime.",
+      "Use sleep logs to understand whether the pattern is changing."
+    ],
+    "feedingNotes": [
+      "Mealtime may include stronger preferences and more participation.",
+      "Ask the pediatrician about textures, choking safety, allergens, or intake concerns."
+    ],
+    "safetyNotes": [
+      "Re-check furniture, cords, outlets, stairs, cabinets, and table edges.",
+      "Keep small objects and unsafe foods out of reach."
+    ],
+    "sourceReferences": [
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": false,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-15T00:00:00Z",
+    "updatedAt": "2026-06-15T00:00:00Z"
+  },
+  {
+    "id": "age-11",
+    "ageMonth": 11,
+    "title": "Ethan at 11 Months",
+    "subtitle": "A between-checkpoint guide for pre-toddler energy, gestures, and family memories.",
+    "overview": "Around 11 months, many babies feel wonderfully specific: favorite games, favorite people, stronger opinions, new movement attempts, and expressive sounds.",
+    "developmentalTopics": [
+      {
+        "id": "age-11-social",
+        "category": "socialEmotional",
+        "title": "Preferences and personality",
+        "body": "Notice the games, people, songs, foods, and routines Ethan clearly likes, dislikes, anticipates, or requests.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-11-communication",
+        "category": "communication",
+        "title": "Gestures and shared attention",
+        "body": "Capture pointing, reaching, waving, clapping, showing objects, or looking back to share a moment.",
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-11-movement",
+        "category": "movementPhysical",
+        "title": "Almost a toddler, still Ethan's pace",
+        "body": "Movement can look very different baby to baby. Log the memorable attempts, not comparisons.",
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-11-prompt-favorite",
+        "title": "Clear favorite",
+        "suggestedCategory": "favoriteThings",
+        "promptText": "What person, food, song, toy, or routine was unmistakably a favorite?",
+        "ageMonth": 11,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-11-prompt-share",
+        "title": "Shared a moment",
+        "suggestedCategory": "social",
+        "promptText": "Did Ethan look back, show something, clap, wave, or invite you into a game?",
+        "ageMonth": 11,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-11-prompt-routine",
+        "title": "New routine personality",
+        "suggestedCategory": "funny",
+        "promptText": "What care routine now has a very Ethan-specific reaction?",
+        "ageMonth": 11,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Practice simple turn-taking with a ball, block, song, or repeated sound.",
+      "Name body parts, people, foods, and familiar objects during routines.",
+      "Offer sturdy supervised play spaces for pulling, standing, cruising, or movement.",
+      "Capture the funniest tiny opinion of the month."
+    ],
+    "careNotes": [
+      "This is a good month to write down favorites before they change.",
+      "Ask the pediatrician about any development, feeding, sleep, or safety concerns."
+    ],
+    "sleepNotes": [
+      "Separation, mobility, and routine preferences can affect sleep.",
+      "Track patterns and note what helps."
+    ],
+    "feedingNotes": [
+      "Food preferences can be strong and changeable.",
+      "Ask the pediatrician about textures, nutrition, choking safety, or intake questions."
+    ],
+    "safetyNotes": [
+      "Assume Ethan can reach more than yesterday.",
+      "Re-check furniture stability, stairs, cords, outlets, drawers, and table surfaces."
+    ],
+    "sourceReferences": [
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": false,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-15T00:00:00Z",
+    "updatedAt": "2026-06-15T00:00:00Z"
+  },
+  {
+    "id": "age-12",
+    "ageMonth": 12,
+    "title": "Ethan at 12 Months",
+    "subtitle": "A checkpoint-style first-birthday guide for gestures, words, movement, play, and memories.",
+    "overview": "Around 12 months, many babies are becoming more intentional communicators and explorers. The first birthday is also a wonderful moment to capture what Ethan loves right now.",
+    "developmentalTopics": [
+      {
+        "id": "age-12-social",
+        "category": "socialEmotional",
+        "title": "Games, help, and shared moments",
+        "body": "Notice how Ethan participates in favorite games, offers objects, seeks comfort, or reacts to familiar people and routines.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      },
+      {
+        "id": "age-12-communication",
+        "category": "communication",
+        "title": "Gestures and word-like sounds",
+        "body": "Capture waves, pointing, reaching, meaningful sounds, favorite syllables, and any words or almost-words you want to remember.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-12-cognitive",
+        "category": "cognitive",
+        "title": "Using objects with intention",
+        "body": "Many babies around this age imitate actions, search for things, put objects in containers, and use familiar items in purposeful ways.",
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-12-movement",
+        "category": "movementPhysical",
+        "title": "Standing, cruising, crawling, or walking attempts",
+        "body": "Movement varies a lot. Capture Ethan's style: crawling, cruising, standing, assisted steps, first steps, or another determined approach.",
+        "sourceReferenceIDs": ["cdc-act-early", "healthychildren"]
+      }
+    ],
+    "milestonePrompts": [
+      {
+        "id": "age-12-prompt-birthday",
+        "title": "First birthday memory",
+        "suggestedCategory": "firsts",
+        "promptText": "What detail from Ethan's first birthday do you want to keep forever?",
+        "ageMonth": 12,
+        "sourceReferenceIDs": ["healthychildren"]
+      },
+      {
+        "id": "age-12-prompt-word",
+        "title": "First word or almost-word",
+        "suggestedCategory": "communication",
+        "promptText": "Was there a word, name, sound, or phrase that seemed meaningful?",
+        "ageMonth": 12,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-12-prompt-step",
+        "title": "Standing, cruising, or steps",
+        "suggestedCategory": "motor",
+        "promptText": "Did Ethan stand, cruise, crawl somewhere important, take assisted steps, or take first steps?",
+        "ageMonth": 12,
+        "sourceReferenceIDs": ["cdc-act-early"]
+      },
+      {
+        "id": "age-12-prompt-favorite",
+        "title": "One-year favorites",
+        "suggestedCategory": "favoriteThings",
+        "promptText": "What are Ethan's favorite foods, songs, books, toys, people, and games at one year?",
+        "ageMonth": 12,
+        "sourceReferenceIDs": ["healthychildren"]
+      }
+    ],
+    "playIdeas": [
+      "Create a one-year favorites memory: song, book, food, toy, face, and game.",
+      "Practice simple imitation with clapping, waving, stacking, putting in, and taking out.",
+      "Read books with familiar objects and pause for pointing, sounds, or gestures.",
+      "Offer safe supervised spaces for crawling, cruising, standing, or walking practice."
+    ],
+    "careNotes": [
+      "Use the first birthday as a memory checkpoint and a place to collect pediatrician questions.",
+      "This guide is not medical advice or a developmental diagnosis."
+    ],
+    "sleepNotes": [
+      "Travel, celebrations, routines, and mobility can all affect sleep.",
+      "Use logs to spot patterns and bring concerns to the pediatrician."
+    ],
+    "feedingNotes": [
+      "Food routines may shift around the first birthday; follow Ethan's pediatrician's guidance.",
+      "Keep logging favorites, reactions, and questions about nutrition, textures, or intake."
+    ],
+    "safetyNotes": [
+      "Re-check babyproofing for climbing, pulling, cruising, and opening cabinets.",
+      "Review choking hazards, safe foods, medicines, cleaning products, and water safety."
+    ],
+    "sourceReferences": [
+      {
+        "id": "cdc-act-early",
+        "sourceName": "CDC Learn the Signs. Act Early.",
+        "sourceURL": "https://www.cdc.gov/act-early/milestones/index.html",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used as the preferred basis for checkpoint-age milestone themes."
+      },
+      {
+        "id": "healthychildren",
+        "sourceName": "HealthyChildren.org by the American Academy of Pediatrics",
+        "sourceURL": "https://www.healthychildren.org/English/ages-stages/baby/Pages/default.aspx",
+        "retrievedOrReviewedDate": "2026-06-15T00:00:00Z",
+        "notes": "Used for parent-facing development, care, play, feeding, and safety framing."
+      }
+    ],
+    "isCheckpointAge": true,
+    "disclaimer": "Monthly guides are based on general developmental information and your logged data. They are not medical advice. Ask your pediatrician if you have concerns about Ethan's development.",
+    "createdAt": "2026-06-15T00:00:00Z",
+    "updatedAt": "2026-06-15T00:00:00Z"
+  }
+]

@@ -1,0 +1,741 @@
+import Foundation
+import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+
+    init(data: Data = Data()) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+private struct BackupEnvelope: Codable {
+    var version: Int
+    var exportedAt: Date
+    var profiles: [ProfileDTO]
+    var events: [EventDTO]
+    var predictionRecords: [PredictionRecordDTO]
+    var milestones: [MilestoneDTO]?
+    var appointments: [AppointmentDTO]?
+    var ageGuideReadStates: [AgeGuideReadStateDTO]?
+    var puppyStageGuideReadStates: [PuppyStageGuideReadStateDTO]?
+}
+
+private struct ProfileDTO: Codable {
+    var id: UUID
+    var profileTypeRawValue: String?
+    var name: String
+    var birthDate: Date
+    var sexRawValue: String?
+    var birthWeightKilograms: Double?
+    var birthLengthCentimeters: Double?
+    var birthHeadCircumferenceCentimeters: Double?
+    var notes: String
+    var createdAt: Date
+    var updatedAt: Date
+    var isArchived: Bool?
+    var displayColor: String?
+    var adoptionDate: Date?
+    var species: String?
+    var breed: String?
+    var coatColor: String?
+    var microchipNumber: String?
+    var vetName: String?
+    var vetClinic: String?
+    var vetPhone: String?
+    var emergencyVet: String?
+}
+
+private struct EventDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var profileTypeSnapshotRawValue: String?
+    var typeRawValue: String
+    var title: String?
+    var startDate: Date
+    var endDate: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    var caregiverName: String?
+    var notes: String?
+    var sleepKindRawValue: String?
+    var feedKindRawValue: String?
+    var amountOz: Double?
+    var foodDescription: String?
+    var nursingSideRawValue: String?
+    var activeNursingSideRawValue: String?
+    var timerStateRawValue: String?
+    var timerAccumulatedSeconds: Double?
+    var activeTimerSegmentStartDate: Date?
+    var leftDurationSeconds: Double?
+    var rightDurationSeconds: Double?
+    var diaperKindRawValue: String?
+    var peeAmountRawValue: String?
+    var pooAmountRawValue: String?
+    var pooColorRawValue: String?
+    var pooTextureRawValue: String?
+    var stoolColor: String?
+    var stoolTexture: String?
+    var bookTitle: String?
+    var medicineName: String?
+    var dose: Double?
+    var doseUnit: String?
+    var reason: String?
+    var activityTypeRawValue: String?
+    var heightFeet: Int?
+    var heightInches: Double?
+    var weightPounds: Int?
+    var weightOunces: Double?
+    var headCircumferenceInches: Double?
+    var growthSexRawValue: String?
+    var growthSourceRawValue: String?
+    var weightKilograms: Double?
+    var lengthCentimeters: Double?
+    var headCircumferenceCentimeters: Double?
+    var temperatureCelsius: Double?
+    var temperatureUnitRawValue: String?
+    var temperatureMethodRawValue: String?
+    var dogDetailsData: Data?
+}
+
+private struct PredictionRecordDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var generatedAt: Date
+    var basedOnLastSleepEventID: UUID?
+    var predictedStart: Date
+    var predictedWindowStart: Date
+    var predictedWindowEnd: Date
+    var predictionKindRawValue: String
+    var confidence: Double
+    var confidenceLabelRawValue: String
+    var explanationSnapshot: String
+    var factorsData: Data?
+    var napIndex: Int
+    var algorithmVersion: String
+    var actualSleepEventID: UUID?
+    var actualSleepStart: Date?
+    var errorMinutes: Double?
+    var wasInsidePredictedWindow: Bool?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct MilestoneDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var title: String
+    var date: Date
+    var approximateDate: Bool
+    var categoryRawValue: String
+    var notes: String?
+    var photoAttachmentIDs: [UUID]?
+    var createdAt: Date
+    var updatedAt: Date
+    var caregiverName: String?
+    var isFavorite: Bool
+    var sortOrder: Int?
+}
+
+private struct AppointmentDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var title: String
+    var appointmentTypeRawValue: String
+    var startDate: Date
+    var endDate: Date?
+    var locationName: String?
+    var address: String?
+    var doctorName: String?
+    var clinicName: String?
+    var phoneNumber: String?
+    var notes: String?
+    var questionsToAsk: String?
+    var visitSummary: String?
+    var followUpInstructions: String?
+    var medicationsDiscussed: String?
+    var vaccinesGiven: String?
+    var growthEntryID: UUID?
+    var temperatureEntryID: UUID?
+    var remindersEnabled: Bool
+    var reminderLeadTimeMinutes: [Int]
+    var lastScheduledAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    var isCompleted: Bool
+    var caregiverName: String?
+}
+
+private struct AgeGuideReadStateDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var guideID: String
+    var firstOpenedAt: Date?
+    var lastOpenedAt: Date?
+    var isDismissedFromToday: Bool
+    var notificationSentAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct PuppyStageGuideReadStateDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var guideID: String
+    var firstOpenedAt: Date?
+    var lastOpenedAt: Date?
+    var isDismissedFromToday: Bool
+    var notificationSentAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+enum DataExportImportService {
+    @MainActor
+    static func exportData(context: ModelContext) throws -> Data {
+        let profiles = try context.fetch(FetchDescriptor<BabyProfile>()).map {
+            ProfileDTO(
+                id: $0.id,
+                profileTypeRawValue: $0.profileTypeRawValue,
+                name: $0.name,
+                birthDate: $0.birthDate,
+                sexRawValue: $0.sexRawValue,
+                birthWeightKilograms: $0.birthWeightKilograms,
+                birthLengthCentimeters: $0.birthLengthCentimeters,
+                birthHeadCircumferenceCentimeters: $0.birthHeadCircumferenceCentimeters,
+                notes: $0.notes,
+                createdAt: $0.createdAt, updatedAt: $0.updatedAt,
+                isArchived: $0.isArchived,
+                displayColor: $0.displayColor,
+                adoptionDate: $0.adoptionDate,
+                species: $0.species,
+                breed: $0.breed,
+                coatColor: $0.coatColor,
+                microchipNumber: $0.microchipNumber,
+                vetName: $0.vetName,
+                vetClinic: $0.vetClinic,
+                vetPhone: $0.vetPhone,
+                emergencyVet: $0.emergencyVet
+            )
+        }
+        let events = try context.fetch(FetchDescriptor<BabyEvent>()).map {
+            EventDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                profileTypeSnapshotRawValue: $0.profileTypeSnapshotRawValue,
+                typeRawValue: $0.typeRawValue,
+                title: $0.title,
+                startDate: $0.startDate, endDate: $0.endDate, createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt, caregiverName: $0.caregiverName, notes: $0.notes,
+                sleepKindRawValue: $0.sleepKindRawValue, feedKindRawValue: $0.feedKindRawValue,
+                amountOz: $0.amountOz, foodDescription: $0.foodDescription,
+                nursingSideRawValue: $0.nursingSideRawValue,
+                activeNursingSideRawValue: $0.activeNursingSideRawValue,
+                timerStateRawValue: $0.timerStateRawValue,
+                timerAccumulatedSeconds: $0.timerAccumulatedSeconds,
+                activeTimerSegmentStartDate: $0.activeTimerSegmentStartDate,
+                leftDurationSeconds: $0.leftDurationSeconds,
+                rightDurationSeconds: $0.rightDurationSeconds,
+                diaperKindRawValue: $0.diaperKindRawValue,
+                peeAmountRawValue: $0.peeAmountRawValue,
+                pooAmountRawValue: $0.pooAmountRawValue,
+                pooColorRawValue: $0.pooColorRawValue,
+                pooTextureRawValue: $0.pooTextureRawValue,
+                stoolColor: $0.stoolColor,
+                stoolTexture: $0.stoolTexture, bookTitle: $0.bookTitle,
+                medicineName: $0.medicineName, dose: $0.dose, doseUnit: $0.doseUnit,
+                reason: $0.reason, activityTypeRawValue: $0.activityTypeRawValue,
+                heightFeet: $0.heightFeet, heightInches: $0.heightInches,
+                weightPounds: $0.weightPounds, weightOunces: $0.weightOunces,
+                headCircumferenceInches: $0.headCircumferenceInches,
+                growthSexRawValue: $0.growthSexRawValue,
+                growthSourceRawValue: $0.growthSourceRawValue,
+                weightKilograms: $0.weightKilograms,
+                lengthCentimeters: $0.lengthCentimeters,
+                headCircumferenceCentimeters: $0.headCircumferenceCentimeters,
+                temperatureCelsius: $0.temperatureCelsius,
+                temperatureUnitRawValue: $0.temperatureUnitRawValue,
+                temperatureMethodRawValue: $0.temperatureMethodRawValue,
+                dogDetailsData: $0.dogDetailsData
+            )
+        }
+        let records = try context.fetch(FetchDescriptor<SleepPredictionRecord>()).map {
+            PredictionRecordDTO(
+                id: $0.id, profileID: $0.profileID, generatedAt: $0.generatedAt,
+                basedOnLastSleepEventID: $0.basedOnLastSleepEventID,
+                predictedStart: $0.predictedStart, predictedWindowStart: $0.predictedWindowStart,
+                predictedWindowEnd: $0.predictedWindowEnd,
+                predictionKindRawValue: $0.predictionKindRawValue,
+                confidence: $0.confidence, confidenceLabelRawValue: $0.confidenceLabelRawValue,
+                explanationSnapshot: $0.explanationSnapshot, factorsData: $0.factorsData,
+                napIndex: $0.napIndex, algorithmVersion: $0.algorithmVersion,
+                actualSleepEventID: $0.actualSleepEventID, actualSleepStart: $0.actualSleepStart,
+                errorMinutes: $0.errorMinutes,
+                wasInsidePredictedWindow: $0.wasInsidePredictedWindow,
+                createdAt: $0.createdAt, updatedAt: $0.updatedAt
+            )
+        }
+        let milestones = try context.fetch(FetchDescriptor<MilestoneEntry>()).map {
+            MilestoneDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                title: $0.title,
+                date: $0.date,
+                approximateDate: $0.approximateDate,
+                categoryRawValue: $0.categoryRawValue,
+                notes: $0.notes,
+                photoAttachmentIDs: $0.photoAttachmentIDs,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                caregiverName: $0.caregiverName,
+                isFavorite: $0.isFavorite,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let appointments = try context.fetch(FetchDescriptor<DoctorAppointment>()).map {
+            AppointmentDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                title: $0.title,
+                appointmentTypeRawValue: $0.appointmentTypeRawValue,
+                startDate: $0.startDate,
+                endDate: $0.endDate,
+                locationName: $0.locationName,
+                address: $0.address,
+                doctorName: $0.doctorName,
+                clinicName: $0.clinicName,
+                phoneNumber: $0.phoneNumber,
+                notes: $0.notes,
+                questionsToAsk: $0.questionsToAsk,
+                visitSummary: $0.visitSummary,
+                followUpInstructions: $0.followUpInstructions,
+                medicationsDiscussed: $0.medicationsDiscussed,
+                vaccinesGiven: $0.vaccinesGiven,
+                growthEntryID: $0.growthEntryID,
+                temperatureEntryID: $0.temperatureEntryID,
+                remindersEnabled: $0.remindersEnabled,
+                reminderLeadTimeMinutes: $0.reminderLeadTimeMinutes,
+                lastScheduledAt: $0.lastScheduledAt,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                isCompleted: $0.isCompleted,
+                caregiverName: $0.caregiverName
+            )
+        }
+        let ageGuideReadStates = try context.fetch(FetchDescriptor<AgeGuideReadState>()).map {
+            AgeGuideReadStateDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                guideID: $0.guideID,
+                firstOpenedAt: $0.firstOpenedAt,
+                lastOpenedAt: $0.lastOpenedAt,
+                isDismissedFromToday: $0.isDismissedFromToday,
+                notificationSentAt: $0.notificationSentAt,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let puppyStageGuideReadStates = try context.fetch(FetchDescriptor<PuppyStageGuideReadState>()).map {
+            PuppyStageGuideReadStateDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                guideID: $0.guideID,
+                firstOpenedAt: $0.firstOpenedAt,
+                lastOpenedAt: $0.lastOpenedAt,
+                isDismissedFromToday: $0.isDismissedFromToday,
+                notificationSentAt: $0.notificationSentAt,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let envelope = BackupEnvelope(
+            version: 7,
+            exportedAt: Date(),
+            profiles: profiles,
+            events: events,
+            predictionRecords: records,
+            milestones: milestones,
+            appointments: appointments,
+            ageGuideReadStates: ageGuideReadStates,
+            puppyStageGuideReadStates: puppyStageGuideReadStates
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(envelope)
+    }
+
+    @MainActor
+    static func importData(_ data: Data, context: ModelContext) throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(BackupEnvelope.self, from: data)
+        guard (1...7).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
+        try deleteAll(context: context)
+
+        for value in envelope.profiles {
+            context.insert(BabyProfile(
+                id: value.id,
+                profileType: value.profileTypeRawValue.flatMap(CareProfileType.init(rawValue:)) ?? .child,
+                name: value.name, birthDate: value.birthDate,
+                sex: value.sexRawValue.flatMap(BabySex.init(rawValue:)) ?? .male,
+                birthWeightKilograms: value.birthWeightKilograms,
+                birthLengthCentimeters: value.birthLengthCentimeters,
+                birthHeadCircumferenceCentimeters: value.birthHeadCircumferenceCentimeters,
+                notes: value.notes, createdAt: value.createdAt, updatedAt: value.updatedAt,
+                isArchived: value.isArchived ?? false,
+                displayColor: value.displayColor,
+                adoptionDate: value.adoptionDate,
+                species: value.species,
+                breed: value.breed,
+                coatColor: value.coatColor,
+                microchipNumber: value.microchipNumber,
+                vetName: value.vetName,
+                vetClinic: value.vetClinic,
+                vetPhone: value.vetPhone,
+                emergencyVet: value.emergencyVet
+            ))
+        }
+        let fallbackProfileID = envelope.profiles.first?.id
+        for value in envelope.events {
+            let event = BabyEvent(
+                id: value.id,
+                profileID: value.profileID ?? fallbackProfileID,
+                type: EventType.normalized(rawValue: value.typeRawValue),
+                title: value.title,
+                startDate: value.startDate,
+                endDate: value.endDate,
+                caregiverName: value.caregiverName,
+                notes: value.notes
+            )
+            event.createdAt = value.createdAt
+            event.updatedAt = value.updatedAt
+            event.profileTypeSnapshotRawValue = value.profileTypeSnapshotRawValue
+            event.sleepKindRawValue = value.sleepKindRawValue
+            event.feedKindRawValue = value.feedKindRawValue
+            event.amountOz = value.amountOz
+            event.foodDescription = value.foodDescription
+            event.nursingSideRawValue = value.nursingSideRawValue
+            event.activeNursingSideRawValue = value.activeNursingSideRawValue
+            event.timerStateRawValue = value.timerStateRawValue
+            event.timerAccumulatedSeconds = value.timerAccumulatedSeconds
+            event.activeTimerSegmentStartDate = value.activeTimerSegmentStartDate
+            event.leftDurationSeconds = value.leftDurationSeconds
+            event.rightDurationSeconds = value.rightDurationSeconds
+            event.diaperKindRawValue = value.diaperKindRawValue
+            event.peeAmountRawValue = value.peeAmountRawValue
+            event.pooAmountRawValue = value.pooAmountRawValue
+            event.pooColorRawValue = value.pooColorRawValue
+            event.pooTextureRawValue = value.pooTextureRawValue
+            event.stoolColor = value.stoolColor
+            event.stoolTexture = value.stoolTexture
+            event.bookTitle = value.bookTitle
+            event.medicineName = value.medicineName
+            event.dose = value.dose
+            event.doseUnit = value.doseUnit
+            event.reason = value.reason
+            event.activityTypeRawValue = value.activityTypeRawValue
+                ?? ActivityType.legacyType(rawValue: value.typeRawValue)?.rawValue
+            event.heightFeet = value.heightFeet
+            event.heightInches = value.heightInches
+            event.weightPounds = value.weightPounds
+            event.weightOunces = value.weightOunces
+            event.headCircumferenceInches = value.headCircumferenceInches
+            event.growthSexRawValue = value.growthSexRawValue
+            event.growthSourceRawValue = value.growthSourceRawValue
+            event.weightKilograms = value.weightKilograms
+                ?? ((value.weightPounds != nil || value.weightOunces != nil)
+                    ? GrowthUnitConversion.poundsAndOuncesToKilograms(
+                        pounds: value.weightPounds ?? 0,
+                        ounces: value.weightOunces ?? 0
+                    )
+                    : nil)
+            event.lengthCentimeters = value.lengthCentimeters
+                ?? ((value.heightFeet != nil || value.heightInches != nil)
+                    ? GrowthUnitConversion.feetAndInchesToCentimeters(
+                        feet: value.heightFeet ?? 0,
+                        inches: value.heightInches ?? 0
+                    )
+                    : nil)
+            event.headCircumferenceCentimeters = value.headCircumferenceCentimeters
+                ?? value.headCircumferenceInches.map(GrowthUnitConversion.inchesToCentimeters)
+            event.temperatureCelsius = value.temperatureCelsius
+            event.temperatureUnitRawValue = value.temperatureUnitRawValue
+            event.temperatureMethodRawValue = value.temperatureMethodRawValue
+            event.dogDetailsData = value.dogDetailsData
+            context.insert(event)
+        }
+        for value in envelope.predictionRecords {
+            let placeholder = SleepPrediction(
+                predictedStart: value.predictedStart,
+                predictedWindowStart: value.predictedWindowStart,
+                predictedWindowEnd: value.predictedWindowEnd,
+                predictionKind: PredictionKind(rawValue: value.predictionKindRawValue) ?? .nap,
+                confidence: value.confidence,
+                confidenceLabel: ConfidenceLabel(rawValue: value.confidenceLabelRawValue) ?? .low,
+                explanation: value.explanationSnapshot.split(separator: "\n").map(String.init),
+                contributingFactors: [],
+                napIndex: value.napIndex
+            )
+            let record = SleepPredictionRecord(
+                prediction: placeholder,
+                basedOnLastSleepEventID: value.basedOnLastSleepEventID
+            )
+            record.id = value.id
+            record.profileID = value.profileID ?? fallbackProfileID
+            record.generatedAt = value.generatedAt
+            record.explanationSnapshot = value.explanationSnapshot
+            record.factorsData = value.factorsData
+            record.algorithmVersion = value.algorithmVersion
+            record.actualSleepEventID = value.actualSleepEventID
+            record.actualSleepStart = value.actualSleepStart
+            record.errorMinutes = value.errorMinutes
+            record.wasInsidePredictedWindow = value.wasInsidePredictedWindow
+            record.createdAt = value.createdAt
+            record.updatedAt = value.updatedAt
+            context.insert(record)
+        }
+        for value in envelope.milestones ?? [] {
+            context.insert(MilestoneEntry(
+                id: value.id,
+                profileID: value.profileID ?? fallbackProfileID,
+                title: value.title,
+                date: value.date,
+                approximateDate: value.approximateDate,
+                category: MilestoneCategory(rawValue: value.categoryRawValue) ?? .custom,
+                notes: value.notes,
+                photoAttachmentIDs: value.photoAttachmentIDs ?? [],
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                caregiverName: value.caregiverName,
+                isFavorite: value.isFavorite,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.appointments ?? [] {
+            let appointment = DoctorAppointment(
+                id: value.id,
+                profileID: value.profileID ?? fallbackProfileID,
+                title: value.title,
+                appointmentType: AppointmentType(rawValue: value.appointmentTypeRawValue) ?? .other,
+                startDate: value.startDate,
+                endDate: value.endDate,
+                locationName: value.locationName,
+                address: value.address,
+                doctorName: value.doctorName,
+                clinicName: value.clinicName,
+                phoneNumber: value.phoneNumber,
+                notes: value.notes,
+                questionsToAsk: value.questionsToAsk,
+                visitSummary: value.visitSummary,
+                followUpInstructions: value.followUpInstructions,
+                medicationsDiscussed: value.medicationsDiscussed,
+                vaccinesGiven: value.vaccinesGiven,
+                growthEntryID: value.growthEntryID,
+                temperatureEntryID: value.temperatureEntryID,
+                remindersEnabled: value.remindersEnabled,
+                reminderLeadTimeMinutes: value.reminderLeadTimeMinutes,
+                lastScheduledAt: value.lastScheduledAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                isCompleted: value.isCompleted,
+                caregiverName: value.caregiverName
+            )
+            context.insert(appointment)
+        }
+        for value in envelope.ageGuideReadStates ?? [] {
+            context.insert(AgeGuideReadState(
+                id: value.id,
+                profileID: value.profileID ?? fallbackProfileID,
+                guideID: value.guideID,
+                firstOpenedAt: value.firstOpenedAt,
+                lastOpenedAt: value.lastOpenedAt,
+                isDismissedFromToday: value.isDismissedFromToday,
+                notificationSentAt: value.notificationSentAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.puppyStageGuideReadStates ?? [] {
+            context.insert(PuppyStageGuideReadState(
+                id: value.id,
+                profileID: value.profileID ?? fallbackProfileID,
+                guideID: value.guideID,
+                firstOpenedAt: value.firstOpenedAt,
+                lastOpenedAt: value.lastOpenedAt,
+                isDismissedFromToday: value.isDismissedFromToday,
+                notificationSentAt: value.notificationSentAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        try context.save()
+        _ = try LegacyHuckleberryGrowthMigration.migrate(in: context)
+        ProfileMigrationService.ensureProfilesAndAssignments(context: context)
+    }
+
+    @MainActor
+    static func deleteAll(context: ModelContext) throws {
+        try context.delete(model: PredictionFactor.self)
+        try context.delete(model: SleepPredictionRecord.self)
+        try context.delete(model: BabyEvent.self)
+        try context.delete(model: DoctorAppointment.self)
+        try context.delete(model: MilestoneEntry.self)
+        try context.delete(model: AgeGuideReadState.self)
+        try context.delete(model: PuppyStageGuideReadState.self)
+        try context.delete(model: BabyProfile.self)
+        try context.save()
+    }
+}
+
+enum LegacyHuckleberryGrowthMigration {
+    struct ParsedMeasurement: Equatable {
+        var weightPounds: Int?
+        var weightOunces: Double?
+        var heightFeet: Int?
+        var heightInches: Double?
+        var headCircumferenceInches: Double?
+        var notes: String?
+    }
+
+    @MainActor
+    @discardableResult
+    static func migrate(in context: ModelContext) throws -> Int {
+        let descriptor = FetchDescriptor<BabyEvent>(
+            predicate: #Predicate {
+                $0.typeRawValue == "custom" && $0.title == "Growth"
+            }
+        )
+        let legacyEvents = try context.fetch(descriptor)
+        guard !legacyEvents.isEmpty else { return 0 }
+
+        let profile = try context.fetch(FetchDescriptor<BabyProfile>()).first
+        var migratedCount = 0
+
+        for event in legacyEvents {
+            guard let measurement = parse(notes: event.notes) else { continue }
+
+            event.type = .growth
+            event.title = nil
+            event.notes = measurement.notes
+            event.weightPounds = measurement.weightPounds
+            event.weightOunces = measurement.weightOunces
+            event.heightFeet = measurement.heightFeet
+            event.heightInches = measurement.heightInches
+            event.headCircumferenceInches = measurement.headCircumferenceInches
+            event.weightKilograms = canonicalWeight(for: measurement)
+            event.lengthCentimeters = canonicalLength(for: measurement)
+            event.headCircumferenceCentimeters = measurement.headCircumferenceInches.map(
+                GrowthUnitConversion.inchesToCentimeters
+            )
+            event.growthSex = profile?.sex ?? .unknown
+            event.growthSource = .other
+            migratedCount += 1
+
+            guard let profile,
+                  Calendar.current.isDate(event.startDate, inSameDayAs: profile.birthDate) else {
+                continue
+            }
+            profile.birthWeightKilograms =
+                profile.birthWeightKilograms ?? event.weightKilograms
+            profile.birthLengthCentimeters =
+                profile.birthLengthCentimeters ?? event.lengthCentimeters
+            profile.birthHeadCircumferenceCentimeters =
+                profile.birthHeadCircumferenceCentimeters
+                ?? event.headCircumferenceCentimeters
+        }
+
+        if migratedCount > 0 {
+            try context.save()
+        }
+        return migratedCount
+    }
+
+    static func parse(notes: String?) -> ParsedMeasurement? {
+        guard let notes else { return nil }
+        var result = ParsedMeasurement()
+        var remainingLines = [String]()
+
+        for rawLine in notes.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value = value(after: "Weight:", in: line) {
+                let parsed = parseCompound(value, suffix: "lbs.oz")
+                result.weightPounds = parsed?.major
+                result.weightOunces = parsed?.minor
+            } else if let value = value(after: "Length:", in: line) {
+                let parsed = parseCompound(value, suffix: "ft.in")
+                result.heightFeet = parsed?.major
+                result.heightInches = parsed?.minor
+            } else if let value = value(after: "Head:", in: line) {
+                result.headCircumferenceInches = parseInches(value)
+            } else if !line.isEmpty {
+                remainingLines.append(line)
+            }
+        }
+
+        guard result.weightPounds != nil
+                || result.heightFeet != nil
+                || result.headCircumferenceInches != nil else {
+            return nil
+        }
+        result.notes = remainingLines.isEmpty ? nil : remainingLines.joined(separator: "\n")
+        return result
+    }
+
+    private static func value(after prefix: String, in line: String) -> String? {
+        guard line.lowercased().hasPrefix(prefix.lowercased()) else { return nil }
+        return String(line.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func parseCompound(
+        _ value: String,
+        suffix: String
+    ) -> (major: Int, minor: Double)? {
+        guard value.lowercased().hasSuffix(suffix.lowercased()) else { return nil }
+        let number = String(value.dropLast(suffix.count))
+        let parts = number.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let major = Int(parts[0]) else { return nil }
+        guard parts.count == 2, !parts[1].isEmpty else { return (major, 0) }
+
+        let encodedMinor = String(parts[1])
+        guard let digits = Double(encodedMinor) else { return nil }
+        let minor = encodedMinor.count == 1 ? digits : digits / 10
+        return (major, minor)
+    }
+
+    private static func parseInches(_ value: String) -> Double? {
+        guard value.lowercased().hasSuffix("in") else { return nil }
+        return Double(value.dropLast(2))
+    }
+
+    private static func canonicalWeight(for value: ParsedMeasurement) -> Double? {
+        guard value.weightPounds != nil || value.weightOunces != nil else { return nil }
+        return GrowthUnitConversion.poundsAndOuncesToKilograms(
+            pounds: value.weightPounds ?? 0,
+            ounces: value.weightOunces ?? 0
+        )
+    }
+
+    private static func canonicalLength(for value: ParsedMeasurement) -> Double? {
+        guard value.heightFeet != nil || value.heightInches != nil else { return nil }
+        return GrowthUnitConversion.feetAndInchesToCentimeters(
+            feet: value.heightFeet ?? 0,
+            inches: value.heightInches ?? 0
+        )
+    }
+}
