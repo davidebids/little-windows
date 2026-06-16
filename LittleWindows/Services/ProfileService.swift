@@ -126,7 +126,7 @@ final class ProfileService: ObservableObject {
         PersistenceService.recordLocalSave()
     }
 
-    func archiveChildProfile(
+    func archiveProfile(
         _ profile: CareProfile,
         profiles: [CareProfile],
         context: ModelContext
@@ -144,6 +144,45 @@ final class ProfileService: ObservableObject {
         PersistenceService.recordLocalSave()
     }
 
+    func archiveChildProfile(
+        _ profile: CareProfile,
+        profiles: [CareProfile],
+        context: ModelContext
+    ) {
+        archiveProfile(profile, profiles: profiles, context: context)
+    }
+
+    func restoreProfile(_ profile: CareProfile, context: ModelContext) {
+        profile.isArchived = false
+        profile.updatedAt = Date()
+        switchProfile(profile)
+        try? context.save()
+        PersistenceService.recordLocalSave()
+    }
+
+    func deleteProfile(
+        _ profile: CareProfile,
+        profiles: [CareProfile],
+        context: ModelContext
+    ) {
+        let profileID = profile.id
+        deleteProfileScopedRecords(profileID: profileID, context: context)
+        context.delete(profile)
+
+        let remainingProfiles = profiles.filter { $0.id != profileID }
+        if selectedProfileID == profileID {
+            if let fallback = allActiveProfiles(in: remainingProfiles).first {
+                switchProfile(fallback)
+            } else {
+                selectedProfileID = nil
+                UserDefaults.standard.removeObject(forKey: selectedProfileKey)
+            }
+        }
+
+        try? context.save()
+        PersistenceService.recordLocalSave()
+    }
+
     func switchProfile(_ profile: CareProfile) {
         selectedProfileID = profile.id
         UserDefaults.standard.set(profile.id.uuidString, forKey: selectedProfileKey)
@@ -155,6 +194,27 @@ final class ProfileService: ObservableObject {
             return
         }
         switchProfile(profile)
+    }
+
+    private func deleteProfileScopedRecords(profileID: UUID, context: ModelContext) {
+        ((try? context.fetch(FetchDescriptor<BabyEvent>())) ?? [])
+            .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<SleepPredictionRecord>())) ?? [])
+            .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<MilestoneEntry>())) ?? [])
+            .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? [])
+            .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? [])
+            .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? [])
+            .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
     }
 }
 

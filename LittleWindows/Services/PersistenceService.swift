@@ -25,6 +25,12 @@ enum PersistenceService {
     }
 
     static func makeModelContainer() -> ModelContainer {
+        if shouldUseLocalStoreForValidation {
+            return makeLocalModelContainer(
+                startupMessage: "CloudKit-backed store skipped for local validation."
+            )
+        }
+
         do {
             return try ModelContainer(
                 for: schema,
@@ -37,22 +43,39 @@ enum PersistenceService {
                 ]
             )
         } catch {
-            startupErrorMessage = "CloudKit-backed store could not open: \(error.localizedDescription)"
-            isUsingCloudKitStore = false
-            do {
-                return try ModelContainer(
-                    for: schema,
-                    configurations: [
-                        ModelConfiguration(
-                            storeName,
-                            schema: schema,
-                            cloudKitDatabase: .none
-                        )
-                    ]
-                )
-            } catch {
-                fatalError("Unable to create the Little Windows data store: \(error)")
-            }
+            return makeLocalModelContainer(
+                startupMessage: "CloudKit-backed store could not open: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private static var shouldUseLocalStoreForValidation: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["LW_CLOUDKIT_SYNC_SMOKE"] != nil {
+            return false
+        }
+        if environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil {
+            return true
+        }
+        return environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
+
+    private static func makeLocalModelContainer(startupMessage: String) -> ModelContainer {
+        startupErrorMessage = startupMessage
+        isUsingCloudKitStore = false
+        do {
+            return try ModelContainer(
+                for: schema,
+                configurations: [
+                    ModelConfiguration(
+                        storeName,
+                        schema: schema,
+                        cloudKitDatabase: .none
+                    )
+                ]
+            )
+        } catch {
+            fatalError("Unable to create the Little Windows data store: \(error)")
         }
     }
 
