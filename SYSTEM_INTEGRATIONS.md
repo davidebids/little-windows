@@ -24,6 +24,12 @@ The source and entitlements currently use this App Group:
 group.com.debidia.LittleWindows
 ```
 
+The app target also uses this CloudKit container for SwiftData private database sync:
+
+```text
+iCloud.com.debidia.LittleWindows
+```
+
 For both the `LittleWindows` and `LittleWindowsWidgets` targets:
 
 1. Open **Signing & Capabilities**.
@@ -31,6 +37,14 @@ For both the `LittleWindows` and `LittleWindowsWidgets` targets:
 3. Add the **App Groups** capability.
 4. Enable `group.com.debidia.LittleWindows`.
 5. Let Xcode regenerate both provisioning profiles.
+
+For the `LittleWindows` app target only:
+
+1. Add the **iCloud** capability.
+2. Enable **CloudKit**.
+3. Select or create `iCloud.com.debidia.LittleWindows`.
+4. Keep `LittleWindows/LittleWindows.entitlements` connected to the target.
+5. Use CloudKit Dashboard to inspect the development schema and deploy it to production before TestFlight/App Store use.
 
 If Xcode reports that the App Group is unavailable for a Personal Team, a paid Apple Developer team is required for reliable shared widget/action state. The main app still runs without the shared group, but widgets cannot reliably read timer snapshots and system buttons should be treated as open-app fallbacks.
 

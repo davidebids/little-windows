@@ -74,6 +74,7 @@ final class ProfileService: ObservableObject {
         context.insert(profile)
         switchProfile(profile)
         try? context.save()
+        PersistenceService.recordLocalSave()
         return profile
     }
 
@@ -114,6 +115,7 @@ final class ProfileService: ObservableObject {
         context.insert(profile)
         switchProfile(profile)
         try? context.save()
+        PersistenceService.recordLocalSave()
         return profile
     }
 
@@ -137,6 +139,7 @@ final class ProfileService: ObservableObject {
             }
         }
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     func switchProfile(_ profile: CareProfile) {
@@ -177,6 +180,7 @@ enum ProfileMigrationService {
         let profilesForSelection = activeProfiles.isEmpty ? existingProfiles + [ethan] : existingProfiles
         _ = ProfileService.shared.ensureSelection(in: profilesForSelection)
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     static func assignMissingProfileIDs(

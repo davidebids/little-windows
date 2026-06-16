@@ -3,29 +3,7 @@ import SwiftUI
 
 @main
 struct LittleWindowsApp: App {
-    private static let sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
-            DoctorAppointment.self,
-            MilestoneEntry.self,
-            AgeGuideReadState.self,
-            PuppyStageGuideReadState.self,
-            SleepPredictionRecord.self,
-            PredictionFactor.self
-        ])
-        let configuration = ModelConfiguration(
-            "LittleWindows",
-            schema: schema,
-            cloudKitDatabase: .none
-        )
-
-        do {
-            return try ModelContainer(for: schema, configurations: [configuration])
-        } catch {
-            fatalError("Unable to create the Little Windows data store: \(error)")
-        }
-    }()
+    private static let sharedModelContainer = PersistenceService.makeModelContainer()
     private let modelContainer = Self.sharedModelContainer
 
     init() {
@@ -51,6 +29,7 @@ struct LittleWindowsApp: App {
                     ProfileMigrationService.ensureProfilesAndAssignments(
                         context: modelContainer.mainContext
                     )
+                    CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)
                     await restoreSystemIntegrations()
                     DeepLinkRouter.shared.isDataReady = true
                 }
@@ -111,6 +90,7 @@ struct LittleWindowsApp: App {
                     profileID: profile?.id
                 ))
                 try? context.save()
+                PersistenceService.recordLocalSave()
             }
         }
         WidgetSnapshotService.refresh(profile: profile, events: events, prediction: prediction)

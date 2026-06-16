@@ -19,7 +19,7 @@ struct TodayView: View {
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
 
-    @AppStorage("caregiverOne") private var caregiverOne = "David"
+    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
     @AppStorage("bedtimePredictionEnabled") private var bedtimePredictionEnabled = true
@@ -34,9 +34,7 @@ struct TodayView: View {
     @State private var duplicateTimerMessage: String?
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
-    @State private var showingActivityChooser = false
     @State private var showingSleepChooser = false
-    @State private var showingNursingChooser = false
     @State private var showingAppointments = false
     @State private var appointmentToOpen: DoctorAppointment?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
@@ -324,37 +322,6 @@ struct TodayView: View {
                 }
             )
         )
-        .confirmationDialog(
-            "Start an activity",
-            isPresented: $showingActivityChooser,
-            titleVisibility: .visible
-        ) {
-            ForEach(ActivityType.allCases) { activity in
-                if activity == .custom {
-                    Button(activity.displayName) {
-                        editorRoute = EventEditorRoute(type: .activity)
-                    }
-                } else {
-                    Button(activity.displayName) {
-                        startTimer(.activity, activityType: activity)
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Timed activities appear on the Lock Screen and Dynamic Island while they run.")
-        }
-        .confirmationDialog(
-            "Start nursing",
-            isPresented: $showingNursingChooser,
-            titleVisibility: .visible
-        ) {
-            Button("Left side") { startNursing(.left) }
-            Button("Right side") { startNursing(.right) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Start with the side Ethan is nursing on now. You can switch sides from the active timer.")
-        }
         .alert(
             "Timer already running",
             isPresented: Binding(
@@ -508,8 +475,12 @@ struct TodayView: View {
     private var childQuickActionsSection: some View {
         Section {
             VStack(spacing: 14) {
-                Button {
-                    showingSleepChooser = true
+                Menu {
+                    ForEach(SleepKind.allCases) { kind in
+                        Button(kind.displayName) {
+                            startTimer(.sleep, sleepKind: kind)
+                        }
+                    }
                 } label: {
                     HStack(spacing: 13) {
                         Image(systemName: "moon.stars.fill")
@@ -551,14 +522,29 @@ struct TodayView: View {
                     QuickActionButton(title: "Feed", icon: "waterbottle.fill", color: .orange) {
                         editorRoute = EventEditorRoute(type: .feed)
                     }
-                    QuickActionButton(title: "Nursing", icon: "figure.and.child.holdinghands", color: .pink) {
-                        showingNursingChooser = true
+                    QuickActionMenuButton(
+                        title: "Nursing",
+                        icon: "figure.and.child.holdinghands",
+                        color: .pink
+                    ) {
+                        Button("Left side") { startNursing(.left) }
+                        Button("Right side") { startNursing(.right) }
                     }
                     QuickActionButton(title: "Diaper", icon: "drop.fill", color: .teal) {
                         editorRoute = EventEditorRoute(type: .diaper)
                     }
-                    QuickActionButton(title: "Activity", icon: "figure.play", color: .green) {
-                        showingActivityChooser = true
+                    QuickActionMenuButton(title: "Activity", icon: "figure.play", color: .green) {
+                        ForEach(ActivityType.allCases) { activity in
+                            if activity == .custom {
+                                Button(activity.displayName) {
+                                    editorRoute = EventEditorRoute(type: .activity)
+                                }
+                            } else {
+                                Button(activity.displayName) {
+                                    startTimer(.activity, activityType: activity)
+                                }
+                            }
+                        }
                     }
                     QuickActionButton(title: "Medicine", icon: "cross.case.fill", color: .red) {
                         editorRoute = EventEditorRoute(type: .medicine)
@@ -1129,22 +1115,48 @@ private struct QuickActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(color)
-                    .frame(width: 42, height: 42)
-                    .background(color.opacity(0.12), in: Circle())
-                Text(title)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+            QuickActionButtonLabel(title: title, icon: icon, color: color)
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct QuickActionMenuButton<MenuContent: View>: View {
+    var title: String
+    var icon: String
+    var color: Color
+    @ViewBuilder var menuContent: () -> MenuContent
+
+    var body: some View {
+        Menu {
+            menuContent()
+        } label: {
+            QuickActionButtonLabel(title: title, icon: icon, color: color)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct QuickActionButtonLabel: View {
+    var title: String
+    var icon: String
+    var color: Color
+
+    var body: some View {
+        VStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(color)
+                .frame(width: 42, height: 42)
+                .background(color.opacity(0.12), in: Circle())
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
     }
 }
 

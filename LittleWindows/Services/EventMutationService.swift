@@ -90,6 +90,7 @@ enum EventMutationService {
             )
             : currentPrediction(in: records)
         try? context.save()
+        PersistenceService.recordLocalSave()
         Task { @MainActor in
             await refreshSystemIntegrations(
                 profile: profile,
@@ -129,6 +130,7 @@ enum EventMutationService {
             )
             : currentPrediction(in: records)
         try? context.save()
+        PersistenceService.recordLocalSave()
         if waitForSystemIntegrations {
             await refreshSystemIntegrations(
                 profile: profile,
@@ -169,6 +171,7 @@ enum EventMutationService {
             settings: settings
         )
         try? context.save()
+        PersistenceService.recordLocalSave()
         Task { @MainActor in
             await refreshSystemIntegrations(
                 profile: profile,

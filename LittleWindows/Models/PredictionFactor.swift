@@ -9,6 +9,8 @@ final class PredictionFactor {
     var impactMinutes: Double = 0
     var confidenceImpact: Double = 0
     var explanation: String = ""
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
 
     init(
         id: UUID = UUID(),
@@ -16,7 +18,9 @@ final class PredictionFactor {
         valueDescription: String,
         impactMinutes: Double,
         confidenceImpact: Double,
-        explanation: String
+        explanation: String,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
     ) {
         self.id = id
         self.name = name
@@ -24,6 +28,8 @@ final class PredictionFactor {
         self.impactMinutes = impactMinutes
         self.confidenceImpact = confidenceImpact
         self.explanation = explanation
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -35,4 +41,3 @@ struct PredictionFactorValue: Codable, Hashable, Identifiable {
     var confidenceImpact: Double
     var explanation: String
 }
-

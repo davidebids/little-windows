@@ -1438,7 +1438,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let event = try XCTUnwrap(EventTimerService.start(
             type: .nursing,
             nursingSide: .left,
-            caregiverName: "David",
+            caregiverName: "Caregiver 1",
             events: [],
             context: container.mainContext,
             at: now.addingTimeInterval(-300)
@@ -1702,7 +1702,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let event = try XCTUnwrap(EventTimerService.start(
             type: .sleep,
             sleepKind: .nap,
-            caregiverName: "David",
+            caregiverName: "Caregiver 1",
             events: [],
             context: container.mainContext,
             at: start
@@ -1751,7 +1751,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let event = try XCTUnwrap(EventTimerService.start(
             type: .activity,
             activityType: .tummyTime,
-            caregiverName: "David",
+            caregiverName: "Caregiver 1",
             events: [],
             context: container.mainContext,
             at: start
@@ -2243,7 +2243,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             category: .social,
             notes: "A tiny smile.",
             photoAttachmentIDs: [photoID],
-            caregiverName: "David",
+            caregiverName: "Caregiver 1",
             isFavorite: true,
             sortOrder: 2
         ))
@@ -2260,7 +2260,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(imported.approximateDate)
         XCTAssertTrue(imported.isFavorite)
         XCTAssertEqual(imported.notes, "A tiny smile.")
-        XCTAssertEqual(imported.caregiverName, "David")
+        XCTAssertEqual(imported.caregiverName, "Caregiver 1")
         XCTAssertEqual(imported.photoAttachmentIDs, [photoID])
         XCTAssertEqual(imported.sortOrder, 2)
     }
@@ -2301,7 +2301,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             ],
             lastScheduledAt: startDate.addingTimeInterval(-2 * 24 * 60 * 60),
             isCompleted: true,
-            caregiverName: "Rachel"
+            caregiverName: "Caregiver 2"
         ))
         try context.save()
 
@@ -2331,7 +2331,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(imported.reminderLeadTimes, [.oneDay, .oneHour, .atTime])
         XCTAssertTrue(imported.remindersEnabled)
         XCTAssertTrue(imported.isCompleted)
-        XCTAssertEqual(imported.caregiverName, "Rachel")
+        XCTAssertEqual(imported.caregiverName, "Caregiver 2")
     }
 
     @MainActor

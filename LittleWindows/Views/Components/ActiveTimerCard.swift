@@ -89,8 +89,6 @@ struct ActiveTimerEditorView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedStart: Date
-    @State private var confirmingReset = false
-    @State private var confirmingDiscard = false
 
     init(
         event: BabyEvent,
@@ -192,8 +190,11 @@ struct ActiveTimerEditorView: View {
                         }
                         .buttonStyle(TimerFilledButtonStyle())
 
-                        Button {
-                            confirmingReset = true
+                        Menu {
+                            Button("Reset Timer", role: .destructive) {
+                                reset()
+                                selectedStart = event.startDate
+                            }
                         } label: {
                             Label(
                                 "Reset",
@@ -289,8 +290,11 @@ struct ActiveTimerEditorView: View {
                     .buttonStyle(TimerFilledButtonStyle(height: 58))
                     .disabled(event.timerElapsed() < 1)
 
-                    Button {
-                        confirmingDiscard = true
+                    Menu {
+                        Button("Discard Timer", role: .destructive) {
+                            discard()
+                            dismiss()
+                        }
                     } label: {
                         Label("Discard Timer", systemImage: "trash")
                     }
@@ -308,32 +312,6 @@ struct ActiveTimerEditorView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
             }
-        }
-        .confirmationDialog(
-            "Reset this timer?",
-            isPresented: $confirmingReset,
-            titleVisibility: .visible
-        ) {
-            Button("Reset Timer", role: .destructive) {
-                reset()
-                selectedStart = event.startDate
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The measured duration and nursing side totals will return to zero.")
-        }
-        .confirmationDialog(
-            "Discard this timer?",
-            isPresented: $confirmingDiscard,
-            titleVisibility: .visible
-        ) {
-            Button("Discard Timer", role: .destructive) {
-                discard()
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This draft will be deleted without adding an event to history.")
         }
         .onChange(of: event.startDate) { _, newValue in
             if abs(selectedStart.timeIntervalSince(newValue)) > 0.5 {

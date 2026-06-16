@@ -1,6 +1,6 @@
 # Little Windows
 
-Little Windows is a local-first SwiftUI care tracker for children and dogs. It targets iOS 17+, stores care history with SwiftData, and keeps predictions, insights, reminders, widgets, Live Activities, and night-light settings on device unless CloudKit is enabled in a signed build.
+Little Windows is a local-first SwiftUI care tracker for children and dogs. It targets iOS 17+, stores care history with SwiftData, and uses a CloudKit private database for signed iCloud builds so user-created records can sync across devices signed into the same Apple Account.
 
 ## Run
 
@@ -74,15 +74,33 @@ Breast feeds containing time on both sides are split into sequential Left and Ri
 
 ## Privacy and sync
 
-Version 1 deliberately uses a local SwiftData configuration so it runs without signing, CloudKit, accounts, passwords, or a custom backend. The Family Sync screen reports that shared sync is not enabled.
+Little Windows uses Apple-native iCloud only. The app target has CloudKit entitlements and `PersistenceService` creates the SwiftData `ModelContainer` with a private CloudKit database using:
 
-To enable CloudKit in a signed app:
+```text
+iCloud.com.debidia.LittleWindows
+```
 
-1. Add the iCloud capability to the app target and enable CloudKit.
-2. Select a production iCloud container owned by your Apple Developer account.
-3. Change the `ModelConfiguration` in `LittleWindowsApp.swift` from `.none` to the selected CloudKit database.
-4. Test schema deployment and migrations on multiple devices.
-5. Add `CKShare` invitation creation and acceptance to `SyncService`.
+Change `PersistenceService.iCloudContainerIdentifier` and the app entitlement if the Xcode container differs for your Apple Developer team. Keep the App Group entitlement enabled for widgets and Live Activities.
+
+Private iCloud Sync keeps Little Windows data available on devices signed into the same Apple Account. It does not share data between different Apple Accounts. The Family Sync screen is intentionally honest: true multi-caregiver sharing requires a shared CloudKit record zone, CKShare invitation creation, acceptance handling, and read/write participant testing before it can be marked enabled.
+
+Migration notes:
+
+1. Export a JSON backup from Settings > Data before changing CloudKit containers or resetting development data.
+2. On first launch of the CloudKit-backed build, `CloudMigrationService` marks local-to-CloudKit migration and assigns old profile-less records to the existing Ethan profile.
+3. Settings > iCloud Sync shows account status, container identifier, migration state, local save time, and record counts.
+4. Settings > Family Sync distinguishes private iCloud sync from shared family sync and does not claim multi-caregiver sharing works yet.
+5. Use CloudKit Dashboard to verify private database record types in development, then deploy the schema to production before TestFlight/App Store distribution.
+
+Private iCloud sync testing:
+
+1. Install the signed app on device A signed into one Apple Account.
+2. Create or edit profiles, events, growth entries, milestones, appointments, guide states, and predictions.
+3. Install the signed app on device B signed into the same Apple Account.
+4. Confirm records appear and edits sync both ways.
+5. Test airplane mode by creating records offline, reconnecting, and confirming they sync later.
+
+Family sharing testing should only be run after CKShare support is implemented: one caregiver creates the family share, another caregiver accepts the invitation on a different Apple Account, both users verify read/write access, and each device schedules notifications locally from the synced data.
 
 ## Validation
 
@@ -90,7 +108,8 @@ Useful local checks:
 
 ```sh
 xcodebuild -list -project LittleWindows.xcodeproj
-xcodebuild test -project LittleWindows.xcodeproj -scheme LittleWindows -destination 'platform=iOS Simulator,name=iPhone 15'
+xcrun simctl list devices available
+xcodebuild test -project LittleWindows.xcodeproj -scheme LittleWindows -destination 'platform=iOS Simulator,name=<available simulator name>,OS=<available runtime version>'
 ```
 
 Simulator, Live Activity, Dynamic Island, App Group, notification, and Control Center behavior should also be verified on a signed physical device.

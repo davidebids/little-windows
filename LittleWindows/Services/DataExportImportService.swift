@@ -584,6 +584,7 @@ enum DataExportImportService {
             ))
         }
         try context.save()
+        PersistenceService.recordLocalSave()
         _ = try LegacyHuckleberryGrowthMigration.migrate(in: context)
         ProfileMigrationService.ensureProfilesAndAssignments(context: context)
     }
@@ -599,6 +600,7 @@ enum DataExportImportService {
         try context.delete(model: PuppyStageGuideReadState.self)
         try context.delete(model: BabyProfile.self)
         try context.save()
+        PersistenceService.recordLocalSave()
     }
 }
 
@@ -661,6 +663,7 @@ enum LegacyHuckleberryGrowthMigration {
 
         if migratedCount > 0 {
             try context.save()
+            PersistenceService.recordLocalSave()
         }
         return migratedCount
     }

@@ -1028,7 +1028,7 @@ struct MilestoneEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @AppStorage("caregiverOne") private var caregiverName = "David"
+    @AppStorage("caregiverOne") private var caregiverName = "Caregiver 1"
     @StateObject private var profileService = ProfileService.shared
 
     let milestone: MilestoneEntry?

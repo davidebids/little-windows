@@ -96,6 +96,7 @@ struct AgeGuideService {
         state.lastOpenedAt = now
         state.updatedAt = now
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     @MainActor
@@ -121,6 +122,7 @@ struct AgeGuideService {
         state.isDismissedFromToday = true
         state.updatedAt = now
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     private static func fallbackGuides() -> [AgeGuide] {

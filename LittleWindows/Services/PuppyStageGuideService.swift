@@ -57,6 +57,7 @@ final class PuppyStageGuideService {
         state.lastOpenedAt = now
         state.updatedAt = now
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     func markStageCardDismissed(
@@ -76,6 +77,7 @@ final class PuppyStageGuideService {
         state.isDismissedFromToday = true
         state.updatedAt = now
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     func ageWeeks(for profile: CareProfile, now: Date = Date(), calendar: Calendar = .current) -> Double {

@@ -28,6 +28,7 @@ enum SampleData {
             ProfileService.shared.switchProfile(profile)
         }
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     static func bundledHuckleberryHistory() throws -> Data {

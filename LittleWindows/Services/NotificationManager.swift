@@ -543,6 +543,7 @@ final class NotificationManager: NSObject, ObservableObject {
         state.notificationSentAt = now
         state.updatedAt = now
         try? context.save()
+        PersistenceService.recordLocalSave()
     }
 
     func cancelMonthlyAgeGuideNotifications() async {

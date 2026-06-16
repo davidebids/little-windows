@@ -12,8 +12,8 @@ struct SettingsView: View {
     @Query private var records: [SleepPredictionRecord]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
 
-    @AppStorage("caregiverOne") private var caregiverOne = "David"
-    @AppStorage("caregiverTwo") private var caregiverTwo = "Rachel"
+    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
+    @AppStorage("caregiverTwo") private var caregiverTwo = "Caregiver 2"
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
     @AppStorage("bedtimePredictionEnabled") private var bedtimePredictionEnabled = true
@@ -32,7 +32,6 @@ struct SettingsView: View {
 
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
-    @State private var showingFamilySync = false
     @State private var showingDeleteConfirmation = false
     @State private var showingHuckleberryConfirmation = false
     @State private var showingExporter = false
@@ -201,18 +200,7 @@ struct SettingsView: View {
                 Text("Little Windows can remind you before Ethan's next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
             }
 
-            Section("Family sync") {
-                Button {
-                    showingFamilySync = true
-                } label: {
-                    LabeledContent {
-                        Text("Local only")
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        Label("iCloud and sharing", systemImage: "icloud")
-                    }
-                }
-            }
+            SyncSettingsSection()
 
             Section {
                 NavigationLink {
@@ -336,9 +324,6 @@ struct SettingsView: View {
                 monthlyAgeGuideNotificationsEnabled = true
                 await rescheduleMonthlyAgeGuideNotification()
             }
-        }
-        .sheet(isPresented: $showingFamilySync) {
-            NavigationStack { FamilySyncView() }
         }
         .fileExporter(
             isPresented: $showingExporter,
@@ -548,6 +533,37 @@ struct SettingsView: View {
     }
 }
 
+private struct SyncSettingsSection: View {
+    var body: some View {
+        Section {
+            NavigationLink {
+                ICloudSyncSettingsView()
+            } label: {
+                LabeledContent {
+                    Text(PersistenceService.isUsingCloudKitStore ? "On" : "Local fallback")
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("iCloud and sharing", systemImage: "icloud")
+                }
+            }
+            NavigationLink {
+                FamilySyncSettingsView()
+            } label: {
+                LabeledContent {
+                    Text("Not enabled")
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("Family Sync", systemImage: "person.2.badge.gearshape.fill")
+                }
+            }
+        } header: {
+            Text("Sync")
+        } footer: {
+            Text("Private iCloud Sync uses Apple's private CloudKit database. Family Sync for multiple caregivers requires a shared iCloud record zone and is not enabled yet.")
+        }
+    }
+}
+
 private struct ProfileSettingsSection: View {
     @Bindable var profile: BabyProfile
 
@@ -624,41 +640,5 @@ private struct WakeWindowTuningView: View {
         }
         .navigationTitle("Wake Windows")
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct FamilySyncView: View {
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var syncService = SyncService()
-
-    var body: some View {
-        List {
-            Section("iCloud account") {
-                LabeledContent("Status", value: syncService.accountState.description)
-            }
-            Section("Shared family data") {
-                LabeledContent(
-                    "David and Rachel sharing",
-                    value: syncService.sharedFamilySyncEnabled ? "Enabled" : "Not enabled"
-                )
-                Text("This build stores data locally and does not create a fake login. The model is CloudKit-ready, but a developer must select an iCloud container, enable CloudKit entitlements, test schema migration, and add CKShare invitation handling before two-phone sharing is switched on.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Section("Enable in Xcode") {
-                Text("1. Add the iCloud capability to the LittleWindows target.")
-                Text("2. Enable CloudKit and select a container.")
-                Text("3. Change ModelConfiguration in LittleWindowsApp to use the CloudKit database.")
-                Text("4. Implement CKShare invitation creation and acceptance in SyncService.")
-            }
-        }
-        .navigationTitle("Family Sync")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
-            }
-        }
-        .task { await syncService.refresh() }
     }
 }

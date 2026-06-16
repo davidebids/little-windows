@@ -182,7 +182,7 @@ struct AppointmentCard: View {
 struct AppointmentEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("caregiverOne") private var caregiverOne = "David"
+    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
 
     let appointment: DoctorAppointment?
     let babyName: String
