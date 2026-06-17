@@ -398,53 +398,59 @@ struct ManageProfilesView: View {
         }
         .appActionSheet(
             isPresented: Binding(
-                get: { profileToArchive != nil },
-                set: { if !$0 { profileToArchive = nil } }
+                get: { profileToArchive != nil || profileToDelete != nil },
+                set: { if !$0 { clearPendingProfileAction() } }
             ),
-            title: profileToArchive.map { "Archive \($0.name)?" } ?? "Archive Profile?",
-            message: "This hides the profile from daily tracking, but keeps all history available.",
-            systemImage: "archivebox",
-            tint: .orange,
-            options: archiveProfileOptions,
+            title: profileActionTitle,
+            message: profileActionMessage,
+            systemImage: profileActionSystemImage,
+            tint: profileActionTint,
+            options: profileActionOptions,
             cancelAction: {
-                profileToArchive = nil
-            }
-        )
-        .appActionSheet(
-            isPresented: Binding(
-                get: { profileToDelete != nil },
-                set: { if !$0 { profileToDelete = nil } }
-            ),
-            title: profileToDelete.map { "Delete \($0.name)?" } ?? "Delete Profile?",
-            message: "This permanently deletes the profile and its events, appointments, milestones, predictions, and guide progress.",
-            systemImage: "trash",
-            tint: .red,
-            options: deleteProfileOptions,
-            cancelAction: {
-                profileToDelete = nil
+                clearPendingProfileAction()
             }
         )
     }
 
-    private var archiveProfileOptions: [AppActionSheetOption] {
-        guard profileToArchive != nil else { return [] }
-        return [
-            AppActionSheetOption(
-                title: "Archive Profile",
-                subtitle: "Hide this profile from daily tracking.",
-                systemImage: "archivebox.fill",
-                tint: .orange,
-                role: .destructive
-            ) {
-                if let profileToArchive {
-                    archive(profileToArchive)
+    private var profileActionTitle: String {
+        if let profileToArchive {
+            return "Archive \(profileToArchive.name)?"
+        }
+        if let profileToDelete {
+            return "Delete \(profileToDelete.name)?"
+        }
+        return "Profile Action"
+    }
+
+    private var profileActionMessage: String {
+        if profileToArchive != nil {
+            return "This hides the profile from daily tracking, but keeps all history available."
+        }
+        return "This permanently deletes the profile and its events, appointments, milestones, predictions, and guide progress."
+    }
+
+    private var profileActionSystemImage: String {
+        profileToArchive != nil ? "archivebox" : "trash"
+    }
+
+    private var profileActionTint: Color {
+        profileToArchive != nil ? .orange : .red
+    }
+
+    private var profileActionOptions: [AppActionSheetOption] {
+        if let profile = profileToArchive {
+            return [
+                AppActionSheetOption(
+                    title: "Archive Profile",
+                    subtitle: "Hide this profile from daily tracking.",
+                    systemImage: "archivebox.fill",
+                    tint: .orange
+                ) {
+                    archive(profile)
                 }
-            }
-        ]
-    }
-
-    private var deleteProfileOptions: [AppActionSheetOption] {
-        guard profileToDelete != nil else { return [] }
+            ]
+        }
+        guard let profile = profileToDelete else { return [] }
         return [
             AppActionSheetOption(
                 title: "Delete Profile",
@@ -453,9 +459,7 @@ struct ManageProfilesView: View {
                 tint: .red,
                 role: .destructive
             ) {
-                if let profileToDelete {
-                    delete(profileToDelete)
-                }
+                delete(profile)
             }
         ]
     }
@@ -538,18 +542,6 @@ struct ManageProfilesView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Restore \(profile.name)")
                     }
-                    Button {
-                        profileToDelete = profile
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(canDelete ? .red : .secondary)
-                            .frame(width: 34, height: 34)
-                            .background(Color.red.opacity(canDelete ? 0.08 : 0.03), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canDelete)
-                    .accessibilityLabel("Delete \(profile.name)")
                 }
             }
             .buttonStyle(.plain)
@@ -592,6 +584,11 @@ struct ManageProfilesView: View {
 
     private func delete(_ profile: CareProfile) {
         profileService.deleteProfile(profile, profiles: allProfiles, context: modelContext)
+        profileToDelete = nil
+    }
+
+    private func clearPendingProfileAction() {
+        profileToArchive = nil
         profileToDelete = nil
     }
 }
