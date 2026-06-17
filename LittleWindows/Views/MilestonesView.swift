@@ -53,6 +53,7 @@ struct MilestonesView: View {
     @State private var selectedCategory: MilestoneCategory?
     @State private var favoritesOnly = false
     @State private var sortOption = MilestoneSortOption.newest
+    @State private var showingSortPicker = false
     @State private var showingEditor = false
     @State private var editingMilestone: MilestoneEntry?
     @State private var selectedTemplate: MilestoneTemplate?
@@ -432,20 +433,55 @@ struct MilestonesView: View {
 
                 Spacer()
 
-                Menu {
-                    Picker("Sort", selection: $sortOption) {
-                        ForEach(MilestoneSortOption.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
+                Button {
+                    showingSortPicker = true
                 } label: {
                     Label(sortOption.title, systemImage: "arrow.up.arrow.down")
                         .font(.subheadline)
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(14)
         .appSurface()
+        .appActionSheet(
+            isPresented: $showingSortPicker,
+            title: "Sort Milestones",
+            message: "Choose how memories and milestones are ordered.",
+            systemImage: "arrow.up.arrow.down",
+            tint: MilestonePalette.accent,
+            options: sortOptions
+        )
+    }
+
+    private var sortOptions: [AppActionSheetOption] {
+        MilestoneSortOption.allCases.map { option in
+            AppActionSheetOption(
+                title: option.title,
+                subtitle: sortSubtitle(for: option),
+                systemImage: sortSystemImage(for: option),
+                tint: MilestonePalette.accent,
+                isSelected: sortOption == option
+            ) {
+                sortOption = option
+            }
+        }
+    }
+
+    private func sortSubtitle(for option: MilestoneSortOption) -> String {
+        switch option {
+        case .newest: "Show recent memories first."
+        case .oldest: "Read from earliest to latest."
+        case .category: "Group related milestones together."
+        }
+    }
+
+    private func sortSystemImage(for option: MilestoneSortOption) -> String {
+        switch option {
+        case .newest: "arrow.down"
+        case .oldest: "arrow.up"
+        case .category: "square.grid.2x2.fill"
+        }
     }
 
     @ViewBuilder
@@ -1299,18 +1335,26 @@ struct MilestoneDetailView: View {
                 MilestoneEditorView(milestone: milestone)
             }
         }
-        .confirmationDialog(
-            "Delete this memory?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Memory", role: .destructive) {
-                modelContext.delete(milestone)
-                try? modelContext.save()
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        }
+            title: "Delete Memory?",
+            message: "This permanently removes this memory from the timeline.",
+            systemImage: "trash",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete Memory",
+                    subtitle: "Remove this memory now.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    modelContext.delete(milestone)
+                    try? modelContext.save()
+                    dismiss()
+                }
+            ]
+        )
     }
 
     private var dateText: String {

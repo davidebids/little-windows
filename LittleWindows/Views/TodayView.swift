@@ -35,6 +35,8 @@ struct TodayView: View {
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
     @State private var showingSleepChooser = false
+    @State private var showingNursingChooser = false
+    @State private var showingActivityChooser = false
     @State private var showingAppointments = false
     @State private var appointmentToOpen: DoctorAppointment?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
@@ -340,6 +342,39 @@ struct TodayView: View {
         } message: {
             Text(duplicateTimerMessage ?? "")
         }
+        .appActionSheet(
+            isPresented: $showingNursingChooser,
+            title: "Start Nursing",
+            message: "Choose the starting side. You can switch sides while the timer runs.",
+            systemImage: "figure.and.child.holdinghands",
+            tint: .pink,
+            options: [
+                AppActionSheetOption(
+                    title: "Left Side",
+                    subtitle: "Begin tracking time on the left side.",
+                    systemImage: "l.circle.fill",
+                    tint: .pink
+                ) {
+                    startNursing(.left)
+                },
+                AppActionSheetOption(
+                    title: "Right Side",
+                    subtitle: "Begin tracking time on the right side.",
+                    systemImage: "r.circle.fill",
+                    tint: .pink
+                ) {
+                    startNursing(.right)
+                }
+            ]
+        )
+        .appActionSheet(
+            isPresented: $showingActivityChooser,
+            title: "Start Activity",
+            message: "Pick a common activity timer or open a custom activity entry.",
+            systemImage: "figure.play",
+            tint: .green,
+            options: activityOptions
+        )
         .confirmationDialog(
             "Turn on Little Window Alerts?",
             isPresented: $showingAlertPermissionPrompt,
@@ -506,12 +541,8 @@ struct TodayView: View {
     private var childQuickActionsSection: some View {
         Section {
             VStack(spacing: 14) {
-                Menu {
-                    ForEach(SleepKind.allCases) { kind in
-                        Button(kind.displayName) {
-                            startTimer(.sleep, sleepKind: kind)
-                        }
-                    }
+                Button {
+                    showingSleepChooser = true
                 } label: {
                     HStack(spacing: 13) {
                         Image(systemName: "moon.stars.fill")
@@ -553,29 +584,18 @@ struct TodayView: View {
                     QuickActionButton(title: "Feed", icon: "waterbottle.fill", color: .orange) {
                         editorRoute = EventEditorRoute(type: .feed)
                     }
-                    QuickActionMenuButton(
+                    QuickActionButton(
                         title: "Nursing",
                         icon: "figure.and.child.holdinghands",
                         color: .pink
                     ) {
-                        Button("Left side") { startNursing(.left) }
-                        Button("Right side") { startNursing(.right) }
+                        showingNursingChooser = true
                     }
                     QuickActionButton(title: "Diaper", icon: "drop.fill", color: .teal) {
                         editorRoute = EventEditorRoute(type: .diaper)
                     }
-                    QuickActionMenuButton(title: "Activity", icon: "figure.play", color: .green) {
-                        ForEach(ActivityType.allCases) { activity in
-                            if activity == .custom {
-                                Button(activity.displayName) {
-                                    editorRoute = EventEditorRoute(type: .activity)
-                                }
-                            } else {
-                                Button(activity.displayName) {
-                                    startTimer(.activity, activityType: activity)
-                                }
-                            }
-                        }
+                    QuickActionButton(title: "Activity", icon: "figure.play", color: .green) {
+                        showingActivityChooser = true
                     }
                     QuickActionButton(title: "Medicine", icon: "cross.case.fill", color: .red) {
                         editorRoute = EventEditorRoute(type: .medicine)
@@ -1114,6 +1134,25 @@ struct TodayView: View {
             }
         )
     }
+
+    private var activityOptions: [AppActionSheetOption] {
+        ActivityType.allCases.map { activity in
+            AppActionSheetOption(
+                title: activity.displayName,
+                subtitle: activity == .custom
+                    ? "Open the editor for a custom activity."
+                    : "Start a timer now.",
+                systemImage: activity.systemImage,
+                tint: .green
+            ) {
+                if activity == .custom {
+                    editorRoute = EventEditorRoute(type: .activity)
+                } else {
+                    startTimer(.activity, activityType: activity)
+                }
+            }
+        }
+    }
 }
 
 private struct SleepKindChooser: ViewModifier {
@@ -1121,20 +1160,23 @@ private struct SleepKindChooser: ViewModifier {
     let startSleep: (SleepKind) -> Void
 
     func body(content: Content) -> some View {
-        content.confirmationDialog(
-            "What kind of sleep?",
+        content.appActionSheet(
             isPresented: $isPresented,
-            titleVisibility: .visible
-        ) {
-            ForEach(SleepKind.allCases) { kind in
-                Button(kind.displayName) {
+            title: "Start Sleep",
+            message: "This keeps daytime naps and overnight sleep accurate in History and Insights.",
+            systemImage: "moon.zzz.fill",
+            tint: .indigo,
+            options: SleepKind.allCases.map { kind in
+                AppActionSheetOption(
+                    title: kind.displayName,
+                    subtitle: kind == .nap ? "Track a daytime sleep." : "Track overnight sleep.",
+                    systemImage: kind == .nap ? "sun.max.fill" : "moon.stars.fill",
+                    tint: .indigo
+                ) {
                     startSleep(kind)
                 }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This keeps daytime naps and overnight sleep accurate in History and Insights.")
-        }
+        )
     }
 }
 
@@ -1146,22 +1188,6 @@ private struct QuickActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            QuickActionButtonLabel(title: title, icon: icon, color: color)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct QuickActionMenuButton<MenuContent: View>: View {
-    var title: String
-    var icon: String
-    var color: Color
-    @ViewBuilder var menuContent: () -> MenuContent
-
-    var body: some View {
-        Menu {
-            menuContent()
-        } label: {
             QuickActionButtonLabel(title: title, icon: icon, color: color)
         }
         .buttonStyle(.plain)

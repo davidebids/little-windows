@@ -339,25 +339,58 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testDeleteProfileRemovesScopedHistoryAndKeepsSiblingData() throws {
+    func testArchivingArchivedProfileIsNoOp() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        testChild.isArchived = true
+        let updatedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        testChild.updatedAt = updatedAt
+        context.insert(testChild)
+        context.insert(sibling)
+        try context.save()
+
+        ProfileService.shared.switchProfile(sibling)
+        ProfileService.shared.archiveChildProfile(
+            testChild,
+            profiles: [testChild, sibling],
+            context: context
+        )
+
+        XCTAssertTrue(testChild.isArchived)
+        XCTAssertEqual(testChild.updatedAt, updatedAt)
+        XCTAssertEqual(ProfileService.shared.selectedProfileID, sibling.id)
+    }
+
+    @MainActor
+    func testDeletingProfileRemovesScopedRecordsAndSelectsFallback() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
         let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
         let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
         context.insert(testChild)
         context.insert(sibling)
-
-        context.insert(BabyEvent(profileID: testChild.id, type: .sleep))
-        context.insert(BabyEvent(profileID: sibling.id, type: .feed))
+        context.insert(BabyEvent(profileID: testChild.id, type: .feed, startDate: Date()))
+        context.insert(BabyEvent(profileID: sibling.id, type: .diaper, startDate: Date()))
         context.insert(SleepPredictionRecord(
             prediction: makeLittleWindowPrediction(),
             basedOnLastSleepEventID: nil,
             profileID: testChild.id
         ))
-        context.insert(MilestoneEntry(profileID: testChild.id, title: "First smile", date: Date()))
-        context.insert(DoctorAppointment(profileID: testChild.id, title: "Wellness Check"))
+        context.insert(MilestoneEntry(
+            profileID: testChild.id,
+            title: "First smile",
+            date: Date(),
+            category: .social
+        ))
+        context.insert(DoctorAppointment(
+            profileID: testChild.id,
+            title: "Checkup",
+            startDate: Date()
+        ))
         context.insert(AgeGuideReadState(profileID: testChild.id, guideID: "month-1"))
-        context.insert(PuppyStageGuideReadState(profileID: testChild.id, guideID: "puppy-8-weeks"))
+        context.insert(PuppyStageGuideReadState(profileID: testChild.id, guideID: "puppy-1"))
         try context.save()
 
         ProfileService.shared.switchProfile(testChild)
@@ -369,7 +402,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
         let events = try context.fetch(FetchDescriptor<BabyEvent>())
-        let records = try context.fetch(FetchDescriptor<SleepPredictionRecord>())
+        let predictions = try context.fetch(FetchDescriptor<SleepPredictionRecord>())
         let milestones = try context.fetch(FetchDescriptor<MilestoneEntry>())
         let appointments = try context.fetch(FetchDescriptor<DoctorAppointment>())
         let ageGuideStates = try context.fetch(FetchDescriptor<AgeGuideReadState>())
@@ -377,12 +410,12 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         XCTAssertEqual(profiles.map(\.id), [sibling.id])
         XCTAssertEqual(events.map(\.profileID), [sibling.id])
-        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(predictions.isEmpty)
         XCTAssertTrue(milestones.isEmpty)
         XCTAssertTrue(appointments.isEmpty)
         XCTAssertTrue(ageGuideStates.isEmpty)
         XCTAssertTrue(puppyGuideStates.isEmpty)
-        XCTAssertEqual(ProfileService.shared.selectedProfile(in: profiles)?.id, sibling.id)
+        XCTAssertEqual(ProfileService.shared.selectedProfileID, sibling.id)
     }
 
     @MainActor

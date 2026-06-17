@@ -2,17 +2,12 @@ import SwiftUI
 
 struct NightLightSoundPicker: View {
     @ObservedObject var viewModel: NightLightViewModel
+    @State private var showingSoundPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Menu {
-                ForEach(NightLightSound.allCases) { sound in
-                    Button {
-                        viewModel.selectSound(sound)
-                    } label: {
-                        Label(sound.displayName, systemImage: sound.systemImage)
-                    }
-                }
+            Button {
+                showingSoundPicker = true
             } label: {
                 HStack {
                     Image(systemName: viewModel.settings.selectedSound.systemImage)
@@ -27,6 +22,7 @@ struct NightLightSoundPicker: View {
                 .padding(14)
                 .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
             }
+            .buttonStyle(.plain)
 
             if viewModel.settings.selectedSound != .none {
                 HStack(spacing: 12) {
@@ -79,6 +75,28 @@ struct NightLightSoundPicker: View {
                 Text("Choose a sound to hear a 10-second preview before starting.")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.42))
+            }
+        }
+        .appActionSheet(
+            isPresented: $showingSoundPicker,
+            title: "Night Sound",
+            message: "Choose a gentle background sound for the night light.",
+            systemImage: viewModel.settings.selectedSound.systemImage,
+            tint: .orange,
+            options: soundOptions
+        )
+    }
+
+    private var soundOptions: [AppActionSheetOption] {
+        NightLightSound.allCases.map { sound in
+            AppActionSheetOption(
+                title: sound.displayName,
+                subtitle: sound == .none ? "Turn sound off." : "Use this sound with the current volume.",
+                systemImage: sound.systemImage,
+                tint: .orange,
+                isSelected: viewModel.settings.selectedSound == sound
+            ) {
+                viewModel.selectSound(sound)
             }
         }
     }

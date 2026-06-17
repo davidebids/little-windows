@@ -89,6 +89,8 @@ struct ActiveTimerEditorView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedStart: Date
+    @State private var showingResetConfirmation = false
+    @State private var showingDiscardConfirmation = false
 
     init(
         event: BabyEvent,
@@ -190,11 +192,8 @@ struct ActiveTimerEditorView: View {
                         }
                         .buttonStyle(TimerFilledButtonStyle())
 
-                        Menu {
-                            Button("Reset Timer", role: .destructive) {
-                                reset()
-                                selectedStart = event.startDate
-                            }
+                        Button {
+                            showingResetConfirmation = true
                         } label: {
                             Label(
                                 "Reset",
@@ -290,11 +289,8 @@ struct ActiveTimerEditorView: View {
                     .buttonStyle(TimerFilledButtonStyle(height: 58))
                     .disabled(event.timerElapsed() < 1)
 
-                    Menu {
-                        Button("Discard Timer", role: .destructive) {
-                            discard()
-                            dismiss()
-                        }
+                    Button {
+                        showingDiscardConfirmation = true
                     } label: {
                         Label("Discard Timer", systemImage: "trash")
                     }
@@ -313,6 +309,44 @@ struct ActiveTimerEditorView: View {
                 Button("Done") { dismiss() }
             }
         }
+        .appActionSheet(
+            isPresented: $showingResetConfirmation,
+            title: "Reset Timer?",
+            message: "This resets the elapsed time and keeps the timer editor open.",
+            systemImage: "arrow.counterclockwise",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Reset Timer",
+                    subtitle: "Start this timer over from now.",
+                    systemImage: "arrow.counterclockwise",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    reset()
+                    selectedStart = event.startDate
+                }
+            ]
+        )
+        .appActionSheet(
+            isPresented: $showingDiscardConfirmation,
+            title: "Discard Timer?",
+            message: "This removes the running timer without saving it to history.",
+            systemImage: "trash",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Discard Timer",
+                    subtitle: "Remove this timer and return to Today.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    discard()
+                    dismiss()
+                }
+            ]
+        )
         .onChange(of: event.startDate) { _, newValue in
             if abs(selectedStart.timeIntervalSince(newValue)) > 0.5 {
                 selectedStart = newValue

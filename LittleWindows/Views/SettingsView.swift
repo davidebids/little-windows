@@ -336,32 +336,45 @@ struct SettingsView: View {
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
             importBackup(result)
         }
-        .confirmationDialog(
-            "Replace current data with this backup?",
+        .appActionSheet(
             isPresented: $showingImportConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Import Backup", role: .destructive) {
-                performPendingImport()
-            }
-            Button("Cancel", role: .cancel) {
+            title: "Replace Current Data?",
+            message: "This replaces every current profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
+            systemImage: "square.and.arrow.down",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Import Backup",
+                    subtitle: "Replace all current Little Windows data.",
+                    systemImage: "square.and.arrow.down.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    performPendingImport()
+                }
+            ],
+            cancelAction: {
                 pendingImportData = nil
             }
-        } message: {
-            Text("This replaces every current profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.")
-        }
-        .confirmationDialog(
-            "Delete every profile, event, and prediction?",
+        )
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete All Data", role: .destructive) {
-                deleteAll()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Export a backup first if you may need this history.")
-        }
+            title: "Delete All Data?",
+            message: "This permanently deletes every profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
+            systemImage: "trash",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete All Data",
+                    subtitle: "Remove all local Little Windows history.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    deleteAll()
+                }
+            ]
+        )
         .alert("Little Windows", isPresented: Binding(
             get: { statusMessage != nil },
             set: { if !$0 { statusMessage = nil } }

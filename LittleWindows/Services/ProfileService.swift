@@ -131,6 +131,7 @@ final class ProfileService: ObservableObject {
         profiles: [CareProfile],
         context: ModelContext
     ) {
+        guard !profile.isArchived else { return }
         let active = allActiveProfiles(in: profiles)
         guard active.count > 1 else { return }
         profile.isArchived = true
@@ -160,25 +161,27 @@ final class ProfileService: ObservableObject {
         PersistenceService.recordLocalSave()
     }
 
+    func canDeleteProfile(_ profile: CareProfile, profiles: [CareProfile]) -> Bool {
+        profile.isArchived || allActiveProfiles(in: profiles).contains { $0.id != profile.id }
+    }
+
     func deleteProfile(
         _ profile: CareProfile,
         profiles: [CareProfile],
         context: ModelContext
     ) {
-        let profileID = profile.id
-        deleteProfileScopedRecords(profileID: profileID, context: context)
+        guard canDeleteProfile(profile, profiles: profiles) else { return }
+        let activeFallback = allActiveProfiles(in: profiles).first { $0.id != profile.id }
+        deleteProfileScopedRecords(profileID: profile.id, context: context)
         context.delete(profile)
-
-        let remainingProfiles = profiles.filter { $0.id != profileID }
-        if selectedProfileID == profileID {
-            if let fallback = allActiveProfiles(in: remainingProfiles).first {
-                switchProfile(fallback)
+        if selectedProfileID == profile.id {
+            if let activeFallback {
+                switchProfile(activeFallback)
             } else {
                 selectedProfileID = nil
                 UserDefaults.standard.removeObject(forKey: selectedProfileKey)
             }
         }
-
         try? context.save()
         PersistenceService.recordLocalSave()
     }
@@ -197,22 +200,20 @@ final class ProfileService: ObservableObject {
     }
 
     private func deleteProfileScopedRecords(profileID: UUID, context: ModelContext) {
-        ((try? context.fetch(FetchDescriptor<BabyEvent>())) ?? [])
-            .filter { $0.profileID == profileID }
-            .forEach { context.delete($0) }
-        ((try? context.fetch(FetchDescriptor<SleepPredictionRecord>())) ?? [])
-            .filter { $0.profileID == profileID }
-            .forEach { context.delete($0) }
-        ((try? context.fetch(FetchDescriptor<MilestoneEntry>())) ?? [])
-            .filter { $0.profileID == profileID }
-            .forEach { context.delete($0) }
-        ((try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? [])
-            .filter { $0.profileID == profileID }
-            .forEach { context.delete($0) }
-        ((try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? [])
-            .filter { $0.profileID == profileID }
-            .forEach { context.delete($0) }
-        ((try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? [])
+        deleteProfileScopedRecords(of: BabyEvent.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: SleepPredictionRecord.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: MilestoneEntry.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: DoctorAppointment.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: AgeGuideReadState.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: PuppyStageGuideReadState.self, profileID: profileID, context: context)
+    }
+
+    private func deleteProfileScopedRecords<Record: PersistentModel & ProfileScopedRecord>(
+        of type: Record.Type,
+        profileID: UUID,
+        context: ModelContext
+    ) {
+        ((try? context.fetch(FetchDescriptor<Record>())) ?? [])
             .filter { $0.profileID == profileID }
             .forEach { context.delete($0) }
     }

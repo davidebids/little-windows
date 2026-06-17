@@ -396,52 +396,92 @@ struct ManageProfilesView: View {
         .sheet(item: $editingProfile) { profile in
             NavigationStack { ProfileEditorView(profile: profile) }
         }
-        .confirmationDialog(
-            "Archive Profile?",
+        .appActionSheet(
             isPresented: Binding(
                 get: { profileToArchive != nil },
                 set: { if !$0 { profileToArchive = nil } }
             ),
-            presenting: profileToArchive
-        ) { profile in
-            Button("Archive \(profile.name)", role: .destructive) {
-                archive(profile)
+            title: profileToArchive.map { "Archive \($0.name)?" } ?? "Archive Profile?",
+            message: "This hides the profile from daily tracking, but keeps all history available.",
+            systemImage: "archivebox",
+            tint: .orange,
+            options: archiveProfileOptions,
+            cancelAction: {
+                profileToArchive = nil
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { profile in
-            Text("\(profile.name) will be hidden from daily tracking, but all history will be kept.")
-        }
-        .confirmationDialog(
-            "Delete Profile?",
+        )
+        .appActionSheet(
             isPresented: Binding(
                 get: { profileToDelete != nil },
                 set: { if !$0 { profileToDelete = nil } }
             ),
-            presenting: profileToDelete
-        ) { profile in
-            Button("Delete \(profile.name)", role: .destructive) {
-                delete(profile)
+            title: profileToDelete.map { "Delete \($0.name)?" } ?? "Delete Profile?",
+            message: "This permanently deletes the profile and its events, appointments, milestones, predictions, and guide progress.",
+            systemImage: "trash",
+            tint: .red,
+            options: deleteProfileOptions,
+            cancelAction: {
+                profileToDelete = nil
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { profile in
-            Text("This permanently deletes \(profile.name) and that profile's events, milestones, appointments, predictions, and guide progress.")
-        }
+        )
+    }
+
+    private var archiveProfileOptions: [AppActionSheetOption] {
+        guard profileToArchive != nil else { return [] }
+        return [
+            AppActionSheetOption(
+                title: "Archive Profile",
+                subtitle: "Hide this profile from daily tracking.",
+                systemImage: "archivebox.fill",
+                tint: .orange,
+                role: .destructive
+            ) {
+                if let profileToArchive {
+                    archive(profileToArchive)
+                }
+            }
+        ]
+    }
+
+    private var deleteProfileOptions: [AppActionSheetOption] {
+        guard profileToDelete != nil else { return [] }
+        return [
+            AppActionSheetOption(
+                title: "Delete Profile",
+                subtitle: "Remove this profile and its history.",
+                systemImage: "trash.fill",
+                tint: .red,
+                role: .destructive
+            ) {
+                if let profileToDelete {
+                    delete(profileToDelete)
+                }
+            }
+        ]
     }
 
     private func manageRows(_ values: [CareProfile]) -> some View {
         ForEach(values) { profile in
-            let isSelected = profileService.selectedProfileID == profile.id
+            let isSelected = !profile.isArchived && profileService.selectedProfileID == profile.id
+            let canDelete = profileService.canDeleteProfile(profile, profiles: allProfiles)
             Button {
                 guard !profile.isArchived else { return }
                 profileService.switchProfile(profile)
                 dismiss()
             } label: {
                 HStack(spacing: 12) {
+                    if profile.isArchived {
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.38))
+                            .frame(width: 4, height: 38)
+                    }
                     ProfileAvatarView(profile: profile, size: 38)
+                        .grayscale(profile.isArchived ? 1 : 0)
+                        .opacity(profile.isArchived ? 0.48 : 1)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(profile.name)
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(profile.isArchived ? .secondary : .primary)
                             if isSelected {
                                 Text("Current")
                                     .font(.caption2.bold())
@@ -460,9 +500,13 @@ struct ManageProfilesView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         if profile.isArchived {
-                            Text("Archived")
+                            Label("Archived", systemImage: "archivebox.fill")
                                 .font(.caption2.bold())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.orange.opacity(0.12), in: Capsule())
+                                .padding(.top, 2)
                         }
                     }
                     Spacer()
@@ -494,15 +538,29 @@ struct ManageProfilesView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Restore \(profile.name)")
                     }
+                    Button {
+                        profileToDelete = profile
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(canDelete ? .red : .secondary)
+                            .frame(width: 34, height: 34)
+                            .background(Color.red.opacity(canDelete ? 0.08 : 0.03), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canDelete)
+                    .accessibilityLabel("Delete \(profile.name)")
                 }
             }
             .buttonStyle(.plain)
+            .listRowBackground(profile.isArchived ? Color.primary.opacity(0.045) : Color.clear)
             .swipeActions {
                 Button(role: .destructive) {
                     profileToDelete = profile
                 } label: {
                     Label("Delete", systemImage: "trash.fill")
                 }
+                .disabled(!canDelete)
                 if profile.isArchived {
                     Button {
                         restore(profile)
