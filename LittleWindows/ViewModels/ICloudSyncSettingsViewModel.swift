@@ -5,6 +5,8 @@ import SwiftData
 @MainActor
 final class ICloudSyncSettingsViewModel: ObservableObject {
     @Published private(set) var availability: ICloudSyncAvailability = .checking
+    @Published private(set) var isICloudSyncEnabled = PersistenceService.isICloudSyncEnabled()
+    @Published private(set) var requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
     @Published private(set) var accountStatusDescription = "Checking iCloud..."
     @Published private(set) var containerStatusDescription = PersistenceService.iCloudContainerIdentifier
     @Published private(set) var lastCheckedAt: Date?
@@ -13,9 +15,17 @@ final class ICloudSyncSettingsViewModel: ObservableObject {
 
     private let statusService = SyncStatusService()
 
+    func setICloudSyncEnabled(_ enabled: Bool) {
+        PersistenceService.setICloudSyncEnabled(enabled)
+        isICloudSyncEnabled = enabled
+        requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
+    }
+
     func refresh(context: ModelContext) async {
         await statusService.refreshStatus()
         availability = statusService.availability
+        isICloudSyncEnabled = PersistenceService.isICloudSyncEnabled()
+        requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
         accountStatusDescription = statusService.accountStatusDescription
         containerStatusDescription = statusService.containerStatusDescription
         lastCheckedAt = statusService.lastCheckedAt

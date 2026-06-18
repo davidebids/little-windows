@@ -3,6 +3,7 @@ import Foundation
 enum ICloudSyncAvailability: Equatable {
     case checking
     case available
+    case disabled
     case unavailable(String)
 
     var title: String {
@@ -11,6 +12,8 @@ enum ICloudSyncAvailability: Equatable {
             return "Waiting for iCloud"
         case .available:
             return "iCloud Sync On"
+        case .disabled:
+            return "iCloud Sync Off"
         case .unavailable:
             return "iCloud unavailable"
         }
@@ -22,6 +25,8 @@ enum ICloudSyncAvailability: Equatable {
             return "Checking this device's iCloud account."
         case .available:
             return "Private iCloud Sync keeps your Little Windows data available on devices signed into the same Apple Account."
+        case .disabled:
+            return "iCloud Sync is turned off. Little Windows keeps data local to this device."
         case .unavailable(let message):
             return message
         }

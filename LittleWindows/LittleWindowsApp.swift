@@ -29,7 +29,9 @@ struct LittleWindowsApp: App {
                     ProfileMigrationService.ensureProfilesAndAssignments(
                         context: modelContainer.mainContext
                     )
-                    CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)
+                    if PersistenceService.isICloudSyncEnabled() {
+                        CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)
+                    }
                     await restoreSystemIntegrations()
                     DeepLinkRouter.shared.isDataReady = true
                 }

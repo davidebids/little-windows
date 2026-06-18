@@ -3,7 +3,8 @@ import Foundation
 
 @MainActor
 final class SyncStatusService {
-    private let container: CKContainer
+    private let containerIdentifier: String
+    private let defaults: UserDefaults
 
     private(set) var availability: ICloudSyncAvailability = .checking
     private(set) var accountStatusDescription = "Checking iCloud..."
@@ -15,13 +16,26 @@ final class SyncStatusService {
         availability == .available
     }
 
-    init(containerIdentifier: String = PersistenceService.iCloudContainerIdentifier) {
-        container = CKContainer(identifier: containerIdentifier)
+    init(
+        containerIdentifier: String = PersistenceService.iCloudContainerIdentifier,
+        defaults: UserDefaults = .standard
+    ) {
+        self.containerIdentifier = containerIdentifier
+        self.defaults = defaults
     }
 
     func refreshStatus() async {
         lastCheckedAt = Date()
+        guard PersistenceService.isICloudSyncEnabled(defaults: defaults) else {
+            availability = .disabled
+            accountStatusDescription = "Off"
+            containerStatusDescription = "Local only"
+            userFriendlyErrorMessage = nil
+            return
+        }
+
         do {
+            let container = CKContainer(identifier: containerIdentifier)
             let status = try await container.accountStatus()
             switch status {
             case .available:

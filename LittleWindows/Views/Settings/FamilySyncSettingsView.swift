@@ -7,13 +7,19 @@ struct FamilySyncSettingsView: View {
         List {
             Section("Current mode") {
                 LabeledContent("Mode", value: viewModel.state.mode.displayName)
+                LabeledContent("iCloud Sync", value: viewModel.availability.title)
                 LabeledContent("Owner", value: viewModel.state.ownerDescription)
                 LabeledContent("Participant", value: viewModel.state.participantDescription)
             }
 
             Section("Private vs family sync") {
-                Text("Private iCloud Sync works across devices signed into your Apple Account.")
-                    .foregroundStyle(.secondary)
+                if viewModel.availability == .disabled {
+                    Text("iCloud Sync is off, so family sharing stays local-only until sync is turned back on from iCloud Sync settings.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Private iCloud Sync works across devices signed into your Apple Account.")
+                        .foregroundStyle(.secondary)
+                }
                 Text("Family Sync lets another iCloud user, like a co-parent or caregiver, access the same Little Windows data.")
                     .foregroundStyle(.secondary)
                 Text("Family Sync requires accepting an iCloud share invitation.")

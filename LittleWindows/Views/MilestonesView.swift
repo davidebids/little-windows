@@ -1,5 +1,7 @@
+import PhotosUI
 import SwiftData
 import SwiftUI
+import UIKit
 
 enum MilestoneSortOption: String, CaseIterable, Identifiable {
     case newest
@@ -49,6 +51,7 @@ struct MilestonesView: View {
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \MilestoneEntry.date, order: .reverse) private var allMilestones: [MilestoneEntry]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @State private var searchText = ""
     @State private var selectedCategory: MilestoneCategory?
     @State private var favoritesOnly = false
@@ -556,6 +559,11 @@ struct MilestonesView: View {
     }
 
     private func delete(_ milestone: MilestoneEntry) {
+        PhotoAttachmentStore.deleteAttachments(
+            with: milestone.photoAttachmentIDs,
+            in: photoAttachments,
+            context: modelContext
+        )
         modelContext.delete(milestone)
         try? modelContext.save()
     }
@@ -996,17 +1004,35 @@ struct MilestoneTimelineRow: View {
     let milestone: MilestoneEntry
     let babyName: String
     let birthDate: Date?
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
 
     var body: some View {
         HStack(alignment: .top, spacing: 13) {
-            ZStack {
-                Circle()
-                    .fill(milestone.category.tint.opacity(0.14))
-                Image(systemName: milestone.category.systemImage)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(milestone.category.tint)
+            if let previewData = firstPhoto?.previewData {
+                PhotoThumbnailImage(data: previewData)
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .bottomTrailing) {
+                        if milestone.photoAttachmentIDs.count > 1 {
+                            Text("\(milestone.photoAttachmentIDs.count)")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(.black.opacity(0.45), in: Capsule())
+                                .padding(4)
+                        }
+                    }
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(milestone.category.tint.opacity(0.14))
+                    Image(systemName: milestone.category.systemImage)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(milestone.category.tint)
+                }
+                .frame(width: 42, height: 42)
             }
-            .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -1058,12 +1084,78 @@ struct MilestoneTimelineRow: View {
     private var dateText: String {
         milestone.date.formatted(date: .abbreviated, time: .omitted)
     }
+
+    private var firstPhoto: PhotoAttachment? {
+        milestone.photoAttachmentIDs.lazy.compactMap { id in
+            photoAttachments.first { $0.id == id }
+        }.first
+    }
+}
+
+private struct PhotoAttachmentDisplayItem: Identifiable {
+    let id: UUID
+    let data: Data
+}
+
+private struct PhotoAttachmentGrid: View {
+    let items: [PhotoAttachmentDisplayItem]
+    var allowsDeletion = false
+    var onDelete: ((UUID) -> Void)?
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 96, maximum: 140), spacing: 10)
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(items) { item in
+                PhotoThumbnailImage(data: item.data)
+                    .aspectRatio(1, contentMode: .fill)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .topTrailing) {
+                        if allowsDeletion {
+                            Button {
+                                onDelete?(item.id)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.title3)
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.55))
+                                    .padding(5)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove photo")
+                        }
+                    }
+            }
+        }
+    }
+}
+
+private struct PhotoThumbnailImage: View {
+    let data: Data
+
+    var body: some View {
+        if let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.12))
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 }
 
 struct MilestoneEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @AppStorage("caregiverOne") private var caregiverName = "Caregiver 1"
     @StateObject private var profileService = ProfileService.shared
 
@@ -1074,6 +1166,11 @@ struct MilestoneEditorView: View {
     @State private var category: MilestoneCategory
     @State private var notes: String
     @State private var isFavorite: Bool
+    @State private var attachmentIDs: [UUID]
+    @State private var photoDrafts: [PhotoAttachmentDraft] = []
+    @State private var removedAttachmentIDs: Set<UUID> = []
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var isImportingPhotos = false
 
     init(milestone: MilestoneEntry? = nil, template: MilestoneTemplate? = nil) {
         self.milestone = milestone
@@ -1083,6 +1180,7 @@ struct MilestoneEditorView: View {
         _category = State(initialValue: milestone?.category ?? template?.category ?? .firsts)
         _notes = State(initialValue: milestone?.notes ?? "")
         _isFavorite = State(initialValue: milestone?.isFavorite ?? false)
+        _attachmentIDs = State(initialValue: milestone?.photoAttachmentIDs ?? [])
     }
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
@@ -1159,11 +1257,34 @@ struct MilestoneEditorView: View {
             }
 
             Section("Photos") {
-                Label("Photo attachments are coming later", systemImage: "photo.badge.plus")
-                    .foregroundStyle(.secondary)
-                Text("This memory is ready for photos and videos when attachment support is added.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if photoDisplayItems.isEmpty {
+                    ContentUnavailableView(
+                        "No Photos",
+                        systemImage: "photo.on.rectangle",
+                        description: Text("Add a photo from your library.")
+                    )
+                    .listRowInsets(EdgeInsets())
+                } else {
+                    PhotoAttachmentGrid(
+                        items: photoDisplayItems,
+                        allowsDeletion: true,
+                        onDelete: removePhoto
+                    )
+                    .padding(.vertical, 4)
+                }
+
+                PhotosPicker(
+                    selection: $selectedPhotoItems,
+                    maxSelectionCount: max(1, remainingPhotoSlots),
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label(
+                        isImportingPhotos ? "Adding Photos" : "Add Photos",
+                        systemImage: "photo.badge.plus"
+                    )
+                }
+                .disabled(isImportingPhotos || remainingPhotoSlots == 0)
             }
         }
         .navigationTitle(milestone == nil ? "New Milestone" : "Edit Milestone")
@@ -1177,6 +1298,9 @@ struct MilestoneEditorView: View {
                     .fontWeight(.semibold)
                     .disabled(!canSave)
             }
+        }
+        .onChange(of: selectedPhotoItems) { _, items in
+            importPhotoItems(items)
         }
     }
 
@@ -1203,6 +1327,28 @@ struct MilestoneEditorView: View {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = Date()
+        let profileID = milestone?.profileID ?? profile?.id
+
+        PhotoAttachmentStore.deleteAttachments(
+            with: Array(removedAttachmentIDs),
+            in: photoAttachments,
+            context: modelContext
+        )
+        photoDrafts
+            .filter { attachmentIDs.contains($0.id) }
+            .forEach { draft in
+                modelContext.insert(PhotoAttachment(
+                    id: draft.id,
+                    profileID: profileID,
+                    ownerKind: .milestone,
+                    contentType: draft.contentType,
+                    filename: draft.filename,
+                    imageData: draft.imageData,
+                    thumbnailData: draft.thumbnailData,
+                    createdAt: draft.createdAt,
+                    updatedAt: now
+                ))
+            }
 
         if let milestone {
             milestone.title = cleanTitle
@@ -1211,15 +1357,17 @@ struct MilestoneEditorView: View {
             milestone.category = category
             milestone.notes = cleanNotes.isEmpty ? nil : cleanNotes
             milestone.isFavorite = isFavorite
+            milestone.photoAttachmentIDs = attachmentIDs
             milestone.updatedAt = now
         } else {
             modelContext.insert(MilestoneEntry(
-                profileID: profile?.id,
+                profileID: profileID,
                 title: cleanTitle,
                 date: date,
                 approximateDate: approximateDate,
                 category: category,
                 notes: cleanNotes.isEmpty ? nil : cleanNotes,
+                photoAttachmentIDs: attachmentIDs,
                 createdAt: now,
                 updatedAt: now,
                 caregiverName: caregiverName,
@@ -1229,12 +1377,60 @@ struct MilestoneEditorView: View {
         try? modelContext.save()
         dismiss()
     }
+
+    private var remainingPhotoSlots: Int {
+        max(0, 12 - attachmentIDs.count)
+    }
+
+    private var photoDisplayItems: [PhotoAttachmentDisplayItem] {
+        attachmentIDs.compactMap { id in
+            if let draft = photoDrafts.first(where: { $0.id == id }) {
+                return PhotoAttachmentDisplayItem(
+                    id: draft.id,
+                    data: draft.thumbnailData ?? draft.imageData
+                )
+            }
+            guard let attachment = photoAttachments.first(where: { $0.id == id }),
+                  let data = attachment.previewData else { return nil }
+            return PhotoAttachmentDisplayItem(id: attachment.id, data: data)
+        }
+    }
+
+    private func importPhotoItems(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            isImportingPhotos = true
+            defer {
+                isImportingPhotos = false
+                selectedPhotoItems = []
+            }
+
+            for item in items where remainingPhotoSlots > 0 {
+                guard
+                    let data = try? await item.loadTransferable(type: Data.self),
+                    let draft = PhotoAttachmentImageProcessor.draft(from: data)
+                else { continue }
+                photoDrafts.append(draft)
+                attachmentIDs.append(draft.id)
+            }
+        }
+    }
+
+    private func removePhoto(id: UUID) {
+        attachmentIDs.removeAll { $0 == id }
+        if photoDrafts.contains(where: { $0.id == id }) {
+            photoDrafts.removeAll { $0.id == id }
+        } else {
+            removedAttachmentIDs.insert(id)
+        }
+    }
 }
 
 struct MilestoneDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     let milestone: MilestoneEntry
     @State private var showingEditor = false
     @State private var showingDeleteConfirmation = false
@@ -1310,11 +1506,15 @@ struct MilestoneDetailView: View {
             }
 
             Section("Photos & videos") {
-                ContentUnavailableView(
-                    "A place for more",
-                    systemImage: "photo.on.rectangle.angled",
-                    description: Text("Attachments will appear here in a future update.")
-                )
+                if milestonePhotoItems.isEmpty {
+                    ContentUnavailableView(
+                        "No Photos",
+                        systemImage: "photo.on.rectangle.angled"
+                    )
+                } else {
+                    PhotoAttachmentGrid(items: milestonePhotoItems)
+                        .padding(.vertical, 4)
+                }
             }
 
             Section {
@@ -1349,6 +1549,11 @@ struct MilestoneDetailView: View {
                     tint: .red,
                     role: .destructive
                 ) {
+                    PhotoAttachmentStore.deleteAttachments(
+                        with: milestone.photoAttachmentIDs,
+                        in: photoAttachments,
+                        context: modelContext
+                    )
                     modelContext.delete(milestone)
                     try? modelContext.save()
                     dismiss()
@@ -1359,6 +1564,14 @@ struct MilestoneDetailView: View {
 
     private var dateText: String {
         milestone.date.formatted(date: .long, time: .omitted)
+    }
+
+    private var milestonePhotoItems: [PhotoAttachmentDisplayItem] {
+        milestone.photoAttachmentIDs.compactMap { id in
+            guard let attachment = photoAttachments.first(where: { $0.id == id }),
+                  let data = attachment.previewData else { return nil }
+            return PhotoAttachmentDisplayItem(id: attachment.id, data: data)
+        }
     }
 
     private var favoriteBinding: Binding<Bool> {

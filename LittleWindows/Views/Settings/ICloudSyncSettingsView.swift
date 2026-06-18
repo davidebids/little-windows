@@ -7,6 +7,28 @@ struct ICloudSyncSettingsView: View {
 
     var body: some View {
         List {
+            Section("Sync mode") {
+                Toggle(
+                    "iCloud Sync",
+                    isOn: Binding(
+                        get: { viewModel.isICloudSyncEnabled },
+                        set: { enabled in
+                            viewModel.setICloudSyncEnabled(enabled)
+                            Task { await viewModel.refresh(context: modelContext) }
+                        }
+                    )
+                )
+
+                Text(viewModel.isICloudSyncEnabled ? "Use private iCloud Sync for devices signed into the same Apple Account." : "Keep Little Windows data local to this device.")
+                    .foregroundStyle(.secondary)
+
+                if viewModel.requiresRestart {
+                    Label("Restart Little Windows to apply this sync mode.", systemImage: "arrow.clockwise")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Section("Status") {
                 LabeledContent("iCloud Sync", value: viewModel.availability.title)
                 LabeledContent("Apple Account", value: viewModel.accountStatusDescription)
@@ -28,10 +50,17 @@ struct ICloudSyncSettingsView: View {
             Section("How sync works") {
                 Text(viewModel.availability.detail)
                     .foregroundStyle(.secondary)
-                Text("Syncing happens automatically when iCloud is available. Logging still works offline; local changes sync later.")
-                    .foregroundStyle(.secondary)
-                Text("Private iCloud Sync works across devices signed into your Apple Account.")
-                    .foregroundStyle(.secondary)
+                if viewModel.isICloudSyncEnabled {
+                    Text("Syncing happens automatically when iCloud is available. Logging still works offline; local changes sync later.")
+                        .foregroundStyle(.secondary)
+                    Text("Private iCloud Sync works across devices signed into your Apple Account.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("When iCloud Sync is off, Little Windows opens a local-only store and does not check the CloudKit container.")
+                        .foregroundStyle(.secondary)
+                    Text("Turn iCloud Sync back on and restart the app when you want same-Apple-Account sync again.")
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let diagnostics = viewModel.diagnostics {

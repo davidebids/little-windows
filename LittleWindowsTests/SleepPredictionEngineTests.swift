@@ -63,6 +63,32 @@ final class SleepPredictionEngineTests: XCTestCase {
         }
     }
 
+    func testICloudSyncPreferenceDefaultsOnAndPersistsChanges() throws {
+        let defaults = try makeIsolatedDefaults()
+
+        XCTAssertTrue(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+
+        PersistenceService.setICloudSyncEnabled(false, defaults: defaults)
+        XCTAssertFalse(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+
+        PersistenceService.setICloudSyncEnabled(true, defaults: defaults)
+        XCTAssertTrue(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+    }
+
+    @MainActor
+    func testSyncStatusReportsDisabledWhenICloudSyncPreferenceIsOff() async throws {
+        let defaults = try makeIsolatedDefaults()
+        PersistenceService.setICloudSyncEnabled(false, defaults: defaults)
+        let service = SyncStatusService(defaults: defaults)
+
+        await service.refreshStatus()
+
+        XCTAssertEqual(service.availability, .disabled)
+        XCTAssertEqual(service.accountStatusDescription, "Off")
+        XCTAssertEqual(service.containerStatusDescription, "Local only")
+        XCTAssertFalse(service.isICloudAvailable)
+    }
+
     @MainActor
     private func fetchOrCreateSmokeProfile(
         named name: String,
@@ -2553,9 +2579,27 @@ final class SleepPredictionEngineTests: XCTestCase {
         let birthDate = Date(timeIntervalSince1970: 1_767_225_600)
         let milestoneDate = birthDate.addingTimeInterval(21 * 24 * 60 * 60)
         let photoID = UUID()
+        let profilePhotoID = UUID()
 
-        context.insert(BabyProfile(name: "Test Child", birthDate: birthDate))
+        let profile = BabyProfile(name: "Test Child", birthDate: birthDate)
+        profile.profilePhotoAttachmentID = profilePhotoID
+        context.insert(profile)
+        context.insert(PhotoAttachment(
+            id: profilePhotoID,
+            profileID: profile.id,
+            ownerKind: .profilePhoto,
+            imageData: Data([1, 2, 3, 4]),
+            thumbnailData: Data([1, 2])
+        ))
+        context.insert(PhotoAttachment(
+            id: photoID,
+            profileID: profile.id,
+            ownerKind: .milestone,
+            imageData: Data([5, 6, 7, 8]),
+            thumbnailData: Data([5, 6])
+        ))
         context.insert(MilestoneEntry(
+            profileID: profile.id,
             title: "First smile",
             date: milestoneDate,
             approximateDate: true,
@@ -2582,6 +2626,22 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(imported.caregiverName, "Caregiver 1")
         XCTAssertEqual(imported.photoAttachmentIDs, [photoID])
         XCTAssertEqual(imported.sortOrder, 2)
+
+        let importedProfile = try XCTUnwrap(
+            context.fetch(FetchDescriptor<BabyProfile>()).first
+        )
+        XCTAssertEqual(importedProfile.profilePhotoAttachmentID, profilePhotoID)
+
+        let attachments = try context.fetch(FetchDescriptor<PhotoAttachment>())
+        XCTAssertEqual(attachments.count, 2)
+        let importedMilestonePhoto = try XCTUnwrap(attachments.first { $0.id == photoID })
+        XCTAssertEqual(importedMilestonePhoto.ownerKind, .milestone)
+        XCTAssertEqual(importedMilestonePhoto.profileID, profile.id)
+        XCTAssertEqual(importedMilestonePhoto.imageData, Data([5, 6, 7, 8]))
+        XCTAssertEqual(importedMilestonePhoto.thumbnailData, Data([5, 6]))
+        let importedProfilePhoto = try XCTUnwrap(attachments.first { $0.id == profilePhotoID })
+        XCTAssertEqual(importedProfilePhoto.ownerKind, .profilePhoto)
+        XCTAssertEqual(importedProfilePhoto.imageData, Data([1, 2, 3, 4]))
     }
 
     @MainActor
@@ -2955,6 +3015,13 @@ final class SleepPredictionEngineTests: XCTestCase {
             crossings += 1
         }
         return Double(crossings) / Double(samples.count - 1)
+    }
+
+    private func makeIsolatedDefaults() throws -> UserDefaults {
+        let suiteName = "LittleWindowsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 
     private func rmsWindows(_ samples: [Double], windowSize: Int) -> [Double] {

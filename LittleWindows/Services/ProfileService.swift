@@ -173,6 +173,7 @@ final class ProfileService: ObservableObject {
         guard canDeleteProfile(profile, profiles: profiles) else { return }
         let activeFallback = allActiveProfiles(in: profiles).first { $0.id != profile.id }
         deleteProfileScopedRecords(profileID: profile.id, context: context)
+        PhotoAttachmentStore.deleteAttachments(profileID: profile.id, context: context)
         context.delete(profile)
         if selectedProfileID == profile.id {
             if let activeFallback {

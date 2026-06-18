@@ -3,10 +3,10 @@ import Foundation
 
 @MainActor
 final class CloudKitSharingService {
-    private let container: CKContainer
+    private let containerIdentifier: String
 
     init(containerIdentifier: String = PersistenceService.iCloudContainerIdentifier) {
-        container = CKContainer(identifier: containerIdentifier)
+        self.containerIdentifier = containerIdentifier
     }
 
     func currentState(privateSyncAvailable: Bool) -> FamilyShareState {
@@ -20,7 +20,8 @@ final class CloudKitSharingService {
     }
 
     func startFamilyShare() async -> Result<CKShare, Error> {
-        .failure(FamilySharingNotImplementedError())
+        _ = CKContainer(identifier: containerIdentifier)
+        return .failure(FamilySharingNotImplementedError())
     }
 
     struct FamilySharingNotImplementedError: LocalizedError {

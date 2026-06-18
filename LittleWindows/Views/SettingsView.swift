@@ -591,13 +591,15 @@ private struct FoodReminderSettingsLauncher: View {
 }
 
 private struct SyncSettingsSection: View {
+    @AppStorage(PersistenceService.iCloudSyncEnabledKey) private var isICloudSyncEnabled = true
+
     var body: some View {
         Section {
             NavigationLink {
                 ICloudSyncSettingsView()
             } label: {
                 LabeledContent {
-                    Text(PersistenceService.isUsingCloudKitStore ? "On" : "Local fallback")
+                    Text(isICloudSyncEnabled ? "On" : "Off")
                         .foregroundStyle(.secondary)
                 } label: {
                     Label("iCloud and sharing", systemImage: "icloud")
@@ -616,7 +618,7 @@ private struct SyncSettingsSection: View {
         } header: {
             Text("Sync")
         } footer: {
-            Text("Private iCloud Sync uses Apple's private CloudKit database. Family Sync for multiple caregivers requires a shared iCloud record zone and is not enabled yet.")
+            Text("Private iCloud Sync can be turned off for local-only use. Family Sync for multiple caregivers requires a shared iCloud record zone and is not enabled yet.")
         }
     }
 }
@@ -627,20 +629,7 @@ private struct ProfileSettingsSection: View {
     var body: some View {
         Section {
             HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [.indigo, .purple],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    Text(String(profile.name.prefix(1)).uppercased())
-                        .font(.title2.bold())
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 58, height: 58)
+                ProfileAvatarView(profile: profile, size: 58)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(profile.name)
