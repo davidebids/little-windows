@@ -74,6 +74,7 @@
 		B00000000000000000000054 /* LittleWindowsWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000049 /* LittleWindowsWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B00000000000000000000055 /* LittleWindowsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000054 /* LittleWindowsControls.swift */; };
 		B00000000000000000000056 /* Models/MilestoneEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000055 /* Models/MilestoneEntry.swift */; };
+		B0000000000000000000005E /* FoodWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005E /* FoodWidgets.swift */; };
 		B00000000000000000000057 /* Views/MilestonesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000056 /* Views/MilestonesView.swift */; };
 		B00000000000000000000058 /* Views/Insights/MilestoneInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000057 /* Views/Insights/MilestoneInsightsView.swift */; };
 		B00000000000000000000059 /* Models/GrowthReferenceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000058 /* Models/GrowthReferenceModels.swift */; };
@@ -121,6 +122,10 @@
 		B00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */; };
 		B00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift */; };
 		B00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift */; };
+		B00000000000000000000088 /* Models/FoodHomeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000088 /* Models/FoodHomeModels.swift */; };
+		B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000089 /* Services/FoodHomeServices.swift */; };
+		B0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift */; };
+		B0000000000000000000008B /* Views/Food/FoodHomeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -223,6 +228,7 @@
 		F00000000000000000000053 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		F00000000000000000000054 /* LittleWindowsControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsControls.swift; sourceTree = "<group>"; };
 		F00000000000000000000055 /* Models/MilestoneEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/MilestoneEntry.swift; sourceTree = "<group>"; };
+		F0000000000000000000005E /* FoodWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodWidgets.swift; sourceTree = "<group>"; };
 		F00000000000000000000056 /* Views/MilestonesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/MilestonesView.swift; sourceTree = "<group>"; };
 		F00000000000000000000057 /* Views/Insights/MilestoneInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/MilestoneInsightsView.swift; sourceTree = "<group>"; };
 		F00000000000000000000058 /* Models/GrowthReferenceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/GrowthReferenceModels.swift; sourceTree = "<group>"; };
@@ -269,6 +275,10 @@
 		F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/ICloudSyncSettingsView.swift; sourceTree = "<group>"; };
 		F00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/FamilySyncSettingsView.swift; sourceTree = "<group>"; };
 		F00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/SyncDiagnosticsView.swift; sourceTree = "<group>"; };
+		F00000000000000000000088 /* Models/FoodHomeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/FoodHomeModels.swift; sourceTree = "<group>"; };
+		F00000000000000000000089 /* Services/FoodHomeServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/FoodHomeServices.swift; sourceTree = "<group>"; };
+		F0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/FoodHomeViewModel.swift; sourceTree = "<group>"; };
+		F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Food/FoodHomeViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -334,6 +344,7 @@
 				F00000000000000000000078 /* Models/DogEventDetails.swift */,
 				F00000000000000000000079 /* Models/PuppyStageGuide.swift */,
 				F0000000000000000000007D /* Models/SyncState.swift */,
+				F00000000000000000000088 /* Models/FoodHomeModels.swift */,
 				F00000000000000000000008 /* Services/DailySummaryService.swift */,
 				F00000000000000000000009 /* Services/DataExportImportService.swift */,
 				F0000000000000000000000A /* Services/EventMutationService.swift */,
@@ -359,10 +370,12 @@
 				F00000000000000000000080 /* Services/SyncStatusService.swift */,
 				F00000000000000000000081 /* Services/SyncDiagnosticsService.swift */,
 				F00000000000000000000082 /* Services/CloudKitSharingService.swift */,
+				F00000000000000000000089 /* Services/FoodHomeServices.swift */,
 				F00000000000000000000025 /* ViewModels/InsightsViewModel.swift */,
 				F00000000000000000000064 /* ViewModels/NightLightViewModel.swift */,
 				F00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift */,
 				F00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift */,
+				F0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift */,
 				F00000000000000000000036 /* AppIntents/LittleWindowsIntents.swift */,
 				F0000000000000000000000F /* Utilities/Formatting.swift */,
 				F00000000000000000000010 /* Utilities/SampleData.swift */,
@@ -376,6 +389,7 @@
 				F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */,
 				F00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift */,
 				F00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift */,
+				F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */,
 				F00000000000000000000017 /* Views/PredictionExplanationView.swift */,
 				F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */,
 				F00000000000000000000019 /* Views/Components/EventRow.swift */,
@@ -453,6 +467,7 @@
 				F00000000000000000000043 /* NextSleepWindowWidget.swift */,
 				F00000000000000000000044 /* TodaySummaryWidget.swift */,
 				F00000000000000000000045 /* QuickLogWidget.swift */,
+				F0000000000000000000005E /* FoodWidgets.swift */,
 				F00000000000000000000046 /* LittleWindowsLiveActivity.swift */,
 				F00000000000000000000054 /* LittleWindowsControls.swift */,
 				F00000000000000000000047 /* Info.plist */,
@@ -611,6 +626,7 @@
 				B00000000000000000000078 /* Models/DogEventDetails.swift in Sources */,
 				B00000000000000000000079 /* Models/PuppyStageGuide.swift in Sources */,
 				B0000000000000000000007D /* Models/SyncState.swift in Sources */,
+				B00000000000000000000088 /* Models/FoodHomeModels.swift in Sources */,
 				B00000000000000000000008 /* Services/DailySummaryService.swift in Sources */,
 				B00000000000000000000009 /* Services/DataExportImportService.swift in Sources */,
 				B0000000000000000000000A /* Services/EventMutationService.swift in Sources */,
@@ -636,10 +652,12 @@
 				B00000000000000000000080 /* Services/SyncStatusService.swift in Sources */,
 				B00000000000000000000081 /* Services/SyncDiagnosticsService.swift in Sources */,
 				B00000000000000000000082 /* Services/CloudKitSharingService.swift in Sources */,
+				B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */,
 				B00000000000000000000023 /* ViewModels/InsightsViewModel.swift in Sources */,
 				B00000000000000000000064 /* ViewModels/NightLightViewModel.swift in Sources */,
 				B00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift in Sources */,
 				B00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift in Sources */,
+				B0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift in Sources */,
 				B00000000000000000000033 /* AppIntents/LittleWindowsIntents.swift in Sources */,
 				B0000000000000000000000F /* Utilities/Formatting.swift in Sources */,
 				B00000000000000000000010 /* Utilities/SampleData.swift in Sources */,
@@ -653,6 +671,7 @@
 				B00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift in Sources */,
 				B00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift in Sources */,
 				B00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift in Sources */,
+				B0000000000000000000008B /* Views/Food/FoodHomeViews.swift in Sources */,
 				B00000000000000000000017 /* Views/PredictionExplanationView.swift in Sources */,
 				B00000000000000000000018 /* Views/Components/ActiveTimerCard.swift in Sources */,
 				B00000000000000000000019 /* Views/Components/EventRow.swift in Sources */,
@@ -704,6 +723,7 @@
 				B00000000000000000000043 /* NextSleepWindowWidget.swift in Sources */,
 				B00000000000000000000044 /* TodaySummaryWidget.swift in Sources */,
 				B00000000000000000000045 /* QuickLogWidget.swift in Sources */,
+				B0000000000000000000005E /* FoodWidgets.swift in Sources */,
 				B00000000000000000000046 /* LittleWindowsLiveActivity.swift in Sources */,
 				B00000000000000000000055 /* LittleWindowsControls.swift in Sources */,
 				B00000000000000000000047 /* Models/SystemIntegrationSnapshots.swift in Sources */,

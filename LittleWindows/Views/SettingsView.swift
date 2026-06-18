@@ -205,6 +205,23 @@ struct SettingsView: View {
 
             Section {
                 NavigationLink {
+                    FoodHomeView()
+                } label: {
+                    Label("Food & Home", systemImage: "cart.fill")
+                }
+                NavigationLink {
+                    FoodReminderSettingsLauncher()
+                } label: {
+                    Label("Food reminders", systemImage: "bell.badge.fill")
+                }
+            } header: {
+                Label("Food & Home", systemImage: "fork.knife")
+            } footer: {
+                Text("Food & Home records are household-level and sync through the same private iCloud store when iCloud Sync is available.")
+            }
+
+            Section {
+                NavigationLink {
                     AppointmentsListView()
                 } label: {
                     LabeledContent {
@@ -543,6 +560,32 @@ struct SettingsView: View {
             statusMessage = "All history was deleted."
         } catch {
             statusMessage = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+private struct FoodReminderSettingsLauncher: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Household.createdAt) private var households: [Household]
+    @Query(sort: \FoodReminder.dateTime) private var reminders: [FoodReminder]
+    @Query(sort: \ShoppingList.sortOrder) private var shoppingLists: [ShoppingList]
+    @Query(sort: \MealPrepItem.updatedAt, order: .reverse) private var mealPrepItems: [MealPrepItem]
+
+    var body: some View {
+        Group {
+            if let household = households.first {
+                FoodReminderSettingsView(
+                    household: household,
+                    reminders: reminders.filter { $0.householdID == household.id },
+                    shoppingLists: shoppingLists.filter { $0.householdID == household.id && !$0.isArchived },
+                    mealPrepItems: mealPrepItems.filter { $0.householdID == household.id && !$0.isArchived }
+                )
+            } else {
+                ProgressView("Preparing Food & Home")
+                    .task {
+                        FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
+                    }
+            }
         }
     }
 }

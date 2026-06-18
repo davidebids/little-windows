@@ -33,6 +33,17 @@ private struct BackupEnvelope: Codable {
     var appointments: [AppointmentDTO]?
     var ageGuideReadStates: [AgeGuideReadStateDTO]?
     var puppyStageGuideReadStates: [PuppyStageGuideReadStateDTO]?
+    var households: [HouseholdDTO]?
+    var foodStores: [FoodStoreDTO]?
+    var foodStoreSections: [FoodStoreSectionDTO]?
+    var shoppingLists: [ShoppingListDTO]?
+    var shoppingListItems: [ShoppingListItemDTO]?
+    var foodItems: [FoodItemDTO]?
+    var inventoryLocations: [InventoryLocationDTO]?
+    var inventoryItems: [InventoryItemDTO]?
+    var mealPrepItems: [MealPrepItemDTO]?
+    var mealPrepUsages: [MealPrepUsageDTO]?
+    var foodReminders: [FoodReminderDTO]?
 }
 
 private struct ProfileDTO: Codable {
@@ -204,6 +215,158 @@ private struct PuppyStageGuideReadStateDTO: Codable {
     var updatedAt: Date
 }
 
+private struct HouseholdDTO: Codable {
+    var id: UUID
+    var name: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct FoodStoreDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var name: String
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var isArchived: Bool
+    var sortOrder: Int?
+}
+
+private struct FoodStoreSectionDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var storeID: UUID
+    var name: String
+    var sortOrder: Int
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct ShoppingListDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var name: String
+    var storeID: UUID?
+    var listTypeRawValue: String
+    var createdAt: Date
+    var updatedAt: Date
+    var isArchived: Bool
+    var sortOrder: Int?
+    var notes: String?
+    var lastUsedAt: Date?
+}
+
+private struct ShoppingListItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var shoppingListID: UUID
+    var foodItemID: UUID?
+    var name: String
+    var quantity: Double?
+    var unit: String?
+    var notes: String?
+    var storeSectionID: UUID?
+    var categoryName: String?
+    var isChecked: Bool
+    var checkedAt: Date?
+    var lastUncheckedAt: Date?
+    var isRecurringStaple: Bool
+    var priorityRawValue: String
+    var addedBy: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int?
+    var lastPurchasedAt: Date?
+    var purchaseCount: Int
+    var inventoryLinkBehaviorRawValue: String
+}
+
+private struct FoodItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var canonicalName: String
+    var aliasesJSON: String?
+    var defaultUnit: String?
+    var defaultStoreSectionByStoreJSON: String?
+    var defaultInventoryLocationID: UUID?
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var isArchived: Bool
+}
+
+private struct InventoryLocationDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var name: String
+    var locationTypeRawValue: String
+    var sortOrder: Int
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var isArchived: Bool
+}
+
+private struct InventoryItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var foodItemID: UUID?
+    var name: String
+    var quantity: Double
+    var unit: String
+    var locationID: UUID
+    var storageDetail: String?
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var lastUsedAt: Date?
+    var statusRawValue: String
+}
+
+private struct MealPrepItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var name: String
+    var locationID: UUID
+    var servingsTotal: Double?
+    var servingsRemaining: Double
+    var servingUnitRawValue: String
+    var preparedDate: Date?
+    var notes: String?
+    var tagsJSON: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var lastUsedAt: Date?
+    var isArchived: Bool
+}
+
+private struct MealPrepUsageDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var mealPrepItemID: UUID
+    var dateTime: Date
+    var servingsUsed: Double
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct FoodReminderDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var typeRawValue: String
+    var title: String
+    var relatedShoppingListID: UUID?
+    var relatedMealPrepItemID: UUID?
+    var dateTime: Date
+    var isEnabled: Bool
+    var recurrence: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 enum DataExportImportService {
     @MainActor
     static func exportData(context: ModelContext) throws -> Data {
@@ -362,8 +525,166 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
+        let households = try context.fetch(FetchDescriptor<Household>()).map {
+            HouseholdDTO(id: $0.id, name: $0.name, createdAt: $0.createdAt, updatedAt: $0.updatedAt)
+        }
+        let foodStores = try context.fetch(FetchDescriptor<FoodStore>()).map {
+            FoodStoreDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                name: $0.name,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                isArchived: $0.isArchived,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let foodStoreSections = try context.fetch(FetchDescriptor<FoodStoreSection>()).map {
+            FoodStoreSectionDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                storeID: $0.storeID,
+                name: $0.name,
+                sortOrder: $0.sortOrder,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let shoppingLists = try context.fetch(FetchDescriptor<ShoppingList>()).map {
+            ShoppingListDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                name: $0.name,
+                storeID: $0.storeID,
+                listTypeRawValue: $0.listTypeRawValue,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                isArchived: $0.isArchived,
+                sortOrder: $0.sortOrder,
+                notes: $0.notes,
+                lastUsedAt: $0.lastUsedAt
+            )
+        }
+        let shoppingListItems = try context.fetch(FetchDescriptor<ShoppingListItem>()).map {
+            ShoppingListItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                shoppingListID: $0.shoppingListID,
+                foodItemID: $0.foodItemID,
+                name: $0.name,
+                quantity: $0.quantity,
+                unit: $0.unit,
+                notes: $0.notes,
+                storeSectionID: $0.storeSectionID,
+                categoryName: $0.categoryName,
+                isChecked: $0.isChecked,
+                checkedAt: $0.checkedAt,
+                lastUncheckedAt: $0.lastUncheckedAt,
+                isRecurringStaple: $0.isRecurringStaple,
+                priorityRawValue: $0.priorityRawValue,
+                addedBy: $0.addedBy,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder,
+                lastPurchasedAt: $0.lastPurchasedAt,
+                purchaseCount: $0.purchaseCount,
+                inventoryLinkBehaviorRawValue: $0.inventoryLinkBehaviorRawValue
+            )
+        }
+        let foodItems = try context.fetch(FetchDescriptor<FoodItem>()).map {
+            FoodItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                canonicalName: $0.canonicalName,
+                aliasesJSON: $0.aliasesJSON,
+                defaultUnit: $0.defaultUnit,
+                defaultStoreSectionByStoreJSON: $0.defaultStoreSectionByStoreJSON,
+                defaultInventoryLocationID: $0.defaultInventoryLocationID,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                isArchived: $0.isArchived
+            )
+        }
+        let inventoryLocations = try context.fetch(FetchDescriptor<InventoryLocation>()).map {
+            InventoryLocationDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                name: $0.name,
+                locationTypeRawValue: $0.locationTypeRawValue,
+                sortOrder: $0.sortOrder,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                isArchived: $0.isArchived
+            )
+        }
+        let inventoryItems = try context.fetch(FetchDescriptor<InventoryItem>()).map {
+            InventoryItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                foodItemID: $0.foodItemID,
+                name: $0.name,
+                quantity: $0.quantity,
+                unit: $0.unit,
+                locationID: $0.locationID,
+                storageDetail: $0.storageDetail,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                lastUsedAt: $0.lastUsedAt,
+                statusRawValue: $0.statusRawValue
+            )
+        }
+        let mealPrepItems = try context.fetch(FetchDescriptor<MealPrepItem>()).map {
+            MealPrepItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                name: $0.name,
+                locationID: $0.locationID,
+                servingsTotal: $0.servingsTotal,
+                servingsRemaining: $0.servingsRemaining,
+                servingUnitRawValue: $0.servingUnitRawValue,
+                preparedDate: $0.preparedDate,
+                notes: $0.notes,
+                tagsJSON: $0.tagsJSON,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                lastUsedAt: $0.lastUsedAt,
+                isArchived: $0.isArchived
+            )
+        }
+        let mealPrepUsages = try context.fetch(FetchDescriptor<MealPrepUsage>()).map {
+            MealPrepUsageDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                mealPrepItemID: $0.mealPrepItemID,
+                dateTime: $0.dateTime,
+                servingsUsed: $0.servingsUsed,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let foodReminders = try context.fetch(FetchDescriptor<FoodReminder>()).map {
+            FoodReminderDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                typeRawValue: $0.typeRawValue,
+                title: $0.title,
+                relatedShoppingListID: $0.relatedShoppingListID,
+                relatedMealPrepItemID: $0.relatedMealPrepItemID,
+                dateTime: $0.dateTime,
+                isEnabled: $0.isEnabled,
+                recurrence: $0.recurrence,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
         let envelope = BackupEnvelope(
-            version: 7,
+            version: 8,
             exportedAt: Date(),
             profiles: profiles,
             events: events,
@@ -371,7 +692,18 @@ enum DataExportImportService {
             milestones: milestones,
             appointments: appointments,
             ageGuideReadStates: ageGuideReadStates,
-            puppyStageGuideReadStates: puppyStageGuideReadStates
+            puppyStageGuideReadStates: puppyStageGuideReadStates,
+            households: households,
+            foodStores: foodStores,
+            foodStoreSections: foodStoreSections,
+            shoppingLists: shoppingLists,
+            shoppingListItems: shoppingListItems,
+            foodItems: foodItems,
+            inventoryLocations: inventoryLocations,
+            inventoryItems: inventoryItems,
+            mealPrepItems: mealPrepItems,
+            mealPrepUsages: mealPrepUsages,
+            foodReminders: foodReminders
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -384,7 +716,7 @@ enum DataExportImportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
-        guard (1...7).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
+        guard (1...8).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
         try deleteAll(context: context)
 
         for value in envelope.profiles {
@@ -583,6 +915,171 @@ enum DataExportImportService {
                 updatedAt: value.updatedAt
             ))
         }
+        for value in envelope.households ?? [] {
+            context.insert(Household(
+                id: value.id,
+                name: value.name,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.foodStores ?? [] {
+            context.insert(FoodStore(
+                id: value.id,
+                householdID: value.householdID,
+                name: value.name,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                isArchived: value.isArchived,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.foodStoreSections ?? [] {
+            context.insert(FoodStoreSection(
+                id: value.id,
+                householdID: value.householdID,
+                storeID: value.storeID,
+                name: value.name,
+                sortOrder: value.sortOrder,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.shoppingLists ?? [] {
+            context.insert(ShoppingList(
+                id: value.id,
+                householdID: value.householdID,
+                name: value.name,
+                storeID: value.storeID,
+                listType: ShoppingListType(rawValue: value.listTypeRawValue) ?? .general,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                isArchived: value.isArchived,
+                sortOrder: value.sortOrder,
+                notes: value.notes,
+                lastUsedAt: value.lastUsedAt
+            ))
+        }
+        for value in envelope.shoppingListItems ?? [] {
+            context.insert(ShoppingListItem(
+                id: value.id,
+                householdID: value.householdID,
+                shoppingListID: value.shoppingListID,
+                foodItemID: value.foodItemID,
+                name: value.name,
+                quantity: value.quantity,
+                unit: value.unit,
+                notes: value.notes,
+                storeSectionID: value.storeSectionID,
+                categoryName: value.categoryName,
+                isChecked: value.isChecked,
+                checkedAt: value.checkedAt,
+                lastUncheckedAt: value.lastUncheckedAt,
+                isRecurringStaple: value.isRecurringStaple,
+                priority: ShoppingItemPriority(rawValue: value.priorityRawValue) ?? .normal,
+                addedBy: value.addedBy,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder,
+                lastPurchasedAt: value.lastPurchasedAt,
+                purchaseCount: value.purchaseCount,
+                inventoryLinkBehavior: InventoryLinkBehavior(
+                    rawValue: value.inventoryLinkBehaviorRawValue
+                ) ?? .askWhenChecked
+            ))
+        }
+        for value in envelope.foodItems ?? [] {
+            context.insert(FoodItem(
+                id: value.id,
+                householdID: value.householdID,
+                canonicalName: value.canonicalName,
+                aliasesJSON: value.aliasesJSON,
+                defaultUnit: value.defaultUnit,
+                defaultStoreSectionByStoreJSON: value.defaultStoreSectionByStoreJSON,
+                defaultInventoryLocationID: value.defaultInventoryLocationID,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                isArchived: value.isArchived
+            ))
+        }
+        for value in envelope.inventoryLocations ?? [] {
+            context.insert(InventoryLocation(
+                id: value.id,
+                householdID: value.householdID,
+                name: value.name,
+                locationType: InventoryLocationType(rawValue: value.locationTypeRawValue) ?? .custom,
+                sortOrder: value.sortOrder,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                isArchived: value.isArchived
+            ))
+        }
+        for value in envelope.inventoryItems ?? [] {
+            context.insert(InventoryItem(
+                id: value.id,
+                householdID: value.householdID,
+                foodItemID: value.foodItemID,
+                name: value.name,
+                quantity: value.quantity,
+                unit: value.unit,
+                locationID: value.locationID,
+                storageDetail: value.storageDetail,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                lastUsedAt: value.lastUsedAt,
+                status: InventoryItemStatus(rawValue: value.statusRawValue) ?? .available
+            ))
+        }
+        for value in envelope.mealPrepItems ?? [] {
+            context.insert(MealPrepItem(
+                id: value.id,
+                householdID: value.householdID,
+                name: value.name,
+                locationID: value.locationID,
+                servingsTotal: value.servingsTotal,
+                servingsRemaining: value.servingsRemaining,
+                servingUnit: MealPrepServingUnit(rawValue: value.servingUnitRawValue) ?? .serving,
+                preparedDate: value.preparedDate,
+                notes: value.notes,
+                tagsJSON: value.tagsJSON,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                lastUsedAt: value.lastUsedAt,
+                isArchived: value.isArchived
+            ))
+        }
+        for value in envelope.mealPrepUsages ?? [] {
+            context.insert(MealPrepUsage(
+                id: value.id,
+                householdID: value.householdID,
+                mealPrepItemID: value.mealPrepItemID,
+                dateTime: value.dateTime,
+                servingsUsed: value.servingsUsed,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.foodReminders ?? [] {
+            context.insert(FoodReminder(
+                id: value.id,
+                householdID: value.householdID,
+                type: FoodReminderType(rawValue: value.typeRawValue) ?? .custom,
+                title: value.title,
+                relatedShoppingListID: value.relatedShoppingListID,
+                relatedMealPrepItemID: value.relatedMealPrepItemID,
+                dateTime: value.dateTime,
+                isEnabled: value.isEnabled,
+                recurrence: value.recurrence,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
         try context.save()
         PersistenceService.recordLocalSave()
         _ = try LegacyTrackerGrowthMigration.migrate(in: context)
@@ -591,6 +1088,17 @@ enum DataExportImportService {
 
     @MainActor
     static func deleteAll(context: ModelContext) throws {
+        try context.delete(model: FoodReminder.self)
+        try context.delete(model: MealPrepUsage.self)
+        try context.delete(model: MealPrepItem.self)
+        try context.delete(model: InventoryItem.self)
+        try context.delete(model: InventoryLocation.self)
+        try context.delete(model: FoodItem.self)
+        try context.delete(model: ShoppingListItem.self)
+        try context.delete(model: ShoppingList.self)
+        try context.delete(model: FoodStoreSection.self)
+        try context.delete(model: FoodStore.self)
+        try context.delete(model: Household.self)
         try context.delete(model: PredictionFactor.self)
         try context.delete(model: SleepPredictionRecord.self)
         try context.delete(model: BabyEvent.self)

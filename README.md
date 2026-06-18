@@ -17,7 +17,7 @@ The first launch creates a starter child profile when the data store is empty. S
 - Dog logs for food, water, treat, potty, walk, rest, training, grooming, medicine, symptoms, growth, temperature, vaccines, glucose, and custom events.
 - Active timers for sleep, feed, nursing, activity, walk, rest, training, grooming, and custom logs.
 - Stopped timer drafts that can be reviewed, resumed, saved, or discarded.
-- Calendar/history views for browsing, editing, and filtering logged events.
+- Reports day and list views for browsing, editing, and filtering logged events.
 - Milestones and memories with age-based prompts, categories, and profile scoping.
 - Monthly age guides for child profiles and puppy-stage guide content for dog profiles.
 - Appointments and visits with questions, notes, summaries, follow-up instructions, medications, vaccines, linked measurements, and reminders.
@@ -31,9 +31,9 @@ Feed and nursing logs are optional soft confidence signals. `LittleWindows/Servi
 
 Predictions and Little Window alerts are planning aids only. They describe logged patterns and are not medical advice.
 
-## Insights
+## Reports and insights
 
-The Insights tab provides analytics sections for Overview, Sleep, Wake Windows, Feeding, Diapers, Activities, Growth, Appointments, Milestones, Dog Care, and Prediction Accuracy. Sections support short lookback ranges, previous-period comparison, plain-language observations, and Swift Charts backed by `InsightsAnalyticsService`.
+The Reports tab combines Day and List history views with a Summary analytics mode. Summary provides analytics sections for Overview, Sleep, Wake Windows, Feeding, Diapers, Activities, Growth, Appointments, Milestones, Dog Care, and Prediction Accuracy. Sections support short lookback ranges, previous-period comparison, plain-language observations, and Swift Charts backed by `InsightsAnalyticsService`.
 
 Analytics are calculated locally from the SwiftData event history. Sleep is grouped into overnight sessions, sequential Left/Right nursing logs can be combined when counting care sessions, and prediction errors use negative for predicted early and positive for predicted late.
 

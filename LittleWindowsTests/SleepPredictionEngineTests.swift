@@ -738,11 +738,40 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual((placement?.endMinute ?? 0) - (placement?.startMinute ?? 0), 30)
     }
 
+    func testHistoryDayFilterIncludesPointDiapersAndExcludesTimerDrafts() {
+        let selectedProfileID = UUID()
+        let otherProfileID = UUID()
+        let now = Date()
+        let diaper = BabyEvent(profileID: selectedProfileID, type: .diaper, startDate: now, endDate: nil)
+        diaper.diaperKind = .wet
+        let legacyDiaper = BabyEvent(type: .diaper, startDate: now, endDate: nil)
+        legacyDiaper.diaperKind = .dirty
+        let otherProfileDiaper = BabyEvent(profileID: otherProfileID, type: .diaper, startDate: now, endDate: nil)
+        otherProfileDiaper.diaperKind = .both
+        let timerDraft = BabyEvent(profileID: selectedProfileID, type: .sleep, startDate: now, endDate: nil)
+
+        XCTAssertTrue(HistoryView.visibleDayEvent(diaper, selectedProfileID: selectedProfileID))
+        XCTAssertTrue(HistoryView.visibleDayEvent(legacyDiaper, selectedProfileID: selectedProfileID))
+        XCTAssertFalse(HistoryView.visibleDayEvent(otherProfileDiaper, selectedProfileID: selectedProfileID))
+        XCTAssertFalse(HistoryView.visibleDayEvent(timerDraft, selectedProfileID: selectedProfileID))
+    }
+
     @MainActor
-    func testDeepLinkRouterOpensHistoryTab() {
+    func testDeepLinkRouterOpensReportsDayModeForHistory() {
         let router = DeepLinkRouter.shared
+        router.selectedReportsMode = .summary
         router.route(URL(string: "littlewindows://history")!)
-        XCTAssertEqual(router.selectedTab, .history)
+        XCTAssertEqual(router.selectedTab, .reports)
+        XCTAssertEqual(router.selectedReportsMode, .day)
+    }
+
+    @MainActor
+    func testDeepLinkRouterOpensReportsSummaryModeForInsights() {
+        let router = DeepLinkRouter.shared
+        router.selectedReportsMode = .day
+        router.route(URL(string: "littlewindows://insights")!)
+        XCTAssertEqual(router.selectedTab, .reports)
+        XCTAssertEqual(router.selectedReportsMode, .summary)
     }
 
     @MainActor
@@ -1111,16 +1140,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     @MainActor
     func testBundledLegacyTrackerHistoryImportsWithoutActiveTimers() throws {
-        let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
-            DoctorAppointment.self,
-            MilestoneEntry.self,
-            AgeGuideReadState.self,
-            PuppyStageGuideReadState.self,
-            SleepPredictionRecord.self,
-            PredictionFactor.self
-        ])
+        let schema = PersistenceService.schema
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
 
@@ -1184,17 +1204,35 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testFoodHomeBootstrapDoesNotCreateDefaultFoodData() throws {
+        let container = try makeInMemoryContainer()
+
+        FoodHomeBootstrapService.seedIfNeeded(context: container.mainContext)
+
+        let households = try container.mainContext.fetch(FetchDescriptor<Household>())
+        let stores = try container.mainContext.fetch(FetchDescriptor<FoodStore>())
+        let storeSections = try container.mainContext.fetch(FetchDescriptor<FoodStoreSection>())
+        let shoppingLists = try container.mainContext.fetch(FetchDescriptor<ShoppingList>())
+        let shoppingItems = try container.mainContext.fetch(FetchDescriptor<ShoppingListItem>())
+        let locations = try container.mainContext.fetch(FetchDescriptor<InventoryLocation>())
+        let inventoryItems = try container.mainContext.fetch(FetchDescriptor<InventoryItem>())
+        let mealPrepItems = try container.mainContext.fetch(FetchDescriptor<MealPrepItem>())
+        let foodReminders = try container.mainContext.fetch(FetchDescriptor<FoodReminder>())
+
+        XCTAssertEqual(households.count, 1)
+        XCTAssertTrue(stores.isEmpty)
+        XCTAssertTrue(storeSections.isEmpty)
+        XCTAssertTrue(shoppingLists.isEmpty)
+        XCTAssertTrue(shoppingItems.isEmpty)
+        XCTAssertTrue(locations.isEmpty)
+        XCTAssertTrue(inventoryItems.isEmpty)
+        XCTAssertTrue(mealPrepItems.isEmpty)
+        XCTAssertTrue(foodReminders.isEmpty)
+    }
+
+    @MainActor
     func testLegacyTrackerGrowthMigrationRecoversMeasurements() throws {
-        let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
-            DoctorAppointment.self,
-            MilestoneEntry.self,
-            AgeGuideReadState.self,
-            PuppyStageGuideReadState.self,
-            SleepPredictionRecord.self,
-            PredictionFactor.self
-        ])
+        let schema = PersistenceService.schema
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let profile = BabyProfile(name: "Test Child", birthDate: SampleData.defaultBirthDate)
@@ -1231,16 +1269,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     @MainActor
     func testBundledHistoryPredictionCompletesQuickly() throws {
-        let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
-            DoctorAppointment.self,
-            MilestoneEntry.self,
-            AgeGuideReadState.self,
-            PuppyStageGuideReadState.self,
-            SleepPredictionRecord.self,
-            PredictionFactor.self
-        ])
+        let schema = PersistenceService.schema
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         try DataExportImportService.importData(
@@ -1666,6 +1695,68 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.activeTimer?.id, sleep.id)
         XCTAssertEqual(snapshot.activeTimer?.eventLabel, "Sleeping")
         XCTAssertEqual(snapshot.activeTimer?.additionalActiveCount, 1)
+    }
+
+    @MainActor
+    func testFoodWidgetSnapshotIncludesActiveShoppingListItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let store = FoodStore(householdID: household.id, name: "Trader Joe's", sortOrder: 0)
+        let section = FoodStoreSection(
+            householdID: household.id,
+            storeID: store.id,
+            name: "Produce",
+            sortOrder: 0
+        )
+        let list = ShoppingList(
+            householdID: household.id,
+            name: "Trader Joe's",
+            storeID: store.id,
+            listType: .store,
+            sortOrder: 0
+        )
+        let bananas = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Bananas",
+            quantity: 6,
+            unit: "ct",
+            storeSectionID: section.id,
+            sortOrder: 1
+        )
+        let spinach = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Spinach",
+            storeSectionID: section.id,
+            sortOrder: 0
+        )
+        let checked = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Cereal",
+            isChecked: true,
+            sortOrder: 2
+        )
+
+        context.insert(household)
+        context.insert(store)
+        context.insert(section)
+        context.insert(list)
+        context.insert(bananas)
+        context.insert(spinach)
+        context.insert(checked)
+        try context.save()
+
+        let snapshot = WidgetSnapshotService.makeFoodSnapshot(context: context)
+
+        XCTAssertEqual(snapshot.selectedList?.id, list.id)
+        XCTAssertEqual(snapshot.selectedList?.activeItemCount, 2)
+        XCTAssertEqual(snapshot.selectedList?.checkedItemCount, 1)
+        XCTAssertEqual(snapshot.selectedList?.topActiveItems.map(\.name), ["Spinach", "Bananas"])
+        XCTAssertEqual(snapshot.selectedList?.topActiveItems.last?.quantityText, "6 ct")
+        XCTAssertEqual(snapshot.selectedList?.topActiveItems.first?.sectionName, "Produce")
     }
 
     @MainActor
@@ -2455,16 +2546,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     @MainActor
     func testMilestonesRoundTripThroughJSONBackup() throws {
-        let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
-            DoctorAppointment.self,
-            MilestoneEntry.self,
-            AgeGuideReadState.self,
-            PuppyStageGuideReadState.self,
-            SleepPredictionRecord.self,
-            PredictionFactor.self
-        ])
+        let schema = PersistenceService.schema
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let context = container.mainContext
@@ -2622,6 +2704,205 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testFoodHomeDataRoundTripsThroughJSONBackup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let store = FoodStore(householdID: household.id, name: "Test Market", sortOrder: 1)
+        let section = FoodStoreSection(
+            householdID: household.id,
+            storeID: store.id,
+            name: "Frozen",
+            sortOrder: 2
+        )
+        let list = ShoppingList(
+            householdID: household.id,
+            name: "Test Market",
+            storeID: store.id,
+            listType: .store
+        )
+        let item = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Breakfast burritos",
+            quantity: 8,
+            unit: "pack",
+            storeSectionID: section.id,
+            isChecked: true,
+            checkedAt: Date(timeIntervalSince1970: 1_780_100_000),
+            isRecurringStaple: true,
+            purchaseCount: 3
+        )
+        let location = InventoryLocation(
+            householdID: household.id,
+            name: "Freezer",
+            locationType: .freezer
+        )
+        let inventory = InventoryItem(
+            householdID: household.id,
+            name: "Chicken soup",
+            quantity: 4,
+            unit: "containers",
+            locationID: location.id
+        )
+        let mealPrep = MealPrepItem(
+            householdID: household.id,
+            name: "Turkey chili",
+            locationID: location.id,
+            servingsTotal: 6,
+            servingsRemaining: 5,
+            servingUnit: .serving,
+            tagsJSON: "freezer,dinner"
+        )
+        let usage = MealPrepUsage(
+            householdID: household.id,
+            mealPrepItemID: mealPrep.id,
+            servingsUsed: 1,
+            notes: "Dinner"
+        )
+        let reminder = FoodReminder(
+            householdID: household.id,
+            type: .shopping,
+            title: "Check shopping list",
+            relatedShoppingListID: list.id,
+            dateTime: Date(timeIntervalSince1970: 1_780_200_000)
+        )
+
+        context.insert(household)
+        context.insert(store)
+        context.insert(section)
+        context.insert(list)
+        context.insert(item)
+        context.insert(location)
+        context.insert(inventory)
+        context.insert(mealPrep)
+        context.insert(usage)
+        context.insert(reminder)
+        try context.save()
+
+        let backup = try DataExportImportService.exportData(context: context)
+        try DataExportImportService.importData(backup, context: context)
+
+        let importedList = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ShoppingList>()).first { $0.name == "Test Market" }
+        )
+        let importedItem = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ShoppingListItem>()).first { $0.name == "Breakfast burritos" }
+        )
+        let importedInventory = try XCTUnwrap(
+            context.fetch(FetchDescriptor<InventoryItem>()).first { $0.name == "Chicken soup" }
+        )
+        let importedMealPrep = try XCTUnwrap(
+            context.fetch(FetchDescriptor<MealPrepItem>()).first { $0.name == "Turkey chili" }
+        )
+        let importedUsage = try XCTUnwrap(
+            context.fetch(FetchDescriptor<MealPrepUsage>()).first {
+                $0.mealPrepItemID == importedMealPrep.id
+            }
+        )
+        let importedReminder = try XCTUnwrap(
+            context.fetch(FetchDescriptor<FoodReminder>()).first { $0.title == "Check shopping list" }
+        )
+
+        XCTAssertEqual(importedList.storeID, store.id)
+        XCTAssertEqual(importedItem.storeSectionID, section.id)
+        XCTAssertTrue(importedItem.isChecked)
+        XCTAssertTrue(importedItem.isRecurringStaple)
+        XCTAssertEqual(importedItem.purchaseCount, 3)
+        XCTAssertEqual(importedInventory.quantity, 4)
+        XCTAssertEqual(importedMealPrep.servingsRemaining, 5)
+        XCTAssertEqual(importedMealPrep.tagsJSON, "freezer,dinner")
+        XCTAssertEqual(importedUsage.notes, "Dinner")
+        XCTAssertEqual(importedReminder.relatedShoppingListID, list.id)
+    }
+
+    @MainActor
+    func testFoodReminderCancelRemovesScheduledReminder() async throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let reminder = FoodReminder(
+            householdID: household.id,
+            type: .shopping,
+            title: "Check shopping list",
+            dateTime: Date().addingTimeInterval(3600)
+        )
+
+        context.insert(household)
+        context.insert(reminder)
+        try context.save()
+
+        await FoodReminderService.cancel(reminder, context: context)
+
+        let reminders = try context.fetch(FetchDescriptor<FoodReminder>())
+        XCTAssertTrue(reminders.isEmpty)
+    }
+
+    @MainActor
+    func testInventoryLocationServiceCreatesUpdatesAndArchivesLocations() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        context.insert(household)
+        try context.save()
+
+        let location = try XCTUnwrap(InventoryLocationService.addLocation(
+            name: "Basement Shelf",
+            locationType: .custom,
+            householdID: household.id,
+            notes: "Bulk storage",
+            existingLocations: [],
+            context: context
+        ))
+        XCTAssertEqual(location.name, "Basement Shelf")
+        XCTAssertEqual(location.locationType, .custom)
+        XCTAssertEqual(location.notes, "Bulk storage")
+
+        let duplicate = InventoryLocationService.addLocation(
+            name: " basement shelf ",
+            locationType: .household,
+            householdID: household.id,
+            notes: "",
+            existingLocations: [location],
+            context: context
+        )
+        XCTAssertNil(duplicate)
+
+        XCTAssertTrue(InventoryLocationService.updateLocation(
+            location,
+            name: "Basement Freezer",
+            locationType: .freezer,
+            notes: "Overflow meals",
+            existingLocations: [location],
+            context: context
+        ))
+        XCTAssertEqual(location.name, "Basement Freezer")
+        XCTAssertEqual(location.locationType, .freezer)
+
+        let inventory = InventoryItem(
+            householdID: household.id,
+            name: "Soup",
+            quantity: 2,
+            locationID: location.id
+        )
+        XCTAssertFalse(InventoryLocationService.archiveLocation(
+            location,
+            inventoryItems: [inventory],
+            mealPrepItems: [],
+            context: context
+        ))
+        XCTAssertFalse(location.isArchived)
+
+        XCTAssertTrue(InventoryLocationService.archiveLocation(
+            location,
+            inventoryItems: [],
+            mealPrepItems: [],
+            context: context
+        ))
+        XCTAssertTrue(location.isArchived)
+    }
+
+    @MainActor
     func testMonthlyAgeGuideNotificationTimingUsesReadableMorning() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -2684,16 +2965,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     @MainActor
     private func makeInMemoryContainer() throws -> ModelContainer {
-        let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
-            DoctorAppointment.self,
-            MilestoneEntry.self,
-            AgeGuideReadState.self,
-            PuppyStageGuideReadState.self,
-            SleepPredictionRecord.self,
-            PredictionFactor.self
-        ])
+        let schema = PersistenceService.schema
         let configuration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: true

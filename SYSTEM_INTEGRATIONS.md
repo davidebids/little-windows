@@ -8,11 +8,13 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - Next Sleep Window widget: small, medium, and Lock Screen rectangular.
 - Today Summary widget: medium.
 - Quick Log widget: medium.
+- Shopping List widget: small and medium, backed by the Food & Home shopping snapshot.
+- Food Quick Add widget: medium, opens quick add and usual shopping lists in the app.
 - Live Activity with Lock Screen, Dynamic Island compact, Dynamic Island minimal, and Dynamic Island expanded presentations.
 - App Intents for timer control, quick logging, app navigation, and night-light presets.
 - App Shortcuts for starting sleep, starting Left or Right nursing, stopping the primary timer, opening the night light, and starting common night-light presets.
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
-- Local notifications for sleep windows, appointment reminders, and monthly guide reminders.
+- Local notifications for sleep windows, appointment reminders, monthly guide reminders, and user-created Food & Home reminders.
 
 The primary Live Activity priority is Sleep, Nursing, Feed, Tummy Time, Reading, then Bath. When another timer is active, the surface displays a `+1 more active` count.
 
@@ -98,6 +100,16 @@ littlewindows://night-light
 littlewindows://active-timer
 littlewindows://prediction
 littlewindows://event/{UUID}
+littlewindows://food
+littlewindows://food/quick-add
+littlewindows://food/shopping
+littlewindows://food/shopping/{UUID}
+littlewindows://food/shopping/{UUID}/mode
+littlewindows://food/inventory
+littlewindows://food/inventory/{UUID}
+littlewindows://food/meal-prep
+littlewindows://food/meal-prep/{UUID}
+littlewindows://food/stores/{UUID}
 ```
 
 Profile-scoped routes can prefix another route with a profile identifier:
@@ -183,8 +195,9 @@ Little Windows uses local notifications for:
 - Sleep-window alerts, gated by notification permission, lead time, nap/bedtime toggles, and minimum confidence.
 - Appointment reminders with selectable lead times.
 - Monthly guide reminders that fire at most once per monthly age guide.
+- Food & Home reminders created by the user for shopping, meal prep, or custom food tasks.
 
-Notification scheduling is refreshed after relevant event mutations, prediction updates, appointment changes, and guide-read-state changes.
+Notification scheduling is refreshed after relevant event mutations, prediction updates, appointment changes, guide-read-state changes, and Food & Home reminder changes. Food & Home shopping-list widgets refresh from lightweight App Group snapshots; the widget extension opens the app for edits rather than writing SwiftData directly.
 
 ## Real-device testing
 
@@ -201,8 +214,10 @@ Notification scheduling is refreshed after relevant event mutations, prediction 
 11. Start diaper-change and soothing night-light presets from shortcuts or controls.
 12. Create an appointment and verify selected reminder lead times.
 13. Enable monthly guide reminders and verify scheduling after guide state changes.
+14. Create a Food & Home reminder and verify it opens the relevant Food screen or item.
+15. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
 
-Live Activities, Dynamic Island, Control Center controls, App Groups, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
+Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit sync, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
 
 ## Apple references
 

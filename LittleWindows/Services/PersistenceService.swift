@@ -20,7 +20,18 @@ enum PersistenceService {
             AgeGuideReadState.self,
             PuppyStageGuideReadState.self,
             SleepPredictionRecord.self,
-            PredictionFactor.self
+            PredictionFactor.self,
+            Household.self,
+            FoodStore.self,
+            FoodStoreSection.self,
+            ShoppingList.self,
+            ShoppingListItem.self,
+            FoodItem.self,
+            InventoryLocation.self,
+            InventoryItem.self,
+            MealPrepItem.self,
+            MealPrepUsage.self,
+            FoodReminder.self
         ])
     }
 

@@ -22,6 +22,62 @@ enum HistoryDisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
+struct ReportsView: View {
+    @ObservedObject private var router = DeepLinkRouter.shared
+    @AppStorage("reportsDisplayMode") private var displayModeRawValue = ReportsDisplayMode.day.rawValue
+    @State private var selectedDate: Date
+
+    init() {
+        _selectedDate = State(initialValue: HistoryView.initialSelectedDate())
+    }
+
+    private var displayMode: Binding<ReportsDisplayMode> {
+        Binding(
+            get: { router.selectedReportsMode },
+            set: {
+                router.selectedReportsMode = $0
+                displayModeRawValue = $0.rawValue
+            }
+        )
+    }
+    private var historyDisplayMode: HistoryDisplayMode? {
+        switch displayMode.wrappedValue {
+        case .day:
+            return .day
+        case .list:
+            return .list
+        case .summary:
+            return nil
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Reports view", selection: displayMode) {
+                ForEach(ReportsDisplayMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+
+            if let historyDisplayMode {
+                HistoryView(
+                    forcedDisplayMode: historyDisplayMode,
+                    showsDisplayModePicker: false,
+                    navigationTitle: "Reports",
+                    selectedDate: $selectedDate
+                )
+            } else {
+                InsightsDashboardView(navigationTitle: "Reports")
+            }
+        }
+        .background(AppTheme.background)
+    }
+}
+
 struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
@@ -34,15 +90,28 @@ struct HistoryView: View {
     @AppStorage("customWakeMinimum") private var customWakeMinimum = 0.0
     @AppStorage("customWakeMaximum") private var customWakeMaximum = 0.0
     @AppStorage("historyDisplayMode") private var displayModeRawValue = HistoryDisplayMode.list.rawValue
-    @State private var selectedDate = Date()
+    @State private var internalSelectedDate: Date
     @State private var events: [BabyEvent] = []
     @State private var appointments: [DoctorAppointment] = []
     @State private var milestones: [MilestoneEntry] = []
     @State private var editorRoute: EventEditorRoute?
     @State private var activeTimerToEdit: BabyEvent?
     @StateObject private var profileService = ProfileService.shared
+    private let forcedDisplayMode: HistoryDisplayMode?
+    private let showsDisplayModePicker: Bool
+    private let navigationTitle: String
+    private let externalSelectedDate: Binding<Date>?
 
-    init() {
+    init(
+        forcedDisplayMode: HistoryDisplayMode? = nil,
+        showsDisplayModePicker: Bool = true,
+        navigationTitle: String = "Calendar",
+        selectedDate: Binding<Date>? = nil
+    ) {
+        self.forcedDisplayMode = forcedDisplayMode
+        self.showsDisplayModePicker = showsDisplayModePicker
+        self.navigationTitle = navigationTitle
+        self.externalSelectedDate = selectedDate
         let recentCutoff = Calendar.current.date(
             byAdding: .day,
             value: -45,
@@ -56,11 +125,15 @@ struct HistoryView: View {
         )
         recordDescriptor.fetchLimit = 120
         _records = Query(recordDescriptor)
+        _internalSelectedDate = State(initialValue: Self.initialSelectedDate())
+    }
 
+    static func initialSelectedDate() -> Date {
         if let value = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_HISTORY_DATE"],
            let date = ISO8601DateFormatter().date(from: value) {
-            _selectedDate = State(initialValue: date)
+            return date
         }
+        return Date()
     }
 
     private var profile: BabyProfile? {
@@ -74,8 +147,23 @@ struct HistoryView: View {
     }
     private var displayMode: Binding<HistoryDisplayMode> {
         Binding(
-            get: { HistoryDisplayMode(rawValue: displayModeRawValue) ?? .list },
-            set: { displayModeRawValue = $0.rawValue }
+            get: { forcedDisplayMode ?? HistoryDisplayMode(rawValue: displayModeRawValue) ?? .list },
+            set: { if forcedDisplayMode == nil { displayModeRawValue = $0.rawValue } }
+        )
+    }
+    private var selectedDate: Date {
+        selectedDateBinding.wrappedValue
+    }
+    private var selectedDateBinding: Binding<Date> {
+        Binding(
+            get: { externalSelectedDate?.wrappedValue ?? internalSelectedDate },
+            set: { newValue in
+                if externalSelectedDate != nil {
+                    externalSelectedDate?.wrappedValue = newValue
+                } else {
+                    internalSelectedDate = newValue
+                }
+            }
         )
     }
 
@@ -90,19 +178,23 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
             }
 
-            summarySection
+            if displayMode.wrappedValue == .day {
+                summarySection
+            }
 
-            Section {
-                Picker("History view", selection: displayMode) {
-                    ForEach(HistoryDisplayMode.allCases) { mode in
-                        Label(mode.title, systemImage: mode.systemImage)
-                            .tag(mode)
+            if showsDisplayModePicker {
+                Section {
+                    Picker("History view", selection: displayMode) {
+                        ForEach(HistoryDisplayMode.allCases) { mode in
+                            Label(mode.title, systemImage: mode.systemImage)
+                                .tag(mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
-                .pickerStyle(.segmented)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
             }
 
             historySection
@@ -110,7 +202,7 @@ struct HistoryView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
-        .navigationTitle("Calendar")
+        .navigationTitle(navigationTitle)
         .task(id: historyRefreshToken) {
             refreshDayData()
         }
@@ -162,7 +254,7 @@ struct HistoryView: View {
             }
             .buttonStyle(.plain)
 
-            DatePicker("History date", selection: $selectedDate, displayedComponents: .date)
+            DatePicker("History date", selection: selectedDateBinding, displayedComponents: .date)
                 .labelsHidden()
                 .datePickerStyle(.compact)
                 .frame(maxWidth: .infinity)
@@ -180,7 +272,7 @@ struct HistoryView: View {
             if !Calendar.current.isDateInToday(selectedDate) {
                 Button("Today") {
                     withAnimation(.snappy) {
-                        selectedDate = Date()
+                        selectedDateBinding.wrappedValue = Date()
                     }
                 }
                 .font(.caption.weight(.semibold))
@@ -194,7 +286,7 @@ struct HistoryView: View {
     private var summarySection: some View {
         Section {
             SummaryGrid(summary: summary)
-                .padding(14)
+                .padding(10)
                 .appSurface()
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -357,7 +449,7 @@ struct HistoryView: View {
             return
         }
         withAnimation(.snappy) {
-            selectedDate = date
+            selectedDateBinding.wrappedValue = date
         }
     }
 
@@ -370,12 +462,12 @@ struct HistoryView: View {
         do {
             let eventDescriptor = FetchDescriptor<BabyEvent>(
                 predicate: #Predicate<BabyEvent> { event in
-                    event.startDate >= start && event.startDate < end && event.endDate != nil
+                    event.startDate >= start && event.startDate < end
                 },
                 sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
             )
             events = try modelContext.fetch(eventDescriptor)
-                .filter { $0.matchesProfile(selectedProfileID) }
+                .filter { Self.visibleDayEvent($0, selectedProfileID: selectedProfileID) }
 
             let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
                 predicate: #Predicate<DoctorAppointment> { appointment in
@@ -399,6 +491,10 @@ struct HistoryView: View {
             appointments = []
             milestones = []
         }
+    }
+
+    static func visibleDayEvent(_ event: BabyEvent, selectedProfileID: UUID?) -> Bool {
+        event.matchesProfile(selectedProfileID) && !event.isTimerDraft
     }
 
     private var settings: PredictionSettings {
@@ -1000,7 +1096,10 @@ private struct SummaryGrid: View {
     let summary: DailySummary
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+            spacing: 8
+        ) {
             SummaryCell("Total sleep", DurationFormatting.string(seconds: summary.totalSleep), icon: "moon.fill", color: .indigo)
             SummaryCell("Day sleep", DurationFormatting.string(seconds: summary.daytimeSleep), icon: "sun.haze.fill", color: .orange)
             SummaryCell("Naps", "\(summary.napCount)", icon: "bed.double.fill", color: .purple)
@@ -1036,22 +1135,28 @@ private struct SummaryCell: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.caption.weight(.bold))
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(color)
-                .frame(width: 28, height: 28)
+                .frame(width: 24, height: 24)
                 .background(color.opacity(0.12), in: Circle())
-            Text(value)
-                .font(.headline)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.vertical, 8)
+        .padding(.horizontal, 9)
+        .background(Color.primary.opacity(0.032), in: RoundedRectangle(cornerRadius: 12))
     }
 }

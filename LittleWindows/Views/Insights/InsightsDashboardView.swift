@@ -6,14 +6,17 @@ struct InsightsDashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
+    let navigationTitle: String
     @StateObject private var viewModel = InsightsViewModel()
-    @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
     @State private var events: [BabyEvent] = []
     @State private var appointments: [DoctorAppointment] = []
     @State private var milestones: [MilestoneEntry] = []
     @State private var records: [SleepPredictionRecord] = []
-    @State private var showingPredictionExplanation = false
+
+    init(navigationTitle: String = "Insights") {
+        self.navigationTitle = navigationTitle
+    }
 
     private var profile: BabyProfile? {
         profileService.selectedProfile(in: profiles)
@@ -107,7 +110,7 @@ struct InsightsDashboardView: View {
             .padding(.top, 8)
         }
         .background(AppTheme.background)
-        .navigationTitle("Insights")
+        .navigationTitle(navigationTitle)
         .task(id: refreshToken) {
             if let sectionName = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_INSIGHTS_SECTION"],
                let section = InsightsSection.allCases.first(where: {
@@ -116,11 +119,6 @@ struct InsightsDashboardView: View {
                 viewModel.selectedSection = section
             }
             refreshInsightsData()
-        }
-        .sheet(isPresented: $showingPredictionExplanation) {
-            NavigationStack {
-                PredictionExplanationView(prediction: currentPrediction)
-            }
         }
     }
 
@@ -331,18 +329,6 @@ struct InsightsDashboardView: View {
 
     private var overview: some View {
         Group {
-            PredictionCard(
-                prediction: currentPrediction,
-                babyName: profile?.name ?? "Baby",
-                alertStatusText: notificationManager.statusText(
-                    prediction: currentPrediction,
-                    settings: .current,
-                    isSleeping: scopedEvents.contains { $0.type == .sleep && $0.isTimerRunning }
-                ),
-                alertsEnabled: LittleWindowAlertSettings.current.enabled,
-                showExplanation: { showingPredictionExplanation = true }
-            )
-
             InsightMetricGrid(metrics: viewModel.snapshot.overviewMetrics)
             InsightObservationsCard(trends: viewModel.snapshot.overviewTrends)
 
@@ -433,10 +419,6 @@ struct InsightsDashboardView: View {
                 .chartXAxis { compactDateAxis }
             }
         }
-    }
-
-    private var currentPrediction: SleepPrediction? {
-        scopedRecords.first(where: { $0.actualSleepEventID == nil })?.prediction
     }
 
     private var compactDateAxis: some AxisContent {

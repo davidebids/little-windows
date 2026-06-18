@@ -112,6 +112,8 @@ final class NotificationManager: NSObject, ObservableObject {
     static let addVisitNotesActionID = "ADD_VISIT_NOTES"
     static let ageGuideCategoryID = "MONTHLY_AGE_GUIDE"
     static let openAgeGuideActionID = "OPEN_AGE_GUIDE"
+    static let foodReminderCategoryID = "FOOD_HOME_REMINDER"
+    static let openFoodActionID = "OPEN_FOOD_HOME"
 
     private static let stateKey = "littleWindowNotificationState"
     private static let allNotificationIDs = [
@@ -209,10 +211,22 @@ final class NotificationManager: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
+        let openFood = UNNotificationAction(
+            identifier: Self.openFoodActionID,
+            title: "Open Food & Home",
+            options: [.foreground]
+        )
+        let foodCategory = UNNotificationCategory(
+            identifier: Self.foodReminderCategoryID,
+            actions: [openFood],
+            intentIdentifiers: [],
+            options: []
+        )
         UNUserNotificationCenter.current().setNotificationCategories([
             category,
             appointmentCategory,
-            ageGuideCategory
+            ageGuideCategory,
+            foodCategory
         ])
     }
 
@@ -556,6 +570,32 @@ final class NotificationManager: NSObject, ObservableObject {
         )
     }
 
+    func scheduleFoodReminder(reminder: FoodReminder, now: Date = Date()) async {
+        await cancelFoodReminder(reminderID: reminder.id)
+        guard reminder.isEnabled, reminder.dateTime > now else { return }
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            return
+        }
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: reminder.dateTime
+        )
+        let request = UNNotificationRequest(
+            identifier: Self.foodReminderNotificationID(reminderID: reminder.id),
+            content: buildFoodReminderNotificationContent(reminder: reminder),
+            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelFoodReminder(reminderID: UUID) async {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.foodReminderNotificationID(reminderID: reminderID)]
+        )
+    }
+
     func buildMonthlyAgeGuideNotificationContent(
         guide: AgeGuide,
         babyName: String,
@@ -574,6 +614,41 @@ final class NotificationManager: NSObject, ObservableObject {
             userInfo["profileID"] = profileID.uuidString
         }
         content.userInfo = userInfo
+        return content
+    }
+
+    func buildFoodReminderNotificationContent(
+        reminder: FoodReminder
+    ) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = reminder.title
+        switch reminder.type {
+        case .shopping:
+            content.body = "Open your shopping list before the next trip."
+        case .mealPrep:
+            content.body = "Check prepared meals and servings."
+        case .custom:
+            content.body = "Food & Home reminder."
+        }
+        content.sound = .default
+        content.categoryIdentifier = Self.foodReminderCategoryID
+        let path: String
+        if let listID = reminder.relatedShoppingListID {
+            path = "food/shopping/\(listID.uuidString)"
+        } else if let mealPrepID = reminder.relatedMealPrepItemID {
+            path = "food/meal-prep/\(mealPrepID.uuidString)"
+        } else if reminder.type == .mealPrep {
+            path = "food/meal-prep"
+        } else if reminder.type == .shopping {
+            path = "food/shopping"
+        } else {
+            path = "food"
+        }
+        content.userInfo = [
+            "foodReminderID": reminder.id.uuidString,
+            "householdID": reminder.householdID.uuidString,
+            "deepLink": Self.deepLink(path: path, profileID: nil)
+        ]
         return content
     }
 
@@ -658,6 +733,14 @@ final class NotificationManager: NSObject, ObservableObject {
                 DeepLinkRouter.shared.route(URL(string: "littlewindows://\(profilePrefix)age-guide/\(month)")!)
             } else {
                 DeepLinkRouter.shared.route(URL(string: "littlewindows://milestones")!)
+            }
+        } else if action == Self.openFoodActionID ||
+                    response.notification.request.content.categoryIdentifier == Self.foodReminderCategoryID {
+            if let deepLink = response.notification.request.content.userInfo["deepLink"] as? String,
+               let url = URL(string: deepLink) {
+                DeepLinkRouter.shared.route(url)
+            } else {
+                DeepLinkRouter.shared.route(URL(string: "littlewindows://food")!)
             }
         } else if action == Self.startSleepActionID {
             let profilePrefix = Self.profilePathPrefix(
@@ -850,6 +933,10 @@ final class NotificationManager: NSObject, ObservableObject {
             return "ageguide.\(profileID.uuidString).\(guideID)"
         }
         return "ageguide.\(guideID)"
+    }
+
+    static func foodReminderNotificationID(reminderID: UUID) -> String {
+        "food.reminder.\(reminderID.uuidString)"
     }
 
     static func scopedNotificationID(_ identifier: String, profileID: UUID?) -> String {
