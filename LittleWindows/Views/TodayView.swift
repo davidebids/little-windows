@@ -267,14 +267,13 @@ struct TodayView: View {
                 Button {
                     deepLinkRouter.presentSettings()
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(AppTheme.accent.gradient)
-                        Text(String((profile?.name ?? "B").prefix(1)).uppercased())
-                            .font(.caption.bold())
-                            .foregroundStyle(.white)
+                    if let profile {
+                        ProfileAvatarView(profile: profile, size: 32)
+                    } else {
+                        Image(systemName: "person.crop.circle")
+                            .font(.title2)
+                            .foregroundStyle(AppTheme.accent)
                     }
-                    .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(profile?.name ?? "Profile") settings")

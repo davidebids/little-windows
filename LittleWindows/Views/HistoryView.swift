@@ -82,6 +82,7 @@ struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query private var records: [SleepPredictionRecord]
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
     @AppStorage("bedtimePredictionEnabled") private var bedtimePredictionEnabled = true
@@ -652,6 +653,11 @@ struct HistoryView: View {
     }
 
     private func delete(_ milestone: MilestoneEntry) {
+        PhotoAttachmentStore.deleteAttachments(
+            with: milestone.photoAttachmentIDs,
+            in: photoAttachments,
+            context: modelContext
+        )
         modelContext.delete(milestone)
         try? modelContext.save()
         refreshDayData()

@@ -1,16 +1,30 @@
+import PhotosUI
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ProfileAvatarView: View {
     let profile: CareProfile
     var size: CGFloat = 42
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
 
     var body: some View {
-        Text(profile.initials)
-            .font(.system(size: size * 0.34, weight: .bold))
-            .foregroundStyle(.white)
+        ZStack {
+            if let profilePhotoData,
+               let image = UIImage(data: profilePhotoData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Text(profile.initials)
+                    .font(.system(size: size * 0.34, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(profileTint.gradient)
+            }
+        }
             .frame(width: size, height: size)
-            .background(profileTint.gradient, in: Circle())
+            .clipShape(Circle())
             .overlay(alignment: .bottomTrailing) {
                 Image(systemName: profile.profileType.systemImage)
                     .font(.system(size: size * 0.22, weight: .bold))
@@ -19,6 +33,11 @@ struct ProfileAvatarView: View {
                     .background(.black.opacity(0.24), in: Circle())
                     .offset(x: size * 0.05, y: size * 0.05)
             }
+    }
+
+    private var profilePhotoData: Data? {
+        guard let id = profile.profilePhotoAttachmentID else { return nil }
+        return photoAttachments.first { $0.id == id }?.previewData
     }
 
     private var profileTint: Color {
@@ -173,6 +192,11 @@ struct ProfileEditorView: View {
     @State private var emergencyVet: String
     @State private var notes: String
     @State private var validationMessage: String?
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var profilePhotoLoadToken = UUID()
+    @State private var profilePhotoDraft: PhotoAttachmentDraft?
+    @State private var removesProfilePhoto = false
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
 
     init(profile: CareProfile? = nil, defaultType: CareProfileType = .child) {
         self.profile = profile
@@ -195,6 +219,47 @@ struct ProfileEditorView: View {
     var body: some View {
         Form {
             Section("Profile") {
+                HStack(spacing: 14) {
+                    ProfilePhotoPreview(
+                        profile: profile,
+                        profileType: profileType,
+                        name: name,
+                        photoData: currentProfilePhotoData
+                    )
+                    VStack(alignment: .leading, spacing: 10) {
+                        if currentProfilePhotoData == nil {
+                            PhotosPicker(
+                                selection: profilePhotoPickerSelection,
+                                matching: .images,
+                                photoLibrary: .shared()
+                            ) {
+                                Label("Choose Photo", systemImage: "photo")
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            HStack(spacing: 12) {
+                                PhotosPicker(
+                                    selection: profilePhotoPickerSelection,
+                                    matching: .images,
+                                    photoLibrary: .shared()
+                                ) {
+                                    Label("Change", systemImage: "photo")
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    profilePhotoLoadToken = UUID()
+                                    selectedPhotoItem = nil
+                                    profilePhotoDraft = nil
+                                    removesProfilePhoto = true
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.red)
+                            }
+                        }
+                    }
+                    .controlSize(.regular)
+                }
                 if profile == nil {
                     Picker("Type", selection: $profileType) {
                         ForEach(CareProfileType.allCases) { value in
@@ -263,6 +328,29 @@ struct ProfileEditorView: View {
         }
     }
 
+    private var currentProfilePhotoData: Data? {
+        if let profilePhotoDraft {
+            return profilePhotoDraft.thumbnailData ?? profilePhotoDraft.imageData
+        }
+        guard !removesProfilePhoto,
+              let id = profile?.profilePhotoAttachmentID else { return nil }
+        return photoAttachments.first { $0.id == id }?.previewData
+    }
+
+    private var profilePhotoPickerSelection: Binding<PhotosPickerItem?> {
+        Binding(
+            get: { selectedPhotoItem },
+            set: { item in
+                guard let item else {
+                    selectedPhotoItem = nil
+                    return
+                }
+                selectedPhotoItem = item
+                loadProfilePhoto(from: item)
+            }
+        )
+    }
+
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -278,9 +366,10 @@ struct ProfileEditorView: View {
             profile.displayColor = profile.displayColor ?? defaultDisplayColor
             profile.profileType = profileType
             applyDogFields(to: profile)
+            applyProfilePhoto(to: profile)
             profileService.updateChildProfile(profile)
         } else if profileType == .dog {
-            _ = profileService.createDogProfile(
+            let createdProfile = profileService.createDogProfile(
                 name: trimmed,
                 birthDate: birthDate,
                 sex: sex,
@@ -296,8 +385,9 @@ struct ProfileEditorView: View {
                 displayColor: defaultDisplayColor,
                 context: modelContext
             )
+            applyProfilePhoto(to: createdProfile)
         } else {
-            _ = profileService.createChildProfile(
+            let createdProfile = profileService.createChildProfile(
                 name: trimmed,
                 birthDate: birthDate,
                 sex: sex,
@@ -305,6 +395,7 @@ struct ProfileEditorView: View {
                 displayColor: defaultDisplayColor,
                 context: modelContext
             )
+            applyProfilePhoto(to: createdProfile)
         }
         try? modelContext.save()
         dismiss()
@@ -329,6 +420,93 @@ struct ProfileEditorView: View {
         profile.vetClinic = vetClinic.nilIfBlank
         profile.vetPhone = vetPhone.nilIfBlank
         profile.emergencyVet = emergencyVet.nilIfBlank
+    }
+
+    private func loadProfilePhoto(from item: PhotosPickerItem) {
+        let token = UUID()
+        profilePhotoLoadToken = token
+        Task {
+            guard
+                let data = try? await item.loadTransferable(type: Data.self),
+                let draft = PhotoAttachmentImageProcessor.draft(from: data)
+            else {
+                if profilePhotoLoadToken == token {
+                    selectedPhotoItem = nil
+                }
+                return
+            }
+            guard profilePhotoLoadToken == token else { return }
+            selectedPhotoItem = nil
+            profilePhotoDraft = draft
+            removesProfilePhoto = false
+        }
+    }
+
+    private func applyProfilePhoto(to profile: CareProfile) {
+        if removesProfilePhoto || profilePhotoDraft != nil,
+           let existingID = profile.profilePhotoAttachmentID,
+           let existing = photoAttachments.first(where: { $0.id == existingID }) {
+            modelContext.delete(existing)
+            profile.profilePhotoAttachmentID = nil
+        }
+
+        guard let draft = profilePhotoDraft else { return }
+        let attachment = PhotoAttachment(
+            id: draft.id,
+            profileID: profile.id,
+            ownerKind: .profilePhoto,
+            contentType: draft.contentType,
+            filename: draft.filename,
+            imageData: draft.imageData,
+            thumbnailData: draft.thumbnailData,
+            createdAt: draft.createdAt,
+            updatedAt: Date()
+        )
+        modelContext.insert(attachment)
+        profile.profilePhotoAttachmentID = attachment.id
+        profile.updatedAt = Date()
+    }
+}
+
+private struct ProfilePhotoPreview: View {
+    let profile: CareProfile?
+    let profileType: CareProfileType
+    let name: String
+    let photoData: Data?
+
+    var body: some View {
+        ZStack {
+            if let photoData,
+               let image = UIImage(data: photoData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Text(profile?.initials ?? initials)
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppTheme.accent.gradient)
+            }
+        }
+        .frame(width: 72, height: 72)
+        .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: profileType.systemImage)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .frame(width: 25, height: 25)
+                .background(.black.opacity(0.24), in: Circle())
+        }
+    }
+
+    private var initials: String {
+        let parts = name
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap(\.first)
+        let value = String(parts).uppercased()
+        return value.isEmpty ? "?" : value
     }
 }
 

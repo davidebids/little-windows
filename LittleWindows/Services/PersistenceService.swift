@@ -4,16 +4,19 @@ import SwiftData
 enum PersistenceService {
     static let storeName = "LittleWindows"
     static let appGroupIdentifier = "group.com.debidia.LittleWindows"
+    static let iCloudSyncEnabledKey = "isICloudSyncEnabled"
 
     // Update this if the bundle/team container in Xcode differs.
     static let iCloudContainerIdentifier = "iCloud.com.debidia.LittleWindows"
 
     static private(set) var startupErrorMessage: String?
     static private(set) var isUsingCloudKitStore = true
+    static private(set) var iCloudSyncEnabledAtStartup = true
 
     static var schema: Schema {
         Schema([
             BabyProfile.self,
+            PhotoAttachment.self,
             BabyEvent.self,
             DoctorAppointment.self,
             MilestoneEntry.self,
@@ -36,10 +39,16 @@ enum PersistenceService {
     }
 
     static func makeModelContainer() -> ModelContainer {
+        iCloudSyncEnabledAtStartup = isICloudSyncEnabled()
+
         if shouldUseLocalStoreForValidation {
             return makeLocalModelContainer(
                 startupMessage: "CloudKit-backed store skipped for local validation."
             )
+        }
+
+        guard iCloudSyncEnabledAtStartup else {
+            return makeLocalModelContainer()
         }
 
         do {
@@ -71,7 +80,7 @@ enum PersistenceService {
         return environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
     }
 
-    private static func makeLocalModelContainer(startupMessage: String) -> ModelContainer {
+    private static func makeLocalModelContainer(startupMessage: String? = nil) -> ModelContainer {
         startupErrorMessage = startupMessage
         isUsingCloudKitStore = false
         do {
@@ -96,5 +105,20 @@ enum PersistenceService {
 
     static func lastLocalSaveAt(defaults: UserDefaults = .standard) -> Date? {
         defaults.object(forKey: "lastSuccessfulLocalSaveAt") as? Date
+    }
+
+    static func isICloudSyncEnabled(defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: iCloudSyncEnabledKey) != nil else {
+            return true
+        }
+        return defaults.bool(forKey: iCloudSyncEnabledKey)
+    }
+
+    static func setICloudSyncEnabled(_ enabled: Bool, defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: iCloudSyncEnabledKey)
+    }
+
+    static var iCloudSyncChangeRequiresRestart: Bool {
+        isICloudSyncEnabled() != iCloudSyncEnabledAtStartup
     }
 }

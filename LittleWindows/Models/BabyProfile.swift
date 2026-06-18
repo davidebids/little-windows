@@ -46,6 +46,7 @@ final class CareProfile {
     var vetClinic: String?
     var vetPhone: String?
     var emergencyVet: String?
+    var profilePhotoAttachmentID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -69,7 +70,8 @@ final class CareProfile {
         vetName: String? = nil,
         vetClinic: String? = nil,
         vetPhone: String? = nil,
-        emergencyVet: String? = nil
+        emergencyVet: String? = nil,
+        profilePhotoAttachmentID: UUID? = nil
     ) {
         self.id = id
         self.profileTypeRawValue = profileType.rawValue
@@ -93,6 +95,7 @@ final class CareProfile {
         self.vetClinic = vetClinic
         self.vetPhone = vetPhone
         self.emergencyVet = emergencyVet
+        self.profilePhotoAttachmentID = profilePhotoAttachmentID
     }
 
     var profileType: CareProfileType {

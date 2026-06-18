@@ -27,6 +27,7 @@ private struct BackupEnvelope: Codable {
     var version: Int
     var exportedAt: Date
     var profiles: [ProfileDTO]
+    var photoAttachments: [PhotoAttachmentDTO]?
     var events: [EventDTO]
     var predictionRecords: [PredictionRecordDTO]
     var milestones: [MilestoneDTO]?
@@ -69,6 +70,20 @@ private struct ProfileDTO: Codable {
     var vetClinic: String?
     var vetPhone: String?
     var emergencyVet: String?
+    var profilePhotoAttachmentID: UUID?
+}
+
+private struct PhotoAttachmentDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var ownerKindRawValue: String
+    var contentType: String
+    var filename: String?
+    var imageData: Data?
+    var thumbnailData: Data?
+    var byteCount: Int
+    var createdAt: Date
+    var updatedAt: Date
 }
 
 private struct EventDTO: Codable {
@@ -392,7 +407,22 @@ enum DataExportImportService {
                 vetName: $0.vetName,
                 vetClinic: $0.vetClinic,
                 vetPhone: $0.vetPhone,
-                emergencyVet: $0.emergencyVet
+                emergencyVet: $0.emergencyVet,
+                profilePhotoAttachmentID: $0.profilePhotoAttachmentID
+            )
+        }
+        let photoAttachments = try context.fetch(FetchDescriptor<PhotoAttachment>()).map {
+            PhotoAttachmentDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                ownerKindRawValue: $0.ownerKindRawValue,
+                contentType: $0.contentType,
+                filename: $0.filename,
+                imageData: $0.imageData,
+                thumbnailData: $0.thumbnailData,
+                byteCount: $0.byteCount,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
             )
         }
         let events = try context.fetch(FetchDescriptor<BabyEvent>()).map {
@@ -684,9 +714,10 @@ enum DataExportImportService {
             )
         }
         let envelope = BackupEnvelope(
-            version: 8,
+            version: 9,
             exportedAt: Date(),
             profiles: profiles,
+            photoAttachments: photoAttachments,
             events: events,
             predictionRecords: records,
             milestones: milestones,
@@ -716,7 +747,7 @@ enum DataExportImportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
-        guard (1...8).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
+        guard (1...9).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
         try deleteAll(context: context)
 
         for value in envelope.profiles {
@@ -739,8 +770,25 @@ enum DataExportImportService {
                 vetName: value.vetName,
                 vetClinic: value.vetClinic,
                 vetPhone: value.vetPhone,
-                emergencyVet: value.emergencyVet
+                emergencyVet: value.emergencyVet,
+                profilePhotoAttachmentID: value.profilePhotoAttachmentID
             ))
+        }
+        for value in envelope.photoAttachments ?? [] {
+            if let imageData = value.imageData {
+                context.insert(PhotoAttachment(
+                    id: value.id,
+                    profileID: value.profileID,
+                    ownerKind: PhotoAttachmentOwnerKind(rawValue: value.ownerKindRawValue) ?? .milestone,
+                    contentType: value.contentType,
+                    filename: value.filename,
+                    imageData: imageData,
+                    thumbnailData: value.thumbnailData,
+                    byteCount: value.byteCount,
+                    createdAt: value.createdAt,
+                    updatedAt: value.updatedAt
+                ))
+            }
         }
         let fallbackProfileID = envelope.profiles.first?.id
         for value in envelope.events {
@@ -1099,6 +1147,7 @@ enum DataExportImportService {
         try context.delete(model: FoodStoreSection.self)
         try context.delete(model: FoodStore.self)
         try context.delete(model: Household.self)
+        try context.delete(model: PhotoAttachment.self)
         try context.delete(model: PredictionFactor.self)
         try context.delete(model: SleepPredictionRecord.self)
         try context.delete(model: BabyEvent.self)

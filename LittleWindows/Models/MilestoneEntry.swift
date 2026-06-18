@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import UIKit
 
 enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
     case firsts
@@ -144,6 +145,128 @@ struct AutomaticMilestoneSummary: Identifiable, Hashable {
         case .days(let days): "\(days) days"
         case .birthday(let years): "\(years) \(years == 1 ? "year" : "years")"
         }
+    }
+}
+
+enum PhotoAttachmentOwnerKind: String, Codable, CaseIterable, Identifiable {
+    case milestone
+    case profilePhoto
+
+    var id: String { rawValue }
+}
+
+@Model
+final class PhotoAttachment {
+    var id: UUID = UUID()
+    var profileID: UUID?
+    var ownerKindRawValue: String = PhotoAttachmentOwnerKind.milestone.rawValue
+    var contentType: String = "image/jpeg"
+    var filename: String?
+    @Attribute(.externalStorage) var imageData: Data?
+    @Attribute(.externalStorage) var thumbnailData: Data?
+    var byteCount: Int = 0
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        profileID: UUID? = nil,
+        ownerKind: PhotoAttachmentOwnerKind = .milestone,
+        contentType: String = "image/jpeg",
+        filename: String? = nil,
+        imageData: Data,
+        thumbnailData: Data? = nil,
+        byteCount: Int? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.profileID = profileID
+        self.ownerKindRawValue = ownerKind.rawValue
+        self.contentType = contentType
+        self.filename = filename
+        self.imageData = imageData
+        self.thumbnailData = thumbnailData
+        self.byteCount = byteCount ?? imageData.count
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    var ownerKind: PhotoAttachmentOwnerKind {
+        get { PhotoAttachmentOwnerKind(rawValue: ownerKindRawValue) ?? .milestone }
+        set { ownerKindRawValue = newValue.rawValue }
+    }
+
+    var previewData: Data? {
+        thumbnailData ?? imageData
+    }
+}
+
+struct PhotoAttachmentDraft: Identifiable, Hashable {
+    var id: UUID = UUID()
+    var imageData: Data
+    var thumbnailData: Data?
+    var contentType: String = "image/jpeg"
+    var filename: String?
+    var createdAt: Date = Date()
+}
+
+enum PhotoAttachmentImageProcessor {
+    static func draft(from data: Data, filename: String? = nil) -> PhotoAttachmentDraft? {
+        guard
+            let imageData = jpegData(from: data, maxPixel: 1_800, compressionQuality: 0.82),
+            let thumbnailData = jpegData(from: data, maxPixel: 520, compressionQuality: 0.76)
+        else { return nil }
+        return PhotoAttachmentDraft(
+            imageData: imageData,
+            thumbnailData: thumbnailData,
+            filename: filename
+        )
+    }
+
+    private static func jpegData(
+        from data: Data,
+        maxPixel: CGFloat,
+        compressionQuality: CGFloat
+    ) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let resized = resizedImage(image, maxPixel: maxPixel)
+        return resized.jpegData(compressionQuality: compressionQuality)
+    }
+
+    private static func resizedImage(_ image: UIImage, maxPixel: CGFloat) -> UIImage {
+        let size = image.size
+        let longestSide = max(size.width, size.height)
+        guard longestSide > maxPixel else { return image }
+
+        let scale = maxPixel / longestSide
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+}
+
+@MainActor
+enum PhotoAttachmentStore {
+    static func deleteAttachments(
+        with ids: [UUID],
+        in attachments: [PhotoAttachment],
+        context: ModelContext
+    ) {
+        guard !ids.isEmpty else { return }
+        let idsToDelete = Set(ids)
+        attachments
+            .filter { idsToDelete.contains($0.id) }
+            .forEach { context.delete($0) }
+    }
+
+    static func deleteAttachments(profileID: UUID, context: ModelContext) {
+        let attachments = (try? context.fetch(FetchDescriptor<PhotoAttachment>())) ?? []
+        attachments
+            .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
     }
 }
 
