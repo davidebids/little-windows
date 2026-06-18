@@ -45,7 +45,7 @@ private enum MilestoneTimelineItem: Identifiable {
 
 struct MilestonesView: View {
     @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject private var deepLinkRouter: DeepLinkRouter
+    @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \MilestoneEntry.date, order: .reverse) private var allMilestones: [MilestoneEntry]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]

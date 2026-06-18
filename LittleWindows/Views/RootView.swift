@@ -274,28 +274,52 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
-            LazyTabContent(isSelected: router.selectedTab == .today) {
-                NavigationStack { TodayView() }
+            Group {
+                if router.selectedTab == .today {
+                    NavigationStack { TodayView() }
+                } else {
+                    Color.clear
+                }
             }
                 .tabItem { Label("Today", systemImage: "sparkles") }
                 .tag(LittleWindowsTab.today)
-            LazyTabContent(isSelected: router.selectedTab == .history) {
-                NavigationStack { HistoryView() }
+
+            Group {
+                if router.selectedTab == .food {
+                    FoodHomeView()
+                } else {
+                    Color.clear
+                }
             }
-                .tabItem { Label("Calendar", systemImage: "calendar") }
-                .tag(LittleWindowsTab.history)
-            LazyTabContent(isSelected: router.selectedTab == .insights) {
-                NavigationStack { InsightsDashboardView() }
+                .tabItem { Label("Food", systemImage: "cart.fill") }
+                .tag(LittleWindowsTab.food)
+
+            Group {
+                if router.selectedTab == .reports {
+                    NavigationStack { ReportsView() }
+                } else {
+                    Color.clear
+                }
             }
-                .tabItem { Label("Insights", systemImage: "waveform.path.ecg") }
-                .tag(LittleWindowsTab.insights)
-            LazyTabContent(isSelected: router.selectedTab == .milestones) {
-                NavigationStack { MilestonesView() }
+                .tabItem { Label("Reports", systemImage: "chart.line.uptrend.xyaxis") }
+                .tag(LittleWindowsTab.reports)
+
+            Group {
+                if router.selectedTab == .milestones {
+                    NavigationStack { MilestonesView() }
+                } else {
+                    Color.clear
+                }
             }
                 .tabItem { Label("Milestones", systemImage: "heart.text.clipboard.fill") }
                 .tag(LittleWindowsTab.milestones)
-            LazyTabContent(isSelected: router.selectedTab == .nightLight) {
-                NavigationStack { NightLightView() }
+
+            Group {
+                if router.selectedTab == .nightLight {
+                    NavigationStack { NightLightView() }
+                } else {
+                    Color.clear
+                }
             }
                 .tabItem { Label("Night Light", systemImage: "lightbulb.fill") }
                 .tag(LittleWindowsTab.nightLight)
@@ -317,7 +341,12 @@ struct RootView: View {
         .onOpenURL { router.route($0) }
         .task {
             if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "insights" {
-                router.selectedTab = .insights
+                router.selectedReportsMode = .summary
+                router.selectedTab = .reports
+            }
+            if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "history" {
+                router.selectedReportsMode = .day
+                router.selectedTab = .reports
             }
             if let value = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_URL"],
                let url = URL(string: value) {
@@ -333,19 +362,6 @@ struct RootView: View {
     private func consumePendingSystemAction() {
         if let url = IntegrationCommandStore.consumePendingURL() {
             router.route(url)
-        }
-    }
-}
-
-private struct LazyTabContent<Content: View>: View {
-    let isSelected: Bool
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        if isSelected {
-            content()
-        } else {
-            Color.clear
         }
     }
 }

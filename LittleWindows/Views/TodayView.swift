@@ -11,7 +11,7 @@ struct EventEditorRoute: Identifiable {
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
-    @EnvironmentObject private var deepLinkRouter: DeepLinkRouter
+    @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query private var allEvents: [BabyEvent]
     @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]

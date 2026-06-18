@@ -32,7 +32,7 @@ struct ActiveTimerWidget: Widget {
                 }
         }
         .configurationDisplayName("Active Timer")
-        .description("Run, stop, resume, and review Ethan's current timer draft.")
+        .description("Run, stop, resume, and review the current timer draft.")
         .supportedFamilies([
             .systemSmall,
             .systemMedium,

@@ -152,6 +152,42 @@ struct TodaySummarySnapshot: Codable, Hashable {
     var diaperCount: Int
 }
 
+struct FoodShoppingListItemSnapshot: Codable, Hashable, Identifiable {
+    var id: UUID
+    var name: String
+    var quantityText: String
+    var sectionName: String?
+}
+
+struct FoodShoppingListSnapshot: Codable, Hashable, Identifiable {
+    var id: UUID
+    var name: String
+    var activeItemCount: Int
+    var checkedItemCount: Int
+    var lastUsedAt: Date?
+    var topActiveItems: [FoodShoppingListItemSnapshot]
+
+    var openURL: URL {
+        URL(string: "littlewindows://food/shopping/\(id.uuidString)")!
+    }
+
+    var shoppingModeURL: URL {
+        URL(string: "littlewindows://food/shopping/\(id.uuidString)/mode")!
+    }
+}
+
+struct FoodWidgetSnapshot: Codable, Hashable {
+    var generatedAt: Date
+    var selectedList: FoodShoppingListSnapshot?
+    var lists: [FoodShoppingListSnapshot]
+
+    static let empty = FoodWidgetSnapshot(
+        generatedAt: Date(),
+        selectedList: nil,
+        lists: []
+    )
+}
+
 struct WidgetSnapshot: Codable, Hashable {
     var generatedAt: Date
     var profileID: UUID?
@@ -160,6 +196,7 @@ struct WidgetSnapshot: Codable, Hashable {
     var activeTimer: ActiveTimerSnapshot?
     var prediction: PredictionSnapshot?
     var todaySummary: TodaySummarySnapshot
+    var food: FoodWidgetSnapshot?
 
     static let empty = WidgetSnapshot(
         generatedAt: Date(),
@@ -175,8 +212,13 @@ struct WidgetSnapshot: Codable, Hashable {
             napCount: 0,
             careSessionCount: 0,
             diaperCount: 0
-        )
+        ),
+        food: .empty
     )
+
+    var resolvedFood: FoodWidgetSnapshot {
+        food ?? .empty
+    }
 }
 
 struct LittleWindowsActivityAttributes: ActivityAttributes {

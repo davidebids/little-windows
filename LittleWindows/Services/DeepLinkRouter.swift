@@ -2,11 +2,35 @@ import Foundation
 
 enum LittleWindowsTab: Hashable {
     case today
-    case history
-    case insights
+    case food
+    case reports
     case milestones
     case nightLight
     case medical
+}
+
+enum ReportsDisplayMode: String, CaseIterable, Identifiable {
+    case day
+    case list
+    case summary
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .day: "Day"
+        case .list: "List"
+        case .summary: "Summary"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .day: "calendar.day.timeline.left"
+        case .list: "list.bullet"
+        case .summary: "chart.bar.xaxis"
+        }
+    }
 }
 
 enum AppointmentRouteCommand: Equatable {
@@ -48,7 +72,11 @@ final class DeepLinkRouter: ObservableObject {
     @Published var pendingNightLightCommand: NightLightCommand?
     @Published var pendingAppointmentCommand: AppointmentRouteCommand?
     @Published var pendingAgeGuideCommand: AgeGuideRouteCommand?
+    @Published var pendingFoodCommand: FoodRouteCommand?
     @Published var pendingProfileID: UUID?
+    @Published var selectedReportsMode: ReportsDisplayMode = ReportsDisplayMode(
+        rawValue: UserDefaults.standard.string(forKey: "reportsDisplayMode") ?? ""
+    ) ?? .day
     @Published var showingSettings = false
     @Published var isDataReady = false
 
@@ -69,8 +97,61 @@ final class DeepLinkRouter: ObservableObject {
 
         if components == ["today"] {
             selectedTab = .today
+        } else if components == ["food"] {
+            selectedTab = .food
+            pendingFoodCommand = .food
+        } else if components == ["food", "shopping"] {
+            selectedTab = .food
+            pendingFoodCommand = .shopping
+        } else if components == ["food", "quick-add"] {
+            selectedTab = .food
+            pendingFoodCommand = .quickAdd
+        } else if components.count >= 3,
+                  components[0] == "food",
+                  components[1] == "shopping",
+                  let uuid = UUID(uuidString: components[2]) {
+            selectedTab = .food
+            pendingFoodCommand = components.count >= 4 && components[3] == "mode"
+                ? .shoppingMode(uuid)
+                : .shoppingList(uuid)
+        } else if components == ["food", "inventory"] {
+            selectedTab = .food
+            pendingFoodCommand = .inventory
+        } else if components.count == 3,
+                  components[0] == "food",
+                  components[1] == "inventory",
+                  let uuid = UUID(uuidString: components[2]) {
+            selectedTab = .food
+            pendingFoodCommand = .inventoryItem(uuid)
+        } else if components == ["food", "meal-prep"] {
+            selectedTab = .food
+            pendingFoodCommand = .mealPrep
+        } else if components.count == 3,
+                  components[0] == "food",
+                  components[1] == "meal-prep",
+                  let uuid = UUID(uuidString: components[2]) {
+            selectedTab = .food
+            pendingFoodCommand = .mealPrepItem(uuid)
+        } else if components.count == 3,
+                  components[0] == "food",
+                  components[1] == "stores",
+                  let uuid = UUID(uuidString: components[2]) {
+            selectedTab = .food
+            pendingFoodCommand = .store(uuid)
         } else if components == ["history"] {
-            selectedTab = .history
+            selectedReportsMode = .day
+            selectedTab = .reports
+        } else if components == ["history", "list"] {
+            selectedReportsMode = .list
+            selectedTab = .reports
+        } else if components == ["reports"] || components == ["calendar"] {
+            selectedReportsMode = .day
+            selectedTab = .reports
+        } else if components.count == 2,
+                  components[0] == "reports",
+                  let mode = ReportsDisplayMode(rawValue: components[1]) {
+            selectedReportsMode = mode
+            selectedTab = .reports
         } else if components == ["settings"] {
             showingSettings = true
         } else if components == ["milestones"] || components == ["memories"] {
@@ -93,9 +174,11 @@ final class DeepLinkRouter: ObservableObject {
                 ? .notes(uuid)
                 : .detail(uuid)
         } else if components == ["medical"] {
-            selectedTab = .insights
+            selectedReportsMode = .summary
+            selectedTab = .reports
         } else if components == ["insights"] {
-            selectedTab = .insights
+            selectedReportsMode = .summary
+            selectedTab = .reports
         } else if components == ["puppy-guide"] {
             selectedTab = .milestones
             pendingAgeGuideCommand = .list
@@ -114,7 +197,8 @@ final class DeepLinkRouter: ObservableObject {
             selectedTab = .today
             pendingAction = .showActiveTimer
         } else if components == ["prediction"] {
-            selectedTab = .insights
+            selectedReportsMode = .summary
+            selectedTab = .reports
         } else if components.count == 2, components[0] == "event" {
             selectedTab = .today
             if let uuid = UUID(uuidString: components[1]) { pendingAction = .showEvent(uuid) }

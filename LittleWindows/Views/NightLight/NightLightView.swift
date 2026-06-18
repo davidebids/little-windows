@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct NightLightView: View {
-    @EnvironmentObject private var router: DeepLinkRouter
+    @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var viewModel = NightLightViewModel()
 
     var body: some View {

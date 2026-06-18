@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import WidgetKit
 
 @MainActor
@@ -67,7 +68,54 @@ enum WidgetSnapshotService {
                 napCount: daily.napCount,
                 careSessionCount: careSessions,
                 diaperCount: daily.wetDiapers + daily.dirtyDiapers + daily.bothDiapers
+            ),
+            food: read().food
+        )
+    }
+
+    static func refreshFood(context: ModelContext, now: Date = Date()) {
+        let existing = read()
+        var snapshot = existing
+        snapshot.generatedAt = now
+        snapshot.food = makeFoodSnapshot(context: context, now: now)
+        write(snapshot)
+    }
+
+    static func makeFoodSnapshot(
+        context: ModelContext,
+        now: Date = Date()
+    ) -> FoodWidgetSnapshot {
+        let householdID = ((try? context.fetch(FetchDescriptor<Household>())) ?? []).first?.id
+        let lists = ((try? context.fetch(FetchDescriptor<ShoppingList>())) ?? [])
+            .filter { list in
+                !list.isArchived && (householdID == nil || list.householdID == householdID)
+            }
+            .sorted { lhs, rhs in
+                ((lhs.sortOrder ?? 0), lhs.name) < ((rhs.sortOrder ?? 0), rhs.name)
+            }
+        let items = ((try? context.fetch(FetchDescriptor<ShoppingListItem>())) ?? [])
+            .filter { item in
+                householdID == nil || item.householdID == householdID
+            }
+        let sections = ((try? context.fetch(FetchDescriptor<FoodStoreSection>())) ?? [])
+            .filter { section in
+                householdID == nil || section.householdID == householdID
+            }
+        let sectionNames = Dictionary(uniqueKeysWithValues: sections.map { ($0.id, $0.name) })
+        let snapshots = lists.map { list in
+            shoppingListSnapshot(
+                list: list,
+                items: items.filter { $0.shoppingListID == list.id },
+                sectionNames: sectionNames
             )
+        }
+        let selected = snapshots.first { $0.activeItemCount > 0 }
+            ?? snapshots.first { $0.name.localizedCaseInsensitiveContains("Trader") }
+            ?? snapshots.first
+        return FoodWidgetSnapshot(
+            generatedAt: now,
+            selectedList: selected,
+            lists: Array(snapshots.prefix(4))
         )
     }
 
@@ -117,6 +165,33 @@ enum WidgetSnapshotService {
             try? data.write(to: url, options: .atomic)
             WidgetCenter.shared.reloadAllTimelines()
         }
+    }
+
+    private static func shoppingListSnapshot(
+        list: ShoppingList,
+        items: [ShoppingListItem],
+        sectionNames: [UUID: String]
+    ) -> FoodShoppingListSnapshot {
+        let activeItems = items
+            .filter { !$0.isChecked }
+            .sorted { lhs, rhs in
+                ((lhs.sortOrder ?? 0), lhs.name) < ((rhs.sortOrder ?? 0), rhs.name)
+            }
+        return FoodShoppingListSnapshot(
+            id: list.id,
+            name: list.name,
+            activeItemCount: activeItems.count,
+            checkedItemCount: items.filter(\.isChecked).count,
+            lastUsedAt: list.lastUsedAt,
+            topActiveItems: activeItems.prefix(4).map { item in
+                FoodShoppingListItemSnapshot(
+                    id: item.id,
+                    name: item.name,
+                    quantityText: item.quantityText,
+                    sectionName: item.storeSectionID.flatMap { sectionNames[$0] }
+                )
+            }
+        )
     }
 
     private static func groupedCareSessions(_ events: [BabyEvent]) -> [Date] {

@@ -10,6 +10,7 @@ enum SampleData {
     static func seedIfNeeded(in context: ModelContext) async {
         _ = try? LegacyTrackerGrowthMigration.migrate(in: context)
         ProfileMigrationService.ensureProfilesAndAssignments(context: context)
+        FoodHomeBootstrapService.seedIfNeeded(context: context)
     }
 
     @MainActor
@@ -53,7 +54,18 @@ enum SampleData {
             AgeGuideReadState.self,
             PuppyStageGuideReadState.self,
             SleepPredictionRecord.self,
-            PredictionFactor.self
+            PredictionFactor.self,
+            Household.self,
+            FoodStore.self,
+            FoodStoreSection.self,
+            ShoppingList.self,
+            ShoppingListItem.self,
+            FoodItem.self,
+            InventoryLocation.self,
+            InventoryItem.self,
+            MealPrepItem.self,
+            MealPrepUsage.self,
+            FoodReminder.self
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container: ModelContainer
@@ -110,6 +122,8 @@ enum SampleData {
         feed.feedKind = .bottle
         feed.amountOz = 5
         context.insert(feed)
+
+        FoodHomeBootstrapService.seedIfNeeded(context: context)
 
         let examples = [
             ("First smile", 21, MilestoneCategory.social),

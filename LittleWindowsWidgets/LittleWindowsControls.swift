@@ -10,7 +10,7 @@ struct StartSleepControl: ControlWidget {
             }
         }
         .displayName("Start Sleep")
-        .description("Start Ethan's sleep timer in Little Windows.")
+        .description("Start a sleep timer in Little Windows.")
     }
 }
 
@@ -49,7 +49,7 @@ struct StartTummyTimeControl: ControlWidget {
             }
         }
         .displayName("Start Tummy Time")
-        .description("Start Ethan's tummy-time timer.")
+        .description("Start a tummy-time timer.")
     }
 }
 

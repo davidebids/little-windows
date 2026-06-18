@@ -12,6 +12,17 @@ enum SyncDiagnosticsService {
         let appointments = (try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? []
         let ageGuideStates = (try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? []
         let puppyGuideStates = (try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? []
+        let households = (try? context.fetch(FetchDescriptor<Household>())) ?? []
+        let foodStores = (try? context.fetch(FetchDescriptor<FoodStore>())) ?? []
+        let foodStoreSections = (try? context.fetch(FetchDescriptor<FoodStoreSection>())) ?? []
+        let shoppingLists = (try? context.fetch(FetchDescriptor<ShoppingList>())) ?? []
+        let shoppingItems = (try? context.fetch(FetchDescriptor<ShoppingListItem>())) ?? []
+        let foodItems = (try? context.fetch(FetchDescriptor<FoodItem>())) ?? []
+        let inventoryLocations = (try? context.fetch(FetchDescriptor<InventoryLocation>())) ?? []
+        let inventoryItems = (try? context.fetch(FetchDescriptor<InventoryItem>())) ?? []
+        let mealPrepItems = (try? context.fetch(FetchDescriptor<MealPrepItem>())) ?? []
+        let mealPrepUsages = (try? context.fetch(FetchDescriptor<MealPrepUsage>())) ?? []
+        let foodReminders = (try? context.fetch(FetchDescriptor<FoodReminder>())) ?? []
 
         let orphanedCount =
             events.orphanedCount(profileIDs: profileIDs)
@@ -40,7 +51,18 @@ enum SyncDiagnosticsService {
                 SyncDiagnosticCount(name: "Milestones", count: milestones.count),
                 SyncDiagnosticCount(name: "Appointments", count: appointments.count),
                 SyncDiagnosticCount(name: "Age guide states", count: ageGuideStates.count),
-                SyncDiagnosticCount(name: "Puppy guide states", count: puppyGuideStates.count)
+                SyncDiagnosticCount(name: "Puppy guide states", count: puppyGuideStates.count),
+                SyncDiagnosticCount(name: "Households", count: households.count),
+                SyncDiagnosticCount(name: "Food stores", count: foodStores.count),
+                SyncDiagnosticCount(name: "Store sections", count: foodStoreSections.count),
+                SyncDiagnosticCount(name: "Shopping lists", count: shoppingLists.count),
+                SyncDiagnosticCount(name: "Shopping items", count: shoppingItems.count),
+                SyncDiagnosticCount(name: "Food items", count: foodItems.count),
+                SyncDiagnosticCount(name: "Inventory locations", count: inventoryLocations.count),
+                SyncDiagnosticCount(name: "Inventory items", count: inventoryItems.count),
+                SyncDiagnosticCount(name: "Meal prep items", count: mealPrepItems.count),
+                SyncDiagnosticCount(name: "Meal prep usage", count: mealPrepUsages.count),
+                SyncDiagnosticCount(name: "Food reminders", count: foodReminders.count)
             ],
             orphanedProfileScopedRecordCount: orphanedCount,
             duplicateChildProfileNameCount: duplicateChildProfiles,

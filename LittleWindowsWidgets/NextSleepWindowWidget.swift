@@ -65,7 +65,7 @@ struct NextSleepWindowWidget: Widget {
                 }
         }
         .configurationDisplayName("Next Sleep Window")
-        .description("See Ethan's next likely nap or bedtime window.")
+        .description("See the next likely nap or bedtime window.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
     }
 }

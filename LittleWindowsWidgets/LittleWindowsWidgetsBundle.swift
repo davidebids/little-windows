@@ -8,6 +8,8 @@ struct LittleWindowsWidgetsBundle: WidgetBundle {
         NextSleepWindowWidget()
         TodaySummaryWidget()
         QuickLogWidget()
+        ShoppingListWidget()
+        FoodQuickAddWidget()
         LittleWindowsLiveActivity()
         if #available(iOSApplicationExtension 18.0, *) {
             StartSleepControl()
