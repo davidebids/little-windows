@@ -21,6 +21,9 @@ struct InsightsDashboardView: View {
     private var profile: BabyProfile? {
         profileService.selectedProfile(in: profiles)
     }
+    private var isDogProfile: Bool {
+        profile?.profileType == .dog
+    }
     private var scopedEvents: [BabyEvent] {
         events.filter { $0.matchesProfile(profile?.id) }
     }
@@ -53,7 +56,7 @@ struct InsightsDashboardView: View {
             LazyVStack(spacing: 18) {
                 controls
 
-                if profile?.profileType == .dog {
+                if isDogProfile {
                     DogInsightsView(
                         profile: profile,
                         events: scopedEvents,
@@ -131,21 +134,23 @@ struct InsightsDashboardView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .disabled(!viewModel.selectedSection.usesDateRange)
+                .disabled(!isDogProfile && !viewModel.selectedSection.usesDateRange)
 
                 Spacer()
 
-                Toggle(
-                    "Compare to previous period",
-                    isOn: $viewModel.comparesToPreviousPeriod
-                )
-                    .font(.subheadline)
-                    .fixedSize()
-                    .disabled(!viewModel.selectedSection.supportsPreviousPeriodComparison)
+                if !isDogProfile {
+                    Toggle(
+                        "Compare to previous period",
+                        isOn: $viewModel.comparesToPreviousPeriod
+                    )
+                        .font(.subheadline)
+                        .fixedSize()
+                        .disabled(!viewModel.selectedSection.supportsPreviousPeriodComparison)
+                }
             }
-            .opacity(viewModel.selectedSection.usesDateRange ? 1 : 0.38)
+            .opacity(isDogProfile || viewModel.selectedSection.usesDateRange ? 1 : 0.38)
 
-            if viewModel.selectedRange == .custom && viewModel.selectedSection.usesDateRange {
+            if viewModel.selectedRange == .custom && (isDogProfile || viewModel.selectedSection.usesDateRange) {
                 VStack(spacing: 10) {
                     DatePicker(
                         "From",
@@ -178,7 +183,8 @@ struct InsightsDashboardView: View {
                 Spacer()
             }
 
-            if viewModel.selectedSection.usesDateRange,
+            if !isDogProfile,
+               viewModel.selectedSection.usesDateRange,
                viewModel.selectedSection.supportsPreviousPeriodComparison {
                 HStack(alignment: .top, spacing: 7) {
                     Image(systemName: "info.circle")
@@ -190,25 +196,27 @@ struct InsightsDashboardView: View {
                 .foregroundStyle(.secondary)
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(InsightsSection.allCases) { section in
-                        Button {
-                            withAnimation(.snappy) {
-                                viewModel.selectedSection = section
+            if !isDogProfile {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(InsightsSection.allCases) { section in
+                            Button {
+                                withAnimation(.snappy) {
+                                    viewModel.selectedSection = section
+                                }
+                            } label: {
+                                Text(section.rawValue)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(viewModel.selectedSection == section ? .white : .primary)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 9)
+                                    .background(
+                                        viewModel.selectedSection == section ? Color.indigo : Color.primary.opacity(0.06),
+                                        in: Capsule()
+                                    )
                             }
-                        } label: {
-                            Text(section.rawValue)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(viewModel.selectedSection == section ? .white : .primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 9)
-                                .background(
-                                    viewModel.selectedSection == section ? Color.indigo : Color.primary.opacity(0.06),
-                                    in: Capsule()
-                                )
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -218,6 +226,9 @@ struct InsightsDashboardView: View {
     }
 
     private var filterStatusText: String {
+        if isDogProfile {
+            return "\(viewModel.periodLabel) · dog care logs only"
+        }
         if !viewModel.selectedSection.usesDateRange {
             return "Growth uses every measurement from birth."
         }

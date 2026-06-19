@@ -42,6 +42,14 @@ struct SettingsView: View {
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
 
+    private var selectedProfile: BabyProfile? {
+        profileService.selectedProfile(in: profiles)
+    }
+
+    private var isDogProfile: Bool {
+        selectedProfile?.profileType == .dog
+    }
+
     init() {
         let recentCutoff = Calendar.current.date(
             byAdding: .day,
@@ -100,28 +108,29 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Prediction") {
-                Toggle("Use feed timing", isOn: $feedAdjustmentEnabled)
-                    .onChange(of: feedAdjustmentEnabled) { _, _ in
-                        Task { await rescheduleNotification() }
+            if !isDogProfile {
+                Section("Prediction") {
+                    Toggle("Use feed timing", isOn: $feedAdjustmentEnabled)
+                        .onChange(of: feedAdjustmentEnabled) { _, _ in
+                            Task { await rescheduleNotification() }
+                        }
+                    Toggle("Use nursing timing", isOn: $nursingAdjustmentEnabled)
+                        .onChange(of: nursingAdjustmentEnabled) { _, _ in
+                            Task { await rescheduleNotification() }
+                        }
+                    Toggle("Predict bedtime", isOn: $bedtimePredictionEnabled)
+                        .onChange(of: bedtimePredictionEnabled) { _, _ in
+                            Task { await rescheduleNotification() }
+                        }
+                    NavigationLink("Wake-window tuning") {
+                        WakeWindowTuningView(
+                            minimum: $customWakeMinimum,
+                            maximum: $customWakeMaximum
+                        )
                     }
-                Toggle("Use nursing timing", isOn: $nursingAdjustmentEnabled)
-                    .onChange(of: nursingAdjustmentEnabled) { _, _ in
-                        Task { await rescheduleNotification() }
-                    }
-                Toggle("Predict bedtime", isOn: $bedtimePredictionEnabled)
-                    .onChange(of: bedtimePredictionEnabled) { _, _ in
-                        Task { await rescheduleNotification() }
-                    }
-                NavigationLink("Wake-window tuning") {
-                    WakeWindowTuningView(
-                        minimum: $customWakeMinimum,
-                        maximum: $customWakeMaximum
-                    )
                 }
-            }
 
-            Section {
+                Section {
                 Toggle(
                     "Enable Little Window Alerts",
                     isOn: Binding(
@@ -195,10 +204,11 @@ struct SettingsView: View {
                 }
                 .padding(12)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-            } header: {
-                Label("Little Window Alerts", systemImage: "bell.badge.fill")
-            } footer: {
-                Text("Little Windows can remind you before the next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
+                } header: {
+                    Label("Little Window Alerts", systemImage: "bell.badge.fill")
+                } footer: {
+                    Text("Little Windows can remind you before the next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
+                }
             }
 
             SyncSettingsSection()
@@ -256,59 +266,61 @@ struct SettingsView: View {
                 Text("Appointment reminders are separate from Little Window sleep alerts.")
             }
 
-            Section {
-                Toggle(
-                    "Monthly guide notifications",
-                    isOn: Binding(
-                        get: { monthlyAgeGuideNotificationsEnabled },
-                        set: { enabled in
-                            if enabled {
-                                Task {
-                                    let granted = await notificationManager.requestAuthorization()
-                                    if granted {
-                                        monthlyAgeGuideNotificationsEnabled = true
-                                        await rescheduleMonthlyAgeGuideNotification()
-                                    } else {
-                                        monthlyAgeGuideNotificationsEnabled = false
-                                        showingPermissionDenied = true
+            if !isDogProfile {
+                Section {
+                    Toggle(
+                        "Monthly guide notifications",
+                        isOn: Binding(
+                            get: { monthlyAgeGuideNotificationsEnabled },
+                            set: { enabled in
+                                if enabled {
+                                    Task {
+                                        let granted = await notificationManager.requestAuthorization()
+                                        if granted {
+                                            monthlyAgeGuideNotificationsEnabled = true
+                                            await rescheduleMonthlyAgeGuideNotification()
+                                        } else {
+                                            monthlyAgeGuideNotificationsEnabled = false
+                                            showingPermissionDenied = true
+                                        }
+                                    }
+                                } else {
+                                    monthlyAgeGuideNotificationsEnabled = false
+                                    Task {
+                                        await notificationManager.cancelMonthlyAgeGuideNotifications()
                                     }
                                 }
-                            } else {
-                                monthlyAgeGuideNotificationsEnabled = false
-                                Task {
-                                    await notificationManager.cancelMonthlyAgeGuideNotifications()
-                                }
+                            }
+                        )
+                    )
+                    if monthlyAgeGuideNotificationsEnabled {
+                        Picker("Timing", selection: $monthlyAgeGuideNotificationTimingRawValue) {
+                            ForEach(MonthlyAgeGuideNotificationTiming.allCases) { timing in
+                                Text(timing.displayName).tag(timing.rawValue)
                             }
                         }
-                    )
-                )
-                if monthlyAgeGuideNotificationsEnabled {
-                    Picker("Timing", selection: $monthlyAgeGuideNotificationTimingRawValue) {
-                        ForEach(MonthlyAgeGuideNotificationTiming.allCases) { timing in
-                            Text(timing.displayName).tag(timing.rawValue)
+                        .onChange(of: monthlyAgeGuideNotificationTimingRawValue) { _, _ in
+                            Task { await rescheduleMonthlyAgeGuideNotification() }
                         }
                     }
-                    .onChange(of: monthlyAgeGuideNotificationTimingRawValue) { _, _ in
-                        Task { await rescheduleMonthlyAgeGuideNotification() }
+                    NavigationLink {
+                        AgeGuidesListView(
+                            guides: AgeGuideService.shared.allAgeGuides(),
+                            currentMonth: selectedProfile.map {
+                                AgeGuideService.shared.ageMonth(for: $0)
+                            },
+                            readStates: ageGuideReadStates.filter {
+                                $0.matchesProfile(selectedProfile?.id)
+                            }
+                        )
+                    } label: {
+                        Label("Browse age guides", systemImage: "book.pages.fill")
                     }
+                } header: {
+                    Label("Monthly Age Guides", systemImage: "calendar.badge.clock")
+                } footer: {
+                    Text("One gentle reminder per monthly age at most. Guides are parent education and memory prompts, not medical advice.")
                 }
-                NavigationLink {
-                    AgeGuidesListView(
-                        guides: AgeGuideService.shared.allAgeGuides(),
-                        currentMonth: profileService.selectedProfile(in: profiles).map {
-                            AgeGuideService.shared.ageMonth(for: $0)
-                        },
-                        readStates: ageGuideReadStates.filter {
-                            $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id)
-                        }
-                    )
-                } label: {
-                    Label("Browse age guides", systemImage: "book.pages.fill")
-                }
-            } header: {
-                Label("Monthly Age Guides", systemImage: "calendar.badge.clock")
-            } footer: {
-                Text("One gentle reminder per monthly age at most. Guides are parent education and memory prompts, not medical advice.")
             }
 
             Section("Data") {

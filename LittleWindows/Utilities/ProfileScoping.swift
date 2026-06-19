@@ -14,6 +14,6 @@ extension PuppyStageGuideReadState: ProfileScopedRecord {}
 extension ProfileScopedRecord {
     func matchesProfile(_ selectedProfileID: UUID?) -> Bool {
         guard let selectedProfileID else { return true }
-        return profileID == selectedProfileID || profileID == nil
+        return profileID == selectedProfileID
     }
 }

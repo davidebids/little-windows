@@ -146,10 +146,19 @@ enum PredictionCountdownFormatting {
 struct TodaySummarySnapshot: Codable, Hashable {
     var profileID: UUID?
     var profileName: String?
+    var profileTypeRawValue: String?
     var totalSleepSeconds: TimeInterval
     var napCount: Int
     var careSessionCount: Int
     var diaperCount: Int
+    var dogFoodCount: Int?
+    var dogWaterCount: Int?
+    var dogPottyCount: Int?
+    var dogWalkSeconds: TimeInterval?
+
+    var isDog: Bool {
+        profileTypeRawValue == "dog"
+    }
 }
 
 struct FoodShoppingListItemSnapshot: Codable, Hashable, Identifiable {
@@ -208,10 +217,15 @@ struct WidgetSnapshot: Codable, Hashable {
         todaySummary: TodaySummarySnapshot(
             profileID: nil,
             profileName: "Baby",
+            profileTypeRawValue: "child",
             totalSleepSeconds: 0,
             napCount: 0,
             careSessionCount: 0,
-            diaperCount: 0
+            diaperCount: 0,
+            dogFoodCount: nil,
+            dogWaterCount: nil,
+            dogPottyCount: nil,
+            dogWalkSeconds: nil
         ),
         food: .empty
     )

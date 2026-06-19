@@ -74,6 +74,9 @@ enum PersistenceService {
         if environment["LW_CLOUDKIT_SYNC_SMOKE"] != nil {
             return false
         }
+        if environment["LITTLE_WINDOWS_UI_TESTING"] == "1" {
+            return true
+        }
         if environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil {
             return true
         }

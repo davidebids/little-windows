@@ -32,7 +32,7 @@ struct TodaySummaryWidget: Widget {
                 }
         }
         .configurationDisplayName("Today Summary")
-        .description("Sleep, naps, care sessions, and diapers today.")
+        .description("A quick profile-specific care summary for today.")
         .supportedFamilies([.systemMedium])
     }
 }
@@ -55,15 +55,27 @@ private struct TodaySummaryWidgetView: View {
                         .foregroundStyle(.white.opacity(0.48))
                 }
                 HStack(spacing: 10) {
-                    metric(
-                        DurationFormatting.string(seconds: snapshot.todaySummary.totalSleepSeconds),
-                        "Sleep",
-                        "moon.fill",
-                        LittleWindowsWidgetStyle.lavender
-                    )
-                    metric("\(snapshot.todaySummary.napCount)", "Naps", "bed.double.fill", .purple)
-                    metric("\(snapshot.todaySummary.careSessionCount)", "Care", "waterbottle.fill", .orange)
-                    metric("\(snapshot.todaySummary.diaperCount)", "Diapers", "drop.fill", .cyan)
+                    if snapshot.todaySummary.isDog {
+                        metric("\(snapshot.todaySummary.dogFoodCount ?? 0)", "Food", "fork.knife", .orange)
+                        metric("\(snapshot.todaySummary.dogWaterCount ?? 0)", "Water", "drop.fill", .cyan)
+                        metric("\(snapshot.todaySummary.dogPottyCount ?? 0)", "Potty", "pawprint.fill", .teal)
+                        metric(
+                            DurationFormatting.string(seconds: snapshot.todaySummary.dogWalkSeconds ?? 0),
+                            "Walks",
+                            "figure.walk",
+                            .green
+                        )
+                    } else {
+                        metric(
+                            DurationFormatting.string(seconds: snapshot.todaySummary.totalSleepSeconds),
+                            "Sleep",
+                            "moon.fill",
+                            LittleWindowsWidgetStyle.lavender
+                        )
+                        metric("\(snapshot.todaySummary.napCount)", "Naps", "bed.double.fill", .purple)
+                        metric("\(snapshot.todaySummary.careSessionCount)", "Care", "waterbottle.fill", .orange)
+                        metric("\(snapshot.todaySummary.diaperCount)", "Diapers", "drop.fill", .cyan)
+                    }
                 }
             }
             .foregroundStyle(.white)

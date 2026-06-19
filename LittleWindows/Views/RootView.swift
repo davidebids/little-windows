@@ -412,14 +412,14 @@ struct RootView: View {
 
     private func route(_ url: URL) {
         #if DEBUG
-        if DebugSimulatorSmokeSeedService.isResetEmpty(url) {
+        if DebugSimulatorSmokeSeedService.isResetEmpty(url), DebugSimulatorSmokeSeedService.isEnabled {
             DebugSimulatorSmokeSeedService.resetEmpty(context: modelContext)
             hasCompletedInitialOnboarding = false
             hasCheckedInitialOnboardingState = true
             router.selectedTab = .today
             return
         }
-        if DebugSimulatorSmokeSeedService.canHandle(url) {
+        if DebugSimulatorSmokeSeedService.canHandle(url), DebugSimulatorSmokeSeedService.isEnabled {
             DebugSimulatorSmokeSeedService.seedIfNeeded(context: modelContext)
             hasCompletedInitialOnboarding = true
             router.selectedTab = .today
@@ -715,6 +715,10 @@ private struct FirstRunOnboardingView: View {
 
 #if DEBUG
 enum DebugSimulatorSmokeSeedService {
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
+    }
+
     static let childProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
     static let dogProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
     static let sleepEventID = UUID(uuidString: "00000000-0000-0000-0000-000000000201")!

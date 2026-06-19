@@ -101,6 +101,19 @@ struct MilestoneTemplate: Identifiable, Hashable {
         .init(title: "First steps", category: .motor),
         .init(title: "First word", category: .communication)
     ]
+
+    static let dogSuggested: [MilestoneTemplate] = [
+        .init(title: "First night home", category: .adoption),
+        .init(title: "First walk", category: .training),
+        .init(title: "First vet visit", category: .health),
+        .init(title: "First vaccine record", category: .health),
+        .init(title: "First successful potty outside", category: .pottyTraining),
+        .init(title: "First accident-free day", category: .pottyTraining),
+        .init(title: "First bath or groom", category: .grooming),
+        .init(title: "First learned cue", category: .training),
+        .init(title: "Favorite toy discovered", category: .favoriteThings),
+        .init(title: "First trip", category: .travel)
+    ]
 }
 
 struct AutomaticMilestoneActivitySummary: Identifiable, Hashable {

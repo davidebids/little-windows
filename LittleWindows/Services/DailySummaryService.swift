@@ -18,6 +18,18 @@ struct DailySummary {
     var readingTime: TimeInterval = 0
     var medicineNames: [String] = []
     var bathCount: Int = 0
+    var dogFoodCount: Int = 0
+    var waterCount: Int = 0
+    var treatCount: Int = 0
+    var pottyCount: Int = 0
+    var pottyAccidents: Int = 0
+    var walkTime: TimeInterval = 0
+    var restTime: TimeInterval = 0
+    var trainingTime: TimeInterval = 0
+    var groomingTime: TimeInterval = 0
+    var symptomCount: Int = 0
+    var vaccineCount: Int = 0
+    var glucoseCount: Int = 0
 }
 
 enum DailySummaryService {
@@ -61,7 +73,30 @@ enum DailySummaryService {
                 case .bath: result.bathCount += 1
                 default: break
                 }
-            case .food, .water, .treat, .potty, .walk, .rest, .training, .grooming, .symptom, .vaccine, .glucose, .growth, .temperature, .custom:
+            case .food:
+                result.dogFoodCount += 1
+            case .water:
+                result.waterCount += 1
+            case .treat:
+                result.treatCount += 1
+            case .potty:
+                result.pottyCount += 1
+                if event.dogDetails.accident == true { result.pottyAccidents += 1 }
+            case .walk:
+                result.walkTime += event.duration ?? 0
+            case .rest:
+                result.restTime += event.duration ?? 0
+            case .training:
+                result.trainingTime += event.duration ?? 0
+            case .grooming:
+                result.groomingTime += event.duration ?? 0
+            case .symptom:
+                result.symptomCount += 1
+            case .vaccine:
+                result.vaccineCount += 1
+            case .glucose:
+                result.glucoseCount += 1
+            case .growth, .temperature, .custom:
                 break
             }
         }

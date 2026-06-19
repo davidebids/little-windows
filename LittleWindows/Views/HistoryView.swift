@@ -344,6 +344,7 @@ struct HistoryView: View {
     private var summarySection: some View {
         Section {
             SummaryGrid(summary: summary)
+                .environment(\.careProfileType, profile?.profileType ?? .child)
                 .padding(10)
                 .appSurface()
                 .listRowInsets(EdgeInsets())
@@ -1171,6 +1172,7 @@ private struct CalendarEventBlock: View {
 }
 
 private struct SummaryGrid: View {
+    @Environment(\.careProfileType) private var profileType
     let summary: DailySummary
 
     var body: some View {
@@ -1178,24 +1180,55 @@ private struct SummaryGrid: View {
             columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
             spacing: 8
         ) {
-            SummaryCell("Total sleep", DurationFormatting.string(seconds: summary.totalSleep), icon: "moon.fill", color: .indigo)
-            SummaryCell("Day sleep", DurationFormatting.string(seconds: summary.daytimeSleep), icon: "sun.haze.fill", color: .orange)
-            SummaryCell("Naps", "\(summary.napCount)", icon: "bed.double.fill", color: .purple)
-            SummaryCell("Average nap", DurationFormatting.string(seconds: summary.averageNap), icon: "clock.fill", color: .blue)
-            SummaryCell("Feeds", "\(summary.feedCount)", icon: "waterbottle.fill", color: .orange)
-            SummaryCell("Bottle", String(format: "%.1f oz", summary.bottleOunces), icon: "drop.fill", color: .cyan)
-            SummaryCell("Nursing", DurationFormatting.string(seconds: summary.nursingTotal), icon: "figure.and.child.holdinghands", color: .pink)
-            SummaryCell(
-                "Diapers",
-                "\(summary.wetDiapers) pee, \(summary.dirtyDiapers) poo, \(summary.bothDiapers) mixed",
-                icon: "humidity.fill",
-                color: .teal
-            )
-            SummaryCell("Tummy time", DurationFormatting.string(seconds: summary.tummyTime), icon: "figure.play", color: .green)
-            SummaryCell("Reading", DurationFormatting.string(seconds: summary.readingTime), icon: "book.fill", color: .blue)
-            SummaryCell("Medicine", "\(summary.medicineNames.count)", icon: "cross.case.fill", color: .red)
-            SummaryCell("Baths", "\(summary.bathCount)", icon: "bathtub.fill", color: .cyan)
+            if profileType == .dog {
+                SummaryCell("Food", "\(summary.dogFoodCount)", icon: "fork.knife", color: .orange)
+                SummaryCell("Water", "\(summary.waterCount)", icon: "drop.fill", color: .cyan)
+                SummaryCell("Treats", "\(summary.treatCount)", icon: "birthday.cake.fill", color: .pink)
+                SummaryCell(
+                    "Potty",
+                    "\(summary.pottyCount) logs, \(summary.pottyAccidents) accidents",
+                    icon: "pawprint.fill",
+                    color: .teal
+                )
+                SummaryCell("Walks", DurationFormatting.string(seconds: summary.walkTime), icon: "figure.walk", color: .green)
+                SummaryCell("Rest", DurationFormatting.string(seconds: summary.restTime), icon: "bed.double.fill", color: .indigo)
+                SummaryCell("Training", DurationFormatting.string(seconds: summary.trainingTime), icon: "graduationcap.fill", color: .purple)
+                SummaryCell("Grooming", DurationFormatting.string(seconds: summary.groomingTime), icon: "comb.fill", color: .mint)
+                SummaryCell("Medicine", "\(summary.medicineNames.count)", icon: "cross.case.fill", color: .red)
+                SummaryCell("Symptoms", "\(summary.symptomCount)", icon: "exclamationmark.triangle.fill", color: .orange)
+                SummaryCell("Vaccines", "\(summary.vaccineCount)", icon: "syringe.fill", color: .blue)
+                SummaryCell("Glucose", "\(summary.glucoseCount)", icon: "drop.triangle.fill", color: .pink)
+            } else {
+                SummaryCell("Total sleep", DurationFormatting.string(seconds: summary.totalSleep), icon: "moon.fill", color: .indigo)
+                SummaryCell("Day sleep", DurationFormatting.string(seconds: summary.daytimeSleep), icon: "sun.haze.fill", color: .orange)
+                SummaryCell("Naps", "\(summary.napCount)", icon: "bed.double.fill", color: .purple)
+                SummaryCell("Average nap", DurationFormatting.string(seconds: summary.averageNap), icon: "clock.fill", color: .blue)
+                SummaryCell("Feeds", "\(summary.feedCount)", icon: "waterbottle.fill", color: .orange)
+                SummaryCell("Bottle", String(format: "%.1f oz", summary.bottleOunces), icon: "drop.fill", color: .cyan)
+                SummaryCell("Nursing", DurationFormatting.string(seconds: summary.nursingTotal), icon: "figure.and.child.holdinghands", color: .pink)
+                SummaryCell(
+                    "Diapers",
+                    "\(summary.wetDiapers) pee, \(summary.dirtyDiapers) poo, \(summary.bothDiapers) mixed",
+                    icon: "humidity.fill",
+                    color: .teal
+                )
+                SummaryCell("Tummy time", DurationFormatting.string(seconds: summary.tummyTime), icon: "figure.play", color: .green)
+                SummaryCell("Reading", DurationFormatting.string(seconds: summary.readingTime), icon: "book.fill", color: .blue)
+                SummaryCell("Medicine", "\(summary.medicineNames.count)", icon: "cross.case.fill", color: .red)
+                SummaryCell("Baths", "\(summary.bathCount)", icon: "bathtub.fill", color: .cyan)
+            }
         }
+    }
+}
+
+private struct CareProfileTypeKey: EnvironmentKey {
+    static let defaultValue: CareProfileType = .child
+}
+
+private extension EnvironmentValues {
+    var careProfileType: CareProfileType {
+        get { self[CareProfileTypeKey.self] }
+        set { self[CareProfileTypeKey.self] = newValue }
     }
 }
 

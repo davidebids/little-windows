@@ -777,7 +777,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let timerDraft = BabyEvent(profileID: selectedProfileID, type: .sleep, startDate: now, endDate: nil)
 
         XCTAssertTrue(HistoryView.visibleDayEvent(diaper, selectedProfileID: selectedProfileID))
-        XCTAssertTrue(HistoryView.visibleDayEvent(legacyDiaper, selectedProfileID: selectedProfileID))
+        XCTAssertFalse(HistoryView.visibleDayEvent(legacyDiaper, selectedProfileID: selectedProfileID))
         XCTAssertFalse(HistoryView.visibleDayEvent(otherProfileDiaper, selectedProfileID: selectedProfileID))
         XCTAssertFalse(HistoryView.visibleDayEvent(timerDraft, selectedProfileID: selectedProfileID))
     }
@@ -1883,6 +1883,78 @@ final class SleepPredictionEngineTests: XCTestCase {
             accuracy: 0.001
         )
         XCTAssertEqual(snapshot.todaySummary.careSessionCount, 0)
+    }
+
+    func testDailySummaryTracksDogCareMetricsSeparately() {
+        let now = Date(timeIntervalSinceReferenceDate: 360_000)
+        let food = BabyEvent(type: .food, startDate: now)
+        let water = BabyEvent(type: .water, startDate: now)
+        let potty = BabyEvent(type: .potty, startDate: now)
+        potty.dogDetails.accident = true
+        let walk = BabyEvent(
+            type: .walk,
+            startDate: now,
+            endDate: now.addingTimeInterval(1_200)
+        )
+        let training = BabyEvent(
+            type: .training,
+            startDate: now,
+            endDate: now.addingTimeInterval(600)
+        )
+        let diaper = BabyEvent(type: .diaper, startDate: now)
+        diaper.diaperKind = .wet
+
+        let summary = DailySummaryService.summary(
+            for: [food, water, potty, walk, training, diaper]
+        )
+
+        XCTAssertEqual(summary.dogFoodCount, 1)
+        XCTAssertEqual(summary.waterCount, 1)
+        XCTAssertEqual(summary.pottyCount, 1)
+        XCTAssertEqual(summary.pottyAccidents, 1)
+        XCTAssertEqual(summary.walkTime, 1_200)
+        XCTAssertEqual(summary.trainingTime, 600)
+        XCTAssertEqual(summary.wetDiapers, 1)
+    }
+
+    @MainActor
+    func testWidgetSnapshotUsesDogSummaryMetricsForDogProfiles() {
+        let now = Date(timeIntervalSinceReferenceDate: 370_000)
+        let food = BabyEvent(type: .food, startDate: now)
+        let water = BabyEvent(type: .water, startDate: now)
+        let potty = BabyEvent(type: .potty, startDate: now)
+        let walk = BabyEvent(
+            type: .walk,
+            startDate: now.addingTimeInterval(-1_500),
+            endDate: now.addingTimeInterval(-300)
+        )
+
+        let snapshot = WidgetSnapshotService.makeSnapshot(
+            profileType: .dog,
+            babyName: "Test Dog",
+            events: [food, water, potty, walk],
+            prediction: nil,
+            now: now
+        )
+
+        XCTAssertTrue(snapshot.todaySummary.isDog)
+        XCTAssertEqual(snapshot.todaySummary.dogFoodCount, 1)
+        XCTAssertEqual(snapshot.todaySummary.dogWaterCount, 1)
+        XCTAssertEqual(snapshot.todaySummary.dogPottyCount, 1)
+        XCTAssertEqual(snapshot.todaySummary.dogWalkSeconds, 1_200)
+        XCTAssertEqual(snapshot.todaySummary.diaperCount, 0)
+    }
+
+    func testMilestoneCategoriesAreProfileSpecific() {
+        let dogCategories = MilestoneCategory.categories(for: .dog)
+        XCTAssertTrue(dogCategories.contains(.pottyTraining))
+        XCTAssertTrue(dogCategories.contains(.grooming))
+        XCTAssertFalse(dogCategories.contains(.diapering))
+        XCTAssertFalse(dogCategories.contains(.motor))
+
+        let childCategories = MilestoneCategory.categories(for: .child)
+        XCTAssertTrue(childCategories.contains(.diapering))
+        XCTAssertFalse(childCategories.contains(.pottyTraining))
     }
 
     func testPredictionCountdownFormatting() {

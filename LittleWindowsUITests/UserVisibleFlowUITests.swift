@@ -91,6 +91,7 @@ final class UserVisibleFlowUITests: XCTestCase {
     private func visit(name: String, startURL: String, expectedText: [String]) {
         app.terminate()
         app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
             "LITTLE_WINDOWS_START_URL": startURL
         ]
         app.launch()

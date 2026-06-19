@@ -11,6 +11,7 @@ enum WidgetSnapshotService {
     ) {
         let snapshot = makeSnapshot(
             profileID: profile?.id,
+            profileType: profile?.profileType ?? .child,
             babyName: profile?.name ?? "Baby",
             events: events,
             prediction: prediction
@@ -20,6 +21,7 @@ enum WidgetSnapshotService {
 
     static func makeSnapshot(
         profileID: UUID? = nil,
+        profileType: CareProfileType = .child,
         babyName: String,
         events: [BabyEvent],
         prediction: SleepPrediction?,
@@ -64,10 +66,15 @@ enum WidgetSnapshotService {
             todaySummary: TodaySummarySnapshot(
                 profileID: profileID,
                 profileName: babyName,
+                profileTypeRawValue: profileType.rawValue,
                 totalSleepSeconds: daily.totalSleep,
                 napCount: daily.napCount,
                 careSessionCount: careSessions,
-                diaperCount: daily.wetDiapers + daily.dirtyDiapers + daily.bothDiapers
+                diaperCount: daily.wetDiapers + daily.dirtyDiapers + daily.bothDiapers,
+                dogFoodCount: daily.dogFoodCount,
+                dogWaterCount: daily.waterCount,
+                dogPottyCount: daily.pottyCount,
+                dogWalkSeconds: daily.walkTime
             ),
             food: read().food
         )

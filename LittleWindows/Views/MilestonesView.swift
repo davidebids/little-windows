@@ -51,6 +51,7 @@ struct MilestonesView: View {
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \MilestoneEntry.date, order: .reverse) private var allMilestones: [MilestoneEntry]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
+    @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
     @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @State private var searchText = ""
     @State private var selectedCategory: MilestoneCategory?
@@ -63,6 +64,7 @@ struct MilestonesView: View {
     @State private var automaticSummaries: [AutomaticMilestoneSummary] = []
     @State private var selectedAutomaticSummary: AutomaticMilestoneSummary?
     @State private var selectedAgeGuide: AgeGuide?
+    @State private var selectedPuppyStageGuideID: String?
     @State private var showingAgeGuides = false
     @State private var events: [BabyEvent] = []
     @State private var milestonePendingDelete: MilestoneEntry?
@@ -71,18 +73,31 @@ struct MilestonesView: View {
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
     private var selectedProfileID: UUID? { profile?.id }
+    private var isDogProfile: Bool { profile?.profileType == .dog }
     private var milestones: [MilestoneEntry] {
         allMilestones.filter { $0.matchesProfile(selectedProfileID) }
     }
     private var readStates: [AgeGuideReadState] {
         ageGuideReadStates.filter { $0.matchesProfile(selectedProfileID) }
     }
+    private var puppyReadStates: [PuppyStageGuideReadState] {
+        puppyStageGuideReadStates.filter { $0.matchesProfile(selectedProfileID) }
+    }
     private var ageGuides: [AgeGuide] { AgeGuideService.shared.allAgeGuides() }
+    private var availableCategories: [MilestoneCategory] {
+        MilestoneCategory.categories(for: profile?.profileType ?? .child)
+    }
     private var currentAgeGuide: AgeGuide? {
-        profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
+        guard !isDogProfile else { return nil }
+        return profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
     }
     private var currentAgeMonth: Int? {
-        profile.map { AgeGuideService.shared.ageMonth(for: $0) }
+        guard !isDogProfile else { return nil }
+        return profile.map { AgeGuideService.shared.ageMonth(for: $0) }
+    }
+    private var currentPuppyStageGuide: PuppyStageGuide? {
+        guard isDogProfile, let profile else { return nil }
+        return PuppyStageGuideService.shared.currentGuide(for: profile)
     }
 
     private var timelineItems: [MilestoneTimelineItem] {
@@ -146,16 +161,7 @@ struct MilestonesView: View {
                     .listRowSeparator(.hidden)
             }
 
-            if let currentAgeGuide {
-                Section {
-                    currentAgeGuideSection(currentAgeGuide)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                } header: {
-                    AppSectionHeader(title: "This Month", subtitle: currentAgeGuide.ageLabel)
-                }
-            }
+            featuredGuideSection
 
             Section {
                 controls
@@ -164,123 +170,9 @@ struct MilestonesView: View {
                     .listRowSeparator(.hidden)
             }
 
-            Section {
-                NavigationLink {
-                    AgeGuidesListView(
-                        guides: ageGuides,
-                        currentMonth: currentAgeMonth,
-                        readStates: readStates
-                    )
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "calendar.badge.clock")
-                            .foregroundStyle(MilestonePalette.accent)
-                            .frame(width: 38, height: 38)
-                            .background(Color.pink.opacity(0.09), in: Circle())
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Monthly Age Guides")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Development notes, play ideas, and milestone prompts")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            } header: {
-                AppSectionHeader(title: "Age Guides", subtitle: "\(ageGuides.count) guides")
-            }
+            ageGuidesLinkSection
 
-            Section {
-                if timelineItems.isEmpty {
-                    ContentUnavailableView {
-                        Label(
-                            milestones.isEmpty && automaticSummaries.isEmpty
-                                ? "A place for the little things"
-                                : "No memories found",
-                            systemImage: "heart.text.clipboard"
-                        )
-                    } description: {
-                        Text(
-                            milestones.isEmpty && automaticSummaries.isEmpty
-                                ? "Capture \(profile?.name ?? "your baby")'s firsts, funny moments, and little life changes here."
-                                : "Try clearing a filter or searching for something else."
-                        )
-                    } actions: {
-                        if milestones.isEmpty && automaticSummaries.isEmpty {
-                            Button("Capture a memory") {
-                                presentEditor()
-                            }
-                            .buttonStyle(.borderedProminent)
-                        } else {
-                            Button("Clear filters") {
-                                clearFilters()
-                            }
-                        }
-                    }
-                } else {
-                    ForEach(timelineItems) { item in
-                        switch item {
-                        case .automatic(let summary):
-                            Button {
-                                selectedAutomaticSummary = summary
-                            } label: {
-                                AutomaticMilestoneSummaryCard(summary: summary)
-                            }
-                            .buttonStyle(.plain)
-                            .listRowInsets(
-                                EdgeInsets(top: 7, leading: 0, bottom: 7, trailing: 0)
-                            )
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-
-                        case .memory(let milestone):
-                            NavigationLink {
-                                MilestoneDetailView(milestone: milestone)
-                            } label: {
-                                MilestoneTimelineRow(
-                                    milestone: milestone,
-                                    babyName: profile?.name ?? "Baby",
-                                    birthDate: profile?.birthDate
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button {
-                                    milestone.isFavorite.toggle()
-                                    milestone.updatedAt = Date()
-                                    try? modelContext.save()
-                                } label: {
-                                    Label(
-                                        milestone.isFavorite ? "Unfavorite" : "Favorite",
-                                        systemImage: milestone.isFavorite
-                                            ? "heart.slash"
-                                            : "heart.fill"
-                                    )
-                                }
-                                .tint(.pink)
-                            }
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    milestonePendingDelete = milestone
-                                    showingDeleteConfirmation = true
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                        }
-                    }
-                }
-            } header: {
-                AppSectionHeader(
-                    title: "Memory timeline",
-                    subtitle: timelineItems.isEmpty
-                        ? nil
-                        : timelineItems.count == 1
-                            ? "1 memory"
-                            : "\(timelineItems.count) memories"
-                )
-            }
+            timelineSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -314,6 +206,11 @@ struct MilestonesView: View {
         .navigationDestination(item: $selectedAgeGuide) { guide in
             AgeGuideDetailView(guide: guide)
         }
+        .navigationDestination(item: $selectedPuppyStageGuideID) { guideID in
+            if let guide = PuppyStageGuideService.shared.guide(forStageKey: guideID) {
+                PuppyStageGuideDetailView(guide: guide, profile: profile)
+            }
+        }
         .navigationDestination(isPresented: $showingAgeGuides) {
             AgeGuidesListView(
                 guides: ageGuides,
@@ -346,9 +243,169 @@ struct MilestonesView: View {
         }
     }
 
+    @ViewBuilder
+    private var featuredGuideSection: some View {
+        if let guide = currentPuppyStageGuide {
+            Section {
+                puppyStageGuideSection(guide)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } header: {
+                AppSectionHeader(title: "Current Stage", subtitle: guide.title)
+            }
+        } else if let guide = currentAgeGuide {
+            Section {
+                currentAgeGuideSection(guide)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } header: {
+                AppSectionHeader(title: "This Month", subtitle: guide.ageLabel)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var ageGuidesLinkSection: some View {
+        if !isDogProfile {
+            Section {
+                NavigationLink {
+                    AgeGuidesListView(
+                        guides: ageGuides,
+                        currentMonth: currentAgeMonth,
+                        readStates: readStates
+                    )
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar.badge.clock")
+                            .foregroundStyle(MilestonePalette.accent)
+                            .frame(width: 38, height: 38)
+                            .background(Color.pink.opacity(0.09), in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Monthly Age Guides")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Development notes, play ideas, and milestone prompts")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            } header: {
+                AppSectionHeader(title: "Age Guides", subtitle: "\(ageGuides.count) guides")
+            }
+        }
+    }
+
+    private var timelineSection: some View {
+        Section {
+            if timelineItems.isEmpty {
+                emptyTimelineView
+            } else {
+                ForEach(timelineItems) { item in
+                    timelineRow(for: item)
+                }
+            }
+        } header: {
+            AppSectionHeader(title: "Memory timeline", subtitle: timelineSubtitle)
+        }
+    }
+
+    private var timelineSubtitle: String? {
+        guard !timelineItems.isEmpty else { return nil }
+        return timelineItems.count == 1 ? "1 memory" : "\(timelineItems.count) memories"
+    }
+
+    private var emptyTimelineView: some View {
+        ContentUnavailableView {
+            Label(
+                milestones.isEmpty && automaticSummaries.isEmpty
+                    ? "A place for the little things"
+                    : "No memories found",
+                systemImage: "heart.text.clipboard"
+            )
+        } description: {
+            Text(emptyTimelineDescription)
+        } actions: {
+            if milestones.isEmpty && automaticSummaries.isEmpty {
+                Button("Capture a memory") {
+                    presentEditor()
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Button("Clear filters") {
+                    clearFilters()
+                }
+            }
+        }
+    }
+
+    private var emptyTimelineDescription: String {
+        if milestones.isEmpty && automaticSummaries.isEmpty {
+            let fallback = isDogProfile ? "your dog" : "your baby"
+            return "Capture \(profile?.name ?? fallback)'s firsts, funny moments, and little life changes here."
+        }
+        return "Try clearing a filter or searching for something else."
+    }
+
+    @ViewBuilder
+    private func timelineRow(for item: MilestoneTimelineItem) -> some View {
+        switch item {
+        case .automatic(let summary):
+            Button {
+                selectedAutomaticSummary = summary
+            } label: {
+                AutomaticMilestoneSummaryCard(summary: summary)
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(top: 7, leading: 0, bottom: 7, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+        case .memory(let milestone):
+            NavigationLink {
+                MilestoneDetailView(milestone: milestone)
+            } label: {
+                MilestoneTimelineRow(
+                    milestone: milestone,
+                    babyName: profile?.name ?? "Baby",
+                    birthDate: profile?.birthDate
+                )
+            }
+            .buttonStyle(.plain)
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button {
+                    milestone.isFavorite.toggle()
+                    milestone.updatedAt = Date()
+                    try? modelContext.save()
+                } label: {
+                    Label(
+                        milestone.isFavorite ? "Unfavorite" : "Favorite",
+                        systemImage: milestone.isFavorite ? "heart.slash" : "heart.fill"
+                    )
+                }
+                .tint(.pink)
+            }
+            .swipeActions {
+                Button(role: .destructive) {
+                    milestonePendingDelete = milestone
+                    showingDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+    }
+
     @MainActor
     private func refreshAutomaticSummaries() async {
         guard let profile else {
+            events = []
+            automaticSummaries = []
+            return
+        }
+        guard !isDogProfile else {
             events = []
             automaticSummaries = []
             return
@@ -433,7 +490,7 @@ struct MilestonesView: View {
                     ) {
                         selectedCategory = nil
                     }
-                    ForEach(MilestoneCategory.allCases) { category in
+                    ForEach(availableCategories) { category in
                         filterChip(
                             category.displayName,
                             systemImage: category.systemImage,
@@ -543,6 +600,57 @@ struct MilestonesView: View {
         }
     }
 
+    @ViewBuilder
+    private func puppyStageGuideSection(_ guide: PuppyStageGuide) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("\(profile?.name ?? "Dog")'s Stage", systemImage: "pawprint.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.teal)
+                        Text(profile.map { "\($0.name) at \(guide.title)" } ?? guide.title)
+                            .font(.title3.bold())
+                        Text(guide.subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: puppyReadStates.contains {
+                        $0.guideID == guide.id && $0.firstOpenedAt != nil
+                    } ? "checkmark.circle.fill" : "book.pages.fill")
+                    .foregroundStyle(.teal)
+                    .font(.title3)
+                }
+
+                Text(guide.overview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            .padding(14)
+            .background(
+                LinearGradient(
+                    colors: [Color.teal.opacity(0.15), Color.orange.opacity(0.08)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 18)
+            )
+
+            Button {
+                selectedPuppyStageGuideID = guide.id
+            } label: {
+                Label("Read puppy stage guide", systemImage: "book.pages.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.teal)
+        }
+    }
+
     private func filterChip(
         _ title: String,
         systemImage: String,
@@ -589,6 +697,7 @@ struct MilestonesView: View {
     }
 
     private func handlePendingAgeGuideDeepLink() {
+        guard !isDogProfile else { return }
         guard deepLinkRouter.isDataReady else { return }
         guard let command = deepLinkRouter.consumeAgeGuideCommand() else { return }
         switch command {
@@ -1204,6 +1313,13 @@ struct MilestoneEditorView: View {
     }
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var activeProfileType: CareProfileType { profile?.profileType ?? .child }
+    private var availableCategories: [MilestoneCategory] {
+        MilestoneCategory.categories(for: activeProfileType, preserving: category)
+    }
+    private var suggestedTemplates: [MilestoneTemplate] {
+        activeProfileType == .dog ? MilestoneTemplate.dogSuggested : MilestoneTemplate.suggested
+    }
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -1214,7 +1330,7 @@ struct MilestoneEditorView: View {
                 Section("Start with an idea") {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(MilestoneTemplate.suggested) { template in
+                            ForEach(suggestedTemplates) { template in
                                 Button(template.title) {
                                     title = template.title
                                     category = template.category
@@ -1242,7 +1358,7 @@ struct MilestoneEditorView: View {
                 Toggle("Date is approximate", isOn: $approximateDate)
 
                 Picker("Category", selection: $category) {
-                    ForEach(MilestoneCategory.allCases) { value in
+                    ForEach(availableCategories) { value in
                         Label(value.displayName, systemImage: value.systemImage)
                             .tag(value)
                     }
@@ -1612,6 +1728,29 @@ enum MilestonePalette {
 }
 
 extension MilestoneCategory {
+    static func categories(
+        for profileType: CareProfileType,
+        preserving selectedCategory: MilestoneCategory? = nil
+    ) -> [MilestoneCategory] {
+        var categories: [MilestoneCategory]
+        switch profileType {
+        case .child:
+            categories = [
+                .firsts, .motor, .social, .communication, .feeding, .sleep,
+                .growth, .health, .travel, .family, .funny, .diapering, .custom
+            ]
+        case .dog:
+            categories = [
+                .adoption, .training, .pottyTraining, .grooming, .health,
+                .growth, .travel, .family, .funny, .favoriteThings, .custom
+            ]
+        }
+        if let selectedCategory, !categories.contains(selectedCategory) {
+            categories.append(selectedCategory)
+        }
+        return categories
+    }
+
     var tint: Color {
         switch self {
         case .firsts: .pink
