@@ -29,8 +29,17 @@ enum DateFormatting {
         return formatter
     }()
 
-    static func window(start: Date, end: Date) -> String {
-        "\(time.string(from: start))-\(time.string(from: end))"
+    static func window(start: Date, end: Date, calendar: Calendar = .current) -> String {
+        let startText = time.string(from: start)
+        let endText = time.string(from: end)
+        guard end > start else { return startText }
+        if endText == startText {
+            if calendar.isDate(start, equalTo: end, toGranularity: .minute) {
+                return startText
+            }
+            return "\(day.string(from: start)) \(startText)-\(day.string(from: end)) \(endText)"
+        }
+        return "\(startText)-\(endText)"
     }
 
     static func age(from birthDate: Date, to date: Date = Date(), calendar: Calendar = .current) -> String {

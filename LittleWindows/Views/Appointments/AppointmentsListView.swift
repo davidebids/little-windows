@@ -6,6 +6,8 @@ struct AppointmentsListView: View {
     @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @State private var showingEditor = false
+    @State private var appointmentPendingDelete: DoctorAppointment?
+    @State private var showingDeleteConfirmation = false
     @StateObject private var profileService = ProfileService.shared
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
@@ -66,6 +68,23 @@ struct AppointmentsListView: View {
                 )
             }
         }
+        .confirmationDialog(
+            "Delete appointment?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Appointment", role: .destructive) {
+                if let appointmentPendingDelete {
+                    Task { await delete(appointmentPendingDelete) }
+                }
+                appointmentPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                appointmentPendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the appointment and cancels its reminders.")
+        }
     }
 
     @ViewBuilder
@@ -83,7 +102,8 @@ struct AppointmentsListView: View {
                     }
                     .swipeActions {
                         Button(role: .destructive) {
-                            Task { await delete(appointment) }
+                            appointmentPendingDelete = appointment
+                            showingDeleteConfirmation = true
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }

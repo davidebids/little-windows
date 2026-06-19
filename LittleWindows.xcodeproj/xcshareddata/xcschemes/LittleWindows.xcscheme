@@ -40,6 +40,16 @@
                ReferencedContainer = "container:LittleWindows.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "D0000000000000000000002A"
+               BuildableName = "LittleWindowsUITests.xctest"
+               BlueprintName = "LittleWindowsUITests"
+               ReferencedContainer = "container:LittleWindows.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

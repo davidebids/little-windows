@@ -3,6 +3,7 @@ import SwiftUI
 
 struct AppointmentDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Bindable var appointment: DoctorAppointment
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \BabyEvent.startDate, order: .reverse) private var events: [BabyEvent]
@@ -11,10 +12,21 @@ struct AppointmentDetailView: View {
     @State private var showingEditor = false
     @State private var eventRoute: EventEditorRoute?
     @State private var milestoneTemplate: MilestoneTemplate?
+    @State private var showingDeleteConfirmation = false
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var growthEntryTitle: String {
+        profile?.profileType == .dog ? "Add vet growth entry" : "Add pediatrician growth entry"
+    }
     private var scopedEvents: [BabyEvent] {
         events.filter { $0.matchesProfile(appointment.profileID ?? profile?.id) }
+    }
+    private var appointmentTimeSummary: String {
+        guard let endDate = appointment.endDate,
+              endDate > appointment.startDate else {
+            return DateFormatting.time.string(from: appointment.startDate)
+        }
+        return DateFormatting.window(start: appointment.startDate, end: endDate)
     }
 
     var body: some View {
@@ -28,7 +40,7 @@ struct AppointmentDetailView: View {
 
             Section("Details") {
                 DetailRow("Type", appointment.appointmentType.displayName, icon: appointment.appointmentType.systemImage)
-                DetailRow("Time", DateFormatting.window(start: appointment.startDate, end: appointment.endDate ?? appointment.startDate), icon: "clock.fill")
+                DetailRow("Time", appointmentTimeSummary, icon: "clock.fill")
                 if let doctor = appointment.doctorName {
                     DetailRow("Doctor", doctor, icon: "person.crop.circle.fill")
                 }
@@ -109,7 +121,7 @@ struct AppointmentDetailView: View {
             }
 
             Section("Add from this visit") {
-                Button("Add pediatrician growth entry", systemImage: "ruler.fill") {
+                Button(growthEntryTitle, systemImage: "ruler.fill") {
                     eventRoute = EventEditorRoute(type: .growth)
                 }
                 Button("Add temperature entry", systemImage: "thermometer.medium") {
@@ -123,6 +135,12 @@ struct AppointmentDetailView: View {
                         title: "\(appointment.appointmentType.displayName) visit",
                         category: .health
                     )
+                }
+            }
+
+            Section {
+                Button("Delete Appointment", systemImage: "trash", role: .destructive) {
+                    showingDeleteConfirmation = true
                 }
             }
 
@@ -172,6 +190,18 @@ struct AppointmentDetailView: View {
             NavigationStack {
                 MilestoneEditorView(template: template)
             }
+        }
+        .confirmationDialog(
+            "Delete \(appointment.displayTitle)?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Appointment", role: .destructive) {
+                Task { await deleteAppointment() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes the appointment and cancels its reminders.")
         }
     }
 
@@ -231,6 +261,15 @@ struct AppointmentDetailView: View {
                 appointment.updatedAt = Date()
             }
         )
+    }
+
+    private func deleteAppointment() async {
+        await NotificationManager.shared.cancelAppointmentReminders(
+            appointmentID: appointment.id
+        )
+        modelContext.delete(appointment)
+        try? modelContext.save()
+        dismiss()
     }
 }
 

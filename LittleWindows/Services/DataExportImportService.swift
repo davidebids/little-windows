@@ -1136,28 +1136,38 @@ enum DataExportImportService {
 
     @MainActor
     static func deleteAll(context: ModelContext) throws {
-        try context.delete(model: FoodReminder.self)
-        try context.delete(model: MealPrepUsage.self)
-        try context.delete(model: MealPrepItem.self)
-        try context.delete(model: InventoryItem.self)
-        try context.delete(model: InventoryLocation.self)
-        try context.delete(model: FoodItem.self)
-        try context.delete(model: ShoppingListItem.self)
-        try context.delete(model: ShoppingList.self)
-        try context.delete(model: FoodStoreSection.self)
-        try context.delete(model: FoodStore.self)
-        try context.delete(model: Household.self)
-        try context.delete(model: PhotoAttachment.self)
-        try context.delete(model: PredictionFactor.self)
-        try context.delete(model: SleepPredictionRecord.self)
-        try context.delete(model: BabyEvent.self)
-        try context.delete(model: DoctorAppointment.self)
-        try context.delete(model: MilestoneEntry.self)
-        try context.delete(model: AgeGuideReadState.self)
-        try context.delete(model: PuppyStageGuideReadState.self)
-        try context.delete(model: BabyProfile.self)
+        try deleteAll(FoodReminder.self, context: context)
+        try deleteAll(MealPrepUsage.self, context: context)
+        try deleteAll(MealPrepItem.self, context: context)
+        try deleteAll(InventoryItem.self, context: context)
+        try deleteAll(InventoryLocation.self, context: context)
+        try deleteAll(FoodItem.self, context: context)
+        try deleteAll(ShoppingListItem.self, context: context)
+        try deleteAll(ShoppingList.self, context: context)
+        try deleteAll(FoodStoreSection.self, context: context)
+        try deleteAll(FoodStore.self, context: context)
+        try deleteAll(Household.self, context: context)
+        try deleteAll(PhotoAttachment.self, context: context)
+        try deleteAll(PredictionFactor.self, context: context)
+        try deleteAll(SleepPredictionRecord.self, context: context)
+        try deleteAll(BabyEvent.self, context: context)
+        try deleteAll(DoctorAppointment.self, context: context)
+        try deleteAll(MilestoneEntry.self, context: context)
+        try deleteAll(AgeGuideReadState.self, context: context)
+        try deleteAll(PuppyStageGuideReadState.self, context: context)
+        try deleteAll(BabyProfile.self, context: context)
         try context.save()
         PersistenceService.recordLocalSave()
+    }
+
+    @MainActor
+    private static func deleteAll<T: PersistentModel>(
+        _ modelType: T.Type,
+        context: ModelContext
+    ) throws {
+        for item in try context.fetch(FetchDescriptor<T>()) {
+            context.delete(item)
+        }
     }
 }
 

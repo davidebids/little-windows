@@ -24,11 +24,14 @@ enum SampleData {
     }
 
     static func bundledLegacyTrackerHistory() throws -> Data {
-        if let url = Bundle.main.url(
-            forResource: "Sample-Legacy-Tracker-Backup",
-            withExtension: "json"
-        ) {
-            return try Data(contentsOf: url)
+        let bundles = [Bundle.main] + Bundle.allBundles + Bundle.allFrameworks
+        for bundle in bundles {
+            if let url = bundle.url(
+                forResource: "Sample-Legacy-Tracker-Backup",
+                withExtension: "json"
+            ) {
+                return try Data(contentsOf: url)
+            }
         }
 
         #if DEBUG

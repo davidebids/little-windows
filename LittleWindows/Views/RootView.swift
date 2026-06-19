@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 enum AppTheme {
@@ -269,8 +270,13 @@ private struct AppActionSheetRow: View {
 }
 
 struct RootView: View {
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
+    @AppStorage(FirstRunOnboarding.completedKey) private var hasCompletedInitialOnboarding = false
     @StateObject private var router = DeepLinkRouter.shared
+    @State private var shouldOpenSettingsAfterOnboarding = false
+    @State private var hasCheckedInitialOnboardingState = false
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
@@ -326,6 +332,30 @@ struct RootView: View {
         }
         .tint(AppTheme.accent)
         .environmentObject(router)
+        .fullScreenCover(
+            isPresented: Binding(
+                get: {
+                    guard hasCheckedInitialOnboardingState else { return false }
+                    return FirstRunOnboarding.shouldPresent(
+                        hasCompleted: hasCompletedInitialOnboarding,
+                        profiles: profiles
+                    )
+                },
+                set: { _ in }
+            )
+        ) {
+            FirstRunOnboardingView(
+                completeOnboarding: {
+                    hasCompletedInitialOnboarding = true
+                    router.selectedTab = .today
+                },
+                importBackupInstead: {
+                    shouldOpenSettingsAfterOnboarding = true
+                    hasCompletedInitialOnboarding = true
+                }
+            )
+            .interactiveDismissDisabled()
+        }
         .sheet(isPresented: $router.showingSettings) {
             NavigationStack {
                 SettingsView()
@@ -338,8 +368,12 @@ struct RootView: View {
                     }
             }
         }
-        .onOpenURL { router.route($0) }
+        .onOpenURL { url in
+            route(url)
+        }
         .task {
+            markOnboardingCompleteForExistingData()
+            hasCheckedInitialOnboardingState = true
             if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "insights" {
                 router.selectedReportsMode = .summary
                 router.selectedTab = .reports
@@ -350,21 +384,872 @@ struct RootView: View {
             }
             if let value = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_URL"],
                let url = URL(string: value) {
-                router.route(url)
+                route(url)
             }
             consumePendingSystemAction()
+        }
+        .onChange(of: profiles.count) { _, _ in
+            markOnboardingCompleteForExistingData()
+            hasCheckedInitialOnboardingState = true
+        }
+        .onChange(of: hasCompletedInitialOnboarding) { _, completed in
+            guard completed, shouldOpenSettingsAfterOnboarding else { return }
+            shouldOpenSettingsAfterOnboarding = false
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                router.showingSettings = true
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { consumePendingSystemAction() }
         }
     }
 
+    private func markOnboardingCompleteForExistingData() {
+        guard !hasCompletedInitialOnboarding, !profiles.isEmpty else { return }
+        hasCompletedInitialOnboarding = true
+    }
+
+    private func route(_ url: URL) {
+        #if DEBUG
+        if DebugSimulatorSmokeSeedService.isResetEmpty(url) {
+            DebugSimulatorSmokeSeedService.resetEmpty(context: modelContext)
+            hasCompletedInitialOnboarding = false
+            hasCheckedInitialOnboardingState = true
+            router.selectedTab = .today
+            return
+        }
+        if DebugSimulatorSmokeSeedService.canHandle(url) {
+            DebugSimulatorSmokeSeedService.seedIfNeeded(context: modelContext)
+            hasCompletedInitialOnboarding = true
+            router.selectedTab = .today
+            return
+        }
+        #endif
+        router.route(url)
+    }
+
     private func consumePendingSystemAction() {
         if let url = IntegrationCommandStore.consumePendingURL() {
-            router.route(url)
+            route(url)
         }
     }
 }
+
+enum FirstRunOnboarding {
+    static let completedKey = "hasCompletedInitialOnboarding"
+
+    static func shouldPresent(hasCompleted: Bool, profiles: [CareProfile]) -> Bool {
+        !hasCompleted && profiles.isEmpty
+    }
+}
+
+private enum FirstRunOnboardingStep: Int {
+    case caregiver
+    case profile
+}
+
+private struct FirstRunOnboardingView: View {
+    @Environment(\.modelContext) private var modelContext
+    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
+    @AppStorage("caregiverTwo") private var caregiverTwo = "Caregiver 2"
+    @StateObject private var profileService = ProfileService.shared
+
+    var completeOnboarding: () -> Void
+    var importBackupInstead: () -> Void
+
+    @State private var step = FirstRunOnboardingStep.caregiver
+    @State private var primaryCaregiverName = ""
+    @State private var secondaryCaregiverName = ""
+    @State private var profileType = CareProfileType.child
+    @State private var profileName = ""
+    @State private var birthDate = Date()
+    @State private var sex = BabySex.unknown
+    @State private var hasAdoptionDate = false
+    @State private var adoptionDate = Date()
+    @State private var breed = ""
+    @State private var validationMessage: String?
+
+    private var trimmedPrimaryCaregiverName: String {
+        primaryCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedSecondaryCaregiverName: String {
+        secondaryCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedProfileName: String {
+        profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isCaregiverStepValid: Bool {
+        !trimmedPrimaryCaregiverName.isEmpty
+    }
+
+    private var isProfileStepValid: Bool {
+        !trimmedProfileName.isEmpty
+    }
+
+    private var profileNamePrompt: String {
+        profileType == .dog ? "Dog name" : "Child name"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    header
+
+                    if step == .caregiver {
+                        caregiverStep
+                    } else {
+                        profileStep
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 18)
+                .padding(.bottom, 34)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(AppTheme.background)
+            .navigationTitle(step == .caregiver ? "Welcome" : "First Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if step == .profile {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Back") { step = .caregiver }
+                    }
+                }
+            }
+            .alert("Check setup", isPresented: Binding(
+                get: { validationMessage != nil },
+                set: { if !$0 { validationMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(validationMessage ?? "")
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: step == .caregiver ? "sparkles" : profileType.systemImage)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(AppTheme.accent.gradient, in: RoundedRectangle(cornerRadius: 16))
+                .accessibilityHidden(true)
+
+            Text(step == .caregiver ? "Set up your care home" : "Add the first profile")
+                .font(.largeTitle.bold())
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(step == .caregiver
+                ? "Little Windows uses caregiver names on logs so the history makes sense later."
+                : "Choose whether you are tracking a child or dog, then add the details needed for daily care.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var caregiverStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Caregivers")
+                    .font(.headline)
+
+                TextField("Your name", text: $primaryCaregiverName)
+                    .textContentType(.name)
+                    .submitLabel(.next)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField("Second caregiver, optional", text: $secondaryCaregiverName)
+                    .textContentType(.name)
+                    .submitLabel(.done)
+                    .textFieldStyle(.roundedBorder)
+
+                Text("You can edit these names later in Settings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(18)
+            .appSurface()
+
+            Button {
+                guard isCaregiverStepValid else {
+                    validationMessage = "Enter your name to continue."
+                    return
+                }
+                step = .profile
+            } label: {
+                Label("Continue", systemImage: "arrow.right.circle.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!isCaregiverStepValid)
+
+            Button {
+                importBackupInstead()
+            } label: {
+                Label("Import JSON backup instead", systemImage: "square.and.arrow.down")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        }
+        .onAppear {
+            if primaryCaregiverName.isEmpty, caregiverOne != "Caregiver 1" {
+                primaryCaregiverName = caregiverOne
+            }
+            if secondaryCaregiverName.isEmpty, caregiverTwo != "Caregiver 2" {
+                secondaryCaregiverName = caregiverTwo
+            }
+        }
+    }
+
+    private var profileStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Care profile")
+                    .font(.headline)
+
+                Picker("Profile type", selection: $profileType) {
+                    ForEach(CareProfileType.allCases) { value in
+                        Label(value.displayName, systemImage: value.systemImage).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                TextField(profileNamePrompt, text: $profileName)
+                    .textContentType(.name)
+                    .submitLabel(.done)
+                    .textFieldStyle(.roundedBorder)
+
+                DatePicker(
+                    profileType == .dog ? "Birthday or best estimate" : "Birthdate",
+                    selection: $birthDate,
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+
+                Picker("Sex", selection: $sex) {
+                    ForEach(BabySex.allCases) { value in
+                        Text(value.displayName).tag(value)
+                    }
+                }
+
+                if profileType == .dog {
+                    TextField("Breed, optional", text: $breed)
+                        .textFieldStyle(.roundedBorder)
+
+                    Toggle("Add adoption date", isOn: $hasAdoptionDate)
+
+                    if hasAdoptionDate {
+                        DatePicker(
+                            "Adoption date",
+                            selection: $adoptionDate,
+                            in: ...Date(),
+                            displayedComponents: .date
+                        )
+                    }
+                }
+            }
+            .padding(18)
+            .appSurface()
+
+            Button {
+                save()
+            } label: {
+                Label("Start Tracking", systemImage: "checkmark.circle.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!isProfileStepValid)
+        }
+    }
+
+    private func save() {
+        guard isCaregiverStepValid else {
+            validationMessage = "Enter your name to continue."
+            step = .caregiver
+            return
+        }
+        guard isProfileStepValid else {
+            validationMessage = "Enter a \(profileType == .dog ? "dog" : "child") name."
+            return
+        }
+
+        caregiverOne = trimmedPrimaryCaregiverName
+        caregiverTwo = trimmedSecondaryCaregiverName
+
+        if profileType == .dog {
+            profileService.createDogProfile(
+                name: trimmedProfileName,
+                birthDate: birthDate,
+                sex: sex,
+                adoptionDate: hasAdoptionDate ? adoptionDate : nil,
+                breed: breed.nilIfBlank,
+                displayColor: "teal",
+                context: modelContext
+            )
+        } else {
+            profileService.createChildProfile(
+                name: trimmedProfileName,
+                birthDate: birthDate,
+                sex: sex,
+                displayColor: "indigo",
+                context: modelContext
+            )
+        }
+
+        completeOnboarding()
+    }
+}
+
+#if DEBUG
+enum DebugSimulatorSmokeSeedService {
+    static let childProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+    static let dogProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
+    static let sleepEventID = UUID(uuidString: "00000000-0000-0000-0000-000000000201")!
+    static let activeNursingEventID = UUID(uuidString: "00000000-0000-0000-0000-000000000202")!
+    static let appointmentID = UUID(uuidString: "00000000-0000-0000-0000-000000000301")!
+    static let shoppingListID = UUID(uuidString: "00000000-0000-0000-0000-000000000501")!
+    static let inventoryItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000601")!
+    static let mealPrepItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000701")!
+    static let storeID = UUID(uuidString: "00000000-0000-0000-0000-000000000801")!
+
+    private static let produceSectionID = UUID(uuidString: "00000000-0000-0000-0000-000000000802")!
+    private static let coldSectionID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
+    private static let pantryLocationID = UUID(uuidString: "00000000-0000-0000-0000-000000000602")!
+    private static let freezerLocationID = UUID(uuidString: "00000000-0000-0000-0000-000000000603")!
+
+    static func canHandle(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = [url.host].compactMap { $0 } + url.pathComponents.filter { $0 != "/" }
+        return components == ["debug", "seed-smoke"]
+    }
+
+    static func isResetEmpty(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = [url.host].compactMap { $0 } + url.pathComponents.filter { $0 != "/" }
+        return components == ["debug", "reset-empty"]
+    }
+
+    @MainActor
+    static func resetEmpty(context: ModelContext) {
+        try? DataExportImportService.deleteAll(context: context)
+        UserDefaults.standard.removeObject(forKey: FirstRunOnboarding.completedKey)
+        UserDefaults.standard.removeObject(forKey: "caregiverOne")
+        UserDefaults.standard.removeObject(forKey: "caregiverTwo")
+        UserDefaults.standard.removeObject(forKey: "selectedCareProfileID")
+        PersistenceService.setICloudSyncEnabled(false)
+    }
+
+    @MainActor
+    static func seedIfNeeded(context: ModelContext, now: Date = Date()) {
+        UserDefaults.standard.set(true, forKey: FirstRunOnboarding.completedKey)
+        UserDefaults.standard.set("Sample Caregiver", forKey: "caregiverOne")
+        UserDefaults.standard.set("Backup Caregiver", forKey: "caregiverTwo")
+        PersistenceService.setICloudSyncEnabled(false)
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let childBirthDate = calendar.date(byAdding: .month, value: -5, to: today) ?? today
+        let dogBirthDate = calendar.date(byAdding: .month, value: -10, to: today) ?? today
+
+        let child = fetchOrCreateProfile(
+            id: childProfileID,
+            profileType: .child,
+            name: "Sample Child",
+            birthDate: childBirthDate,
+            sex: .unknown,
+            displayColor: "indigo",
+            context: context
+        )
+        _ = fetchOrCreateProfile(
+            id: dogProfileID,
+            profileType: .dog,
+            name: "Sample Dog",
+            birthDate: dogBirthDate,
+            sex: .female,
+            displayColor: "teal",
+            adoptionDate: calendar.date(byAdding: .month, value: -3, to: today),
+            breed: "Mixed breed",
+            context: context
+        )
+        ProfileService.shared.switchProfile(child)
+
+        seedCareEvents(profile: child, today: today, context: context)
+        seedAppointments(profile: child, today: today, context: context)
+        seedMilestones(profile: child, today: today, context: context)
+        seedFoodHome(today: today, context: context)
+
+        try? context.save()
+        PersistenceService.recordLocalSave()
+    }
+
+    @MainActor
+    private static func fetchOrCreateProfile(
+        id: UUID,
+        profileType: CareProfileType,
+        name: String,
+        birthDate: Date,
+        sex: BabySex,
+        displayColor: String,
+        adoptionDate: Date? = nil,
+        breed: String? = nil,
+        context: ModelContext
+    ) -> CareProfile {
+        if let existing = fetch(CareProfile.self, id: id, context: context) {
+            existing.name = name
+            existing.profileType = profileType
+            existing.birthDate = birthDate
+            existing.sex = sex
+            existing.displayColor = displayColor
+            existing.adoptionDate = adoptionDate
+            existing.breed = breed
+            existing.species = profileType == .dog ? "dog" : nil
+            existing.isArchived = false
+            existing.updatedAt = Date()
+            return existing
+        }
+        let profile = CareProfile(
+            id: id,
+            profileType: profileType,
+            name: name,
+            birthDate: birthDate,
+            sex: sex,
+            displayColor: displayColor,
+            adoptionDate: adoptionDate,
+            species: profileType == .dog ? "dog" : nil,
+            breed: breed
+        )
+        context.insert(profile)
+        return profile
+    }
+
+    @MainActor
+    private static func seedCareEvents(profile: CareProfile, today: Date, context: ModelContext) {
+        let nightStart = today.addingTimeInterval(-9.5 * 3_600)
+        upsertEvent(
+            id: sleepEventID,
+            profile: profile,
+            type: .sleep,
+            startDate: nightStart,
+            endDate: today.addingTimeInterval(6.75 * 3_600),
+            title: nil,
+            notes: "Slept through one short wake-up.",
+            context: context
+        ) { event in
+            event.sleepKind = .nightSleep
+        }
+        upsertEvent(
+            id: activeNursingEventID,
+            profile: profile,
+            type: .nursing,
+            startDate: Date().addingTimeInterval(-11 * 60),
+            endDate: nil,
+            title: nil,
+            notes: "Active simulator smoke timer.",
+            context: context
+        ) { event in
+            event.nursingSide = .left
+            event.activeNursingSide = .left
+            event.timerState = .running
+            event.activeTimerSegmentStartDate = Date().addingTimeInterval(-11 * 60)
+        }
+        upsertEvent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000203")!,
+            profile: profile,
+            type: .feed,
+            startDate: today.addingTimeInterval(8.5 * 3_600),
+            endDate: today.addingTimeInterval(8.55 * 3_600),
+            title: nil,
+            notes: "Finished most of the bottle.",
+            context: context
+        ) { event in
+            event.feedKind = .bottle
+            event.amountOz = 5
+        }
+        upsertEvent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000204")!,
+            profile: profile,
+            type: .diaper,
+            startDate: today.addingTimeInterval(9.2 * 3_600),
+            endDate: nil,
+            title: nil,
+            notes: "Normal change.",
+            context: context
+        ) { event in
+            event.diaperKind = .both
+            event.peeAmount = .medium
+            event.pooAmount = .little
+        }
+        upsertEvent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000205")!,
+            profile: profile,
+            type: .medicine,
+            startDate: today.addingTimeInterval(10.25 * 3_600),
+            endDate: nil,
+            title: nil,
+            notes: "Given with snack.",
+            context: context
+        ) { event in
+            event.medicineName = "Vitamin D"
+            event.dose = 1
+            event.doseUnit = "drop"
+        }
+    }
+
+    @MainActor
+    private static func upsertEvent(
+        id: UUID,
+        profile: CareProfile,
+        type: EventType,
+        startDate: Date,
+        endDate: Date?,
+        title: String?,
+        notes: String?,
+        context: ModelContext,
+        configure: (BabyEvent) -> Void
+    ) {
+        let resolvedEndDate = type.supportsTimer ? endDate : nil
+        let event = fetch(BabyEvent.self, id: id, context: context) ?? BabyEvent(
+            id: id,
+            profileID: profile.id,
+            type: type,
+            title: title,
+            startDate: startDate,
+            endDate: resolvedEndDate,
+            caregiverName: "Sample Caregiver",
+            notes: notes
+        )
+        if event.modelContext == nil {
+            context.insert(event)
+        }
+        event.profileID = profile.id
+        event.profileTypeSnapshot = profile.profileType
+        event.type = type
+        event.title = title
+        event.startDate = startDate
+        event.endDate = resolvedEndDate
+        event.caregiverName = "Sample Caregiver"
+        event.notes = notes
+        event.updatedAt = Date()
+        configure(event)
+    }
+
+    @MainActor
+    private static func seedAppointments(profile: CareProfile, today: Date, context: ModelContext) {
+        let appointment = fetch(DoctorAppointment.self, id: appointmentID, context: context) ?? DoctorAppointment(
+            id: appointmentID,
+            profileID: profile.id,
+            title: "Six month checkup",
+            appointmentType: .wellnessCheck,
+            startDate: today.addingTimeInterval(2 * 24 * 3_600 + 10 * 3_600),
+            caregiverName: "Sample Caregiver"
+        )
+        if appointment.modelContext == nil {
+            context.insert(appointment)
+        }
+        appointment.profileID = profile.id
+        appointment.title = "Six month checkup"
+        appointment.appointmentType = .wellnessCheck
+        appointment.startDate = today.addingTimeInterval(2 * 24 * 3_600 + 10 * 3_600)
+        appointment.endDate = nil
+        appointment.clinicName = "Neighborhood Clinic"
+        appointment.doctorName = "Care Team"
+        appointment.questionsToAsk = "Ask about sleep schedule and introducing new foods."
+        appointment.notes = "Bring backup bottle and growth notes."
+        appointment.caregiverName = "Sample Caregiver"
+        appointment.isCompleted = false
+    }
+
+    @MainActor
+    private static func seedMilestones(profile: CareProfile, today: Date, context: ModelContext) {
+        let milestones = [
+            ("Rolled from tummy to back", MilestoneCategory.motor, -24, true),
+            ("First big laugh", MilestoneCategory.social, -12, false),
+            ("Tried oatmeal", MilestoneCategory.feeding, -4, false)
+        ]
+        for (index, milestone) in milestones.enumerated() {
+            let id = UUID(uuidString: "00000000-0000-0000-0000-00000000030\(index + 2)")!
+            let entry = fetch(MilestoneEntry.self, id: id, context: context) ?? MilestoneEntry(
+                id: id,
+                profileID: profile.id,
+                title: milestone.0,
+                date: today.addingTimeInterval(Double(milestone.2) * 24 * 3_600),
+                category: milestone.1,
+                caregiverName: "Sample Caregiver",
+                isFavorite: milestone.3
+            )
+            if entry.modelContext == nil {
+                context.insert(entry)
+            }
+            entry.profileID = profile.id
+            entry.title = milestone.0
+            entry.date = today.addingTimeInterval(Double(milestone.2) * 24 * 3_600)
+            entry.category = milestone.1
+            entry.notes = "Simulator smoke milestone."
+            entry.caregiverName = "Sample Caregiver"
+            entry.isFavorite = milestone.3
+        }
+    }
+
+    @MainActor
+    private static func seedFoodHome(today: Date, context: ModelContext) {
+        let household = HouseholdService.ensureDefaultHousehold(context: context)
+        household.name = "Sample Home"
+        household.updatedAt = Date()
+        let householdID = household.id
+
+        let store = fetch(FoodStore.self, id: storeID, context: context) ?? FoodStore(
+            id: storeID,
+            householdID: householdID,
+            name: "Neighborhood Market",
+            notes: "Main weekly grocery route.",
+            sortOrder: 0
+        )
+        if store.modelContext == nil { context.insert(store) }
+        store.householdID = householdID
+        store.name = "Neighborhood Market"
+        store.notes = "Main weekly grocery route."
+        store.isArchived = false
+
+        seedStoreSection(
+            id: produceSectionID,
+            householdID: householdID,
+            storeID: storeID,
+            name: "Produce",
+            sortOrder: 0,
+            context: context
+        )
+        seedStoreSection(
+            id: coldSectionID,
+            householdID: householdID,
+            storeID: storeID,
+            name: "Cold Case",
+            sortOrder: 1,
+            context: context
+        )
+
+        seedLocation(
+            id: pantryLocationID,
+            householdID: householdID,
+            name: "Pantry",
+            type: .pantry,
+            sortOrder: 0,
+            context: context
+        )
+        seedLocation(
+            id: freezerLocationID,
+            householdID: householdID,
+            name: "Freezer",
+            type: .freezer,
+            sortOrder: 1,
+            context: context
+        )
+
+        let list = fetch(ShoppingList.self, id: shoppingListID, context: context) ?? ShoppingList(
+            id: shoppingListID,
+            householdID: householdID,
+            name: "Weekly groceries",
+            storeID: storeID,
+            listType: .store,
+            sortOrder: 0,
+            notes: "Used for simulator smoke QA."
+        )
+        if list.modelContext == nil { context.insert(list) }
+        list.householdID = householdID
+        list.name = "Weekly groceries"
+        list.storeID = storeID
+        list.isArchived = false
+
+        seedShoppingItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000502")!,
+            householdID: householdID,
+            listID: shoppingListID,
+            name: "Bananas",
+            quantity: 6,
+            unit: nil,
+            sectionID: produceSectionID,
+            isChecked: false,
+            priority: .high,
+            context: context
+        )
+        seedShoppingItem(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000503")!,
+            householdID: householdID,
+            listID: shoppingListID,
+            name: "Yogurt cups",
+            quantity: 4,
+            unit: "pack",
+            sectionID: coldSectionID,
+            isChecked: true,
+            priority: .normal,
+            context: context
+        )
+
+        let inventory = fetch(InventoryItem.self, id: inventoryItemID, context: context) ?? InventoryItem(
+            id: inventoryItemID,
+            householdID: householdID,
+            name: "Applesauce pouches",
+            quantity: 8,
+            unit: "pouches",
+            locationID: pantryLocationID
+        )
+        if inventory.modelContext == nil { context.insert(inventory) }
+        inventory.householdID = householdID
+        inventory.name = "Applesauce pouches"
+        inventory.quantity = 8
+        inventory.unit = "pouches"
+        inventory.locationID = pantryLocationID
+        inventory.notes = "Restock at 3 pouches."
+        inventory.status = .available
+
+        let mealPrep = fetch(MealPrepItem.self, id: mealPrepItemID, context: context) ?? MealPrepItem(
+            id: mealPrepItemID,
+            householdID: householdID,
+            name: "Veggie puree cubes",
+            locationID: freezerLocationID,
+            servingsTotal: 12,
+            servingsRemaining: 9,
+            servingUnit: .portion,
+            preparedDate: today.addingTimeInterval(-2 * 24 * 3_600),
+            notes: "Carrot and sweet potato."
+        )
+        if mealPrep.modelContext == nil { context.insert(mealPrep) }
+        mealPrep.householdID = householdID
+        mealPrep.name = "Veggie puree cubes"
+        mealPrep.locationID = freezerLocationID
+        mealPrep.servingsTotal = 12
+        mealPrep.servingsRemaining = 9
+        mealPrep.servingUnit = .portion
+        mealPrep.isArchived = false
+
+        let usageID = UUID(uuidString: "00000000-0000-0000-0000-000000000702")!
+        let usage = fetch(MealPrepUsage.self, id: usageID, context: context) ?? MealPrepUsage(
+            id: usageID,
+            householdID: householdID,
+            mealPrepItemID: mealPrepItemID,
+            dateTime: today.addingTimeInterval(8 * 3_600),
+            servingsUsed: 1,
+            notes: "Served with breakfast."
+        )
+        if usage.modelContext == nil { context.insert(usage) }
+        usage.householdID = householdID
+        usage.mealPrepItemID = mealPrepItemID
+    }
+
+    @MainActor
+    private static func seedStoreSection(
+        id: UUID,
+        householdID: UUID,
+        storeID: UUID,
+        name: String,
+        sortOrder: Int,
+        context: ModelContext
+    ) {
+        let section = fetch(FoodStoreSection.self, id: id, context: context) ?? FoodStoreSection(
+            id: id,
+            householdID: householdID,
+            storeID: storeID,
+            name: name,
+            sortOrder: sortOrder
+        )
+        if section.modelContext == nil { context.insert(section) }
+        section.householdID = householdID
+        section.storeID = storeID
+        section.name = name
+        section.sortOrder = sortOrder
+    }
+
+    @MainActor
+    private static func seedLocation(
+        id: UUID,
+        householdID: UUID,
+        name: String,
+        type: InventoryLocationType,
+        sortOrder: Int,
+        context: ModelContext
+    ) {
+        let location = fetch(InventoryLocation.self, id: id, context: context) ?? InventoryLocation(
+            id: id,
+            householdID: householdID,
+            name: name,
+            locationType: type,
+            sortOrder: sortOrder
+        )
+        if location.modelContext == nil { context.insert(location) }
+        location.householdID = householdID
+        location.name = name
+        location.locationType = type
+        location.sortOrder = sortOrder
+        location.isArchived = false
+    }
+
+    @MainActor
+    private static func seedShoppingItem(
+        id: UUID,
+        householdID: UUID,
+        listID: UUID,
+        name: String,
+        quantity: Double,
+        unit: String?,
+        sectionID: UUID,
+        isChecked: Bool,
+        priority: ShoppingItemPriority,
+        context: ModelContext
+    ) {
+        let item = fetch(ShoppingListItem.self, id: id, context: context) ?? ShoppingListItem(
+            id: id,
+            householdID: householdID,
+            shoppingListID: listID,
+            name: name,
+            quantity: quantity,
+            unit: unit,
+            storeSectionID: sectionID,
+            isChecked: isChecked,
+            checkedAt: isChecked ? Date() : nil,
+            priority: priority,
+            addedBy: "Sample Caregiver"
+        )
+        if item.modelContext == nil { context.insert(item) }
+        item.householdID = householdID
+        item.shoppingListID = listID
+        item.name = name
+        item.quantity = quantity
+        item.unit = unit
+        item.storeSectionID = sectionID
+        item.isChecked = isChecked
+        item.checkedAt = isChecked ? Date() : nil
+        item.priority = priority
+        item.addedBy = "Sample Caregiver"
+    }
+
+    @MainActor
+    private static func fetch<Model: PersistentModel & Identifiable>(
+        _ type: Model.Type,
+        id: UUID,
+        context: ModelContext
+    ) -> Model? where Model.ID == UUID {
+        var descriptor = FetchDescriptor<Model>(
+            predicate: #Predicate<Model> { model in
+                model.id == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
+    }
+}
+#endif
 
 #Preview {
     RootView()

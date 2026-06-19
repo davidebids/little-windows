@@ -62,10 +62,13 @@ enum StoreLayoutService {
         save(context)
     }
 
-    static func archiveStore(_ store: FoodStore, context: ModelContext) {
+    @discardableResult
+    static func archiveStore(_ store: FoodStore, context: ModelContext) -> Bool {
+        guard !store.isArchived else { return false }
         store.isArchived = true
         store.updatedAt = Date()
         save(context)
+        return true
     }
 
     private static func createSections(
@@ -104,6 +107,19 @@ enum ShoppingListService {
         context.insert(list)
         save(context)
         return list
+    }
+
+    @discardableResult
+    static func archiveList(
+        _ list: ShoppingList,
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        guard !list.isArchived else { return false }
+        list.isArchived = true
+        list.updatedAt = now
+        save(context)
+        return true
     }
 
     static func addItem(
@@ -150,6 +166,11 @@ enum ShoppingListService {
         item.priority = priority
         item.inventoryLinkBehavior = inventoryLinkBehavior
         item.updatedAt = Date()
+        save(context)
+    }
+
+    static func deleteItem(_ item: ShoppingListItem, context: ModelContext) {
+        context.delete(item)
         save(context)
     }
 
@@ -425,6 +446,11 @@ enum FoodInventoryService {
         save(context)
     }
 
+    static func deleteInventoryItem(_ item: InventoryItem, context: ModelContext) {
+        context.delete(item)
+        save(context)
+    }
+
     static func addToShoppingList(
         item: InventoryItem,
         list: ShoppingList,
@@ -523,6 +549,11 @@ enum MealPrepService {
 
     static func archiveIfFinished(_ item: MealPrepItem, context: ModelContext) {
         guard item.servingsRemaining <= 0 else { return }
+        archive(item, context: context)
+    }
+
+    static func archive(_ item: MealPrepItem, context: ModelContext) {
+        guard !item.isArchived else { return }
         item.isArchived = true
         item.updatedAt = Date()
         save(context)

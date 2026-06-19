@@ -44,7 +44,7 @@ struct EventRow: View {
     private var detail: String {
         var pieces = [DateFormatting.time.string(from: event.startDate)]
         if let endDate = event.endDate {
-            pieces[0] += "-\(DateFormatting.time.string(from: endDate))"
+            pieces[0] = DateFormatting.window(start: event.startDate, end: endDate)
         }
         if let duration = event.duration, duration >= 60 {
             pieces.append(DurationFormatting.string(seconds: duration))

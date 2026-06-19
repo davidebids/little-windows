@@ -19,8 +19,19 @@ struct FoodHomeView: View {
     @State private var selectedSection: FoodHomeSection = .shopping
     @State private var path = NavigationPath()
     @State private var showingQuickAdd = false
+    @State private var deferredFoodCommand: FoodRouteCommand?
+    @State private var deferredFoodCommandRetryToken = UUID()
 
     private var household: Household? { households.first }
+    private var foodRouteDataVersion: Int {
+        households.count
+        + shoppingLists.count
+        + inventoryItems.count
+        + mealPrepItems.count
+        + stores.count
+        + storeSections.count
+        + locations.count
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -48,10 +59,14 @@ struct FoodHomeView: View {
             }
             .task {
                 FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
+                retryDeferredFoodCommandIfPossible()
             }
             .onReceive(router.$pendingFoodCommand.compactMap { $0 }) { command in
                 handle(command)
                 router.pendingFoodCommand = nil
+            }
+            .onChange(of: foodRouteDataVersion) { _, _ in
+                retryDeferredFoodCommandIfPossible()
             }
             .sheet(isPresented: $showingQuickAdd) {
                 if let household {
@@ -179,7 +194,8 @@ struct FoodHomeView: View {
             if let store = householdStores.first(where: { $0.id == id }) {
                 StoreEditorView(
                     store: store,
-                    sections: householdStoreSections.filter { $0.storeID == store.id }
+                    sections: householdStoreSections.filter { $0.storeID == store.id },
+                    shoppingItems: householdShoppingItems
                 )
             } else {
                 MissingFoodRouteView()
@@ -196,38 +212,108 @@ struct FoodHomeView: View {
         }
     }
 
-    private func handle(_ command: FoodRouteCommand) {
+    private func handle(_ command: FoodRouteCommand, allowDeferral: Bool = true) {
+        if allowDeferral && shouldDefer(command) {
+            deferFoodCommand(command)
+            return
+        }
+
         switch command {
         case .food:
+            deferredFoodCommand = nil
             selectedSection = .shopping
             path.removeLast(path.count)
         case .shopping:
+            deferredFoodCommand = nil
             selectedSection = .shopping
             path.removeLast(path.count)
         case .shoppingList(let id):
+            deferredFoodCommand = nil
             selectedSection = .shopping
+            path.removeLast(path.count)
             path.append(FoodRoute.shoppingList(id))
         case .shoppingMode(let id):
+            deferredFoodCommand = nil
             selectedSection = .shopping
+            path.removeLast(path.count)
             path.append(FoodRoute.shoppingMode(id))
         case .inventory:
+            deferredFoodCommand = nil
             selectedSection = .inventory
             path.removeLast(path.count)
         case .inventoryItem(let id):
+            deferredFoodCommand = nil
             selectedSection = .inventory
+            path.removeLast(path.count)
             path.append(FoodRoute.inventoryItem(id))
         case .mealPrep:
+            deferredFoodCommand = nil
             selectedSection = .mealPrep
             path.removeLast(path.count)
         case .mealPrepItem(let id):
+            deferredFoodCommand = nil
             selectedSection = .mealPrep
+            path.removeLast(path.count)
             path.append(FoodRoute.mealPrepItem(id))
         case .store(let id):
+            deferredFoodCommand = nil
             selectedSection = .stores
+            path.removeLast(path.count)
             path.append(FoodRoute.store(id))
         case .quickAdd:
+            deferredFoodCommand = nil
             selectedSection = .shopping
             showingQuickAdd = true
+        }
+    }
+
+    private func shouldDefer(_ command: FoodRouteCommand) -> Bool {
+        guard household != nil else { return true }
+        switch command {
+        case .food, .shopping, .inventory, .mealPrep, .quickAdd:
+            return false
+        case .shoppingList(let id), .shoppingMode(let id):
+            return !householdShoppingLists.contains { $0.id == id }
+        case .inventoryItem(let id):
+            return !householdInventoryItems.contains { $0.id == id }
+        case .mealPrepItem(let id):
+            return !householdMealPrepItems.contains { $0.id == id }
+        case .store(let id):
+            return !householdStores.contains { $0.id == id }
+        }
+    }
+
+    private func deferFoodCommand(_ command: FoodRouteCommand) {
+        selectedSection = section(for: command)
+        path.removeLast(path.count)
+        deferredFoodCommand = command
+
+        let retryToken = UUID()
+        deferredFoodCommandRetryToken = retryToken
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard deferredFoodCommandRetryToken == retryToken else { return }
+            retryDeferredFoodCommandIfPossible(force: true)
+        }
+    }
+
+    private func retryDeferredFoodCommandIfPossible(force: Bool = false) {
+        guard let command = deferredFoodCommand else { return }
+        if force || !shouldDefer(command) {
+            handle(command, allowDeferral: !force)
+        }
+    }
+
+    private func section(for command: FoodRouteCommand) -> FoodHomeSection {
+        switch command {
+        case .food, .shopping, .shoppingList, .shoppingMode, .quickAdd:
+            return .shopping
+        case .inventory, .inventoryItem:
+            return .inventory
+        case .mealPrep, .mealPrepItem:
+            return .mealPrep
+        case .store:
+            return .stores
         }
     }
 
@@ -357,21 +443,37 @@ private struct ShoppingListsView: View {
     @State private var showingNewList = false
     @State private var newListName = ""
     @State private var selectedStoreID: UUID?
+    @State private var listPendingDelete: ShoppingList?
+    @State private var showingDeleteConfirmation = false
 
     var body: some View {
         List {
             Section {
-                ForEach(shoppingLists) { list in
-                    Button {
-                        openList(list)
-                    } label: {
-                        ShoppingListSummaryRow(
-                            list: list,
-                            store: stores.first { $0.id == list.storeID },
-                            items: shoppingItems.filter { $0.shoppingListID == list.id }
-                        )
+                if shoppingLists.isEmpty {
+                    ContentUnavailableView(
+                        "No shopping lists",
+                        systemImage: "cart",
+                        description: Text("Create a reusable list for a store, pantry run, or household trip.")
+                    )
+                } else {
+                    ForEach(shoppingLists) { list in
+                        Button {
+                            openList(list)
+                        } label: {
+                            ShoppingListSummaryRow(
+                                list: list,
+                                store: stores.first { $0.id == list.storeID },
+                                items: shoppingItems.filter { $0.shoppingListID == list.id }
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions {
+                            Button("Delete", role: .destructive) {
+                                listPendingDelete = list
+                                showingDeleteConfirmation = true
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             } header: {
                 AppSectionHeader(title: "Reusable Lists", subtitle: "\(shoppingLists.count)")
@@ -422,6 +524,23 @@ private struct ShoppingListsView: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Delete shopping list?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete List", role: .destructive) {
+                if let listPendingDelete {
+                    ShoppingListService.archiveList(listPendingDelete, context: modelContext)
+                }
+                listPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                listPendingDelete = nil
+            }
+        } message: {
+            Text("This removes the list from active shopping lists.")
+        }
     }
 }
 
@@ -469,6 +588,7 @@ private struct ShoppingListSummaryRow: View {
 
 private struct ShoppingListDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Bindable var list: ShoppingList
     let items: [ShoppingListItem]
     let store: FoodStore?
@@ -482,7 +602,9 @@ private struct ShoppingListDetailView: View {
     @State private var showingChecked = true
     @State private var searchText = ""
     @State private var editingItem: ShoppingListItem?
-    @State private var showingActions = false
+    @State private var showingDeleteConfirmation = false
+    @State private var itemPendingDelete: ShoppingListItem?
+    @State private var showingDeleteItemConfirmation = false
 
     private var visibleItems: [ShoppingListItem] {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -533,6 +655,10 @@ private struct ShoppingListDetailView: View {
                             }
                             .swipeActions(edge: .trailing) {
                                 Button("Edit") { editingItem = item }
+                                Button("Delete", role: .destructive) {
+                                    itemPendingDelete = item
+                                    showingDeleteItemConfirmation = true
+                                }
                             }
                         }
                     }
@@ -552,6 +678,10 @@ private struct ShoppingListDetailView: View {
                         }
                         .swipeActions(edge: .trailing) {
                             Button("Edit") { editingItem = item }
+                            Button("Delete", role: .destructive) {
+                                itemPendingDelete = item
+                                showingDeleteItemConfirmation = true
+                            }
                         }
                     }
                 }
@@ -571,6 +701,10 @@ private struct ShoppingListDetailView: View {
                             }
                             .swipeActions(edge: .trailing) {
                                 Button("Edit") { editingItem = item }
+                                Button("Delete", role: .destructive) {
+                                    itemPendingDelete = item
+                                    showingDeleteItemConfirmation = true
+                                }
                             }
                         }
                     }
@@ -619,10 +753,48 @@ private struct ShoppingListDetailView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .accessibilityLabel("Reactivate items")
+                Menu {
+                    Button("Delete List", role: .destructive) {
+                        showingDeleteConfirmation = true
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("More list actions")
             }
         }
         .sheet(item: $editingItem) { item in
             ShoppingListItemEditorView(item: item, sections: sections)
+        }
+        .confirmationDialog(
+            "Delete \(list.name)?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete List", role: .destructive) {
+                ShoppingListService.archiveList(list, context: modelContext)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the list from active shopping lists.")
+        }
+        .confirmationDialog(
+            "Delete item?",
+            isPresented: $showingDeleteItemConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Item", role: .destructive) {
+                if let itemPendingDelete {
+                    ShoppingListService.deleteItem(itemPendingDelete, context: modelContext)
+                }
+                itemPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                itemPendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the item from this shopping list.")
         }
     }
 
@@ -938,6 +1110,8 @@ private struct InventoryHomeView: View {
     @State private var searchText = ""
     @State private var showingEditor = false
     @State private var showingLocationManager = false
+    @State private var itemPendingDelete: InventoryItem?
+    @State private var showingDeleteConfirmation = false
 
     var body: some View {
         List {
@@ -963,14 +1137,28 @@ private struct InventoryHomeView: View {
                 }
             }
             Section("Inventory") {
-                ForEach(filteredItems) { item in
-                    Button { openItem(item) } label: {
-                        InventoryItemRow(
-                            item: item,
-                            location: locations.first { $0.id == item.locationID }
-                        )
+                if filteredItems.isEmpty {
+                    ContentUnavailableView(
+                        "No inventory items",
+                        systemImage: "cabinet",
+                        description: Text("Add pantry, fridge, freezer, or household items so they are easy to find later.")
+                    )
+                } else {
+                    ForEach(filteredItems) { item in
+                        Button { openItem(item) } label: {
+                            InventoryItemRow(
+                                item: item,
+                                location: locations.first { $0.id == item.locationID }
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions {
+                            Button("Delete", role: .destructive) {
+                                itemPendingDelete = item
+                                showingDeleteConfirmation = true
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1004,6 +1192,23 @@ private struct InventoryHomeView: View {
                 inventoryItems: inventoryItems,
                 mealPrepItems: mealPrepItems
             )
+        }
+        .confirmationDialog(
+            "Delete inventory item?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Item", role: .destructive) {
+                if let itemPendingDelete {
+                    FoodInventoryService.deleteInventoryItem(itemPendingDelete, context: modelContext)
+                }
+                itemPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                itemPendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the item from inventory.")
         }
     }
 
@@ -1103,6 +1308,8 @@ private struct InventoryLocationManagerView: View {
     @State private var showingEditor = false
     @State private var editingLocation: InventoryLocation?
     @State private var showingArchiveBlocked = false
+    @State private var locationPendingArchive: InventoryLocation?
+    @State private var showingArchiveConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -1118,7 +1325,8 @@ private struct InventoryLocationManagerView: View {
                         .buttonStyle(.plain)
                         .swipeActions {
                             Button("Archive", role: .destructive) {
-                                archive(location)
+                                locationPendingArchive = location
+                                showingArchiveConfirmation = true
                             }
                         }
                     }
@@ -1151,6 +1359,23 @@ private struct InventoryLocationManagerView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("Move or remove items from this location before archiving it.")
+            }
+            .confirmationDialog(
+                "Archive location?",
+                isPresented: $showingArchiveConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Archive Location", role: .destructive) {
+                    if let locationPendingArchive {
+                        archive(locationPendingArchive)
+                    }
+                    locationPendingArchive = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    locationPendingArchive = nil
+                }
+            } message: {
+                Text("Archived locations are removed from active inventory pickers.")
             }
         }
     }
@@ -1287,12 +1512,14 @@ private struct InventoryLocationEditorView: View {
 
 private struct InventoryItemDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Bindable var item: InventoryItem
     let locations: [InventoryLocation]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
 
     @State private var showingEditor = false
+    @State private var showingDeleteConfirmation = false
     @State private var selectedListID: UUID?
 
     var body: some View {
@@ -1312,6 +1539,9 @@ private struct InventoryItemDetailView: View {
                 }
                 Button("Duplicate", systemImage: "plus.square.on.square") {
                     FoodInventoryService.duplicate(item, context: modelContext)
+                }
+                Button("Delete Item", systemImage: "trash", role: .destructive) {
+                    showingDeleteConfirmation = true
                 }
                 Picker("Add to List", selection: $selectedListID) {
                     Text("Choose").tag(UUID?.none)
@@ -1344,6 +1574,19 @@ private struct InventoryItemDetailView: View {
                 item: item,
                 locations: locations
             )
+        }
+        .confirmationDialog(
+            "Delete \(item.name)?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Item", role: .destructive) {
+                FoodInventoryService.deleteInventoryItem(item, context: modelContext)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes the item from inventory.")
         }
     }
 }
@@ -1470,31 +1713,58 @@ private struct MealPrepView: View {
 
     @State private var searchText = ""
     @State private var showingEditor = false
+    @State private var itemPendingArchive: MealPrepItem?
+    @State private var showingArchiveConfirmation = false
 
     var body: some View {
         List {
-            ForEach(groupedLocations, id: \.id) { location in
-                let items = filteredItems.filter { $0.locationID == location.id }
-                if !items.isEmpty {
-                    Section(location.name) {
-                        ForEach(items) { item in
-                            Button { openItem(item) } label: {
-                                MealPrepCard(
-                                    item: item,
-                                    location: location,
-                                    useOne: {
-                                        MealPrepService.use(
-                                            item,
-                                            servings: 1,
-                                            notes: "",
-                                            context: modelContext
-                                        )
+            if filteredItems.isEmpty {
+                ContentUnavailableView(
+                    "No meal prep yet",
+                    systemImage: "takeoutbag.and.cup.and.straw",
+                    description: Text("Add prepared portions, freezer meals, or leftovers to track what is ready.")
+                )
+            } else {
+                ForEach(groupedLocations, id: \.id) { location in
+                    let items = filteredItems.filter { $0.locationID == location.id }
+                    if !items.isEmpty {
+                        Section(location.name) {
+                            ForEach(items) { item in
+                                Button { openItem(item) } label: {
+                                    MealPrepCard(
+                                        item: item,
+                                        location: location,
+                                        useOne: {
+                                            MealPrepService.use(
+                                                item,
+                                                servings: 1,
+                                                notes: "",
+                                                context: modelContext
+                                            )
+                                        }
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .swipeActions {
+                                    Button("Archive", role: .destructive) {
+                                        itemPendingArchive = item
+                                        showingArchiveConfirmation = true
                                     }
-                                )
+                                }
                             }
-                            .buttonStyle(.plain)
                         }
                     }
+                }
+            }
+            if !filteredItems.isEmpty && filteredItems.allSatisfy({ item in
+                !groupedLocations.contains { $0.id == item.locationID }
+            }) {
+                Section {
+                    ContentUnavailableView(
+                        "Meal prep location unavailable",
+                        systemImage: "archivebox",
+                        description: Text("Move these items to an active fridge, freezer, pantry, or garage freezer location.")
+                    )
                 }
             }
         }
@@ -1516,6 +1786,23 @@ private struct MealPrepView: View {
                 item: nil,
                 locations: locations
             )
+        }
+        .confirmationDialog(
+            "Archive meal prep?",
+            isPresented: $showingArchiveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Archive Item", role: .destructive) {
+                if let itemPendingArchive {
+                    MealPrepService.archive(itemPendingArchive, context: modelContext)
+                }
+                itemPendingArchive = nil
+            }
+            Button("Cancel", role: .cancel) {
+                itemPendingArchive = nil
+            }
+        } message: {
+            Text("Archived meal prep is hidden from active food planning.")
         }
     }
 
@@ -1577,6 +1864,7 @@ private struct MealPrepCard: View {
 
 private struct MealPrepDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Bindable var item: MealPrepItem
     let locations: [InventoryLocation]
     let usages: [MealPrepUsage]
@@ -1584,6 +1872,7 @@ private struct MealPrepDetailView: View {
     @State private var showingEditor = false
     @State private var showingUseSheet = false
     @State private var showingFinishPrompt = false
+    @State private var showingArchiveConfirmation = false
 
     var body: some View {
         List {
@@ -1599,9 +1888,7 @@ private struct MealPrepDetailView: View {
                     showingUseSheet = true
                 }
                 Button("Archive", systemImage: "archivebox", role: .destructive) {
-                    item.isArchived = true
-                    item.updatedAt = Date()
-                    save(modelContext)
+                    showingArchiveConfirmation = true
                 }
             }
             if !usages.isEmpty {
@@ -1635,8 +1922,22 @@ private struct MealPrepDetailView: View {
         .confirmationDialog("Mark finished?", isPresented: $showingFinishPrompt) {
             Button("Archive Finished Item") {
                 MealPrepService.archiveIfFinished(item, context: modelContext)
+                dismiss()
             }
             Button("Keep Visible", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Archive \(item.name)?",
+            isPresented: $showingArchiveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Archive Item", role: .destructive) {
+                MealPrepService.archive(item, context: modelContext)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Archived meal prep is hidden from active food planning.")
         }
     }
 
@@ -1664,6 +1965,7 @@ private struct MealPrepEditorView: View {
     @State private var hasPreparedDate = false
     @State private var notes = ""
     @State private var tags = ""
+    @State private var showingLocationEditor = false
 
     var body: some View {
         NavigationStack {
@@ -1679,8 +1981,14 @@ private struct MealPrepEditorView: View {
                     }
                 }
                 Picker("Location", selection: $locationID) {
+                    Text("Select Location").tag(UUID?.none)
                     ForEach(locations) { location in
                         Text(location.name).tag(UUID?.some(location.id))
+                    }
+                }
+                if locationHouseholdID != nil {
+                    Button("Add Location", systemImage: "plus") {
+                        showingLocationEditor = true
                     }
                 }
                 Toggle("Prepared date", isOn: $hasPreparedDate)
@@ -1698,6 +2006,7 @@ private struct MealPrepEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { saveItem() }
+                        .disabled(!canSave)
                 }
             }
             .onAppear {
@@ -1710,6 +2019,16 @@ private struct MealPrepEditorView: View {
                 hasPreparedDate = item?.preparedDate != nil
                 notes = item?.notes ?? ""
                 tags = item?.tagsJSON ?? ""
+            }
+            .sheet(isPresented: $showingLocationEditor) {
+                if let householdID = locationHouseholdID {
+                    InventoryLocationEditorView(
+                        householdID: householdID,
+                        location: nil,
+                        locations: locations,
+                        onSave: { locationID = $0 }
+                    )
+                }
             }
         }
     }
@@ -1743,6 +2062,17 @@ private struct MealPrepEditorView: View {
             )
         }
         dismiss()
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && servingsRemaining >= 0
+            && (servingsTotal == nil || (servingsTotal ?? 0) >= 0)
+            && locationID != nil
+    }
+
+    private var locationHouseholdID: UUID? {
+        household?.id ?? item?.householdID
     }
 }
 
@@ -1787,22 +2117,38 @@ private struct StoresView: View {
 
     @State private var showingNewStore = false
     @State private var storeName = ""
+    @State private var storePendingArchive: FoodStore?
+    @State private var showingArchiveConfirmation = false
 
     var body: some View {
         List {
             Section("Stores") {
-                ForEach(stores) { store in
-                    Button {
-                        openStore(store)
-                    } label: {
-                        LabeledContent {
-                            Text("\(sections.filter { $0.storeID == store.id }.count) sections")
-                                .foregroundStyle(.secondary)
+                if stores.isEmpty {
+                    ContentUnavailableView(
+                        "No stores",
+                        systemImage: "map",
+                        description: Text("Add a store to organize aisles, sections, and store-specific shopping lists.")
+                    )
+                } else {
+                    ForEach(stores) { store in
+                        Button {
+                            openStore(store)
                         } label: {
-                            Label(store.name, systemImage: "map.fill")
+                            LabeledContent {
+                                Text("\(sections.filter { $0.storeID == store.id }.count) sections")
+                                    .foregroundStyle(.secondary)
+                            } label: {
+                                Label(store.name, systemImage: "map.fill")
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions {
+                            Button("Archive", role: .destructive) {
+                                storePendingArchive = store
+                                showingArchiveConfirmation = true
+                            }
                         }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1842,6 +2188,23 @@ private struct StoresView: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Archive store?",
+            isPresented: $showingArchiveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Archive Store", role: .destructive) {
+                if let storePendingArchive {
+                    StoreLayoutService.archiveStore(storePendingArchive, context: modelContext)
+                }
+                storePendingArchive = nil
+            }
+            Button("Cancel", role: .cancel) {
+                storePendingArchive = nil
+            }
+        } message: {
+            Text("Archived stores are removed from active store lists and section pickers.")
+        }
     }
 }
 
@@ -1850,7 +2213,9 @@ private struct StoreEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: FoodStore
     let sections: [FoodStoreSection]
+    let shoppingItems: [ShoppingListItem]
     @State private var newSectionName = ""
+    @State private var showingArchiveConfirmation = false
 
     var body: some View {
         Form {
@@ -1867,7 +2232,10 @@ private struct StoreEditorView: View {
             }
             Section("Sections") {
                 ForEach(sections) { section in
-                    StoreSectionEditorView(section: section)
+                    StoreSectionEditorView(
+                        section: section,
+                        itemCount: shoppingItems.filter { $0.storeSectionID == section.id }.count
+                    )
                 }
                 HStack {
                     TextField("New section", text: $newSectionName)
@@ -1880,33 +2248,47 @@ private struct StoreEditorView: View {
                         )
                         newSectionName = ""
                     }
+                    .disabled(newSectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             Section {
                 Button("Archive Store", role: .destructive) {
-                    StoreLayoutService.archiveStore(store, context: modelContext)
-                    dismiss()
+                    showingArchiveConfirmation = true
                 }
             }
         }
         .navigationTitle(store.name)
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Archive \(store.name)?",
+            isPresented: $showingArchiveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Archive Store", role: .destructive) {
+                StoreLayoutService.archiveStore(store, context: modelContext)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Archived stores are removed from active store lists and section pickers.")
+        }
     }
 }
 
 private struct StoreSectionEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var section: FoodStoreSection
+    let itemCount: Int
 
     var body: some View {
         HStack {
             TextField("Section", text: $section.name)
-            TextField("Order", value: $section.sortOrder, format: .number)
-                .keyboardType(.numberPad)
-                .frame(width: 70)
+            Spacer()
+            Text(itemCount == 1 ? "1 item" : "\(itemCount) items")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
         .onChange(of: section.name) { _, _ in persist() }
-        .onChange(of: section.sortOrder) { _, _ in persist() }
     }
 
     private func persist() {
