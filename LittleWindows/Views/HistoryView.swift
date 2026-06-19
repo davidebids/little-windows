@@ -97,6 +97,12 @@ struct HistoryView: View {
     @State private var milestones: [MilestoneEntry] = []
     @State private var editorRoute: EventEditorRoute?
     @State private var activeTimerToEdit: BabyEvent?
+    @State private var eventPendingDelete: BabyEvent?
+    @State private var milestonePendingDelete: MilestoneEntry?
+    @State private var appointmentPendingDelete: DoctorAppointment?
+    @State private var showingDeleteEventConfirmation = false
+    @State private var showingDeleteMilestoneConfirmation = false
+    @State private var showingDeleteAppointmentConfirmation = false
     @StateObject private var profileService = ProfileService.shared
     private let forcedDisplayMode: HistoryDisplayMode?
     private let showsDisplayModePicker: Bool
@@ -234,6 +240,57 @@ struct HistoryView: View {
                 )
             }
         }
+        .confirmationDialog(
+            "Delete event?",
+            isPresented: $showingDeleteEventConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Event", role: .destructive) {
+                if let eventPendingDelete {
+                    delete(eventPendingDelete)
+                }
+                eventPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                eventPendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the event from the timeline.")
+        }
+        .confirmationDialog(
+            "Delete memory?",
+            isPresented: $showingDeleteMilestoneConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Memory", role: .destructive) {
+                if let milestonePendingDelete {
+                    delete(milestonePendingDelete)
+                }
+                milestonePendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                milestonePendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the memory from the timeline.")
+        }
+        .confirmationDialog(
+            "Delete appointment?",
+            isPresented: $showingDeleteAppointmentConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Appointment", role: .destructive) {
+                if let appointmentPendingDelete {
+                    delete(appointmentPendingDelete)
+                }
+                appointmentPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                appointmentPendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the appointment and cancels its reminders.")
+        }
     }
 
     private var historyRefreshToken: String {
@@ -319,7 +376,7 @@ struct HistoryView: View {
                             date: selectedDate,
                             events: events,
                             edit: open,
-                            delete: delete
+                            delete: confirmDelete
                         )
                     }
                 }
@@ -335,7 +392,7 @@ struct HistoryView: View {
                     }
                     .swipeActions {
                         Button(role: .destructive) {
-                            delete(appointment)
+                            confirmDelete(appointment)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -352,7 +409,7 @@ struct HistoryView: View {
                     }
                     .swipeActions {
                         Button(role: .destructive) {
-                            delete(milestone)
+                            confirmDelete(milestone)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -367,7 +424,7 @@ struct HistoryView: View {
                     .buttonStyle(.plain)
                     .swipeActions {
                         Button(role: .destructive) {
-                            delete(event)
+                            confirmDelete(event)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -557,6 +614,21 @@ struct HistoryView: View {
         } else {
             editorRoute = EventEditorRoute(type: event.type, event: event)
         }
+    }
+
+    private func confirmDelete(_ event: BabyEvent) {
+        eventPendingDelete = event
+        showingDeleteEventConfirmation = true
+    }
+
+    private func confirmDelete(_ milestone: MilestoneEntry) {
+        milestonePendingDelete = milestone
+        showingDeleteMilestoneConfirmation = true
+    }
+
+    private func confirmDelete(_ appointment: DoctorAppointment) {
+        appointmentPendingDelete = appointment
+        showingDeleteAppointmentConfirmation = true
     }
 
     private func adjustStart(of event: BabyEvent, to date: Date) {

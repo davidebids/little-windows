@@ -207,7 +207,7 @@ private struct NextSleepWidgetView: View {
     }
 
     private func formattedWindow(_ prediction: PredictionSnapshot) -> String {
-        "\(prediction.windowStart.formatted(date: .omitted, time: .shortened))-\(prediction.windowEnd.formatted(date: .omitted, time: .shortened))"
+        DateFormatting.window(start: prediction.windowStart, end: prediction.windowEnd)
     }
 
     private func timingPhase(_ prediction: PredictionSnapshot) -> PredictionTimingPhase {

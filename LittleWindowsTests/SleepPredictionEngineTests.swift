@@ -816,6 +816,17 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testDeepLinkRouterQueuesPuppyGuideCommand() {
+        let router = DeepLinkRouter.shared
+        router.pendingPuppyGuideCommand = nil
+
+        router.route(URL(string: "littlewindows://puppy-guide")!)
+
+        XCTAssertEqual(router.selectedTab, .today)
+        XCTAssertEqual(router.consumePuppyGuideCommand(), .current)
+    }
+
+    @MainActor
     func testNightLightDeepLinkStartsRequestedPreset() {
         let router = DeepLinkRouter.shared
         router.pendingNightLightCommand = nil
@@ -1167,7 +1178,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testBundledLegacyTrackerHistoryImportsWithoutActiveTimers() throws {
         let schema = PersistenceService.schema
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
 
         let data = try SampleData.bundledLegacyTrackerHistory()
@@ -1229,6 +1240,21 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(records.isEmpty)
     }
 
+    func testFirstRunOnboardingOnlyPresentsForNewEmptyStores() {
+        XCTAssertTrue(FirstRunOnboarding.shouldPresent(hasCompleted: false, profiles: []))
+        XCTAssertFalse(FirstRunOnboarding.shouldPresent(hasCompleted: true, profiles: []))
+
+        let existingProfile = BabyProfile(
+            name: "Sample Child",
+            birthDate: Date(),
+            sex: .unknown
+        )
+        XCTAssertFalse(FirstRunOnboarding.shouldPresent(
+            hasCompleted: false,
+            profiles: [existingProfile]
+        ))
+    }
+
     @MainActor
     func testFoodHomeBootstrapDoesNotCreateDefaultFoodData() throws {
         let container = try makeInMemoryContainer()
@@ -1259,7 +1285,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testLegacyTrackerGrowthMigrationRecoversMeasurements() throws {
         let schema = PersistenceService.schema
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let profile = BabyProfile(name: "Test Child", birthDate: SampleData.defaultBirthDate)
         container.mainContext.insert(profile)
@@ -1296,7 +1322,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testBundledHistoryPredictionCompletesQuickly() throws {
         let schema = PersistenceService.schema
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         try DataExportImportService.importData(
             SampleData.bundledLegacyTrackerHistory(),
@@ -1330,6 +1356,46 @@ final class SleepPredictionEngineTests: XCTestCase {
             WeightedValue(value: 180, weight: 1)
         ])
         XCTAssertEqual(result, 120)
+    }
+
+    func testDateWindowCollapsesInstantEventsToSingleTime() {
+        let date = Date(timeIntervalSinceReferenceDate: 10 * 60 * 60)
+        let sameDisplayedMinute = date.addingTimeInterval(30)
+
+        XCTAssertEqual(
+            DateFormatting.window(start: date, end: date),
+            DateFormatting.time.string(from: date)
+        )
+        XCTAssertEqual(
+            DateFormatting.window(start: date, end: sameDisplayedMinute),
+            DateFormatting.time.string(from: date)
+        )
+
+        let nextDaySameTime = date.addingTimeInterval(24 * 60 * 60)
+        XCTAssertEqual(
+            DateFormatting.window(start: date, end: nextDaySameTime),
+            "\(DateFormatting.day.string(from: date)) \(DateFormatting.time.string(from: date))-\(DateFormatting.day.string(from: nextDaySameTime)) \(DateFormatting.time.string(from: nextDaySameTime))"
+        )
+    }
+
+    @MainActor
+    func testDebugSimulatorSmokeSeedKeepsInstantCareEventsWithoutEndDates() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+
+        DebugSimulatorSmokeSeedService.seedIfNeeded(
+            context: context,
+            now: Date(timeIntervalSinceReferenceDate: 800_000_000)
+        )
+
+        let events = try context.fetch(FetchDescriptor<BabyEvent>())
+        let diaper = try XCTUnwrap(events.first { $0.type == .diaper })
+        let medicine = try XCTUnwrap(events.first { $0.type == .medicine })
+        let bottle = try XCTUnwrap(events.first { $0.type == .feed })
+
+        XCTAssertNil(diaper.endDate)
+        XCTAssertNil(medicine.endDate)
+        XCTAssertNotNil(bottle.endDate)
     }
 
     func testOutlierClippingRemovesExtremeWakeWindow() {
@@ -1904,7 +1970,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             SleepPredictionRecord.self,
             PredictionFactor.self
         ])
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let start = Date().addingTimeInterval(-300)
         let event = BabyEvent(type: .nursing, startDate: start)
@@ -1936,7 +2002,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             SleepPredictionRecord.self,
             PredictionFactor.self
         ])
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let start = Date().addingTimeInterval(-300)
         let event = BabyEvent(type: .nursing, startDate: start)
@@ -2021,7 +2087,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             SleepPredictionRecord.self,
             PredictionFactor.self
         ])
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let now = Date(timeIntervalSinceReferenceDate: 300_000)
         let originalStart = now.addingTimeInterval(-120)
@@ -2573,7 +2639,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testMilestonesRoundTripThroughJSONBackup() throws {
         let schema = PersistenceService.schema
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let context = container.mainContext
         let birthDate = Date(timeIntervalSince1970: 1_767_225_600)
@@ -2963,6 +3029,117 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testShoppingListServiceArchivesLists() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let updatedAt = Date(timeIntervalSince1970: 100)
+        let archivedAt = Date(timeIntervalSince1970: 200)
+        let list = ShoppingList(
+            householdID: household.id,
+            name: "Test Market",
+            updatedAt: updatedAt
+        )
+        let item = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Milk"
+        )
+
+        context.insert(household)
+        context.insert(list)
+        context.insert(item)
+        try context.save()
+
+        XCTAssertTrue(ShoppingListService.archiveList(list, context: context, now: archivedAt))
+        XCTAssertTrue(list.isArchived)
+        XCTAssertEqual(list.updatedAt, archivedAt)
+
+        let activeLists = try context.fetch(FetchDescriptor<ShoppingList>())
+            .filter { !$0.isArchived }
+        XCTAssertFalse(activeLists.contains { $0.id == list.id })
+
+        let savedItems = try context.fetch(FetchDescriptor<ShoppingListItem>())
+        XCTAssertEqual(savedItems.first?.shoppingListID, list.id)
+        XCTAssertFalse(ShoppingListService.archiveList(list, context: context, now: Date(timeIntervalSince1970: 300)))
+        XCTAssertEqual(list.updatedAt, archivedAt)
+    }
+
+    @MainActor
+    func testFoodCleanupServicesRemoveAndArchiveUserItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        context.insert(household)
+        try context.save()
+
+        let store = try XCTUnwrap(StoreLayoutService.createStore(
+            name: "Test Store",
+            householdID: household.id,
+            context: context
+        ))
+        XCTAssertTrue(StoreLayoutService.archiveStore(store, context: context))
+        XCTAssertTrue(store.isArchived)
+        XCTAssertFalse(StoreLayoutService.archiveStore(store, context: context))
+
+        let location = try XCTUnwrap(InventoryLocationService.addLocation(
+            name: "Pantry",
+            locationType: .pantry,
+            householdID: household.id,
+            notes: "",
+            existingLocations: [],
+            context: context
+        ))
+        let inventory = try XCTUnwrap(FoodInventoryService.addInventoryItem(
+            name: "Pasta",
+            quantity: 2,
+            unit: "boxes",
+            locationID: location.id,
+            householdID: household.id,
+            context: context
+        ))
+        FoodInventoryService.deleteInventoryItem(inventory, context: context)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<InventoryItem>()).isEmpty)
+        XCTAssertTrue(InventoryLocationService.archiveLocation(
+            location,
+            inventoryItems: [],
+            mealPrepItems: [],
+            context: context
+        ))
+
+        let shoppingList = try XCTUnwrap(ShoppingListService.createList(
+            name: "Errands",
+            householdID: household.id,
+            storeID: nil,
+            context: context
+        ))
+        ShoppingListService.addItem(
+            named: "Soap",
+            to: shoppingList,
+            sectionID: nil,
+            existingItems: [],
+            context: context
+        )
+        let shoppingItem = try XCTUnwrap(try context.fetch(FetchDescriptor<ShoppingListItem>()).first)
+        ShoppingListService.deleteItem(shoppingItem, context: context)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<ShoppingListItem>()).isEmpty)
+
+        let mealPrep = try XCTUnwrap(MealPrepService.createMealPrepItem(
+            name: "Soup portions",
+            servingsRemaining: 3,
+            servingUnit: .serving,
+            locationID: location.id,
+            householdID: household.id,
+            preparedDate: nil,
+            notes: "",
+            tags: "",
+            context: context
+        ))
+        MealPrepService.archive(mealPrep, context: context)
+        XCTAssertTrue(mealPrep.isArchived)
+    }
+
+    @MainActor
     func testMonthlyAgeGuideNotificationTimingUsesReadableMorning() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -3033,13 +3210,19 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = PersistenceService.schema
-        let configuration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: true
-        )
+        let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         return try ModelContainer(
             for: schema,
             configurations: [configuration]
+        )
+    }
+
+    private static func uniqueInMemoryConfiguration(schema: Schema) -> ModelConfiguration {
+        ModelConfiguration(
+            "LittleWindowsTests-\(UUID().uuidString)",
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
         )
     }
 }

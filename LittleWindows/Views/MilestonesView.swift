@@ -65,6 +65,8 @@ struct MilestonesView: View {
     @State private var selectedAgeGuide: AgeGuide?
     @State private var showingAgeGuides = false
     @State private var events: [BabyEvent] = []
+    @State private var milestonePendingDelete: MilestoneEntry?
+    @State private var showingDeleteConfirmation = false
     @StateObject private var profileService = ProfileService.shared
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
@@ -260,7 +262,8 @@ struct MilestonesView: View {
                             }
                             .swipeActions {
                                 Button(role: .destructive) {
-                                    delete(milestone)
+                                    milestonePendingDelete = milestone
+                                    showingDeleteConfirmation = true
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -323,6 +326,23 @@ struct MilestonesView: View {
         }
         .onChange(of: deepLinkRouter.isDataReady) { _, ready in
             if ready { handlePendingAgeGuideDeepLink() }
+        }
+        .confirmationDialog(
+            "Delete memory?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Memory", role: .destructive) {
+                if let milestonePendingDelete {
+                    delete(milestonePendingDelete)
+                }
+                milestonePendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                milestonePendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the memory from the timeline.")
         }
     }
 

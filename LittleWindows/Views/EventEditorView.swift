@@ -105,7 +105,7 @@ struct EventEditorView: View {
         _title = State(initialValue: event?.title ?? "")
         _startDate = State(initialValue: event?.startDate ?? Date())
         _endDate = State(initialValue: event?.endDate ?? Date())
-        _hasEndDate = State(initialValue: event == nil || event?.endDate != nil)
+        _hasEndDate = State(initialValue: selectedType.supportsTimer && (event == nil || event?.endDate != nil))
         _caregiverName = State(initialValue: event?.caregiverName ?? "")
         _notes = State(initialValue: event?.notes ?? "")
         _sleepKind = State(initialValue: event?.sleepKind ?? .nap)
@@ -217,7 +217,7 @@ struct EventEditorView: View {
                 if type.supportsTimer {
                     Toggle("Has ended", isOn: $hasEndDate)
                 }
-                if hasEndDate {
+                if type.supportsTimer, hasEndDate {
                     DatePicker("End", selection: $endDate, in: startDate...)
                 }
                 TextField("Caregiver", text: $caregiverName)
@@ -603,7 +603,7 @@ struct EventEditorView: View {
     }
 
     private func save() {
-        if hasEndDate, endDate < startDate {
+        if type.supportsTimer, hasEndDate, endDate < startDate {
             validationMessage = "End time must be after the start time."
             return
         }
@@ -642,7 +642,7 @@ struct EventEditorView: View {
         } else {
             event.startDate = startDate
         }
-        event.endDate = hasEndDate ? max(endDate, startDate) : nil
+        event.endDate = type.supportsTimer && hasEndDate ? max(endDate, startDate) : nil
         event.caregiverName = caregiverName.nilIfBlank
         event.notes = notes.nilIfBlank
         event.sleepKind = type == .sleep ? sleepKind : nil

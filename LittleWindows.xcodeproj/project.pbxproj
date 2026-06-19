@@ -34,6 +34,7 @@
 		B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* SleepPredictionEngineTests.swift */; };
 		B0000000000000000000001C /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
 		B0000000000000000000001D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* Assets.xcassets */; };
+		B0000000000000000000001E /* SeedData/Sample-Legacy-Tracker-Backup.json in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000020 /* SeedData/Sample-Legacy-Tracker-Backup.json */; };
 		B0000000000000000000001F /* Models/InsightMetric.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000021 /* Models/InsightMetric.swift */; };
 		B00000000000000000000020 /* Models/InsightTrend.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000022 /* Models/InsightTrend.swift */; };
 		B00000000000000000000021 /* Models/ChartDataPoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000023 /* Models/ChartDataPoint.swift */; };
@@ -126,6 +127,8 @@
 		B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000089 /* Services/FoodHomeServices.swift */; };
 		B0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift */; };
 		B0000000000000000000008B /* Views/Food/FoodHomeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */; };
+		B0000000000000000000008C /* UserVisibleFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008C /* UserVisibleFlowUITests.swift */; };
+		B0000000000000000000008D /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +145,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = D00000000000000000000020;
 			remoteInfo = LittleWindowsWidgets;
+		};
+		C00000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D00000000000000000000002;
+			remoteInfo = LittleWindows;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -279,6 +289,8 @@
 		F00000000000000000000089 /* Services/FoodHomeServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/FoodHomeServices.swift; sourceTree = "<group>"; };
 		F0000000000000000000008A /* ViewModels/FoodHomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/FoodHomeViewModel.swift; sourceTree = "<group>"; };
 		F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Food/FoodHomeViews.swift; sourceTree = "<group>"; };
+		F0000000000000000000008C /* UserVisibleFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserVisibleFlowUITests.swift; sourceTree = "<group>"; };
+		F0000000000000000000008D /* LittleWindowsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LittleWindowsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -308,6 +320,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D00000000000000000000028 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000008D /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -317,6 +337,7 @@
 				D00000000000000000000006 /* LittleWindows */,
 				D00000000000000000000027 /* LittleWindowsWidgets */,
 				D00000000000000000000007 /* LittleWindowsTests */,
+				D00000000000000000000029 /* LittleWindowsUITests */,
 				D00000000000000000000008 /* Frameworks */,
 				D00000000000000000000009 /* Products */,
 			);
@@ -436,6 +457,14 @@
 			path = LittleWindowsTests;
 			sourceTree = "<group>";
 		};
+		D00000000000000000000029 /* LittleWindowsUITests */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000008C /* UserVisibleFlowUITests.swift */,
+			);
+			path = LittleWindowsUITests;
+			sourceTree = "<group>";
+		};
 		D00000000000000000000008 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -454,6 +483,7 @@
 				F0000000000000000000001D /* LittleWindows.app */,
 				F0000000000000000000001E /* LittleWindowsTests.xctest */,
 				F00000000000000000000049 /* LittleWindowsWidgets.appex */,
+				F0000000000000000000008D /* LittleWindowsUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -533,6 +563,24 @@
 			productReference = F00000000000000000000049 /* LittleWindowsWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		D0000000000000000000002A /* LittleWindowsUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0000000000000000000002E /* Build configuration list for PBXNativeTarget "LittleWindowsUITests" */;
+			buildPhases = (
+				D0000000000000000000002B /* Sources */,
+				D00000000000000000000028 /* Frameworks */,
+				D0000000000000000000002C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D0000000000000000000002D /* PBXTargetDependency */,
+			);
+			name = LittleWindowsUITests;
+			productName = LittleWindowsUITests;
+			productReference = F0000000000000000000008D /* LittleWindowsUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -553,6 +601,10 @@
 					D00000000000000000000020 = {
 						CreatedOnToolsVersion = 16.0;
 					};
+					D0000000000000000000002A = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = D00000000000000000000002;
+					};
 				};
 			};
 			buildConfigurationList = D00000000000000000000012 /* Build configuration list for PBXProject "LittleWindows" */;
@@ -571,6 +623,7 @@
 				D00000000000000000000002 /* LittleWindows */,
 				D00000000000000000000020 /* LittleWindowsWidgets */,
 				D0000000000000000000000D /* LittleWindowsTests */,
+				D0000000000000000000002A /* LittleWindowsUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -590,10 +643,18 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B0000000000000000000001E /* SeedData/Sample-Legacy-Tracker-Backup.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D00000000000000000000023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0000000000000000000002C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -734,6 +795,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0000000000000000000002B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000008C /* UserVisibleFlowUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -746,6 +815,11 @@
 			isa = PBXTargetDependency;
 			target = D00000000000000000000020 /* LittleWindowsWidgets */;
 			targetProxy = C00000000000000000000002 /* PBXContainerItemProxy */;
+		};
+		D0000000000000000000002D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D00000000000000000000002 /* LittleWindows */;
+			targetProxy = C00000000000000000000003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -993,6 +1067,36 @@
 			};
 			name = Release;
 		};
+		E00000000000000000000022 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindowsUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LittleWindows;
+			};
+			name = Debug;
+		};
+		E00000000000000000000023 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindowsUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LittleWindows;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1028,6 +1132,15 @@
 			buildConfigurations = (
 				E00000000000000000000020 /* Debug */,
 				E00000000000000000000021 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0000000000000000000002E /* Build configuration list for PBXNativeTarget "LittleWindowsUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000022 /* Debug */,
+				E00000000000000000000023 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

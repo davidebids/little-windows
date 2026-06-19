@@ -41,7 +41,10 @@ struct TodayView: View {
     @State private var appointmentToOpen: DoctorAppointment?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
     @State private var puppyGuideToOpen: PuppyStageGuide?
+    @State private var puppyGuideProfileToOpen: BabyProfile?
     @State private var showingProfileEditor = false
+    @State private var eventPendingDelete: BabyEvent?
+    @State private var showingDeleteEventConfirmation = false
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -244,7 +247,10 @@ struct TodayView: View {
                             }
                             .buttonStyle(.plain)
                             .swipeActions {
-                                Button(role: .destructive) { delete(event) } label: {
+                                Button(role: .destructive) {
+                                    eventPendingDelete = event
+                                    showingDeleteEventConfirmation = true
+                                } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
                             }
@@ -309,7 +315,7 @@ struct TodayView: View {
         }
         .sheet(item: $puppyGuideToOpen) { guide in
             NavigationStack {
-                PuppyStageGuideDetailView(guide: guide, profile: profile)
+                PuppyStageGuideDetailView(guide: guide, profile: puppyGuideProfileToOpen ?? profile)
             }
         }
         .sheet(isPresented: $showingProfileEditor) {
@@ -321,6 +327,23 @@ struct TodayView: View {
             NavigationStack {
                 PredictionExplanationView(prediction: prediction)
             }
+        }
+        .confirmationDialog(
+            "Delete event?",
+            isPresented: $showingDeleteEventConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Event", role: .destructive) {
+                if let eventPendingDelete {
+                    delete(eventPendingDelete)
+                }
+                eventPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                eventPendingDelete = nil
+            }
+        } message: {
+            Text("This permanently removes the event from the timeline.")
         }
         .modifier(
             SleepKindChooser(
@@ -405,11 +428,15 @@ struct TodayView: View {
         .onChange(of: deepLinkRouter.pendingAppointmentCommand) { _, _ in
             handlePendingAppointmentDeepLink()
         }
+        .onChange(of: deepLinkRouter.pendingPuppyGuideCommand) { _, _ in
+            handlePendingPuppyGuideDeepLink()
+        }
         .onChange(of: deepLinkRouter.isDataReady) { _, ready in
             if ready {
                 handlePendingProfileSwitch()
                 handlePendingDeepLink()
                 handlePendingAppointmentDeepLink()
+                handlePendingPuppyGuideDeepLink()
             }
         }
         .task {
@@ -418,6 +445,7 @@ struct TodayView: View {
             handlePendingProfileSwitch()
             handlePendingDeepLink()
             handlePendingAppointmentDeepLink()
+            handlePendingPuppyGuideDeepLink()
         }
     }
 
@@ -431,23 +459,38 @@ struct TodayView: View {
 
     private var noProfileSection: some View {
         Section {
-            VStack(spacing: 14) {
-                ContentUnavailableView(
-                    "Create a profile",
-                    systemImage: "person.crop.circle.badge.plus",
-                    description: Text("Add a child or dog profile to start logging care, or import an existing backup from Settings.")
-                )
+            VStack(spacing: 16) {
+                VStack(spacing: 10) {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.system(size: 46, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+
+                    Text("Create a profile")
+                        .font(.title3.bold())
+                        .multilineTextAlignment(.center)
+
+                    Text("Add a child or dog profile to start logging care, or import an existing backup from Settings.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Button {
                     showingProfileEditor = true
                 } label: {
                     Label("Add Profile", systemImage: "plus.circle.fill")
                         .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 8)
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         }
@@ -1047,6 +1090,27 @@ struct TodayView: View {
         case .detail(let id), .notes(let id):
             appointmentToOpen = scopedAppointments.first { $0.id == id }
         }
+    }
+
+    private func handlePendingPuppyGuideDeepLink() {
+        guard deepLinkRouter.isDataReady else { return }
+        guard deepLinkRouter.consumePuppyGuideCommand() != nil else { return }
+        guard let targetProfile = dogProfileForPuppyGuide(),
+              let guide = PuppyStageGuideService.shared.currentGuide(for: targetProfile) else {
+            return
+        }
+        if profile?.id != targetProfile.id {
+            profileService.switchProfile(targetProfile)
+        }
+        puppyGuideProfileToOpen = targetProfile
+        puppyGuideToOpen = guide
+    }
+
+    private func dogProfileForPuppyGuide() -> BabyProfile? {
+        if let profile, profile.profileType == .dog {
+            return profile
+        }
+        return profiles.first { $0.profileType == .dog && !$0.isArchived }
     }
 
     private func eventChanged(
