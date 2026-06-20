@@ -35,6 +35,78 @@ struct WakeWindowStatistics: Hashable {
     var effectiveSampleCount: Double
 }
 
+enum BackwardsSleepPlanSegmentKind: Hashable {
+    case wakeWindow
+    case nap
+    case bedtime
+}
+
+struct BackwardsSleepPlanSegment: Hashable, Identifiable {
+    var kind: BackwardsSleepPlanSegmentKind
+    var napIndex: Int?
+    var startDate: Date
+    var endDate: Date
+    var durationMinutes: Double
+
+    var id: String {
+        [
+            "\(kind)",
+            napIndex.map(String.init) ?? "none",
+            "\(startDate.timeIntervalSince1970)",
+            "\(endDate.timeIntervalSince1970)"
+        ].joined(separator: "-")
+    }
+}
+
+struct BackwardsSleepPlan: Hashable {
+    var targetBedtime: Date
+    var generatedAt: Date
+    var historyRange: BackwardsSleepPlanHistoryRange
+    var plannedNapCount: Int
+    var typicalNapCount: Int
+    var sourceDayCount: Int
+    var confidence: Double
+    var confidenceLabel: ConfidenceLabel
+    var segments: [BackwardsSleepPlanSegment]
+    var explanation: [String]
+}
+
+enum BackwardsSleepPlanHistoryRange: String, CaseIterable, Identifiable, Hashable {
+    case sevenDays
+    case fourteenDays
+    case thirtyDays
+    case allAvailable
+
+    var id: String { rawValue }
+
+    var dayCount: Int? {
+        switch self {
+        case .sevenDays: 7
+        case .fourteenDays: 14
+        case .thirtyDays: 30
+        case .allAvailable: nil
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .sevenDays: "7 days"
+        case .fourteenDays: "14 days"
+        case .thirtyDays: "30 days"
+        case .allAvailable: "All"
+        }
+    }
+
+    var explanationText: String {
+        switch self {
+        case .sevenDays: "the last 7 days"
+        case .fourteenDays: "the last 14 days"
+        case .thirtyDays: "the last 30 days"
+        case .allAvailable: "all available history"
+        }
+    }
+}
+
 struct PredictionSettings {
     var feedAdjustmentEnabled: Bool
     var nursingAdjustmentEnabled: Bool
@@ -53,6 +125,206 @@ struct PredictionSettings {
 
 enum SleepPredictionEngine {
     static let algorithmVersion = "LittleWindowsSleep-v3"
+
+    static func backwardsPlan(
+        profile: BabyProfile,
+        events: [BabyEvent],
+        targetBedtime: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        historyRange: BackwardsSleepPlanHistoryRange = .sevenDays,
+        settings: PredictionSettings = .default
+    ) -> BackwardsSleepPlan {
+        let todayStart = calendar.startOfDay(for: now)
+        let tomorrowStart = calendar.startOfNextDay(for: now)
+        let target = date(onSameDayAs: now, matchingTimeOf: targetBedtime, calendar: calendar)
+        let historyStart = historyRange.dayCount.flatMap {
+            calendar.date(byAdding: .day, value: -$0, to: todayStart)
+        } ?? .distantPast
+
+        let completedSleeps = events
+            .filter { $0.type == .sleep && !$0.isTimerDraft && $0.endDate != nil }
+            .sorted { $0.startDate < $1.startDate }
+        let historySleeps = completedSleeps.filter {
+            $0.startDate >= historyStart && $0.startDate < todayStart
+        }
+        let sourceDays = sourceDayCount(from: historySleeps, calendar: calendar)
+        let typicalNapCount = typicalDailyNapCountForPlanning(
+            events: historySleeps,
+            profile: profile,
+            date: now,
+            calendar: calendar,
+            settings: settings
+        )
+
+        var explanations = [String]()
+        if sourceDays > 0 {
+            explanations.append(
+                "This plan uses completed sleep logs from \(sourceDays) days in \(historyRange.explanationText)."
+            )
+        } else {
+            explanations.append(
+                "There are not enough completed sleep logs in \(historyRange.explanationText), so this leans on the age-based wake-window baseline."
+            )
+        }
+
+        guard target > now.addingTimeInterval(15 * 60), target < tomorrowStart else {
+            explanations.append("Choose a bedtime later today to build a full-day plan.")
+            explanations.append("This is a planning aid based on local logs, not medical advice.")
+            return BackwardsSleepPlan(
+                targetBedtime: target,
+                generatedAt: now,
+                historyRange: historyRange,
+                plannedNapCount: 0,
+                typicalNapCount: typicalNapCount,
+                sourceDayCount: sourceDays,
+                confidence: 0.20,
+                confidenceLabel: .low,
+                segments: [
+                    BackwardsSleepPlanSegment(
+                        kind: .bedtime,
+                        napIndex: nil,
+                        startDate: target,
+                        endDate: target,
+                        durationMinutes: 0
+                    )
+                ],
+                explanation: explanations
+            )
+        }
+
+        let napDurations = napDurationAveragesByIndex(
+            from: historySleeps,
+            calendar: calendar
+        )
+        let wakeWindows = wakeWindowAveragesByNextSleepIndex(
+            from: historySleeps,
+            now: now,
+            calendar: calendar
+        )
+        let planningDayStart = typicalMorningWakeDate(
+            from: historySleeps,
+            on: now,
+            calendar: calendar
+        ) ?? calendar.date(bySettingHour: 7, minute: 0, second: 0, of: now) ?? todayStart
+        let fallbackWake = fallbackWakeWindowMinutes(
+            profile: profile,
+            date: now,
+            settings: settings,
+            calendar: calendar
+        )
+        let fallbackNap = clippedAverage(
+            historySleeps
+                .filter { $0.sleepKind == .nap }
+                .compactMap(\.duration)
+                .map { $0 / 60 },
+            allowedRange: 15...180
+        ) ?? 50
+        let plannedNapIndexes = typicalNapCount > 0 ? Array(1...typicalNapCount) : []
+        var nextSleepIndex = 5
+        var nextSleepStart = target
+        var plannedNaps = [BackwardsSleepPlanSegment]()
+
+        for napIndex in plannedNapIndexes.reversed() {
+            let wakeMinutes = wakeWindows[nextSleepIndex]
+                ?? (nextSleepIndex == 5 ? max(fallbackWake, 150) : fallbackWake)
+            let napDuration = napDurations[napIndex] ?? fallbackNap
+            let napEnd = nextSleepStart.addingTimeInterval(-wakeMinutes * 60)
+            let napStart = napEnd.addingTimeInterval(-napDuration * 60)
+
+            plannedNaps.append(
+                BackwardsSleepPlanSegment(
+                    kind: .nap,
+                    napIndex: napIndex,
+                    startDate: napStart,
+                    endDate: napEnd,
+                    durationMinutes: napDuration
+                )
+            )
+            nextSleepIndex = napIndex
+            nextSleepStart = napStart
+        }
+
+        let dayNaps = plannedNaps
+            .filter { $0.endDate > planningDayStart && $0.startDate < target }
+            .map { nap in
+                guard nap.startDate < planningDayStart else { return nap }
+                return BackwardsSleepPlanSegment(
+                    kind: nap.kind,
+                    napIndex: nap.napIndex,
+                    startDate: planningDayStart,
+                    endDate: nap.endDate,
+                    durationMinutes: nap.endDate.timeIntervalSince(planningDayStart) / 60
+                )
+            }
+            .sorted { $0.startDate < $1.startDate }
+
+        var segments = [BackwardsSleepPlanSegment]()
+        var cursor = planningDayStart
+        for nap in dayNaps {
+            if nap.startDate > cursor {
+                segments.append(
+                    BackwardsSleepPlanSegment(
+                        kind: .wakeWindow,
+                        napIndex: nap.napIndex,
+                        startDate: cursor,
+                        endDate: nap.startDate,
+                        durationMinutes: nap.startDate.timeIntervalSince(cursor) / 60
+                    )
+                )
+            }
+            segments.append(nap)
+            cursor = max(cursor, nap.endDate)
+        }
+        if target > cursor {
+            segments.append(
+                BackwardsSleepPlanSegment(
+                    kind: .wakeWindow,
+                    napIndex: nil,
+                    startDate: cursor,
+                    endDate: target,
+                    durationMinutes: target.timeIntervalSince(cursor) / 60
+                )
+            )
+        }
+        segments.append(
+            BackwardsSleepPlanSegment(
+                kind: .bedtime,
+                napIndex: nil,
+                startDate: target,
+                endDate: target,
+                durationMinutes: 0
+            )
+        )
+
+        if dayNaps.isEmpty {
+            explanations.append("No naps fit comfortably into the full-day layout before the selected bedtime.")
+        } else {
+            explanations.append(
+                "The full-day layout starts from the usual morning wake and works backward from bedtime using typical nap lengths and wake windows by nap order."
+            )
+        }
+        explanations.append("This is a planning aid based on local logs, not medical advice.")
+
+        let confidence = backwardsPlanConfidence(
+            sourceDays: sourceDays,
+            napDurationCount: napDurations.count,
+            wakeWindowCount: wakeWindows.count
+        )
+
+        return BackwardsSleepPlan(
+            targetBedtime: target,
+            generatedAt: now,
+            historyRange: historyRange,
+            plannedNapCount: dayNaps.count,
+            typicalNapCount: typicalNapCount,
+            sourceDayCount: sourceDays,
+            confidence: confidence,
+            confidenceLabel: confidenceLabel(for: confidence),
+            segments: segments,
+            explanation: explanations
+        )
+    }
 
     static func predict(
         profile: BabyProfile,
@@ -514,6 +786,151 @@ enum SleepPredictionEngine {
             second: 0,
             of: targetDate
         )
+    }
+
+    private static func typicalDailyNapCountForPlanning(
+        events: [BabyEvent],
+        profile: BabyProfile,
+        date: Date,
+        calendar: Calendar,
+        settings: PredictionSettings
+    ) -> Int {
+        let naps = events.filter { $0.sleepKind == .nap }
+        let grouped = Dictionary(grouping: naps) { calendar.startOfDay(for: $0.startDate) }
+        if !grouped.isEmpty {
+            let average = Double(grouped.values.reduce(0) { $0 + $1.count }) / Double(grouped.count)
+            return min(4, max(1, Int(average.rounded())))
+        }
+        let baseline = ageBaselineMinutes(
+            birthDate: profile.birthDate,
+            date: date,
+            customMinimum: settings.customBaselineMinimum,
+            customMaximum: settings.customBaselineMaximum,
+            calendar: calendar
+        )
+        let center = (baseline.lowerBound + baseline.upperBound) / 2
+        switch center {
+        case ..<105: return 4
+        case ..<150: return 3
+        case ..<195: return 2
+        default: return 1
+        }
+    }
+
+    private static func napDurationAveragesByIndex(
+        from sleeps: [BabyEvent],
+        calendar: Calendar
+    ) -> [Int: Double] {
+        var values = [Int: [Double]]()
+        let sorted = sleeps.sorted { $0.startDate < $1.startDate }
+        for sleep in sorted where sleep.sleepKind == .nap {
+            guard let duration = sleep.duration else { continue }
+            let index = napIndex(for: sleep, among: sorted, calendar: calendar)
+            values[index, default: []].append(duration / 60)
+        }
+        return values.compactMapValues {
+            clippedAverage($0, allowedRange: 15...180)
+        }
+    }
+
+    private static func wakeWindowAveragesByNextSleepIndex(
+        from sleeps: [BabyEvent],
+        now: Date,
+        calendar: Calendar
+    ) -> [Int: Double] {
+        let samples = wakeWindowSamples(from: sleeps, now: now, calendar: calendar)
+        let grouped = Dictionary(grouping: samples, by: \.napIndex)
+        return grouped.compactMapValues { samples in
+            clippedAverage(samples.map(\.minutes), allowedRange: 20...480)
+        }
+    }
+
+    private static func typicalMorningWakeDate(
+        from sleeps: [BabyEvent],
+        on date: Date,
+        calendar: Calendar
+    ) -> Date? {
+        let wakeMinutes = sleeps
+            .filter { $0.sleepKind == .nightSleep }
+            .compactMap(\.endDate)
+            .map {
+                Double(calendar.component(.hour, from: $0) * 60 + calendar.component(.minute, from: $0))
+            }
+            .filter { (3 * 60 ... 12 * 60).contains($0) }
+        guard let average = clippedAverage(wakeMinutes, allowedRange: 3 * 60 ... 12 * 60) else {
+            return nil
+        }
+        let rounded = Int(average.rounded())
+        return calendar.date(
+            bySettingHour: rounded / 60,
+            minute: rounded % 60,
+            second: 0,
+            of: date
+        )
+    }
+
+    private static func fallbackWakeWindowMinutes(
+        profile: BabyProfile,
+        date: Date,
+        settings: PredictionSettings,
+        calendar: Calendar
+    ) -> Double {
+        let baseline = ageBaselineMinutes(
+            birthDate: profile.birthDate,
+            date: date,
+            customMinimum: settings.customBaselineMinimum,
+            customMaximum: settings.customBaselineMaximum,
+            calendar: calendar
+        )
+        return (baseline.lowerBound + baseline.upperBound) / 2
+    }
+
+    private static func sourceDayCount(from sleeps: [BabyEvent], calendar: Calendar) -> Int {
+        Set(sleeps.map { calendar.startOfDay(for: $0.startDate) }).count
+    }
+
+    private static func backwardsPlanConfidence(
+        sourceDays: Int,
+        napDurationCount: Int,
+        wakeWindowCount: Int
+    ) -> Double {
+        let dayScore = min(0.40, Double(sourceDays) * 0.055)
+        let napScore = min(0.18, Double(napDurationCount) * 0.045)
+        let wakeScore = min(0.24, Double(wakeWindowCount) * 0.04)
+        return min(0.86, max(0.20, 0.22 + dayScore + napScore + wakeScore))
+    }
+
+    private static func clippedAverage(
+        _ values: [Double],
+        allowedRange: ClosedRange<Double>
+    ) -> Double? {
+        let filtered = values.filter { allowedRange.contains($0) }.sorted()
+        guard !filtered.isEmpty else { return nil }
+        guard filtered.count >= 4 else {
+            return filtered.reduce(0, +) / Double(filtered.count)
+        }
+        let q1 = percentile(filtered, 0.25)
+        let q3 = percentile(filtered, 0.75)
+        let iqr = q3 - q1
+        let lower = q1 - 1.5 * iqr
+        let upper = q3 + 1.5 * iqr
+        let clipped = filtered.filter { (lower...upper).contains($0) }
+        guard !clipped.isEmpty else { return filtered.reduce(0, +) / Double(filtered.count) }
+        return clipped.reduce(0, +) / Double(clipped.count)
+    }
+
+    private static func date(
+        onSameDayAs day: Date,
+        matchingTimeOf time: Date,
+        calendar: Calendar
+    ) -> Date {
+        let components = calendar.dateComponents([.hour, .minute, .second], from: time)
+        return calendar.date(
+            bySettingHour: components.hour ?? 0,
+            minute: components.minute ?? 0,
+            second: components.second ?? 0,
+            of: day
+        ) ?? time
     }
 
     private static func percentile(_ sortedValues: [Double], _ percentile: Double) -> Double {

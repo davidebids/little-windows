@@ -1196,6 +1196,212 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(baseline.upperBound, 165)
     }
 
+    func testBackwardsPlanBuildsTodayNapLayoutFromSevenDayHistory() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        let events = makeTwoNapHistory(today: today, calendar: calendar)
+
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: events,
+            targetBedtime: target,
+            now: today,
+            calendar: calendar
+        )
+
+        let naps = plan.segments.filter { $0.kind == .nap }
+        XCTAssertEqual(plan.sourceDayCount, 7)
+        XCTAssertEqual(plan.typicalNapCount, 2)
+        XCTAssertEqual(plan.plannedNapCount, 2)
+        XCTAssertEqual(plan.segments.first?.kind, .wakeWindow)
+        XCTAssertEqual(
+            plan.segments.first?.startDate,
+            calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 6, minute: 30))
+        )
+        XCTAssertEqual(naps.map(\.napIndex), [1, 2])
+        XCTAssertEqual(calendar.component(.hour, from: try XCTUnwrap(naps.first?.startDate)), 8)
+        XCTAssertEqual(calendar.component(.minute, from: try XCTUnwrap(naps.first?.startDate)), 30)
+        XCTAssertEqual(calendar.component(.hour, from: try XCTUnwrap(naps.last?.startDate)), 12)
+        XCTAssertEqual(calendar.component(.minute, from: try XCTUnwrap(naps.last?.startDate)), 0)
+        XCTAssertEqual(plan.segments.last?.kind, .bedtime)
+    }
+
+    func testBackwardsPlanShowsFullDayEvenAfterEarlierNapsPassed() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 15))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: makeTwoNapHistory(today: now, calendar: calendar),
+            targetBedtime: target,
+            now: now,
+            calendar: calendar
+        )
+
+        let naps = plan.segments.filter { $0.kind == .nap }
+        XCTAssertEqual(naps.map(\.napIndex), [1, 2])
+        XCTAssertLessThan(try XCTUnwrap(naps.first?.startDate), now)
+        XCTAssertEqual(
+            plan.segments.first?.startDate,
+            calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 6, minute: 30))
+        )
+    }
+
+    func testBackwardsPlanFallsBackWhenRecentHistoryIsSparse() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: [],
+            targetBedtime: target,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(plan.sourceDayCount, 0)
+        XCTAssertEqual(plan.confidenceLabel, .low)
+        XCTAssertTrue(plan.explanation.contains { $0.contains("age-based wake-window baseline") })
+        XCTAssertEqual(plan.segments.last?.kind, .bedtime)
+    }
+
+    func testBackwardsPlanHonorsSelectedHistoryRange() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        let events = makeTwoNapHistory(
+            today: today,
+            calendar: calendar,
+            dayOffsets: -14 ... -8
+        )
+
+        let sevenDayPlan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: events,
+            targetBedtime: target,
+            now: today,
+            calendar: calendar,
+            historyRange: .sevenDays
+        )
+        let fourteenDayPlan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: events,
+            targetBedtime: target,
+            now: today,
+            calendar: calendar,
+            historyRange: .fourteenDays
+        )
+
+        XCTAssertEqual(sevenDayPlan.sourceDayCount, 0)
+        XCTAssertEqual(fourteenDayPlan.sourceDayCount, 7)
+        XCTAssertEqual(fourteenDayPlan.historyRange, .fourteenDays)
+        XCTAssertTrue(fourteenDayPlan.explanation.contains { $0.contains("last 14 days") })
+    }
+
+    func testBackwardsPlanIgnoresActiveSleepTimers() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        var events = makeTwoNapHistory(today: today, calendar: calendar)
+        let activeSleep = BabyEvent(
+            type: .sleep,
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 6, minute: 45))!,
+            endDate: nil
+        )
+        activeSleep.sleepKind = .nap
+        events.append(activeSleep)
+
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: events,
+            targetBedtime: target,
+            now: today,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(plan.plannedNapCount, 2)
+        XCTAssertEqual(plan.segments.filter { $0.kind == .nap }.map(\.napIndex), [1, 2])
+    }
+
+    func testBackwardsPlanRejectsBedtimeThatAlreadyPassedToday() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: makeTwoNapHistory(today: now, calendar: calendar),
+            targetBedtime: target,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(plan.plannedNapCount, 0)
+        XCTAssertEqual(plan.confidenceLabel, .low)
+        XCTAssertTrue(plan.explanation.contains { $0.contains("later today") })
+    }
+
+    private func makeTwoNapHistory(
+        today: Date,
+        calendar: Calendar,
+        dayOffsets: ClosedRange<Int> = -7 ... -1
+    ) -> [BabyEvent] {
+        let todayStart = calendar.startOfDay(for: today)
+        return dayOffsets.flatMap { offset -> [BabyEvent] in
+            let day = calendar.date(byAdding: .day, value: offset, to: todayStart)!
+            let nightStart = calendar.date(bySettingHour: 19, minute: 30, second: 0, of: day)!
+            let nightEnd = calendar.date(byAdding: .hour, value: 11, to: nightStart)!
+            let napOneStart = calendar.date(bySettingHour: 8, minute: 30, second: 0, of: day)!
+            let napOneEnd = calendar.date(bySettingHour: 9, minute: 30, second: 0, of: day)!
+            let napTwoStart = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day)!
+            let napTwoEnd = calendar.date(bySettingHour: 13, minute: 0, second: 0, of: day)!
+            return [
+                makeSleep(kind: .nightSleep, start: nightStart, end: nightEnd),
+                makeSleep(kind: .nap, start: napOneStart, end: napOneEnd),
+                makeSleep(kind: .nap, start: napTwoStart, end: napTwoEnd)
+            ]
+        }
+    }
+
+    private func makeSleep(kind: SleepKind, start: Date, end: Date) -> BabyEvent {
+        let event = BabyEvent(type: .sleep, startDate: start, endDate: end)
+        event.sleepKind = kind
+        return event
+    }
+
     @MainActor
     func testBundledLegacyTrackerHistoryImportsWithoutActiveTimers() throws {
         let schema = PersistenceService.schema

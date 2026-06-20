@@ -31,6 +31,7 @@ struct TodayView: View {
     @State private var editorRoute: EventEditorRoute?
     @State private var activeTimerToEdit: BabyEvent?
     @State private var showingExplanation = false
+    @State private var showingBackwardsPlanner = false
     @State private var duplicateTimerMessage: String?
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
@@ -213,6 +214,7 @@ struct TodayView: View {
                             ),
                             alertsEnabled: notificationsEnabled,
                             toggleAlerts: toggleLittleWindowAlerts,
+                            showBackwardsPlanner: { showingBackwardsPlanner = true },
                             showExplanation: { showingExplanation = true }
                         )
                         .listRowInsets(EdgeInsets())
@@ -326,6 +328,17 @@ struct TodayView: View {
         .sheet(isPresented: $showingExplanation) {
             NavigationStack {
                 PredictionExplanationView(prediction: prediction)
+            }
+        }
+        .sheet(isPresented: $showingBackwardsPlanner) {
+            if let profile {
+                NavigationStack {
+                    BackwardsSleepPlanView(
+                        profile: profile,
+                        events: scopedEvents,
+                        settings: predictionSettings
+                    )
+                }
             }
         }
         .confirmationDialog(
@@ -802,14 +815,28 @@ struct TodayView: View {
                         .tint(.green)
                     }
                 }
-                Button {
-                    showingAppointments = true
-                } label: {
-                    Label("View all appointments", systemImage: "calendar.badge.clock")
-                        .font(.subheadline.weight(.semibold))
-                }
             } header: {
-                AppSectionHeader(title: "Appointments", subtitle: "Coming up")
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Appointments")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Button {
+                        showingAppointments = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("View all")
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.bold))
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("View all appointments")
+                }
+                .textCase(nil)
+                .padding(.horizontal, 4)
             }
         }
     }

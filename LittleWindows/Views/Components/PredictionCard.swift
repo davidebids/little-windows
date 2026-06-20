@@ -6,6 +6,7 @@ struct PredictionCard: View {
     var alertStatusText: String?
     var alertsEnabled = false
     var toggleAlerts: (() -> Void)?
+    var showBackwardsPlanner: (() -> Void)?
     var showExplanation: () -> Void
 
     var body: some View {
@@ -113,8 +114,22 @@ struct PredictionCard: View {
 
                         Spacer()
 
+                        if let showBackwardsPlanner {
+                            Button(action: showBackwardsPlanner) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "calendar.badge.clock")
+                                    Text("Plan")
+                                }
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         Button(action: showExplanation) {
-                            Label("Why", systemImage: "info.circle")
+                            HStack(spacing: 4) {
+                                Image(systemName: "info.circle")
+                                Text("Why")
+                            }
                                 .font(.subheadline.weight(.semibold))
                         }
                         .buttonStyle(.plain)
@@ -150,6 +165,17 @@ struct PredictionCard: View {
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.72))
                             .fixedSize(horizontal: false, vertical: true)
+                        if let showBackwardsPlanner {
+                            Button(action: showBackwardsPlanner) {
+                                Label("Plan bedtime", systemImage: "calendar.badge.clock")
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(.white.opacity(0.14), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 4)
+                        }
                     }
                     .padding(.vertical, 8)
                 }
