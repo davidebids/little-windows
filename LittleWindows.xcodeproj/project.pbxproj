@@ -75,7 +75,6 @@
 		B00000000000000000000054 /* LittleWindowsWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000049 /* LittleWindowsWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B00000000000000000000055 /* LittleWindowsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000054 /* LittleWindowsControls.swift */; };
 		B00000000000000000000056 /* Models/MilestoneEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000055 /* Models/MilestoneEntry.swift */; };
-		B0000000000000000000005E /* FoodWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005E /* FoodWidgets.swift */; };
 		B00000000000000000000057 /* Views/MilestonesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000056 /* Views/MilestonesView.swift */; };
 		B00000000000000000000058 /* Views/Insights/MilestoneInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000057 /* Views/Insights/MilestoneInsightsView.swift */; };
 		B00000000000000000000059 /* Models/GrowthReferenceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000058 /* Models/GrowthReferenceModels.swift */; };
@@ -83,6 +82,7 @@
 		B0000000000000000000005B /* Views/Insights/GrowthInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005A /* Views/Insights/GrowthInsightsView.swift */; };
 		B0000000000000000000005C /* Resources/GrowthCharts in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005B /* Resources/GrowthCharts */; };
 		B0000000000000000000005D /* Services/IntegrationCommandProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000039 /* Services/IntegrationCommandProcessor.swift */; };
+		B0000000000000000000005E /* FoodWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005E /* FoodWidgets.swift */; };
 		B00000000000000000000060 /* Models/NightLightModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000060 /* Models/NightLightModels.swift */; };
 		B00000000000000000000061 /* Services/NightLightPresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000061 /* Services/NightLightPresetService.swift */; };
 		B00000000000000000000062 /* Services/NightLightTimerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000062 /* Services/NightLightTimerService.swift */; };
@@ -238,13 +238,13 @@
 		F00000000000000000000053 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		F00000000000000000000054 /* LittleWindowsControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsControls.swift; sourceTree = "<group>"; };
 		F00000000000000000000055 /* Models/MilestoneEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/MilestoneEntry.swift; sourceTree = "<group>"; };
-		F0000000000000000000005E /* FoodWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodWidgets.swift; sourceTree = "<group>"; };
 		F00000000000000000000056 /* Views/MilestonesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/MilestonesView.swift; sourceTree = "<group>"; };
 		F00000000000000000000057 /* Views/Insights/MilestoneInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/MilestoneInsightsView.swift; sourceTree = "<group>"; };
 		F00000000000000000000058 /* Models/GrowthReferenceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/GrowthReferenceModels.swift; sourceTree = "<group>"; };
 		F00000000000000000000059 /* Services/GrowthReferenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/GrowthReferenceService.swift; sourceTree = "<group>"; };
 		F0000000000000000000005A /* Views/Insights/GrowthInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/GrowthInsightsView.swift; sourceTree = "<group>"; };
 		F0000000000000000000005B /* Resources/GrowthCharts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/GrowthCharts; sourceTree = "<group>"; };
+		F0000000000000000000005E /* FoodWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodWidgets.swift; sourceTree = "<group>"; };
 		F00000000000000000000060 /* Models/NightLightModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/NightLightModels.swift; sourceTree = "<group>"; };
 		F00000000000000000000061 /* Services/NightLightPresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightPresetService.swift; sourceTree = "<group>"; };
 		F00000000000000000000062 /* Services/NightLightTimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightTimerService.swift; sourceTree = "<group>"; };
@@ -457,14 +457,6 @@
 			path = LittleWindowsTests;
 			sourceTree = "<group>";
 		};
-		D00000000000000000000029 /* LittleWindowsUITests */ = {
-			isa = PBXGroup;
-			children = (
-				F0000000000000000000008C /* UserVisibleFlowUITests.swift */,
-			);
-			path = LittleWindowsUITests;
-			sourceTree = "<group>";
-		};
 		D00000000000000000000008 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -504,6 +496,14 @@
 				F00000000000000000000048 /* LittleWindowsWidgets.entitlements */,
 			);
 			path = LittleWindowsWidgets;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000029 /* LittleWindowsUITests */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000008C /* UserVisibleFlowUITests.swift */,
+			);
+			path = LittleWindowsUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -953,13 +953,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.1;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -978,13 +978,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.1;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1032,11 +1032,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+					CURRENT_PROJECT_VERSION = 1.1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+					MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1052,11 +1052,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+					CURRENT_PROJECT_VERSION = 1.1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+					MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

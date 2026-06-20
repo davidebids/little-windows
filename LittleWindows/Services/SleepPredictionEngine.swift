@@ -168,31 +168,6 @@ enum SleepPredictionEngine {
             )
         }
 
-        guard target > now.addingTimeInterval(15 * 60), target < tomorrowStart else {
-            explanations.append("Choose a bedtime later today to build a full-day plan.")
-            explanations.append("This is a planning aid based on local logs, not medical advice.")
-            return BackwardsSleepPlan(
-                targetBedtime: target,
-                generatedAt: now,
-                historyRange: historyRange,
-                plannedNapCount: 0,
-                typicalNapCount: typicalNapCount,
-                sourceDayCount: sourceDays,
-                confidence: 0.20,
-                confidenceLabel: .low,
-                segments: [
-                    BackwardsSleepPlanSegment(
-                        kind: .bedtime,
-                        napIndex: nil,
-                        startDate: target,
-                        endDate: target,
-                        durationMinutes: 0
-                    )
-                ],
-                explanation: explanations
-            )
-        }
-
         let napDurations = napDurationAveragesByIndex(
             from: historySleeps,
             calendar: calendar
@@ -221,60 +196,92 @@ enum SleepPredictionEngine {
             allowedRange: 15...180
         ) ?? 50
         let plannedNapIndexes = typicalNapCount > 0 ? Array(1...typicalNapCount) : []
-        var nextSleepIndex = 5
-        var nextSleepStart = target
-        var plannedNaps = [BackwardsSleepPlanSegment]()
 
-        for napIndex in plannedNapIndexes.reversed() {
-            let wakeMinutes = wakeWindows[nextSleepIndex]
-                ?? (nextSleepIndex == 5 ? max(fallbackWake, 150) : fallbackWake)
-            let napDuration = napDurations[napIndex] ?? fallbackNap
-            let napEnd = nextSleepStart.addingTimeInterval(-wakeMinutes * 60)
-            let napStart = napEnd.addingTimeInterval(-napDuration * 60)
+        guard target > planningDayStart, target < tomorrowStart else {
+            explanations.append("Choose a bedtime after the usual morning wake to build a full-day plan.")
+            explanations.append("This is a planning aid based on local logs, not medical advice.")
+            return BackwardsSleepPlan(
+                targetBedtime: target,
+                generatedAt: now,
+                historyRange: historyRange,
+                plannedNapCount: 0,
+                typicalNapCount: typicalNapCount,
+                sourceDayCount: sourceDays,
+                confidence: 0.20,
+                confidenceLabel: .low,
+                segments: [
+                    BackwardsSleepPlanSegment(
+                        kind: .bedtime,
+                        napIndex: nil,
+                        startDate: target,
+                        endDate: target,
+                        durationMinutes: 0
+                    )
+                ],
+                explanation: explanations
+            )
+        }
 
-            plannedNaps.append(
+        let napDurationsByIndex = Dictionary(
+            uniqueKeysWithValues: plannedNapIndexes.map { napIndex in
+                (napIndex, napDurations[napIndex] ?? fallbackNap)
+            }
+        )
+        let wakeSlotIndexes = plannedNapIndexes + [5]
+        var wakeDurationsByNextSleepIndex = Dictionary(
+            uniqueKeysWithValues: wakeSlotIndexes.map { nextSleepIndex in
+                let fallback = nextSleepIndex == 5 ? max(fallbackWake, 150) : fallbackWake
+                return (nextSleepIndex, wakeWindows[nextSleepIndex] ?? fallback)
+            }
+        )
+        let availableMinutes = target.timeIntervalSince(planningDayStart) / 60
+        let totalNapMinutes = napDurationsByIndex.values.reduce(0, +)
+        let baseWakeMinutes = wakeDurationsByNextSleepIndex.values.reduce(0, +)
+        let desiredWakeMinutes = max(0, availableMinutes - totalNapMinutes)
+
+        if !wakeSlotIndexes.isEmpty, baseWakeMinutes > 0 {
+            if desiredWakeMinutes >= baseWakeMinutes {
+                let slackPerWake = (desiredWakeMinutes - baseWakeMinutes) / Double(wakeSlotIndexes.count)
+                for nextSleepIndex in wakeSlotIndexes {
+                    wakeDurationsByNextSleepIndex[nextSleepIndex, default: 0] += slackPerWake
+                }
+            } else {
+                let scale = desiredWakeMinutes / baseWakeMinutes
+                for nextSleepIndex in wakeSlotIndexes {
+                    wakeDurationsByNextSleepIndex[nextSleepIndex, default: 0] *= scale
+                }
+            }
+        }
+
+        var segments = [BackwardsSleepPlanSegment]()
+        var cursor = planningDayStart
+        for napIndex in plannedNapIndexes {
+            let wakeMinutes = max(0, wakeDurationsByNextSleepIndex[napIndex] ?? fallbackWake)
+            let wakeEnd = cursor.addingTimeInterval(wakeMinutes * 60)
+            if wakeEnd > cursor {
+                segments.append(
+                    BackwardsSleepPlanSegment(
+                        kind: .wakeWindow,
+                        napIndex: napIndex,
+                        startDate: cursor,
+                        endDate: wakeEnd,
+                        durationMinutes: wakeMinutes
+                    )
+                )
+            }
+
+            let napDuration = max(0, napDurationsByIndex[napIndex] ?? fallbackNap)
+            let napEnd = wakeEnd.addingTimeInterval(napDuration * 60)
+            segments.append(
                 BackwardsSleepPlanSegment(
                     kind: .nap,
                     napIndex: napIndex,
-                    startDate: napStart,
+                    startDate: wakeEnd,
                     endDate: napEnd,
                     durationMinutes: napDuration
                 )
             )
-            nextSleepIndex = napIndex
-            nextSleepStart = napStart
-        }
-
-        let dayNaps = plannedNaps
-            .filter { $0.endDate > planningDayStart && $0.startDate < target }
-            .map { nap in
-                guard nap.startDate < planningDayStart else { return nap }
-                return BackwardsSleepPlanSegment(
-                    kind: nap.kind,
-                    napIndex: nap.napIndex,
-                    startDate: planningDayStart,
-                    endDate: nap.endDate,
-                    durationMinutes: nap.endDate.timeIntervalSince(planningDayStart) / 60
-                )
-            }
-            .sorted { $0.startDate < $1.startDate }
-
-        var segments = [BackwardsSleepPlanSegment]()
-        var cursor = planningDayStart
-        for nap in dayNaps {
-            if nap.startDate > cursor {
-                segments.append(
-                    BackwardsSleepPlanSegment(
-                        kind: .wakeWindow,
-                        napIndex: nap.napIndex,
-                        startDate: cursor,
-                        endDate: nap.startDate,
-                        durationMinutes: nap.startDate.timeIntervalSince(cursor) / 60
-                    )
-                )
-            }
-            segments.append(nap)
-            cursor = max(cursor, nap.endDate)
+            cursor = napEnd
         }
         if target > cursor {
             segments.append(
@@ -297,11 +304,12 @@ enum SleepPredictionEngine {
             )
         )
 
-        if dayNaps.isEmpty {
+        let plannedNaps = segments.filter { $0.kind == .nap }
+        if plannedNaps.isEmpty {
             explanations.append("No naps fit comfortably into the full-day layout before the selected bedtime.")
         } else {
             explanations.append(
-                "The full-day layout starts from the usual morning wake and works backward from bedtime using typical nap lengths and wake windows by nap order."
+                "The full-day layout starts from the usual morning wake and lands on bedtime using typical nap lengths and wake windows by nap order."
             )
         }
         explanations.append("This is a planning aid based on local logs, not medical advice.")
@@ -316,7 +324,7 @@ enum SleepPredictionEngine {
             targetBedtime: target,
             generatedAt: now,
             historyRange: historyRange,
-            plannedNapCount: dayNaps.count,
+            plannedNapCount: plannedNaps.count,
             typicalNapCount: typicalNapCount,
             sourceDayCount: sourceDays,
             confidence: confidence,

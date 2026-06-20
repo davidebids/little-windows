@@ -26,7 +26,7 @@ The source and entitlements currently use this App Group:
 group.com.debidia.LittleWindows
 ```
 
-The app target also uses this CloudKit container for SwiftData private database sync:
+The app target also uses this CloudKit container for SwiftData private database sync and Family Sync shared records:
 
 ```text
 iCloud.com.debidia.LittleWindows
@@ -47,6 +47,7 @@ For the `LittleWindows` app target only:
 3. Select or create `iCloud.com.debidia.LittleWindows`.
 4. Keep `LittleWindows/LittleWindows.entitlements` connected to the target.
 5. Use CloudKit Dashboard to inspect the development schema and deploy it to production before TestFlight/App Store use.
+6. For Family Sync testing, create a share from Settings > Family Sync on the owner's device, accept the iCloud invitation on a second Apple Account, and verify both devices can write care data.
 
 If Xcode reports that the App Group is unavailable for a Personal Team, a paid Apple Developer team is required for reliable shared widget/action state. The main app still runs without the shared group, but widgets cannot reliably read timer snapshots and system buttons should be treated as open-app fallbacks.
 
@@ -65,6 +66,8 @@ The extension target includes:
 ## Action behavior
 
 Timer data, event history, appointments, profiles, predictions, and settings remain in the app's SwiftData store. Widgets and Live Activities receive lightweight snapshots through the App Group.
+
+When Family Sync is enabled, SwiftData uses a local cache and `CloudKitSharingService` moves the shared family dataset through a CloudKit shared record. Accepted caregivers read and write the same shared data, while widgets and Live Activities continue to refresh from each device's local cache.
 
 System action buttons:
 
@@ -218,6 +221,8 @@ Notification scheduling is refreshed after relevant event mutations, prediction 
 15. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
 
 Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit sync, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
+
+Family Sync also needs two signed physical devices or simulator/device installs with different Apple Accounts. Verify share creation, invitation acceptance, start/stop timer handoff, offline edits that sync later, and local widget/Live Activity refresh after synced changes arrive.
 
 ## Apple references
 

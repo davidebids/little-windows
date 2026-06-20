@@ -6,6 +6,7 @@ import SwiftData
 final class ICloudSyncSettingsViewModel: ObservableObject {
     @Published private(set) var availability: ICloudSyncAvailability = .checking
     @Published private(set) var isICloudSyncEnabled = PersistenceService.isICloudSyncEnabled()
+    @Published private(set) var syncMode = PersistenceService.familySyncMode()
     @Published private(set) var requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
     @Published private(set) var accountStatusDescription = "Checking iCloud..."
     @Published private(set) var containerStatusDescription = PersistenceService.iCloudContainerIdentifier
@@ -18,6 +19,7 @@ final class ICloudSyncSettingsViewModel: ObservableObject {
     func setICloudSyncEnabled(_ enabled: Bool) {
         PersistenceService.setICloudSyncEnabled(enabled)
         isICloudSyncEnabled = enabled
+        syncMode = PersistenceService.familySyncMode()
         requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
     }
 
@@ -25,6 +27,7 @@ final class ICloudSyncSettingsViewModel: ObservableObject {
         await statusService.refreshStatus()
         availability = statusService.availability
         isICloudSyncEnabled = PersistenceService.isICloudSyncEnabled()
+        syncMode = PersistenceService.familySyncMode()
         requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
         accountStatusDescription = statusService.accountStatusDescription
         containerStatusDescription = statusService.containerStatusDescription

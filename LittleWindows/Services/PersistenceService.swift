@@ -5,13 +5,18 @@ enum PersistenceService {
     static let storeName = "LittleWindows"
     static let appGroupIdentifier = "group.com.debidia.LittleWindows"
     static let iCloudSyncEnabledKey = "isICloudSyncEnabled"
+    static let familySyncModeKey = "familySyncMode"
 
     // Update this if the bundle/team container in Xcode differs.
     static let iCloudContainerIdentifier = "iCloud.com.debidia.LittleWindows"
 
     static private(set) var startupErrorMessage: String?
     static private(set) var isUsingCloudKitStore = true
-    static private(set) var iCloudSyncEnabledAtStartup = true
+    static private(set) var syncModeAtStartup: FamilySyncMode = .privateICloudSync
+
+    static var iCloudSyncEnabledAtStartup: Bool {
+        syncModeAtStartup.requiresICloudAccount
+    }
 
     static var schema: Schema {
         Schema([
@@ -39,7 +44,7 @@ enum PersistenceService {
     }
 
     static func makeModelContainer() -> ModelContainer {
-        iCloudSyncEnabledAtStartup = isICloudSyncEnabled()
+        syncModeAtStartup = familySyncMode()
 
         if shouldUseLocalStoreForValidation {
             return makeLocalModelContainer(
@@ -47,25 +52,32 @@ enum PersistenceService {
             )
         }
 
-        guard iCloudSyncEnabledAtStartup else {
+        switch syncModeAtStartup {
+        case .localOnly:
             return makeLocalModelContainer()
-        }
-
-        do {
-            return try ModelContainer(
-                for: schema,
-                configurations: [
-                    ModelConfiguration(
-                        storeName,
-                        schema: schema,
-                        cloudKitDatabase: .private(iCloudContainerIdentifier)
-                    )
-                ]
-            )
-        } catch {
+        case .sharedFamilySync:
             return makeLocalModelContainer(
-                startupMessage: "CloudKit-backed store could not open: \(error.localizedDescription)"
+                startupMessage: "Family Sync uses a local SwiftData store plus CloudKit shared records."
             )
+        case .privateICloudSync:
+            do {
+                isUsingCloudKitStore = true
+                startupErrorMessage = nil
+                return try ModelContainer(
+                    for: schema,
+                    configurations: [
+                        ModelConfiguration(
+                            storeName,
+                            schema: schema,
+                            cloudKitDatabase: .private(iCloudContainerIdentifier)
+                        )
+                    ]
+                )
+            } catch {
+                return makeLocalModelContainer(
+                    startupMessage: "CloudKit-backed store could not open: \(error.localizedDescription)"
+                )
+            }
         }
     }
 
@@ -104,6 +116,9 @@ enum PersistenceService {
 
     static func recordLocalSave(at date: Date = Date(), defaults: UserDefaults = .standard) {
         defaults.set(date, forKey: "lastSuccessfulLocalSaveAt")
+        Task { @MainActor in
+            CloudKitSharingService.noteLocalDataChanged()
+        }
     }
 
     static func lastLocalSaveAt(defaults: UserDefaults = .standard) -> Date? {
@@ -111,17 +126,31 @@ enum PersistenceService {
     }
 
     static func isICloudSyncEnabled(defaults: UserDefaults = .standard) -> Bool {
-        guard defaults.object(forKey: iCloudSyncEnabledKey) != nil else {
-            return true
-        }
-        return defaults.bool(forKey: iCloudSyncEnabledKey)
+        familySyncMode(defaults: defaults).requiresICloudAccount
     }
 
     static func setICloudSyncEnabled(_ enabled: Bool, defaults: UserDefaults = .standard) {
         defaults.set(enabled, forKey: iCloudSyncEnabledKey)
+        setFamilySyncMode(enabled ? .privateICloudSync : .localOnly, defaults: defaults)
+    }
+
+    static func familySyncMode(defaults: UserDefaults = .standard) -> FamilySyncMode {
+        if let rawValue = defaults.string(forKey: familySyncModeKey),
+           let mode = FamilySyncMode(rawValue: rawValue) {
+            return mode
+        }
+        guard defaults.object(forKey: iCloudSyncEnabledKey) != nil else {
+            return .privateICloudSync
+        }
+        return defaults.bool(forKey: iCloudSyncEnabledKey) ? .privateICloudSync : .localOnly
+    }
+
+    static func setFamilySyncMode(_ mode: FamilySyncMode, defaults: UserDefaults = .standard) {
+        defaults.set(mode.rawValue, forKey: familySyncModeKey)
+        defaults.set(mode.requiresICloudAccount, forKey: iCloudSyncEnabledKey)
     }
 
     static var iCloudSyncChangeRequiresRestart: Bool {
-        isICloudSyncEnabled() != iCloudSyncEnabledAtStartup
+        familySyncMode() != syncModeAtStartup
     }
 }

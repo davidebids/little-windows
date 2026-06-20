@@ -82,7 +82,7 @@ iCloud.com.debidia.LittleWindows
 
 Change `PersistenceService.iCloudContainerIdentifier` and the app entitlement if the Xcode container differs for your Apple Developer team. Keep the App Group entitlement enabled for widgets and Live Activities.
 
-Private iCloud Sync keeps Little Windows data available on devices signed into the same Apple Account. It does not share data between different Apple Accounts. The Family Sync screen is intentionally honest: true multi-caregiver sharing requires a shared CloudKit record zone, CKShare invitation creation, acceptance handling, and read/write participant testing before it can be marked enabled.
+Private iCloud Sync keeps Little Windows data available on devices signed into the same Apple Account. Family Sync is an opt-in mode for sharing one Little Windows dataset with accepted caregivers on different Apple Accounts. It uses a CloudKit shared record zone and a `CKShare` invitation; it is not tied to Apple Family Sharing membership.
 
 Migration notes:
 
@@ -91,6 +91,7 @@ Migration notes:
 3. Settings > iCloud Sync shows account status, container identifier, migration state, local save time, and record counts.
 4. Settings > Family Sync distinguishes private iCloud sync from shared family sync and does not claim multi-caregiver sharing works yet.
 5. Use CloudKit Dashboard to verify private database record types in development, then deploy the schema to production before TestFlight/App Store distribution.
+6. For Family Sync, one caregiver creates the share from Settings > Family Sync, another caregiver accepts the iCloud invitation, and both devices use the shared family dataset mode.
 
 Private iCloud sync testing:
 
@@ -100,7 +101,7 @@ Private iCloud sync testing:
 4. Confirm records appear and edits sync both ways.
 5. Test airplane mode by creating records offline, reconnecting, and confirming they sync later.
 
-Family sharing testing should only be run after CKShare support is implemented: one caregiver creates the family share, another caregiver accepts the invitation on a different Apple Account, both users verify read/write access, and each device schedules notifications locally from the synced data.
+Family sharing testing requires two signed installs on different Apple Accounts: one caregiver creates the family share, another caregiver accepts the invitation, both users verify read/write access, and each device schedules notifications locally from the synced data.
 
 ## Validation
 
