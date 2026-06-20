@@ -199,8 +199,11 @@ Little Windows uses local notifications for:
 - Appointment reminders with selectable lead times.
 - Monthly guide reminders that fire at most once per monthly age guide.
 - Food & Home reminders created by the user for shopping, meal prep, or custom food tasks.
+- Family Sync shared activity alerts after CloudKit silent pushes wake the app, download the shared dataset, and detect another caregiver's care, appointment, milestone, shopping, inventory, meal-prep, or food-reminder change.
 
 Notification scheduling is refreshed after relevant event mutations, prediction updates, appointment changes, guide-read-state changes, and Food & Home reminder changes. Food & Home shopping-list widgets refresh from lightweight App Group snapshots; the widget extension opens the app for edits rather than writing SwiftData directly.
+
+Family Sync creates a CloudKit record-zone subscription for the shared family zone when a share is created or accepted, and refreshes it during shared sync. The CloudKit push itself is silent; Little Windows posts a local shared-activity notification only after the remote dataset imports and the local diff identifies a user-facing change. These alerts can be disabled from **Settings -> Family Sync -> Shared activity alerts**.
 
 ## Real-device testing
 
@@ -218,7 +221,8 @@ Notification scheduling is refreshed after relevant event mutations, prediction 
 12. Create an appointment and verify selected reminder lead times.
 13. Enable monthly guide reminders and verify scheduling after guide state changes.
 14. Create a Food & Home reminder and verify it opens the relevant Food screen or item.
-15. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
+15. With two signed devices in the same Family Sync share, allow notifications, background one device, make a shared care or shopping-list change on the other device, and verify the backgrounded device receives a shared-activity alert that opens the relevant Little Windows screen.
+16. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
 
 Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit sync, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
 

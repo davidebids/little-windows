@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import SwiftData
+import UIKit
 import UserNotifications
 
 enum LittleWindowConfidenceThreshold: String, Codable, CaseIterable, Identifiable {
@@ -95,6 +96,12 @@ struct LittleWindowNotificationCopy: Equatable {
     var body: String
 }
 
+struct FamilySyncActivityNotification: Equatable {
+    var title: String
+    var body: String
+    var deepLinkPath: String
+}
+
 @MainActor
 final class NotificationManager: NSObject, ObservableObject {
     static let shared = NotificationManager()
@@ -114,6 +121,8 @@ final class NotificationManager: NSObject, ObservableObject {
     static let openAgeGuideActionID = "OPEN_AGE_GUIDE"
     static let foodReminderCategoryID = "FOOD_HOME_REMINDER"
     static let openFoodActionID = "OPEN_FOOD_HOME"
+    static let familySyncActivityCategoryID = "FAMILY_SYNC_ACTIVITY"
+    static let openFamilySyncActivityActionID = "OPEN_FAMILY_SYNC_ACTIVITY"
 
     private static let stateKey = "littleWindowNotificationState"
     private static let allNotificationIDs = [
@@ -133,6 +142,7 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func configure() async {
         registerNotificationCategories()
+        UIApplication.shared.registerForRemoteNotifications()
         await refreshAuthorizationStatus()
     }
 
@@ -222,11 +232,23 @@ final class NotificationManager: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
+        let openFamilySyncActivity = UNNotificationAction(
+            identifier: Self.openFamilySyncActivityActionID,
+            title: "Open",
+            options: [.foreground]
+        )
+        let familySyncActivityCategory = UNNotificationCategory(
+            identifier: Self.familySyncActivityCategoryID,
+            actions: [openFamilySyncActivity],
+            intentIdentifiers: [],
+            options: []
+        )
         UNUserNotificationCenter.current().setNotificationCategories([
             category,
             appointmentCategory,
             ageGuideCategory,
-            foodCategory
+            foodCategory,
+            familySyncActivityCategory
         ])
     }
 
@@ -652,6 +674,35 @@ final class NotificationManager: NSObject, ObservableObject {
         return content
     }
 
+    func showFamilySyncActivityNotification(
+        _ notification: FamilySyncActivityNotification
+    ) async {
+        guard UserDefaults.standard.object(forKey: "familySyncActivityNotificationsEnabled") == nil
+                || UserDefaults.standard.bool(forKey: "familySyncActivityNotificationsEnabled") else {
+            return
+        }
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = notification.title
+        content.body = notification.body
+        content.sound = .default
+        content.categoryIdentifier = Self.familySyncActivityCategoryID
+        content.userInfo = [
+            "deepLink": Self.deepLink(path: notification.deepLinkPath, profileID: nil)
+        ]
+        let request = UNNotificationRequest(
+            identifier: "family.sync.activity.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
     func buildNotificationContent(
         for prediction: SleepPrediction,
         babyName: String,
@@ -741,6 +792,14 @@ final class NotificationManager: NSObject, ObservableObject {
                 DeepLinkRouter.shared.route(url)
             } else {
                 DeepLinkRouter.shared.route(URL(string: "littlewindows://food")!)
+            }
+        } else if action == Self.openFamilySyncActivityActionID ||
+                    response.notification.request.content.categoryIdentifier == Self.familySyncActivityCategoryID {
+            if let deepLink = response.notification.request.content.userInfo["deepLink"] as? String,
+               let url = URL(string: deepLink) {
+                DeepLinkRouter.shared.route(url)
+            } else {
+                DeepLinkRouter.shared.route(URL(string: "littlewindows://history")!)
             }
         } else if action == Self.startSleepActionID {
             let profilePrefix = Self.profilePathPrefix(

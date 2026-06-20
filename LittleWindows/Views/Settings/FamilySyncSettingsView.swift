@@ -6,6 +6,8 @@ import UIKit
 struct FamilySyncSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = FamilySyncViewModel()
+    @AppStorage("familySyncActivityNotificationsEnabled")
+    private var activityNotificationsEnabled = true
     @State private var confirmLeave = false
     @State private var deleteLocalDataOnLeave = false
 
@@ -76,6 +78,23 @@ struct FamilySyncSettingsView: View {
 
                 if viewModel.state.status == .localOnly {
                     Text("Turn on iCloud Sync before creating or accepting a family share.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if viewModel.state.syncMode == .sharedFamilySync {
+                Section("Notifications") {
+                    Toggle(
+                        "Shared activity alerts",
+                        isOn: $activityNotificationsEnabled
+                    )
+                    .onChange(of: activityNotificationsEnabled) { _, enabled in
+                        guard enabled else { return }
+                        Task {
+                            _ = await NotificationManager.shared.requestAuthorization()
+                        }
+                    }
+                    Text("Show alerts when another caregiver's synced changes arrive on this device.")
                         .foregroundStyle(.secondary)
                 }
             }

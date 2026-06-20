@@ -38,7 +38,7 @@ struct LittleWindowsApp: App {
                     }
                     CloudKitSharingService.processPendingAcceptedShareIfNeeded()
                     if PersistenceService.familySyncMode() == .sharedFamilySync {
-                        try? await CloudKitSharingService.shared.syncNow(
+                        _ = try? await CloudKitSharingService.shared.syncNow(
                             context: modelContainer.mainContext,
                             reason: .launch
                         )
@@ -141,5 +141,16 @@ final class LittleWindowsAppDelegate: NSObject, UIApplicationDelegate {
         userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata
     ) {
         CloudKitSharingService.handleAcceptedShare(metadata: cloudKitShareMetadata)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        CloudKitSharingService.handleRemoteNotification(
+            userInfo,
+            completion: completionHandler
+        )
     }
 }

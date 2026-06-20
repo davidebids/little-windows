@@ -89,6 +89,118 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertFalse(service.isICloudAvailable)
     }
 
+    func testFamilySyncActivityDiffPrioritizesShoppingItemChanges() throws {
+        let listID = UUID()
+        let itemID = UUID()
+        let local = familySyncDatasetJSON(
+            shoppingLists: """
+            [{
+              "id":"\(listID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "name":"Market List",
+              "listTypeRawValue":"general",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z",
+              "isArchived":false
+            }]
+            """,
+            shoppingListItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "shoppingListID":"\(listID.uuidString)",
+              "name":"Apples",
+              "isChecked":false,
+              "isRecurringStaple":false,
+              "priorityRawValue":"normal",
+              "addedBy":"Caregiver B",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z",
+              "purchaseCount":0,
+              "inventoryLinkBehaviorRawValue":"askWhenChecked"
+            }]
+            """
+        )
+        let remote = familySyncDatasetJSON(
+            shoppingLists: """
+            [{
+              "id":"\(listID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "name":"Market List",
+              "listTypeRawValue":"general",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z",
+              "isArchived":false
+            }]
+            """,
+            shoppingListItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "shoppingListID":"\(listID.uuidString)",
+              "name":"Apples",
+              "isChecked":true,
+              "checkedAt":"2026-01-01T00:05:00Z",
+              "isRecurringStaple":false,
+              "priorityRawValue":"normal",
+              "addedBy":"Caregiver B",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:05:00Z",
+              "purchaseCount":0,
+              "inventoryLinkBehaviorRawValue":"askWhenChecked"
+            }]
+            """
+        )
+
+        let notification = try XCTUnwrap(FamilySyncActivityDiff.notification(
+            localData: local,
+            remoteData: remote
+        ))
+
+        XCTAssertEqual(notification.title, "Shopping list updated")
+        XCTAssertEqual(notification.body, "Caregiver B checked off Apples on Market List.")
+        XCTAssertEqual(notification.deepLinkPath, "food/shopping/\(listID.uuidString)")
+    }
+
+    func testFamilySyncActivityDiffSummarizesSharedCareEvents() throws {
+        let profileID = UUID()
+        let eventID = UUID()
+        let remote = familySyncDatasetJSON(
+            profiles: """
+            [{
+              "id":"\(profileID.uuidString)",
+              "name":"Sample Child",
+              "birthDate":"2025-01-01T00:00:00Z",
+              "sexRawValue":"unknown",
+              "notes":"",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z"
+            }]
+            """,
+            events: """
+            [{
+              "id":"\(eventID.uuidString)",
+              "profileID":"\(profileID.uuidString)",
+              "typeRawValue":"sleep",
+              "startDate":"2026-01-01T00:00:00Z",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:05:00Z",
+              "caregiverName":"Caregiver A",
+              "sleepKindRawValue":"nap"
+            }]
+            """
+        )
+
+        let notification = try XCTUnwrap(FamilySyncActivityDiff.notification(
+            localData: familySyncDatasetJSON(),
+            remoteData: remote
+        ))
+
+        XCTAssertEqual(notification.title, "Shared care updated")
+        XCTAssertEqual(notification.body, "Caregiver A added Sample Child nap sleep.")
+        XCTAssertEqual(notification.deepLinkPath, "profile/\(profileID.uuidString)/history")
+    }
+
     @MainActor
     private func fetchOrCreateSmokeProfile(
         named name: String,
@@ -146,6 +258,35 @@ final class SleepPredictionEngineTests: XCTestCase {
         environment[key]
             ?? UserDefaults.standard.string(forKey: key)
             ?? UserDefaults(suiteName: "com.debidia.LittleWindows")?.string(forKey: key)
+    }
+
+    private func familySyncDatasetJSON(
+        profiles: String = "[]",
+        events: String = "[]",
+        milestones: String = "[]",
+        appointments: String = "[]",
+        shoppingLists: String = "[]",
+        shoppingListItems: String = "[]",
+        inventoryItems: String = "[]",
+        mealPrepItems: String = "[]",
+        foodReminders: String = "[]"
+    ) -> Data {
+        Data("""
+        {
+          "version": 9,
+          "exportedAt": "2026-01-01T00:00:00Z",
+          "profiles": \(profiles),
+          "events": \(events),
+          "predictionRecords": [],
+          "milestones": \(milestones),
+          "appointments": \(appointments),
+          "shoppingLists": \(shoppingLists),
+          "shoppingListItems": \(shoppingListItems),
+          "inventoryItems": \(inventoryItems),
+          "mealPrepItems": \(mealPrepItems),
+          "foodReminders": \(foodReminders)
+        }
+        """.utf8)
     }
 
     func testNursingSideIsAlwaysLeftOrRight() {
