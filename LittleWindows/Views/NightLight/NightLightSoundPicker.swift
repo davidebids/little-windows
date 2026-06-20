@@ -30,7 +30,7 @@ struct NightLightSoundPicker: View {
                         .foregroundStyle(.white.opacity(0.55))
                     Slider(
                         value: $viewModel.settings.soundVolume,
-                        in: 0...0.7
+                        in: 0...1
                     )
                     .tint(.orange)
                     Image(systemName: "speaker.wave.2.fill")

@@ -308,7 +308,7 @@ struct NightLightControlsView: View {
                             get: { viewModel.settings.soundVolume },
                             set: { viewModel.updateSoundVolume($0) }
                         ),
-                        in: 0...0.8
+                        in: 0...1
                     )
                     .tint(.orange)
                     .opacity(viewModel.isSoundMuted ? 0.48 : 1)

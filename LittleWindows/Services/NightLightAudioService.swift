@@ -16,7 +16,7 @@ final class NightLightAudioService: ObservableObject {
         }
 
         if sound == currentSound, let player, player.isPlaying {
-            player.volume = Float(volume)
+            player.volume = Self.playbackVolume(for: volume)
             return
         }
 
@@ -35,7 +35,7 @@ final class NightLightAudioService: ObservableObject {
                 data: Self.generatedWAVData(for: sound)
             )
             audioPlayer.numberOfLoops = -1
-            audioPlayer.volume = Float(volume)
+            audioPlayer.volume = Self.playbackVolume(for: volume)
             audioPlayer.prepareToPlay()
 
             guard audioPlayer.play() else {
@@ -53,7 +53,7 @@ final class NightLightAudioService: ObservableObject {
     }
 
     func updateVolume(_ volume: Double) {
-        player?.volume = Float(volume)
+        player?.volume = Self.playbackVolume(for: volume)
     }
 
     func stop() {
@@ -173,7 +173,7 @@ final class NightLightAudioService: ObservableObject {
                 value = 0
             }
 
-            let clamped = max(-1, min(1, value))
+            let clamped = max(-1, min(1, value * 1.35))
             samples.append(clamped)
         }
 
@@ -224,6 +224,12 @@ final class NightLightAudioService: ObservableObject {
             append(UInt16(bitPattern: sample), to: &data)
         }
         return data
+    }
+
+    nonisolated static func playbackVolume(for volume: Double) -> Float {
+        let clamped = max(0, min(1, volume))
+        guard clamped > 0 else { return 0 }
+        return Float(pow(clamped, 0.65))
     }
 
     nonisolated private static func applyGentleLoopFade(

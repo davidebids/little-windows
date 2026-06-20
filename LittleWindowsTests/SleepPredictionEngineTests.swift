@@ -926,6 +926,27 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertLessThan(rms(fireplace), rms(white) * 0.85)
     }
 
+    func testNightLightAudioVolumeUsesFullUsefulRange() throws {
+        let whiteNoise = trimmedMiddle(try wavSamples(for: .whiteNoise))
+
+        XCTAssertGreaterThan(
+            rms(whiteNoise),
+            0.13,
+            "White noise should be audible at full playback volume without feeling broken."
+        )
+        XCTAssertEqual(NightLightAudioService.playbackVolume(for: 0), 0)
+        XCTAssertGreaterThan(
+            NightLightAudioService.playbackVolume(for: 0.22),
+            0.22
+        )
+        XCTAssertGreaterThan(
+            NightLightAudioService.playbackVolume(for: 0.5),
+            0.5
+        )
+        XCTAssertEqual(NightLightAudioService.playbackVolume(for: 1), 1)
+        XCTAssertEqual(NightLightAudioService.playbackVolume(for: 2), 1)
+    }
+
     func testNightLightShushingKeepsContinuousAirBed() throws {
         let shushing = trimmedMiddle(try wavSamples(for: .shushing))
         let envelopes = rmsWindows(shushing, windowSize: 4_410)
