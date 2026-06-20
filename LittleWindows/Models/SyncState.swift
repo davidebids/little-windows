@@ -1,5 +1,28 @@
 import Foundation
 
+enum FamilySyncMode: String, CaseIterable, Identifiable, Equatable {
+    case localOnly
+    case privateICloudSync
+    case sharedFamilySync
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .localOnly:
+            return "Local only"
+        case .privateICloudSync:
+            return "Private iCloud Sync"
+        case .sharedFamilySync:
+            return "Shared Family Sync"
+        }
+    }
+
+    var requiresICloudAccount: Bool {
+        self != .localOnly
+    }
+}
+
 enum ICloudSyncAvailability: Equatable {
     case checking
     case available
@@ -75,10 +98,64 @@ enum FamilyShareMode: String, Equatable {
     }
 }
 
+enum FamilyShareRole: String, Equatable {
+    case none
+    case owner
+    case participant
+
+    var displayName: String {
+        switch self {
+        case .none:
+            return "Not sharing"
+        case .owner:
+            return "Owner"
+        case .participant:
+            return "Participant"
+        }
+    }
+}
+
+enum FamilyShareStatus: String, Equatable {
+    case notConfigured
+    case readyToShare
+    case sharing
+    case needsICloud
+    case localOnly
+    case error
+
+    var displayName: String {
+        switch self {
+        case .notConfigured:
+            return "Not configured"
+        case .readyToShare:
+            return "Ready"
+        case .sharing:
+            return "Sharing"
+        case .needsICloud:
+            return "Needs iCloud"
+        case .localOnly:
+            return "Local only"
+        case .error:
+            return "Needs attention"
+        }
+    }
+}
+
 struct FamilyShareState: Equatable {
     var mode: FamilyShareMode
+    var syncMode: FamilySyncMode
+    var role: FamilyShareRole
+    var status: FamilyShareStatus
     var ownerDescription: String
     var participantDescription: String
     var sharingIsImplemented: Bool
+    var participantCount: Int
+    var lastSyncAt: Date?
+    var pendingUploadCount: Int
+    var pendingDownloadCount: Int
+    var canCreateShare: Bool
+    var canManageShare: Bool
+    var canSyncNow: Bool
+    var canLeaveShare: Bool
     var lastErrorMessage: String?
 }

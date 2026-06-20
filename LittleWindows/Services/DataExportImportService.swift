@@ -743,7 +743,11 @@ enum DataExportImportService {
     }
 
     @MainActor
-    static func importData(_ data: Data, context: ModelContext) throws {
+    static func importData(
+        _ data: Data,
+        context: ModelContext,
+        recordLocalSave: Bool = true
+    ) throws {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
@@ -1128,8 +1132,11 @@ enum DataExportImportService {
                 updatedAt: value.updatedAt
             ))
         }
+        CloudKitFamilySyncConflictResolver.resolveDuplicateActiveTimers(in: context)
         try context.save()
-        PersistenceService.recordLocalSave()
+        if recordLocalSave {
+            PersistenceService.recordLocalSave()
+        }
         _ = try LegacyTrackerGrowthMigration.migrate(in: context)
         ProfileMigrationService.ensureProfilesAndAssignments(context: context)
     }

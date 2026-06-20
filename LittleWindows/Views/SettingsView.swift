@@ -604,6 +604,12 @@ private struct FoodReminderSettingsLauncher: View {
 
 private struct SyncSettingsSection: View {
     @AppStorage(PersistenceService.iCloudSyncEnabledKey) private var isICloudSyncEnabled = true
+    @AppStorage(PersistenceService.familySyncModeKey) private var syncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
+
+    private var syncMode: FamilySyncMode {
+        FamilySyncMode(rawValue: syncModeRawValue)
+            ?? (isICloudSyncEnabled ? .privateICloudSync : .localOnly)
+    }
 
     var body: some View {
         Section {
@@ -621,7 +627,7 @@ private struct SyncSettingsSection: View {
                 FamilySyncSettingsView()
             } label: {
                 LabeledContent {
-                    Text("Not enabled")
+                    Text(syncMode == .sharedFamilySync ? "On" : "Off")
                         .foregroundStyle(.secondary)
                 } label: {
                     Label("Family Sync", systemImage: "person.2.badge.gearshape.fill")
@@ -630,7 +636,7 @@ private struct SyncSettingsSection: View {
         } header: {
             Text("Sync")
         } footer: {
-            Text("Private iCloud Sync can be turned off for local-only use. Family Sync for multiple caregivers requires a shared iCloud record zone and is not enabled yet.")
+            Text("Private iCloud Sync covers the same Apple Account. Family Sync shares Little Windows data with accepted iCloud caregivers across Apple Accounts.")
         }
     }
 }

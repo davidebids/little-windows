@@ -33,8 +33,9 @@ struct ICloudSyncSettingsView: View {
                 LabeledContent("iCloud Sync", value: viewModel.availability.title)
                 LabeledContent("Apple Account", value: viewModel.accountStatusDescription)
                 LabeledContent("Container", value: viewModel.containerStatusDescription)
+                LabeledContent("Mode", value: viewModel.syncMode.displayName)
                 LabeledContent("Store") {
-                    Text(PersistenceService.isUsingCloudKitStore ? "CloudKit private database" : "Local fallback")
+                    Text(storeDescription)
                         .foregroundStyle(.secondary)
                 }
                 if let lastCheckedAt = viewModel.lastCheckedAt {
@@ -53,7 +54,7 @@ struct ICloudSyncSettingsView: View {
                 if viewModel.isICloudSyncEnabled {
                     Text("Syncing happens automatically when iCloud is available. Logging still works offline; local changes sync later.")
                         .foregroundStyle(.secondary)
-                    Text("Private iCloud Sync works across devices signed into your Apple Account.")
+                    Text(viewModel.syncMode == .sharedFamilySync ? "Family Sync shares data with accepted iCloud caregivers across Apple Accounts." : "Private iCloud Sync works across devices signed into your Apple Account.")
                         .foregroundStyle(.secondary)
                 } else {
                     Text("When iCloud Sync is off, Little Windows opens a local-only store and does not check the CloudKit container.")
@@ -102,5 +103,12 @@ struct ICloudSyncSettingsView: View {
         .task {
             await viewModel.refresh(context: modelContext)
         }
+    }
+
+    private var storeDescription: String {
+        if viewModel.syncMode == .sharedFamilySync {
+            return "Local family-sync cache"
+        }
+        return PersistenceService.isUsingCloudKitStore ? "CloudKit private database" : "Local fallback"
     }
 }

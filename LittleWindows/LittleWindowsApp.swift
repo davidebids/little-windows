@@ -1,13 +1,17 @@
+import CloudKit
 import SwiftData
 import SwiftUI
+import UIKit
 
 @main
 struct LittleWindowsApp: App {
     private static let sharedModelContainer = PersistenceService.makeModelContainer()
     private let modelContainer = Self.sharedModelContainer
+    @UIApplicationDelegateAdaptor(LittleWindowsAppDelegate.self) private var appDelegate
 
     init() {
         let container = Self.sharedModelContainer
+        CloudKitSharingService.install(container: container)
         IntegrationCommandStore.installInAppHandler { url in
             let processed = await IntegrationCommandProcessor.process(
                 url,
@@ -31,6 +35,13 @@ struct LittleWindowsApp: App {
                     )
                     if PersistenceService.isICloudSyncEnabled() {
                         CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)
+                    }
+                    CloudKitSharingService.processPendingAcceptedShareIfNeeded()
+                    if PersistenceService.familySyncMode() == .sharedFamilySync {
+                        try? await CloudKitSharingService.shared.syncNow(
+                            context: modelContainer.mainContext,
+                            reason: .launch
+                        )
                     }
                     await restoreSystemIntegrations()
                     DeepLinkRouter.shared.isDataReady = true
@@ -121,5 +132,14 @@ struct LittleWindowsApp: App {
             }
             await LiveActivityManager.shared.synchronize(profile: profile, events: events)
         }
+    }
+}
+
+final class LittleWindowsAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata
+    ) {
+        CloudKitSharingService.handleAcceptedShare(metadata: cloudKitShareMetadata)
     }
 }

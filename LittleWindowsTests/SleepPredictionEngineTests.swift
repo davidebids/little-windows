@@ -1351,11 +1351,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(plan.segments.filter { $0.kind == .nap }.map(\.napIndex), [1, 2])
     }
 
-    func testBackwardsPlanRejectsBedtimeThatAlreadyPassedToday() {
+    func testBackwardsPlanShowsFullDayWhenSelectedBedtimeAlreadyPassedToday() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20))!
-        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 21, minute: 30))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20, minute: 30))!
         let profile = BabyProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
@@ -1369,9 +1369,17 @@ final class SleepPredictionEngineTests: XCTestCase {
             calendar: calendar
         )
 
-        XCTAssertEqual(plan.plannedNapCount, 0)
-        XCTAssertEqual(plan.confidenceLabel, .low)
-        XCTAssertTrue(plan.explanation.contains { $0.contains("later today") })
+        let naps = plan.segments.filter { $0.kind == .nap }
+        let firstWake = try XCTUnwrap(plan.segments.first)
+        XCTAssertEqual(plan.plannedNapCount, 2)
+        XCTAssertEqual(naps.map(\.napIndex), [1, 2])
+        XCTAssertEqual(firstWake.kind, .wakeWindow)
+        XCTAssertEqual(firstWake.napIndex, 1)
+        XCTAssertEqual(firstWake.durationMinutes, 140, accuracy: 0.001)
+        XCTAssertEqual(calendar.component(.hour, from: firstWake.endDate), 8)
+        XCTAssertEqual(calendar.component(.minute, from: firstWake.endDate), 50)
+        XCTAssertEqual(plan.segments.last?.kind, .bedtime)
+        XCTAssertEqual(plan.segments.last?.startDate, target)
     }
 
     private func makeTwoNapHistory(
@@ -3459,6 +3467,72 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(calendar.component(.day, from: oneDayAfter), 16)
         XCTAssertTrue(calendar.isDateInWeekend(firstWeekend))
         XCTAssertEqual(calendar.component(.hour, from: firstWeekend), 9)
+    }
+
+    func testFamilySyncModeDefaultsToPrivateICloudAndTracksSharedMode() throws {
+        let defaults = try makeIsolatedDefaults()
+
+        XCTAssertEqual(PersistenceService.familySyncMode(defaults: defaults), .privateICloudSync)
+        XCTAssertTrue(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+
+        PersistenceService.setICloudSyncEnabled(false, defaults: defaults)
+        XCTAssertEqual(PersistenceService.familySyncMode(defaults: defaults), .localOnly)
+        XCTAssertFalse(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+
+        PersistenceService.setFamilySyncMode(.sharedFamilySync, defaults: defaults)
+        XCTAssertEqual(PersistenceService.familySyncMode(defaults: defaults), .sharedFamilySync)
+        XCTAssertTrue(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+    }
+
+    @MainActor
+    func testFamilySyncConflictResolverStopsDuplicateActiveTimers() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profileID = UUID()
+        let earlyStart = Date(timeIntervalSince1970: 100)
+        let laterStart = Date(timeIntervalSince1970: 200)
+        let resolutionDate = Date(timeIntervalSince1970: 500)
+
+        let first = BabyEvent(
+            id: UUID(),
+            profileID: profileID,
+            type: .sleep,
+            startDate: earlyStart,
+            caregiverName: "Caregiver A"
+        )
+        first.createdAt = earlyStart
+        first.updatedAt = earlyStart
+        first.timerState = .running
+        first.timerAccumulatedSeconds = 0
+        first.activeTimerSegmentStartDate = earlyStart
+
+        let duplicate = BabyEvent(
+            id: UUID(),
+            profileID: profileID,
+            type: .sleep,
+            startDate: laterStart,
+            caregiverName: "Caregiver B"
+        )
+        duplicate.createdAt = laterStart
+        duplicate.updatedAt = laterStart
+        duplicate.timerState = .running
+        duplicate.timerAccumulatedSeconds = 0
+        duplicate.activeTimerSegmentStartDate = laterStart
+
+        context.insert(first)
+        context.insert(duplicate)
+        try context.save()
+
+        CloudKitFamilySyncConflictResolver.resolveDuplicateActiveTimers(
+            in: context,
+            now: resolutionDate
+        )
+
+        XCTAssertTrue(first.isTimerRunning)
+        XCTAssertFalse(duplicate.isTimerRunning)
+        XCTAssertTrue(duplicate.isTimerDraft)
+        XCTAssertNil(duplicate.activeTimerSegmentStartDate)
+        XCTAssertEqual(duplicate.timerElapsed(at: resolutionDate), 300, accuracy: 0.001)
     }
 
     private func wavSamples(for sound: NightLightSound) throws -> [Double] {
