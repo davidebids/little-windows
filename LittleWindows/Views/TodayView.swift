@@ -148,6 +148,23 @@ struct TodayView: View {
             $0.type == .sleep && $0.isTimerRunning
         }
     }
+    private var awakeSinceDate: Date? {
+        guard runningSleepTimer == nil else { return nil }
+        let now = Date()
+        let completedSleepEnd = scopedEvents
+            .filter { $0.type == .sleep && !$0.isTimerDraft }
+            .compactMap(\.endDate)
+            .filter { $0 <= now }
+            .max()
+        let stoppedDraftSleepEnd = activeEvents
+            .filter { $0.type == .sleep && !$0.isTimerRunning }
+            .map(\.updatedAt)
+            .filter { $0 <= now }
+            .max()
+        return [completedSleepEnd, stoppedDraftSleepEnd]
+            .compactMap { $0 }
+            .max()
+    }
 
     var body: some View {
         let todayEvents = todayEvents
@@ -211,6 +228,7 @@ struct TodayView: View {
                         PredictionCard(
                             prediction: prediction,
                             babyName: profile?.name ?? "Baby",
+                            awakeSinceDate: awakeSinceDate,
                             alertStatusText: notificationManager.statusText(
                                 prediction: prediction,
                                 settings: .current,

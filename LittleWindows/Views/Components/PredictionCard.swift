@@ -3,6 +3,7 @@ import SwiftUI
 struct PredictionCard: View {
     let prediction: SleepPrediction?
     let babyName: String
+    var awakeSinceDate: Date?
     var alertStatusText: String?
     var alertsEnabled = false
     var toggleAlerts: (() -> Void)?
@@ -47,12 +48,12 @@ struct PredictionCard: View {
                         .foregroundStyle(.white.opacity(0.76))
                     Spacer()
                     if let prediction {
-                        Text("\(prediction.confidenceLabel.displayName) confidence")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.white.opacity(0.13), in: Capsule())
+                        confidenceStatus(prediction)
                     }
+                }
+
+                if let awakeSinceDate, awakeSinceDate <= now {
+                    awakeBanner(since: awakeSinceDate, now: now)
                 }
 
                 if let prediction {
@@ -81,18 +82,7 @@ struct PredictionCard: View {
 
                             Spacer(minLength: 0)
 
-                            Text(countdown)
-                            .font(.subheadline.weight(.bold))
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 7)
-                            .background(.white.opacity(0.14), in: Capsule())
-                            .overlay {
-                                Capsule()
-                                    .stroke(.white.opacity(0.12), lineWidth: 1)
-                            }
-                            .accessibilityLabel(countdown)
+                            timingStatus(countdown, phase: phase)
                         }
                         Text(
                             subtitleText(
@@ -250,6 +240,63 @@ struct PredictionCard: View {
             start: prediction.predictedWindowStart,
             end: prediction.predictedWindowEnd
         )
+    }
+
+    private func confidenceStatus(_ prediction: SleepPrediction) -> some View {
+        let isLow = prediction.confidenceLabel == .low
+        return HStack(spacing: 5) {
+            Image(systemName: isLow ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(isLow ? Color.orange : .white.opacity(0.58))
+            Text("\(prediction.confidenceLabel.displayName) confidence")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isLow ? Color.orange : .white.opacity(0.66))
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func timingStatus(
+        _ text: String,
+        phase: PredictionTimingPhase
+    ) -> some View {
+        HStack(spacing: 5) {
+            if phase == .overdue {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.orange)
+            }
+            Text(text)
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .foregroundStyle(phase == .overdue ? Color.orange : .white.opacity(0.82))
+        }
+        .accessibilityLabel(text)
+    }
+
+    private func awakeBanner(since date: Date, now: Date) -> some View {
+        let duration = DurationFormatting.string(seconds: now.timeIntervalSince(date))
+        return HStack(spacing: 9) {
+            Image(systemName: "sun.max.fill")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.yellow)
+                .frame(width: 24, height: 24)
+                .background(.white.opacity(0.12), in: Circle())
+            Text("\(babyName) has been up for \(duration)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.86))
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityLabel("\(babyName) has been up for \(duration)")
     }
 
     private func resolvedAlertStatus(phase: PredictionTimingPhase) -> String? {
