@@ -69,6 +69,9 @@ struct BackwardsSleepPlanView: View {
     let profile: BabyProfile
     let events: [BabyEvent]
     let settings: PredictionSettings
+    let activePlan: ActiveSleepPlan?
+    let activatePlan: (BackwardsSleepPlan) -> Void
+    let deactivatePlan: () -> Void
 
     @State private var targetBedtime: Date
     @State private var historyRange: BackwardsSleepPlanHistoryRange = .sevenDays
@@ -77,12 +80,21 @@ struct BackwardsSleepPlanView: View {
         profile: BabyProfile,
         events: [BabyEvent],
         settings: PredictionSettings,
+        activePlan: ActiveSleepPlan? = nil,
+        activatePlan: @escaping (BackwardsSleepPlan) -> Void = { _ in },
+        deactivatePlan: @escaping () -> Void = {},
         now: Date = Date()
     ) {
         self.profile = profile
         self.events = events
         self.settings = settings
-        _targetBedtime = State(initialValue: Self.defaultTargetBedtime(now: now))
+        self.activePlan = activePlan
+        self.activatePlan = activatePlan
+        self.deactivatePlan = deactivatePlan
+        _targetBedtime = State(
+            initialValue: activePlan?.targetBedtime ?? Self.defaultTargetBedtime(now: now)
+        )
+        _historyRange = State(initialValue: activePlan?.historyRange ?? .sevenDays)
     }
 
     private var plan: BackwardsSleepPlan {
@@ -97,6 +109,11 @@ struct BackwardsSleepPlanView: View {
 
     var body: some View {
         let plan = plan
+        let isActivePlan = activePlan.map {
+            $0.profileID == profile.id &&
+                abs($0.targetBedtime.timeIntervalSince(plan.targetBedtime)) < 60 &&
+                $0.historyRange == historyRange
+        } ?? false
 
         List {
             Section {
@@ -107,8 +124,27 @@ struct BackwardsSleepPlanView: View {
                 )
                 LabeledContent("Plan", value: "Today")
                 LabeledContent("Confidence", value: "\(plan.confidenceLabel.displayName) - \(Int(plan.confidence * 100))%")
+                Button {
+                    if isActivePlan {
+                        deactivatePlan()
+                    } else {
+                        activatePlan(plan)
+                    }
+                } label: {
+                    Label(
+                        isActivePlan ? "Active Plan" : "Activate Plan",
+                        systemImage: isActivePlan ? "checkmark.circle.fill" : "bell.badge.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(isActivePlan ? .green : .indigo)
             } header: {
                 Text("Target")
+            } footer: {
+                if isActivePlan {
+                    Text("A running nap will show and schedule the latest wake-up time for this bedtime.")
+                }
             }
 
             Section {

@@ -46,6 +46,7 @@ struct TodayView: View {
     @State private var showingProfileEditor = false
     @State private var eventPendingDelete: BabyEvent?
     @State private var showingDeleteEventConfirmation = false
+    @State private var activeSleepPlan: ActiveSleepPlan?
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -141,6 +142,11 @@ struct TodayView: View {
             customBaselineMinimum: customWakeMinimum > 0 ? customWakeMinimum : nil,
             customBaselineMaximum: customWakeMaximum > 0 ? customWakeMaximum : nil
         )
+    }
+    private var runningSleepTimer: BabyEvent? {
+        activeEvents.first {
+            $0.type == .sleep && $0.isTimerRunning
+        }
     }
 
     var body: some View {
@@ -336,7 +342,10 @@ struct TodayView: View {
                     BackwardsSleepPlanView(
                         profile: profile,
                         events: scopedEvents,
-                        settings: predictionSettings
+                        settings: predictionSettings,
+                        activePlan: activeSleepPlan,
+                        activatePlan: activateSleepPlan,
+                        deactivatePlan: deactivateSleepPlan
                     )
                 }
             }
@@ -437,6 +446,7 @@ struct TodayView: View {
         }
         .onChange(of: deepLinkRouter.pendingProfileID) { _, _ in
             handlePendingProfileSwitch()
+            refreshActiveSleepPlan()
         }
         .onChange(of: deepLinkRouter.pendingAppointmentCommand) { _, _ in
             handlePendingAppointmentDeepLink()
@@ -455,10 +465,12 @@ struct TodayView: View {
         .task {
             await notificationManager.configure()
             _ = profileService.ensureSelection(in: profiles)
+            refreshActiveSleepPlan()
             handlePendingProfileSwitch()
             handlePendingDeepLink()
             handlePendingAppointmentDeepLink()
             handlePendingPuppyGuideDeepLink()
+            await syncActiveSleepPlanWakeAlert()
         }
     }
 
@@ -844,6 +856,7 @@ struct TodayView: View {
     private func activeTimerCard(for event: BabyEvent) -> some View {
         ActiveTimerCard(
             event: event,
+            planWakeAlert: wakeAlert(for: event),
             edit: { activeTimerToEdit = event },
             toggleRunning: {
                 event.isTimerRunning ? stop(event) : resume(event)
@@ -905,6 +918,9 @@ struct TodayView: View {
                     created,
                     refreshPrediction: false,
                     waitForSystemIntegrations: true
+                )
+                await syncActiveSleepPlanWakeAlert(
+                    for: created.type == .sleep ? created : nil
                 )
             }
             return created
@@ -986,6 +1002,7 @@ struct TodayView: View {
                 refreshPrediction: false,
                 waitForSystemIntegrations: true
             )
+            await syncActiveSleepPlanWakeAlert()
         }
     }
 
@@ -997,6 +1014,7 @@ struct TodayView: View {
                 refreshPrediction: false,
                 waitForSystemIntegrations: true
             )
+            await syncActiveSleepPlanWakeAlert(for: event)
         }
     }
 
@@ -1008,6 +1026,7 @@ struct TodayView: View {
                 refreshPrediction: false,
                 waitForSystemIntegrations: true
             )
+            await syncActiveSleepPlanWakeAlert(for: event)
         }
     }
 
@@ -1019,6 +1038,7 @@ struct TodayView: View {
                 refreshPrediction: true,
                 waitForSystemIntegrations: true
             )
+            await syncActiveSleepPlanWakeAlert()
         }
     }
 
@@ -1030,6 +1050,7 @@ struct TodayView: View {
                 refreshPrediction: false,
                 waitForSystemIntegrations: true
             )
+            await syncActiveSleepPlanWakeAlert(for: event)
         }
     }
 
@@ -1106,6 +1127,7 @@ struct TodayView: View {
         guard let id = deepLinkRouter.pendingProfileID else { return }
         profileService.switchProfile(id: id, profiles: profiles)
         deepLinkRouter.pendingProfileID = nil
+        refreshActiveSleepPlan()
     }
 
     private func handlePendingAppointmentDeepLink() {
@@ -1197,6 +1219,68 @@ struct TodayView: View {
             }
         } else {
             showingAlertPermissionPrompt = true
+        }
+    }
+
+    private func refreshActiveSleepPlan() {
+        activeSleepPlan = ActiveSleepPlanService.activePlan(
+            for: selectedProfileID
+        )
+    }
+
+    private func activateSleepPlan(_ plan: BackwardsSleepPlan) {
+        guard let profileID = selectedProfileID else { return }
+        activeSleepPlan = ActiveSleepPlanService.activate(
+            plan: plan,
+            profileID: profileID
+        )
+        Task {
+            await ensureNotificationPermissionForPlan()
+            await syncActiveSleepPlanWakeAlert()
+        }
+    }
+
+    private func deactivateSleepPlan() {
+        ActiveSleepPlanService.clear(profileID: selectedProfileID)
+        activeSleepPlan = nil
+        Task {
+            await notificationManager.cancelActiveSleepPlanWakeAlert(
+                profileID: selectedProfileID
+            )
+        }
+    }
+
+    private func wakeAlert(for event: BabyEvent?) -> ActiveSleepPlanWakeAlert? {
+        ActiveSleepPlanService.wakeAlert(
+            for: activeSleepPlan,
+            profile: profile,
+            events: scopedEvents,
+            activeSleep: event,
+            settings: predictionSettings
+        )
+    }
+
+    private func ensureNotificationPermissionForPlan() async {
+        let status = await notificationManager.getAuthorizationStatus()
+        if status == .notDetermined {
+            _ = await notificationManager.requestAuthorization()
+        } else if status == .denied {
+            showingPermissionDenied = true
+        }
+    }
+
+    private func syncActiveSleepPlanWakeAlert(for event: BabyEvent? = nil) async {
+        refreshActiveSleepPlan()
+        let alert = wakeAlert(for: event ?? runningSleepTimer)
+        if let alert {
+            await notificationManager.scheduleActiveSleepPlanWakeAlert(
+                alert,
+                babyName: profile?.name ?? "Baby"
+            )
+        } else {
+            await notificationManager.cancelActiveSleepPlanWakeAlert(
+                profileID: selectedProfileID
+            )
         }
     }
 

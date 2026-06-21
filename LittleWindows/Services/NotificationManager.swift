@@ -117,6 +117,8 @@ final class NotificationManager: NSObject, ObservableObject {
     static let openAppointmentActionID = "OPEN_APPOINTMENT"
     static let completeAppointmentActionID = "COMPLETE_APPOINTMENT"
     static let addVisitNotesActionID = "ADD_VISIT_NOTES"
+    static let activeSleepPlanWakeNotificationBaseID = "activeSleepPlan.wake"
+    static let activeSleepPlanCategoryID = "ACTIVE_SLEEP_PLAN_WAKE"
     static let ageGuideCategoryID = "MONTHLY_AGE_GUIDE"
     static let openAgeGuideActionID = "OPEN_AGE_GUIDE"
     static let foodReminderCategoryID = "FOOD_HOME_REMINDER"
@@ -210,6 +212,12 @@ final class NotificationManager: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
+        let activePlanCategory = UNNotificationCategory(
+            identifier: Self.activeSleepPlanCategoryID,
+            actions: [open],
+            intentIdentifiers: [],
+            options: []
+        )
         let openAgeGuide = UNNotificationAction(
             identifier: Self.openAgeGuideActionID,
             title: "Read Guide",
@@ -246,6 +254,7 @@ final class NotificationManager: NSObject, ObservableObject {
         UNUserNotificationCenter.current().setNotificationCategories([
             category,
             appointmentCategory,
+            activePlanCategory,
             ageGuideCategory,
             foodCategory,
             familySyncActivityCategory
@@ -474,6 +483,48 @@ final class NotificationManager: NSObject, ObservableObject {
         )
     }
 
+    func scheduleActiveSleepPlanWakeAlert(
+        _ alert: ActiveSleepPlanWakeAlert?,
+        babyName: String,
+        now: Date = Date()
+    ) async {
+        await cancelActiveSleepPlanWakeAlert(profileID: alert?.profileID)
+        guard let alert else { return }
+
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            return
+        }
+
+        let content = buildActiveSleepPlanWakeContent(
+            alert: alert,
+            babyName: babyName
+        )
+        let trigger: UNNotificationTrigger?
+        if alert.wakeByDate > now {
+            let components = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: alert.wakeByDate
+            )
+            trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        } else {
+            trigger = nil
+        }
+        let request = UNNotificationRequest(
+            identifier: Self.activeSleepPlanWakeNotificationID(profileID: alert.profileID),
+            content: content,
+            trigger: trigger
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelActiveSleepPlanWakeAlert(profileID: UUID? = nil) async {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.activeSleepPlanWakeNotificationID(profileID: profileID)]
+        )
+    }
+
     func buildAppointmentNotificationContent(
         appointment: DoctorAppointment,
         babyName: String = "Baby",
@@ -506,6 +557,27 @@ final class NotificationManager: NSObject, ObservableObject {
             userInfo["profileID"] = profileID.uuidString
         }
         content.userInfo = userInfo
+        return content
+    }
+
+    func buildActiveSleepPlanWakeContent(
+        alert: ActiveSleepPlanWakeAlert,
+        babyName: String
+    ) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        let wakeTime = DateFormatting.time.string(from: alert.wakeByDate)
+        let bedtime = DateFormatting.time.string(from: alert.targetBedtime)
+        content.title = "Wake \(babyName) by \(wakeTime)"
+        content.body = "To keep \(bedtime) bedtime, this nap should end around \(wakeTime)."
+        content.sound = .default
+        content.categoryIdentifier = Self.activeSleepPlanCategoryID
+        content.userInfo = [
+            "profileID": alert.profileID.uuidString,
+            "activeSleepEventID": alert.activeSleepEventID.uuidString,
+            "targetBedtime": alert.targetBedtime.timeIntervalSince1970,
+            "wakeBy": alert.wakeByDate.timeIntervalSince1970,
+            "deepLink": Self.deepLink(path: "active-timer", profileID: alert.profileID)
+        ]
         return content
     }
 
@@ -775,6 +847,11 @@ final class NotificationManager: NSObject, ObservableObject {
             } else {
                 DeepLinkRouter.shared.route(URL(string: "littlewindows://appointments")!)
             }
+        } else if response.notification.request.content.categoryIdentifier == Self.activeSleepPlanCategoryID {
+            let profilePrefix = Self.profilePathPrefix(
+                from: response.notification.request.content.userInfo
+            )
+            DeepLinkRouter.shared.route(URL(string: "littlewindows://\(profilePrefix)active-timer")!)
         } else if action == Self.openAgeGuideActionID ||
                     response.notification.request.content.categoryIdentifier == Self.ageGuideCategoryID {
             if let month = response.notification.request.content.userInfo["ageGuideMonth"] as? Int {
@@ -996,6 +1073,10 @@ final class NotificationManager: NSObject, ObservableObject {
 
     static func foodReminderNotificationID(reminderID: UUID) -> String {
         "food.reminder.\(reminderID.uuidString)"
+    }
+
+    static func activeSleepPlanWakeNotificationID(profileID: UUID? = nil) -> String {
+        scopedNotificationID(activeSleepPlanWakeNotificationBaseID, profileID: profileID)
     }
 
     static func scopedNotificationID(_ identifier: String, profileID: UUID?) -> String {

@@ -1492,6 +1492,96 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(plan.segments.filter { $0.kind == .nap }.map(\.napIndex), [1, 2])
     }
 
+    func testActiveSleepPlanWakeAlertUsesPlannedNapEndForCurrentNap() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8, minute: 45))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        var events = makeTwoNapHistory(today: now, calendar: calendar)
+        let activeSleep = activeNap(
+            profileID: profile.id,
+            start: now
+        )
+        events.append(activeSleep)
+        let activePlan = ActiveSleepPlan(
+            profileID: profile.id,
+            targetBedtime: target,
+            historyRangeRawValue: BackwardsSleepPlanHistoryRange.sevenDays.rawValue,
+            activatedAt: now,
+            generatedAt: now
+        )
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: events,
+            targetBedtime: target,
+            now: now,
+            calendar: calendar
+        )
+        let plannedWake = try XCTUnwrap(
+            plan.segments.first { $0.kind == .nap && $0.napIndex == 1 }?.endDate
+        )
+
+        let alert = ActiveSleepPlanService.wakeAlert(
+            for: activePlan,
+            profile: profile,
+            events: events,
+            activeSleep: activeSleep,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(alert?.wakeByDate, plannedWake)
+        XCTAssertEqual(alert?.targetBedtime, target)
+    }
+
+    func testActiveSleepPlanWakeAlertUsesBedtimeWakeWindowForLateNap() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 18))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        let activeSleep = activeNap(
+            profileID: profile.id,
+            start: now
+        )
+        let activePlan = ActiveSleepPlan(
+            profileID: profile.id,
+            targetBedtime: target,
+            historyRangeRawValue: BackwardsSleepPlanHistoryRange.sevenDays.rawValue,
+            activatedAt: now,
+            generatedAt: now
+        )
+        let settings = PredictionSettings(
+            feedAdjustmentEnabled: true,
+            nursingAdjustmentEnabled: true,
+            bedtimePredictionEnabled: true,
+            customBaselineMinimum: 134.5,
+            customBaselineMaximum: 135.5
+        )
+
+        let alert = ActiveSleepPlanService.wakeAlert(
+            for: activePlan,
+            profile: profile,
+            events: [activeSleep],
+            activeSleep: activeSleep,
+            now: now,
+            calendar: calendar,
+            settings: settings
+        )
+
+        XCTAssertEqual(
+            alert?.wakeByDate,
+            calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 18, minute: 15))
+        )
+    }
+
     func testBackwardsPlanShowsFullDayWhenSelectedBedtimeAlreadyPassedToday() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -1548,6 +1638,17 @@ final class SleepPredictionEngineTests: XCTestCase {
     private func makeSleep(kind: SleepKind, start: Date, end: Date) -> BabyEvent {
         let event = BabyEvent(type: .sleep, startDate: start, endDate: end)
         event.sleepKind = kind
+        return event
+    }
+
+    private func activeNap(
+        profileID: UUID,
+        start: Date
+    ) -> BabyEvent {
+        let event = BabyEvent(profileID: profileID, type: .sleep, startDate: start)
+        event.sleepKind = .nap
+        event.timerState = .running
+        event.activeTimerSegmentStartDate = start
         return event
     }
 

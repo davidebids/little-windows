@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ActiveTimerCard: View {
     let event: BabyEvent
+    var planWakeAlert: ActiveSleepPlanWakeAlert?
     var edit: () -> Void
     var toggleRunning: () -> Void
     var save: () -> Void
@@ -50,6 +51,10 @@ struct ActiveTimerCard: View {
                     )
                 }
 
+                if let planWakeAlert {
+                    planWakeAlertRow(planWakeAlert, now: context.date)
+                }
+
                 HStack(spacing: 10) {
                     Button(action: toggleRunning) {
                         Label(
@@ -73,6 +78,31 @@ struct ActiveTimerCard: View {
 
     private func elapsedText(at date: Date) -> String {
         DurationFormatting.liveString(seconds: event.timerElapsed(at: date))
+    }
+
+    private func planWakeAlertRow(
+        _ alert: ActiveSleepPlanWakeAlert,
+        now: Date
+    ) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: alert.wakeByDate <= now ? "bell.badge.fill" : "bell.fill")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.orange)
+                .frame(width: 24, height: 24)
+                .background(Color.orange.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(alert.wakeByDate <= now ? "Wake now" : "Wake by \(DateFormatting.time.string(from: alert.wakeByDate))")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text("Keeps \(DateFormatting.time.string(from: alert.targetBedtime)) bedtime on the active plan")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

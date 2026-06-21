@@ -71,6 +71,29 @@ struct BackwardsSleepPlan: Hashable {
     var explanation: [String]
 }
 
+struct ActiveSleepPlan: Codable, Equatable {
+    var profileID: UUID
+    var targetBedtime: Date
+    var historyRangeRawValue: String
+    var activatedAt: Date
+    var generatedAt: Date
+
+    var historyRange: BackwardsSleepPlanHistoryRange {
+        BackwardsSleepPlanHistoryRange(rawValue: historyRangeRawValue) ?? .sevenDays
+    }
+}
+
+struct ActiveSleepPlanWakeAlert: Equatable {
+    var profileID: UUID
+    var activeSleepEventID: UUID
+    var wakeByDate: Date
+    var targetBedtime: Date
+
+    var isPastDue: Bool {
+        wakeByDate <= Date()
+    }
+}
+
 enum BackwardsSleepPlanHistoryRange: String, CaseIterable, Identifiable, Hashable {
     case sevenDays
     case fourteenDays
@@ -123,8 +146,176 @@ struct PredictionSettings {
     )
 }
 
+enum ActiveSleepPlanService {
+    private static let defaultsKey = "activeSleepPlan"
+
+    static func activate(
+        plan: BackwardsSleepPlan,
+        profileID: UUID,
+        defaults: UserDefaults = .standard
+    ) -> ActiveSleepPlan {
+        let activePlan = ActiveSleepPlan(
+            profileID: profileID,
+            targetBedtime: plan.targetBedtime,
+            historyRangeRawValue: plan.historyRange.rawValue,
+            activatedAt: Date(),
+            generatedAt: plan.generatedAt
+        )
+        save(activePlan, defaults: defaults)
+        return activePlan
+    }
+
+    static func activePlan(
+        for profileID: UUID?,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        defaults: UserDefaults = .standard
+    ) -> ActiveSleepPlan? {
+        guard let profileID,
+              let data = defaults.data(forKey: defaultsKey),
+              let plan = try? JSONDecoder().decode(ActiveSleepPlan.self, from: data),
+              plan.profileID == profileID,
+              calendar.isDate(plan.targetBedtime, inSameDayAs: now) else {
+            return nil
+        }
+        return plan
+    }
+
+    static func clear(
+        profileID: UUID? = nil,
+        defaults: UserDefaults = .standard
+    ) {
+        guard let profileID else {
+            defaults.removeObject(forKey: defaultsKey)
+            return
+        }
+        guard let data = defaults.data(forKey: defaultsKey),
+              let plan = try? JSONDecoder().decode(ActiveSleepPlan.self, from: data),
+              plan.profileID == profileID else {
+            return
+        }
+        defaults.removeObject(forKey: defaultsKey)
+    }
+
+    static func wakeAlert(
+        for activePlan: ActiveSleepPlan?,
+        profile: BabyProfile?,
+        events: [BabyEvent],
+        activeSleep: BabyEvent?,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        settings: PredictionSettings = .default
+    ) -> ActiveSleepPlanWakeAlert? {
+        guard let activePlan,
+              let profile,
+              profile.id == activePlan.profileID,
+              let activeSleep,
+              activeSleep.type == .sleep,
+              activeSleep.isTimerRunning,
+              activeSleep.sleepKind != .nightSleep,
+              calendar.isDate(activePlan.targetBedtime, inSameDayAs: now) else {
+            return nil
+        }
+
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: events,
+            targetBedtime: activePlan.targetBedtime,
+            now: now,
+            calendar: calendar,
+            historyRange: activePlan.historyRange,
+            settings: settings
+        )
+        let napIndex = SleepPredictionEngine.napIndex(
+            for: activeSleep,
+            among: events,
+            calendar: calendar
+        )
+        let plannedNapWakeBy = plan.segments.first {
+            $0.kind == .nap && $0.napIndex == napIndex
+        }?.endDate
+        let bedtimeWakeBy = SleepPredictionEngine.latestWakeDateForBedtime(
+            profile: profile,
+            events: events,
+            targetBedtime: activePlan.targetBedtime,
+            now: now,
+            calendar: calendar,
+            historyRange: activePlan.historyRange,
+            settings: settings
+        )
+
+        let plannedWakeBy = plannedNapWakeBy.flatMap {
+            $0 > activeSleep.startDate ? $0 : nil
+        }
+        let wakeByDate = plannedWakeBy ?? bedtimeWakeBy
+
+        guard activeSleep.startDate < plan.targetBedtime,
+              wakeByDate < plan.targetBedtime else {
+            return nil
+        }
+
+        return ActiveSleepPlanWakeAlert(
+            profileID: profile.id,
+            activeSleepEventID: activeSleep.id,
+            wakeByDate: wakeByDate,
+            targetBedtime: plan.targetBedtime
+        )
+    }
+
+    private static func save(
+        _ plan: ActiveSleepPlan,
+        defaults: UserDefaults
+    ) {
+        if let data = try? JSONEncoder().encode(plan) {
+            defaults.set(data, forKey: defaultsKey)
+        }
+    }
+}
+
 enum SleepPredictionEngine {
     static let algorithmVersion = "LittleWindowsSleep-v3"
+
+    static func latestWakeDateForBedtime(
+        profile: BabyProfile,
+        events: [BabyEvent],
+        targetBedtime: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        historyRange: BackwardsSleepPlanHistoryRange = .sevenDays,
+        settings: PredictionSettings = .default
+    ) -> Date {
+        let todayStart = calendar.startOfDay(for: now)
+        let target = date(onSameDayAs: now, matchingTimeOf: targetBedtime, calendar: calendar)
+        let historyStart = historyRange.dayCount.flatMap {
+            calendar.date(byAdding: .day, value: -$0, to: todayStart)
+        } ?? .distantPast
+        let completedSleeps = events
+            .filter {
+                $0.type == .sleep &&
+                    !$0.isTimerDraft &&
+                    $0.endDate != nil &&
+                    $0.startDate >= historyStart &&
+                    $0.startDate < todayStart
+            }
+            .sorted { $0.startDate < $1.startDate }
+        let samples = wakeWindowSamples(
+            from: completedSleeps,
+            now: now,
+            calendar: calendar
+        )
+        .filter { $0.napIndex == 5 }
+        let wakeMinutes = statistics(for: preferredPredictionSamples(
+            samples,
+            now: now,
+            calendar: calendar
+        )).map(planningWakeWindowMinutes) ?? fallbackWakeWindowMinutes(
+            profile: profile,
+            date: now,
+            settings: settings,
+            calendar: calendar
+        )
+        return target.addingTimeInterval(-wakeMinutes * 60)
+    }
 
     static func backwardsPlan(
         profile: BabyProfile,
