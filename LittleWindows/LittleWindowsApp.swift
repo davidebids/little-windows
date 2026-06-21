@@ -78,34 +78,12 @@ struct LittleWindowsApp: App {
         recordDescriptor.fetchLimit = 120
         let records = ((try? context.fetch(recordDescriptor)) ?? [])
             .filter { $0.matchesProfile(profile?.id) }
-        let currentRecord = records
-            .filter { $0.actualSleepEventID == nil }
-            .max { $0.generatedAt < $1.generatedAt }
-        let prediction: SleepPrediction?
-        if let currentRecord {
-            prediction = currentRecord.prediction
-        } else {
-            prediction = profile.flatMap {
-                SleepPredictionEngine.predict(
-                    profile: $0,
-                    events: events,
-                    records: records.filter { $0.actualSleepEventID != nil }
-                )
-            }
-            if let prediction {
-                let lastSleepID = events
-                    .filter { $0.type == .sleep && $0.endDate != nil }
-                    .max { $0.startDate < $1.startDate }?
-                    .id
-                context.insert(SleepPredictionRecord(
-                    prediction: prediction,
-                    basedOnLastSleepEventID: lastSleepID,
-                    profileID: profile?.id
-                ))
-                try? context.save()
-                PersistenceService.recordLocalSave()
-            }
-        }
+        let prediction = try? PredictionTuningService.refreshCurrentPrediction(
+            profile: profile,
+            events: events,
+            records: records,
+            context: context
+        )
         WidgetSnapshotService.refresh(profile: profile, events: events, prediction: prediction)
         Task { @MainActor in
             await NotificationManager.shared.rescheduleLittleWindowAlertIfNeeded(

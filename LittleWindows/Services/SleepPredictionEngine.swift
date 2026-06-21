@@ -273,7 +273,7 @@ enum ActiveSleepPlanService {
 }
 
 enum SleepPredictionEngine {
-    static let algorithmVersion = "LittleWindowsSleep-v3"
+    static let algorithmVersion = "LittleWindowsSleep-v4"
 
     static func latestWakeDateForBedtime(
         profile: BabyProfile,
@@ -602,7 +602,7 @@ enum SleepPredictionEngine {
                 )
             }
             if stats.sampleCount >= 6 {
-                let trendAdjustment = min(12, max(-12, stats.trendMinutes * 0.3))
+                let trendAdjustment = wakeWindowTrendAdjustmentMinutes(stats)
                 if abs(trendAdjustment) >= 2 {
                     predictedWakeMinutes += trendAdjustment
                     explanations.append(
@@ -889,8 +889,13 @@ enum SleepPredictionEngine {
 
     static func planningWakeWindowMinutes(_ stats: WakeWindowStatistics) -> Double {
         let laterSideGap = max(0, stats.upperQuartile - stats.weightedMedian)
-        let variabilityBuffer = min(24, max(laterSideGap * 0.75, stats.standardDeviation * 0.22))
+        let variabilityBuffer = min(18, max(laterSideGap * 0.55, stats.standardDeviation * 0.17))
         return stats.weightedMedian + variabilityBuffer
+    }
+
+    static func wakeWindowTrendAdjustmentMinutes(_ stats: WakeWindowStatistics) -> Double {
+        guard stats.trendMinutes < -6 else { return 0 }
+        return max(-8, stats.trendMinutes * 0.2)
     }
 
     static func confidenceScore(sampleCount: Int, variability: Double?) -> Double {

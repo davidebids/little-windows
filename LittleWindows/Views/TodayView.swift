@@ -123,8 +123,12 @@ struct TodayView: View {
         scopedEvents.filter(\.isTimerDraft).sorted { $0.startDate < $1.startDate }
     }
     private var prediction: SleepPrediction? {
-        guard profile?.profileType == .child else { return nil }
-        return scopedRecords.first(where: { $0.actualSleepEventID == nil })?.prediction
+        PredictionTuningService.currentPrediction(
+            profile: profile,
+            events: scopedEvents,
+            records: scopedRecords,
+            settings: predictionSettings
+        )
     }
     private var isDogProfile: Bool { profile?.profileType == .dog }
     private var relevantAppointments: [DoctorAppointment] {

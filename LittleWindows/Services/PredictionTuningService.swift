@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 struct PredictionAccuracy: Hashable {
     var sampleCount: Int
@@ -14,6 +15,73 @@ struct AccuracyBreakdown: Identifiable, Hashable {
 }
 
 enum PredictionTuningService {
+    static func currentPrediction(
+        profile: BabyProfile?,
+        events: [BabyEvent],
+        records: [SleepPredictionRecord],
+        settings: PredictionSettings = .default
+    ) -> SleepPrediction? {
+        guard let profile, profile.profileType == .child else { return nil }
+        let committedEvents = events.filter { !$0.isTimerDraft }
+        let lastSleepID = latestCompletedSleepID(in: committedEvents)
+        let currentRecord = latestOpenRecord(in: records)
+        if let currentRecord,
+           currentRecord.basedOnLastSleepEventID == lastSleepID,
+           currentRecord.algorithmVersion == SleepPredictionEngine.algorithmVersion {
+            return currentRecord.prediction
+        }
+        return SleepPredictionEngine.predict(
+            profile: profile,
+            events: committedEvents,
+            records: records.filter { $0.actualSleepEventID != nil },
+            settings: settings
+        )
+    }
+
+    @MainActor
+    static func refreshCurrentPrediction(
+        profile: BabyProfile?,
+        events: [BabyEvent],
+        records: [SleepPredictionRecord],
+        context: ModelContext,
+        settings: PredictionSettings = .default
+    ) throws -> SleepPrediction? {
+        guard let profile, profile.profileType == .child else { return nil }
+        let committedEvents = events.filter { !$0.isTimerDraft }
+        let lastSleepID = latestCompletedSleepID(in: committedEvents)
+        let currentRecord = latestOpenRecord(in: records)
+        if let currentRecord,
+           currentRecord.basedOnLastSleepEventID == lastSleepID,
+           currentRecord.algorithmVersion == SleepPredictionEngine.algorithmVersion {
+            return currentRecord.prediction
+        }
+
+        var changed = false
+        for record in records where record.actualSleepEventID == nil {
+            context.delete(record)
+            changed = true
+        }
+        let prediction = SleepPredictionEngine.predict(
+            profile: profile,
+            events: committedEvents,
+            records: records.filter { $0.actualSleepEventID != nil },
+            settings: settings
+        )
+        if let prediction {
+            context.insert(SleepPredictionRecord(
+                prediction: prediction,
+                basedOnLastSleepEventID: lastSleepID,
+                profileID: profile.id
+            ))
+            changed = true
+        }
+        try context.save()
+        if changed {
+            PersistenceService.recordLocalSave()
+        }
+        return prediction
+    }
+
     static func resolveLatestPrediction(
         with sleepEvent: BabyEvent,
         records: [SleepPredictionRecord]
@@ -91,5 +159,20 @@ enum PredictionTuningService {
         guard matching.count >= 3 else { return 0 }
         let averageBias = matching.reduce(0, +) / Double(matching.count)
         return min(12, max(-12, averageBias * 0.25))
+    }
+
+    private static func latestOpenRecord(
+        in records: [SleepPredictionRecord]
+    ) -> SleepPredictionRecord? {
+        records
+            .filter { $0.actualSleepEventID == nil }
+            .max { $0.generatedAt < $1.generatedAt }
+    }
+
+    private static func latestCompletedSleepID(in events: [BabyEvent]) -> UUID? {
+        events
+            .filter { $0.type == .sleep && $0.endDate != nil }
+            .max { $0.startDate < $1.startDate }?
+            .id
     }
 }

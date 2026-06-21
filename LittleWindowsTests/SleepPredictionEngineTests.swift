@@ -1316,7 +1316,89 @@ final class SleepPredictionEngineTests: XCTestCase {
         let target = SleepPredictionEngine.planningWakeWindowMinutes(statistics)
 
         XCTAssertGreaterThan(target, statistics.weightedMedian)
-        XCTAssertLessThanOrEqual(target - statistics.weightedMedian, 24)
+        XCTAssertLessThanOrEqual(target - statistics.weightedMedian, 18)
+    }
+
+    func testWakeWindowTrendDoesNotMoveExpectedTimeLater() {
+        let statistics = WakeWindowStatistics(
+            weightedMean: 135,
+            weightedMedian: 120,
+            upperQuartile: 140,
+            standardDeviation: 35,
+            interquartileRange: 40,
+            trendMinutes: 30,
+            sampleCount: 12,
+            effectiveSampleCount: 10
+        )
+
+        let adjustment = SleepPredictionEngine.wakeWindowTrendAdjustmentMinutes(statistics)
+
+        XCTAssertEqual(adjustment, 0)
+    }
+
+    func testShorteningWakeWindowTrendCanMoveExpectedTimeEarlier() {
+        let statistics = WakeWindowStatistics(
+            weightedMean: 115,
+            weightedMedian: 120,
+            upperQuartile: 135,
+            standardDeviation: 28,
+            interquartileRange: 35,
+            trendMinutes: -30,
+            sampleCount: 12,
+            effectiveSampleCount: 10
+        )
+
+        let adjustment = SleepPredictionEngine.wakeWindowTrendAdjustmentMinutes(statistics)
+
+        XCTAssertEqual(adjustment, -6, accuracy: 0.001)
+    }
+
+    func testCurrentPredictionIgnoresRecordBasedOnOlderSleep() throws {
+        let now = Date()
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: now.addingTimeInterval(-150 * 86_400)
+        )
+        let firstSleep = BabyEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-6 * 60 * 60),
+            endDate: now.addingTimeInterval(-5 * 60 * 60)
+        )
+        firstSleep.sleepKind = .nightSleep
+        let latestSleep = BabyEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-2 * 60 * 60),
+            endDate: now.addingTimeInterval(-90 * 60)
+        )
+        latestSleep.sleepKind = .nap
+
+        let stalePrediction = SleepPrediction(
+            predictedStart: now.addingTimeInterval(-4 * 60 * 60),
+            predictedWindowStart: now.addingTimeInterval(-5 * 60 * 60),
+            predictedWindowEnd: now.addingTimeInterval(-3 * 60 * 60),
+            predictionKind: .nap,
+            confidence: 0.8,
+            confidenceLabel: .high,
+            explanation: ["Stale"],
+            contributingFactors: [],
+            napIndex: 1
+        )
+        let staleRecord = SleepPredictionRecord(
+            prediction: stalePrediction,
+            basedOnLastSleepEventID: firstSleep.id,
+            profileID: profile.id
+        )
+
+        let prediction = try XCTUnwrap(PredictionTuningService.currentPrediction(
+            profile: profile,
+            events: [firstSleep, latestSleep],
+            records: [staleRecord]
+        ))
+
+        XCTAssertNotEqual(prediction.predictedStart, stalePrediction.predictedStart)
+        XCTAssertGreaterThan(prediction.predictedStart, latestSleep.endDate ?? now)
     }
 
     func testAgeBaselineUsesFractionalMonthsForFourMonthWakeWindows() {
