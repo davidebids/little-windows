@@ -1419,6 +1419,61 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(baseline.upperBound, 165)
     }
 
+    func testLateShortNapUsesPreBedWakeWindowForBedtimePrediction() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20))!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20, minute: 1))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 31))!
+        )
+        var events = [BabyEvent]()
+        for offset in -14 ... -1 {
+            let day = calendar.date(byAdding: .day, value: offset, to: today)!
+            let firstNapStart = calendar.date(bySettingHour: 16, minute: 8, second: 0, of: day)!
+            let firstNapEnd = calendar.date(byAdding: .minute, value: 48, to: firstNapStart)!
+            let secondNapStart = calendar.date(bySettingHour: 19, minute: 11, second: 0, of: day)!
+            let secondNapEnd = calendar.date(byAdding: .minute, value: 48, to: secondNapStart)!
+            let nightStart = calendar.date(bySettingHour: 21, minute: 50, second: 0, of: day)!
+            let nightEnd = calendar.date(byAdding: .hour, value: 9, to: nightStart)!
+            events.append(contentsOf: [
+                makeSleep(kind: .nap, start: firstNapStart, end: firstNapEnd),
+                makeSleep(kind: .nap, start: secondNapStart, end: secondNapEnd),
+                makeSleep(kind: .nightSleep, start: nightStart, end: nightEnd)
+            ])
+        }
+        events.append(contentsOf: [
+            makeSleep(
+                kind: .nap,
+                start: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 16, minute: 8))!,
+                end: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 16, minute: 53))!
+            ),
+            makeSleep(
+                kind: .nap,
+                start: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 35))!,
+                end: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 59))!
+            )
+        ])
+
+        let prediction = try XCTUnwrap(SleepPredictionEngine.predict(
+            profile: profile,
+            events: events,
+            now: now,
+            calendar: calendar
+        ))
+
+        XCTAssertEqual(prediction.predictionKind, .bedtime)
+        XCTAssertEqual(prediction.napIndex, 5)
+        XCTAssertEqual(
+            prediction.predictedStart.timeIntervalSince(
+                try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 21, minute: 50)))
+            ),
+            0,
+            accuracy: 90
+        )
+    }
+
     func testBackwardsPlanBuildsTodayNapLayoutFromSevenDayHistory() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -2791,6 +2846,35 @@ final class SleepPredictionEngineTests: XCTestCase {
             180,
             accuracy: 0.001
         )
+        XCTAssertNil(event.timerState)
+        XCTAssertNil(event.timerAccumulatedSeconds)
+    }
+
+    @MainActor
+    func testStoppedTimerCanSaveWithEditedEndDate() throws {
+        let container = try makeInMemoryContainer()
+        let start = Date(timeIntervalSinceReferenceDate: 650_000)
+        let stoppedAt = start.addingTimeInterval(15 * 60)
+        let editedEnd = start.addingTimeInterval(12 * 60)
+        let event = try XCTUnwrap(EventTimerService.start(
+            type: .sleep,
+            sleepKind: .nap,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            at: start
+        ))
+
+        EventTimerService.stop(event, context: container.mainContext, at: stoppedAt)
+        EventTimerService.save(
+            event,
+            context: container.mainContext,
+            at: stoppedAt,
+            endDate: editedEnd
+        )
+
+        XCTAssertFalse(event.isTimerDraft)
+        XCTAssertEqual(event.endDate, editedEnd)
         XCTAssertNil(event.timerState)
         XCTAssertNil(event.timerAccumulatedSeconds)
     }

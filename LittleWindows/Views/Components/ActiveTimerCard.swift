@@ -112,13 +112,14 @@ struct ActiveTimerEditorView: View {
     let stop: () -> Void
     let resume: () -> Void
     let reset: () -> Void
-    let save: () -> Void
+    let save: (Date?) -> Void
     let discard: () -> Void
     let switchNursingSide: (() -> Void)?
     let setNursingSide: ((NursingSide) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedStart: Date
+    @State private var selectedEnd: Date
     @State private var showingResetConfirmation = false
     @State private var showingDiscardConfirmation = false
 
@@ -128,7 +129,7 @@ struct ActiveTimerEditorView: View {
         stop: @escaping () -> Void,
         resume: @escaping () -> Void,
         reset: @escaping () -> Void,
-        save: @escaping () -> Void,
+        save: @escaping (Date?) -> Void,
         discard: @escaping () -> Void,
         switchNursingSide: (() -> Void)? = nil,
         setNursingSide: ((NursingSide) -> Void)? = nil
@@ -143,6 +144,7 @@ struct ActiveTimerEditorView: View {
         self.switchNursingSide = switchNursingSide
         self.setNursingSide = setNursingSide
         _selectedStart = State(initialValue: event.startDate)
+        _selectedEnd = State(initialValue: Self.defaultEndDate(for: event))
     }
 
     var body: some View {
@@ -211,7 +213,12 @@ struct ActiveTimerEditorView: View {
 
                     HStack(spacing: 12) {
                         Button {
-                            event.isTimerRunning ? stop() : resume()
+                            if event.isTimerRunning {
+                                stop()
+                                selectedEnd = Self.defaultEndDate(for: event)
+                            } else {
+                                resume()
+                            }
                         } label: {
                             Label(
                                 event.isTimerRunning ? "Stop" : "Resume",
@@ -236,7 +243,7 @@ struct ActiveTimerEditorView: View {
                     Text(
                         event.isTimerRunning
                             ? "Stop pauses the timer without saving it."
-                            : "Resume continues from the saved duration."
+                            : "Edit the end time below, resume, or save the event."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -261,6 +268,18 @@ struct ActiveTimerEditorView: View {
                     }
 
                     Divider()
+
+                    if !event.isTimerRunning {
+                        DatePicker(
+                            "Ended",
+                            selection: $selectedEnd,
+                            in: selectedStart...Date(),
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        .font(.body.weight(.medium))
+
+                        Divider()
+                    }
 
                     HStack(spacing: 8) {
                         adjustmentButton("−5 min", minutes: -5)
@@ -308,7 +327,7 @@ struct ActiveTimerEditorView: View {
 
                 VStack(spacing: 12) {
                     Button {
-                        save()
+                        save(event.isTimerRunning ? nil : selectedEnd)
                         dismiss()
                     } label: {
                         Label(
@@ -355,6 +374,7 @@ struct ActiveTimerEditorView: View {
                 ) {
                     reset()
                     selectedStart = event.startDate
+                    selectedEnd = Self.defaultEndDate(for: event)
                 }
             ]
         )
@@ -380,6 +400,14 @@ struct ActiveTimerEditorView: View {
         .onChange(of: event.startDate) { _, newValue in
             if abs(selectedStart.timeIntervalSince(newValue)) > 0.5 {
                 selectedStart = newValue
+            }
+            if selectedEnd < newValue {
+                selectedEnd = newValue
+            }
+        }
+        .onChange(of: event.isTimerRunning) { _, isRunning in
+            if !isRunning {
+                selectedEnd = Self.defaultEndDate(for: event)
             }
         }
     }
@@ -410,6 +438,10 @@ struct ActiveTimerEditorView: View {
             selectedStart = clamped
         }
         adjustStart(clamped)
+    }
+
+    private static func defaultEndDate(for event: BabyEvent) -> Date {
+        min(Date(), event.startDate.addingTimeInterval(event.timerElapsed()))
     }
 }
 

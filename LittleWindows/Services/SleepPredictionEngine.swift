@@ -544,9 +544,18 @@ enum SleepPredictionEngine {
             return nil
         }
 
-        let napIndex = nextNapIndex(events: events, date: now, calendar: calendar)
+        let nextSleepIndex = nextNapIndex(events: events, date: now, calendar: calendar)
+        let napsToday = events.filter {
+            $0.type == .sleep &&
+            $0.sleepKind == .nap &&
+            calendar.isDate($0.startDate, inSameDayAs: now)
+        }.count
+        let typicalNapCount = typicalDailyNapCount(events: completedSleeps, now: now, calendar: calendar)
+        let bedtimeCandidate = settings.bedtimePredictionEnabled &&
+            Double(napsToday) >= max(1, typicalNapCount - 0.5)
+        let predictionSampleIndex = bedtimeCandidate ? 5 : nextSleepIndex
         let allSamples = wakeWindowSamples(from: completedSleeps, now: now, calendar: calendar)
-            .filter { $0.napIndex == napIndex }
+            .filter { $0.napIndex == predictionSampleIndex }
         let samples = preferredPredictionSamples(allSamples, now: now, calendar: calendar)
         let clipped = clipOutliers(samples)
         let stats = statistics(for: clipped)
@@ -577,8 +586,9 @@ enum SleepPredictionEngine {
         var factors = [PredictionFactorValue]()
 
         if let stats {
+            let sampleLabel = predictionSampleIndex == 5 ? "pre-bed" : "nap \(predictionSampleIndex)"
             explanations.append(
-                "\(profile.name)'s recent wake-window median for nap \(napIndex) is \(minutesText(stats.weightedMedian)); the planning target is \(minutesText(personalCenter))."
+                "\(profile.name)'s recent wake-window median for \(sampleLabel) is \(minutesText(stats.weightedMedian)); the planning target is \(minutesText(personalCenter))."
             )
             factors.append(PredictionFactorValue(
                 name: "Personal history",
@@ -651,7 +661,7 @@ enum SleepPredictionEngine {
 
         let bias = PredictionTuningService.conservativeBiasCorrection(
             records: records,
-            napIndex: napIndex
+            napIndex: predictionSampleIndex
         )
         predictedWakeMinutes += bias
         if abs(bias) >= 2 {
@@ -676,19 +686,13 @@ enum SleepPredictionEngine {
             .suffix(14)
             .map(\.startDate)
         let bedtimeDate = circularTypicalTime(for: typicalBedtimes, on: now, calendar: calendar)
-        let napsToday = events.filter {
-            $0.type == .sleep &&
-            $0.sleepKind == .nap &&
-            calendar.isDate($0.startDate, inSameDayAs: now)
-        }.count
-        let typicalNapCount = typicalDailyNapCount(events: completedSleeps, now: now, calendar: calendar)
         var kind: PredictionKind = .nap
         var finalStart = provisionalStart
 
         if settings.bedtimePredictionEnabled,
            let bedtimeDate,
            provisionalStart >= bedtimeDate.addingTimeInterval(-45 * 60),
-           Double(napsToday) >= max(1, typicalNapCount - 0.5) {
+           bedtimeCandidate {
             kind = .bedtime
             finalStart = max(provisionalStart, bedtimeDate.addingTimeInterval(-30 * 60))
             explanations.append(
@@ -750,7 +754,7 @@ enum SleepPredictionEngine {
             confidenceLabel: label,
             explanation: explanations,
             contributingFactors: factors,
-            napIndex: napIndex
+            napIndex: predictionSampleIndex
         )
     }
 

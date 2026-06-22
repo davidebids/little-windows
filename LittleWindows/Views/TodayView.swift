@@ -906,7 +906,7 @@ struct TodayView: View {
             stop: { stop(event) },
             resume: { resume(event) },
             reset: { reset(event) },
-            save: { save(event) },
+            save: { endDate in save(event, endDate: endDate) },
             discard: { delete(event) },
             switchNursingSide: nursingSideSwitcher(for: event),
             setNursingSide: nursingSideSetter(for: event)
@@ -1059,8 +1059,8 @@ struct TodayView: View {
         }
     }
 
-    private func save(_ event: BabyEvent) {
-        EventMutationService.saveTimer(event, context: modelContext)
+    private func save(_ event: BabyEvent, endDate: Date? = nil) {
+        EventMutationService.saveTimer(event, context: modelContext, endDate: endDate)
         Task {
             await eventChanged(
                 event,

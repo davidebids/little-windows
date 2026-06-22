@@ -54,9 +54,10 @@ enum EventMutationService {
     static func saveTimer(
         _ event: BabyEvent,
         context: ModelContext,
-        at date: Date = Date()
+        at date: Date = Date(),
+        endDate: Date? = nil
     ) {
-        EventTimerService.save(event, context: context, at: date)
+        EventTimerService.save(event, context: context, at: date, endDate: endDate)
     }
 
     static func delete(

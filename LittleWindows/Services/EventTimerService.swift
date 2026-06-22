@@ -89,14 +89,19 @@ enum EventTimerService {
     static func save(
         _ event: BabyEvent,
         context: ModelContext,
-        at date: Date = Date()
+        at date: Date = Date(),
+        endDate: Date? = nil
     ) {
         guard event.isTimerDraft else { return }
         if event.isTimerRunning {
             accrueCurrentSegment(event, until: date)
         }
         let elapsed = max(0, event.timerAccumulatedSeconds ?? 0)
-        event.endDate = event.startDate.addingTimeInterval(elapsed)
+        if let endDate {
+            event.endDate = max(endDate, event.startDate)
+        } else {
+            event.endDate = event.startDate.addingTimeInterval(elapsed)
+        }
         event.timerState = nil
         event.timerAccumulatedSeconds = nil
         event.activeTimerSegmentStartDate = nil
