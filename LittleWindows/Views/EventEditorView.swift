@@ -199,9 +199,18 @@ struct EventEditorView: View {
     private var selectedProfile: CareProfile? {
         profileService.selectedProfile(in: profiles)
     }
+    private var activeProfileID: UUID? {
+        existingEvent?.profileID ?? selectedProfile?.id
+    }
 
     private var activeProfileType: CareProfileType {
         existingEvent?.profileTypeSnapshot ?? selectedProfile?.profileType ?? .child
+    }
+    private var isDogProfile: Bool {
+        activeProfileType == .dog
+    }
+    private var temperatureMethods: [TemperatureMethod] {
+        isDogProfile ? [.rectal, .ear, .unknown] : TemperatureMethod.allCases
     }
     private var activeCaregiverName: String {
         CaregiverIdentityService.currentCaregiverName(
@@ -252,6 +261,11 @@ struct EventEditorView: View {
             guard existingEvent == nil,
                   caregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             caregiverName = activeCaregiverName
+        }
+        .onAppear(perform: normalizeDogTemperatureMethod)
+        .onChange(of: type) { _, newType in
+            guard newType == .temperature else { return }
+            normalizeDogTemperatureMethod()
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -355,7 +369,7 @@ struct EventEditorView: View {
             }
         case .medicine:
             Section("Medicine") {
-                TextField("Medicine name", text: $medicineName)
+                TextField(isDogProfile ? "Medication or supplement name" : "Medicine name", text: $medicineName)
                 if !recentMedicineNames.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack {
@@ -405,7 +419,7 @@ struct EventEditorView: View {
                     }
                     .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Height") {
+                LabeledContent(isDogProfile ? "Length/height" : "Height") {
                     HStack {
                         TextField("ft", value: $heightFeet, format: .number)
                             .keyboardType(.numberPad)
@@ -416,27 +430,31 @@ struct EventEditorView: View {
                     }
                     .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Head circumference") {
-                    HStack {
-                        TextField(
-                            "Optional",
-                            value: $headCircumferenceInches,
-                            format: .number.precision(.fractionLength(0...2))
-                        )
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        Text("in")
-                            .foregroundStyle(.secondary)
+                if !isDogProfile {
+                    LabeledContent("Head circumference") {
+                        HStack {
+                            TextField(
+                                "Optional",
+                                value: $headCircumferenceInches,
+                                format: .number.precision(.fractionLength(0...2))
+                            )
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            Text("in")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-                Picker("Measured at", selection: $growthSource) {
+                Picker(isDogProfile ? "Measured by" : "Measured at", selection: $growthSource) {
                     ForEach(GrowthMeasurementSource.allCases) {
-                        Text($0.displayName).tag($0)
+                        Text($0.displayName(for: activeProfileType)).tag($0)
                     }
                 }
-                Picker("Reference sex", selection: $growthSex) {
-                    ForEach(BabySex.allCases) {
-                        Text($0.displayName).tag($0)
+                if !isDogProfile {
+                    Picker("Reference sex", selection: $growthSex) {
+                        ForEach(BabySex.allCases) {
+                            Text($0.displayName).tag($0)
+                        }
                     }
                 }
             }
@@ -465,7 +483,7 @@ struct EventEditorView: View {
                 }
 
                 Picker("Method", selection: $temperatureMethod) {
-                    ForEach(TemperatureMethod.allCases) { Text($0.displayName).tag($0) }
+                    ForEach(temperatureMethods) { Text($0.displayName).tag($0) }
                 }
             }
         case .activity:
@@ -507,9 +525,15 @@ struct EventEditorView: View {
             }
         case .treat:
             Section("Treat") {
-                TextField("Treat type/name", text: $dogTreatName)
-                TextField("Quantity optional", value: $dogTreatQuantity, format: .number)
-                    .keyboardType(.decimalPad)
+                LabeledContent("Treat") {
+                    TextField("Type or name", text: $dogTreatName)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Quantity") {
+                    TextField("Optional", value: $dogTreatQuantity, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
             }
         case .potty:
             Section("Potty") {
@@ -711,7 +735,7 @@ struct EventEditorView: View {
         event.heightInches = type == .growth && heightInches > 0 ? heightInches : nil
         event.weightPounds = type == .growth && weightPounds > 0 ? weightPounds : nil
         event.weightOunces = type == .growth && weightOunces > 0 ? weightOunces : nil
-        event.headCircumferenceInches = type == .growth
+        event.headCircumferenceInches = type == .growth && !isDogProfile
             ? headCircumferenceInches.flatMap { $0 > 0 ? $0 : nil }
             : nil
         event.weightKilograms = type == .growth && (weightPounds > 0 || weightOunces > 0)
@@ -726,12 +750,12 @@ struct EventEditorView: View {
                 inches: heightInches
             )
             : nil
-        event.headCircumferenceCentimeters = type == .growth
+        event.headCircumferenceCentimeters = type == .growth && !isDogProfile
             ? headCircumferenceInches.flatMap {
                 $0 > 0 ? GrowthUnitConversion.inchesToCentimeters($0) : nil
             }
             : nil
-        event.growthSexRawValue = type == .growth ? growthSex.rawValue : nil
+        event.growthSexRawValue = type == .growth && !isDogProfile ? growthSex.rawValue : nil
         event.growthSource = type == .growth ? growthSource : nil
         event.temperatureCelsius = type == .temperature
             ? (temperatureUnit == .celsius ? temperatureValue : (temperatureValue - 32) * 5 / 9)
@@ -743,6 +767,11 @@ struct EventEditorView: View {
         if existingEvent == nil { modelContext.insert(event) }
         onSave(event)
         dismiss()
+    }
+
+    private func normalizeDogTemperatureMethod() {
+        guard isDogProfile, type == .temperature, !temperatureMethods.contains(temperatureMethod) else { return }
+        temperatureMethod = .rectal
     }
 
     private func dogDetailsForSave() -> DogEventDetails {
@@ -793,11 +822,29 @@ struct EventEditorView: View {
     private var recentMedicineNames: [String] {
         var seen = Set<String>()
         return recentEvents
-            .filter { $0.type == .medicine }
+            .filter {
+                $0.type == .medicine &&
+                    $0.matchesProfile(activeProfileID) &&
+                    ($0.profileTypeSnapshot ?? activeProfileType) == activeProfileType
+            }
             .compactMap(\.medicineName)
             .filter { seen.insert($0.lowercased()).inserted }
             .prefix(5)
             .map { $0 }
+    }
+}
+
+private extension GrowthMeasurementSource {
+    func displayName(for profileType: CareProfileType) -> String {
+        guard profileType == .dog else { return displayName }
+        switch self {
+        case .pediatrician:
+            return "Vet"
+        case .home:
+            return "Home"
+        case .other:
+            return "Other"
+        }
     }
 }
 

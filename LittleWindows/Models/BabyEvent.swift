@@ -330,7 +330,7 @@ final class BabyEvent {
         case .potty:
             dogPottySummary
         case .walk:
-            "Walk: \(dogWalkSummary)"
+            dogWalkSummary
         case .rest:
             dogRestSummary
         case .training:

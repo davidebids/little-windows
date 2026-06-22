@@ -730,6 +730,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(walk.displayTitle.contains("34m"))
         XCTAssertTrue(walk.displayTitle.contains("1.2 mi"))
         XCTAssertTrue(walk.displayTitle.contains("pulled"))
+
+        let plainWalk = BabyEvent(type: .walk, startDate: Date(), endDate: Date())
+        plainWalk.profileTypeSnapshot = .dog
+        XCTAssertEqual(plainWalk.displayTitle, "Walk")
     }
 
     @MainActor
