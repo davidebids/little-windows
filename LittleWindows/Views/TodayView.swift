@@ -8,6 +8,10 @@ struct EventEditorRoute: Identifiable {
     var event: BabyEvent?
 }
 
+private enum TodayScrollAnchor {
+    case timeline
+}
+
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
@@ -182,128 +186,139 @@ struct TodayView: View {
         let activeEvents = activeEvents
         let prediction = prediction
 
-        List {
-            Section {
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Good \(greeting), \(activeCaregiverName)")
-                            .font(.title2.bold())
-                        if let profile {
-                            Text(profile.profileType == .dog
-                                ? "\(profile.name) · \(profile.profileSubtitle)"
-                                : "\(profile.name) is \(DateFormatting.age(from: profile.birthDate))"
-                            )
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    if let profile {
-                        VStack(spacing: 3) {
-                            Text("\(todayEvents.count)")
-                                .font(.title3.bold())
-                                .monospacedDigit()
-                            Text("logs today")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 9)
-                        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14))
-                        .accessibilityLabel("\(todayEvents.count) logs today for \(profile.name)")
-                    }
-                }
-                .padding(.horizontal, 4)
-                .padding(.top, 2)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                .listRowSeparator(.hidden)
-            }
-
-            if profile == nil {
-                noProfileSection
-            } else {
-                activeTimersSection(activeEvents)
-
-                if isDogProfile {
-                    dogTodaySummarySection
-                    puppyStageGuideSection
-                } else {
-                    monthlyAgeGuideSection
-                }
-
-                appointmentsSection
-
-                if !isDogProfile {
-                    Section {
-                        PredictionCard(
-                            prediction: prediction,
-                            babyName: profile?.name ?? "Baby",
-                            awakeSinceDate: awakeSinceDate,
-                            alertStatusText: notificationManager.statusText(
-                                prediction: prediction,
-                                settings: .current,
-                                isSleeping: activeEvents.contains {
-                                    $0.type == .sleep && $0.isTimerRunning
-                                }
-                            ),
-                            alertsEnabled: notificationsEnabled,
-                            toggleAlerts: toggleLittleWindowAlerts,
-                            showBackwardsPlanner: { showingBackwardsPlanner = true },
-                            showExplanation: { showingExplanation = true }
-                        )
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                    }
-                }
-
-                if isDogProfile {
-                    dogQuickActionsSection
-                } else {
-                    childQuickActionsSection
-                }
-
+        ScrollViewReader { scrollProxy in
+            List {
                 Section {
-                    if todayEvents.isEmpty {
-                        ContentUnavailableView(
-                            "No events yet",
-                            systemImage: "clock",
-                            description: Text("Use a quick action to start \(profile?.name ?? "the profile")'s day.")
-                        )
-                    } else {
-                        ForEach(todayEvents) { event in
+                    HStack(alignment: .center, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Good \(greeting), \(activeCaregiverName)")
+                                .font(.title2.bold())
+                            if let profile {
+                                Text(profile.profileType == .dog
+                                    ? "\(profile.name) · \(profile.profileSubtitle)"
+                                    : "\(profile.name) is \(DateFormatting.age(from: profile.birthDate))"
+                                )
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if let profile {
                             Button {
-                                if event.isTimerDraft {
-                                    activeTimerToEdit = event
-                                } else {
-                                    editorRoute = EventEditorRoute(type: event.type, event: event)
+                                withAnimation(.snappy) {
+                                    scrollProxy.scrollTo(TodayScrollAnchor.timeline, anchor: .top)
                                 }
                             } label: {
-                                EventRow(event: event)
+                                VStack(spacing: 3) {
+                                    Text("\(todayEvents.count)")
+                                        .font(.title3.bold())
+                                        .monospacedDigit()
+                                    Text("logs today")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 9)
+                                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14))
                             }
                             .buttonStyle(.plain)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    eventPendingDelete = event
-                                    showingDeleteEventConfirmation = true
+                            .accessibilityLabel("\(todayEvents.count) logs today for \(profile.name)")
+                            .accessibilityHint("Jumps to today's timeline")
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowSeparator(.hidden)
+                }
+
+                if profile == nil {
+                    noProfileSection
+                } else {
+                    activeTimersSection(activeEvents)
+
+                    if isDogProfile {
+                        dogTodaySummarySection
+                        puppyStageGuideSection
+                    } else {
+                        monthlyAgeGuideSection
+                    }
+
+                    appointmentsSection
+
+                    if !isDogProfile {
+                        Section {
+                            PredictionCard(
+                                prediction: prediction,
+                                babyName: profile?.name ?? "Baby",
+                                awakeSinceDate: awakeSinceDate,
+                                alertStatusText: notificationManager.statusText(
+                                    prediction: prediction,
+                                    settings: .current,
+                                    isSleeping: activeEvents.contains {
+                                        $0.type == .sleep && $0.isTimerRunning
+                                    }
+                                ),
+                                alertsEnabled: notificationsEnabled,
+                                toggleAlerts: toggleLittleWindowAlerts,
+                                showBackwardsPlanner: { showingBackwardsPlanner = true },
+                                showExplanation: { showingExplanation = true }
+                            )
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+                    }
+
+                    if isDogProfile {
+                        dogQuickActionsSection
+                    } else {
+                        childQuickActionsSection
+                    }
+
+                    Section {
+                        if todayEvents.isEmpty {
+                            ContentUnavailableView(
+                                "No events yet",
+                                systemImage: "clock",
+                                description: Text("Use a quick action to start \(profile?.name ?? "the profile")'s day.")
+                            )
+                        } else {
+                            ForEach(todayEvents) { event in
+                                Button {
+                                    if event.isTimerDraft {
+                                        activeTimerToEdit = event
+                                    } else {
+                                        editorRoute = EventEditorRoute(type: event.type, event: event)
+                                    }
                                 } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    EventRow(event: event)
+                                }
+                                .buttonStyle(.plain)
+                                .swipeActions {
+                                    Button(role: .destructive) {
+                                        eventPendingDelete = event
+                                        showingDeleteEventConfirmation = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
+                    } header: {
+                        AppSectionHeader(
+                            title: "Today's timeline",
+                            subtitle: todayEvents.isEmpty ? nil : "\(todayEvents.count) events"
+                        )
                     }
-                } header: {
-                    AppSectionHeader(
-                        title: "Today's timeline",
-                        subtitle: todayEvents.isEmpty ? nil : "\(todayEvents.count) events"
-                    )
+                    .id(TodayScrollAnchor.timeline)
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.background)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(AppTheme.background)
         .navigationTitle("Today")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

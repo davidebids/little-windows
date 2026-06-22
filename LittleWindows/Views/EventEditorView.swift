@@ -212,7 +212,7 @@ struct EventEditorView: View {
 
     var body: some View {
         Form {
-            Section("Event") {
+            Section {
                 Picker("Type", selection: $type) {
                     ForEach(EventType.cases(for: activeProfileType)) { type in
                         Label(type.displayName, systemImage: type.systemImage).tag(type)
@@ -228,7 +228,15 @@ struct EventEditorView: View {
                 if type.supportsTimer, hasEndDate {
                     DatePicker("End", selection: $endDate, in: startDate...)
                 }
-                TextField("Caregiver", text: $caregiverName)
+                LabeledContent("Logged by") {
+                    TextField("Name", text: $caregiverName)
+                        .textContentType(.name)
+                        .multilineTextAlignment(.trailing)
+                }
+            } header: {
+                Text("Event")
+            } footer: {
+                Text("This name is saved with the event so history can show who logged it.")
             }
 
             eventSpecificFields
@@ -306,8 +314,15 @@ struct EventEditorView: View {
                     ForEach(NursingSide.allCases) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                TextField("Duration (minutes)", value: $nursingMinutes, format: .number)
-                    .keyboardType(.decimalPad)
+                LabeledContent("Duration") {
+                    HStack(spacing: 6) {
+                        TextField("0", value: $nursingMinutes, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                        Text("min")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         case .diaper:
             Section("Diaper") {
