@@ -2216,18 +2216,21 @@ private struct StoreEditorView: View {
     let shoppingItems: [ShoppingListItem]
     @State private var newSectionName = ""
     @State private var showingArchiveConfirmation = false
+    @State private var pendingSave: Task<Void, Never>?
 
     var body: some View {
         Form {
             Section("Store") {
                 TextField("Name", text: $store.name)
                     .onChange(of: store.name) { _, _ in
-                        store.updatedAt = Date()
-                        save(modelContext)
+                        scheduleSave()
                     }
                 TextField("Notes", text: Binding(
                     get: { store.notes ?? "" },
-                    set: { store.notes = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                    set: {
+                        store.notes = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+                        scheduleSave()
+                    }
                 ), axis: .vertical)
             }
             Section("Sections") {
@@ -2259,6 +2262,7 @@ private struct StoreEditorView: View {
         }
         .navigationTitle(store.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onDisappear(perform: saveNow)
         .confirmationDialog(
             "Archive \(store.name)?",
             isPresented: $showingArchiveConfirmation,
@@ -2273,12 +2277,28 @@ private struct StoreEditorView: View {
             Text("Archived stores are removed from active store lists and section pickers.")
         }
     }
+
+    private func scheduleSave() {
+        store.updatedAt = Date()
+        pendingSave?.cancel()
+        pendingSave = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            save(modelContext)
+        }
+    }
+
+    private func saveNow() {
+        pendingSave?.cancel()
+        save(modelContext)
+    }
 }
 
 private struct StoreSectionEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var section: FoodStoreSection
     let itemCount: Int
+    @State private var pendingSave: Task<Void, Never>?
 
     var body: some View {
         HStack {
@@ -2288,11 +2308,22 @@ private struct StoreSectionEditorView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-        .onChange(of: section.name) { _, _ in persist() }
+        .onChange(of: section.name) { _, _ in schedulePersist() }
+        .onDisappear(perform: persistNow)
     }
 
-    private func persist() {
+    private func schedulePersist() {
         section.updatedAt = Date()
+        pendingSave?.cancel()
+        pendingSave = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            save(modelContext)
+        }
+    }
+
+    private func persistNow() {
+        pendingSave?.cancel()
         save(modelContext)
     }
 }

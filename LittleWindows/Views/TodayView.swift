@@ -1216,13 +1216,6 @@ struct TodayView: View {
 
     private func adjustStart(of event: BabyEvent, to date: Date) {
         EventTimerService.adjustStartDate(event, to: date)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
     }
 
     private func delete(_ event: BabyEvent) {
