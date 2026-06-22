@@ -1405,6 +1405,66 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertGreaterThan(prediction.predictedStart, latestSleep.endDate ?? now)
     }
 
+    func testCurrentPredictionIgnoresRecordWithDifferentTuningSettings() throws {
+        let now = Date()
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: now.addingTimeInterval(-150 * 86_400)
+        )
+        let nightSleep = BabyEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-10 * 60 * 60),
+            endDate: now.addingTimeInterval(-6 * 60 * 60)
+        )
+        nightSleep.sleepKind = .nightSleep
+        let latestSleep = BabyEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-2 * 60 * 60),
+            endDate: now.addingTimeInterval(-90 * 60)
+        )
+        latestSleep.sleepKind = .nap
+
+        let cachedPrediction = SleepPrediction(
+            predictedStart: now.addingTimeInterval(8 * 60 * 60),
+            predictedWindowStart: now.addingTimeInterval(7 * 60 * 60),
+            predictedWindowEnd: now.addingTimeInterval(9 * 60 * 60),
+            predictionKind: .nap,
+            confidence: 0.9,
+            confidenceLabel: .high,
+            explanation: ["Cached with old settings"],
+            contributingFactors: [],
+            napIndex: 1
+        )
+        let cachedRecord = SleepPredictionRecord(
+            prediction: cachedPrediction,
+            basedOnLastSleepEventID: latestSleep.id,
+            profileID: profile.id,
+            settings: .default
+        )
+        let tunedSettings = PredictionSettings(
+            feedAdjustmentEnabled: true,
+            nursingAdjustmentEnabled: true,
+            bedtimePredictionEnabled: true,
+            customBaselineMinimum: 45,
+            customBaselineMaximum: 60
+        )
+
+        let prediction = try XCTUnwrap(PredictionTuningService.currentPrediction(
+            profile: profile,
+            events: [nightSleep, latestSleep],
+            records: [cachedRecord],
+            settings: tunedSettings
+        ))
+
+        XCTAssertNotEqual(prediction.predictedStart, cachedPrediction.predictedStart)
+        XCTAssertNotEqual(
+            cachedRecord.algorithmVersion,
+            SleepPredictionEngine.cacheVersion(settings: tunedSettings)
+        )
+    }
+
     func testAgeBaselineUsesFractionalMonthsForFourMonthWakeWindows() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

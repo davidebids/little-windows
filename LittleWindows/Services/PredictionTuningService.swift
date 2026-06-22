@@ -25,9 +25,10 @@ enum PredictionTuningService {
         let committedEvents = events.filter { !$0.isTimerDraft }
         let lastSleepID = latestCompletedSleepID(in: committedEvents)
         let currentRecord = latestOpenRecord(in: records)
+        let cacheVersion = SleepPredictionEngine.cacheVersion(settings: settings)
         if let currentRecord,
            currentRecord.basedOnLastSleepEventID == lastSleepID,
-           currentRecord.algorithmVersion == SleepPredictionEngine.algorithmVersion {
+           currentRecord.algorithmVersion == cacheVersion {
             return currentRecord.prediction
         }
         return SleepPredictionEngine.predict(
@@ -50,9 +51,10 @@ enum PredictionTuningService {
         let committedEvents = events.filter { !$0.isTimerDraft }
         let lastSleepID = latestCompletedSleepID(in: committedEvents)
         let currentRecord = latestOpenRecord(in: records)
+        let cacheVersion = SleepPredictionEngine.cacheVersion(settings: settings)
         if let currentRecord,
            currentRecord.basedOnLastSleepEventID == lastSleepID,
-           currentRecord.algorithmVersion == SleepPredictionEngine.algorithmVersion {
+           currentRecord.algorithmVersion == cacheVersion {
             return currentRecord.prediction
         }
 
@@ -71,7 +73,8 @@ enum PredictionTuningService {
             context.insert(SleepPredictionRecord(
                 prediction: prediction,
                 basedOnLastSleepEventID: lastSleepID,
-                profileID: profile.id
+                profileID: profile.id,
+                settings: settings
             ))
             changed = true
         }

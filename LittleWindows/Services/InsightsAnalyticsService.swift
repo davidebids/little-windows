@@ -596,7 +596,12 @@ enum InsightsAnalyticsService {
             metric("Timing bias", accuracy.bias, previousAccuracy.bias, compare: compareToPrevious, format: signedMinutes, icon: "arrow.left.and.right", interpretation: "Negative is early; positive is late."),
             InsightMetric(title: "Best nap index", value: bestNap?.category ?? "-", interpretation: bestNap.map { "\(duration($0.value)) mean absolute error." } ?? "More resolved predictions are needed.", systemImage: "hand.thumbsup.fill"),
             InsightMetric(title: "Hardest nap index", value: worstNap?.category ?? "-", interpretation: worstNap.map { "\(duration($0.value)) mean absolute error." } ?? "More resolved predictions are needed.", systemImage: "wand.and.stars"),
-            InsightMetric(title: "Algorithm", value: records.first?.algorithmVersion ?? SleepPredictionEngine.algorithmVersion, interpretation: "Version recorded with predictions.", systemImage: "cpu")
+            InsightMetric(
+                title: "Algorithm",
+                value: SleepPredictionEngine.displayAlgorithmVersion(records.first?.algorithmVersion),
+                interpretation: "Version recorded with predictions.",
+                systemImage: "cpu"
+            )
         ]
 
         return InsightsSnapshot(

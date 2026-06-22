@@ -27,7 +27,8 @@ final class SleepPredictionRecord {
     init(
         prediction: SleepPrediction,
         basedOnLastSleepEventID: UUID?,
-        profileID: UUID? = nil
+        profileID: UUID? = nil,
+        settings: PredictionSettings = .default
     ) {
         id = UUID()
         self.profileID = profileID
@@ -42,7 +43,7 @@ final class SleepPredictionRecord {
         explanationSnapshot = prediction.explanation.joined(separator: "\n")
         factorsData = try? JSONEncoder().encode(prediction.contributingFactors)
         napIndex = prediction.napIndex
-        algorithmVersion = SleepPredictionEngine.algorithmVersion
+        algorithmVersion = SleepPredictionEngine.cacheVersion(settings: settings)
         createdAt = Date()
         updatedAt = Date()
     }

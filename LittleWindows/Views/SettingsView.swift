@@ -346,6 +346,8 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+
+            SettingsBuildInfoFooter()
         }
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
@@ -594,6 +596,52 @@ struct SettingsView: View {
             statusMessage = "All history was deleted."
         } catch {
             statusMessage = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+private struct SettingsBuildInfoFooter: View {
+    private var version: String {
+        Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "Unknown"
+    }
+
+    private var build: String {
+        Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String ?? "Unknown"
+    }
+
+    private var buildChannel: String {
+        #if DEBUG
+        return "Debug"
+        #elseif targetEnvironment(simulator)
+        return "Simulator"
+        #else
+        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
+            return "TestFlight"
+        }
+        if Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil {
+            return "Development"
+        }
+        return "App Store"
+        #endif
+    }
+
+    var body: some View {
+        Section {
+            VStack(spacing: 4) {
+                Text("Little Windows")
+                    .font(.caption.weight(.semibold))
+                Text("Version \(version) (\(build))")
+                    .font(.caption2.monospacedDigit())
+                Text("Build: \(buildChannel)")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .listRowBackground(Color.clear)
         }
     }
 }

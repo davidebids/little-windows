@@ -144,6 +144,21 @@ struct PredictionSettings {
         customBaselineMinimum: nil,
         customBaselineMaximum: nil
     )
+
+    var cacheKey: String {
+        [
+            "feed:\(feedAdjustmentEnabled ? 1 : 0)",
+            "nursing:\(nursingAdjustmentEnabled ? 1 : 0)",
+            "bedtime:\(bedtimePredictionEnabled ? 1 : 0)",
+            "min:\(Self.cacheValue(customBaselineMinimum))",
+            "max:\(Self.cacheValue(customBaselineMaximum))"
+        ].joined(separator: "|")
+    }
+
+    private static func cacheValue(_ value: Double?) -> String {
+        guard let value else { return "auto" }
+        return String(format: "%.1f", value)
+    }
 }
 
 enum ActiveSleepPlanService {
@@ -274,6 +289,15 @@ enum ActiveSleepPlanService {
 
 enum SleepPredictionEngine {
     static let algorithmVersion = "LittleWindowsSleep-v4"
+
+    static func cacheVersion(settings: PredictionSettings) -> String {
+        "\(algorithmVersion)|\(settings.cacheKey)"
+    }
+
+    static func displayAlgorithmVersion(_ cacheVersion: String?) -> String {
+        guard let cacheVersion else { return algorithmVersion }
+        return cacheVersion.components(separatedBy: "|").first ?? cacheVersion
+    }
 
     static func latestWakeDateForBedtime(
         profile: BabyProfile,

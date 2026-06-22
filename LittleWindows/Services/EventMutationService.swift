@@ -213,7 +213,8 @@ enum EventMutationService {
             context.insert(SleepPredictionRecord(
                 prediction: prediction,
                 basedOnLastSleepEventID: lastSleepID,
-                profileID: profile?.id
+                profileID: profile?.id,
+                settings: settings
             ))
         }
         return prediction
