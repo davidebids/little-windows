@@ -637,10 +637,16 @@ private struct FirstRunOnboardingView: View {
                     displayedComponents: .date
                 )
 
-                Picker("Sex", selection: $sex) {
-                    ForEach(BabySex.allCases) { value in
-                        Text(value.displayName).tag(value)
+                HStack {
+                    Text("Sex")
+                    Spacer()
+                    Picker("Sex", selection: $sex) {
+                        ForEach(BabySex.allCases) { value in
+                            Text(value.displayName).tag(value)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
                 }
 
                 if profileType == .dog {

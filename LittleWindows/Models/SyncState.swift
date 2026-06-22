@@ -153,6 +153,7 @@ struct FamilyShareState: Equatable {
     var lastSyncAt: Date?
     var pendingUploadCount: Int
     var pendingDownloadCount: Int
+    var canResumeShare: Bool
     var canCreateShare: Bool
     var canManageShare: Bool
     var canSyncNow: Bool

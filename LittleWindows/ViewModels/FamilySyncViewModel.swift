@@ -17,6 +17,7 @@ final class FamilySyncViewModel: ObservableObject {
         lastSyncAt: nil,
         pendingUploadCount: 0,
         pendingDownloadCount: 0,
+        canResumeShare: false,
         canCreateShare: false,
         canManageShare: false,
         canSyncNow: false,
@@ -24,6 +25,8 @@ final class FamilySyncViewModel: ObservableObject {
         lastErrorMessage: nil
     )
     @Published private(set) var availability: ICloudSyncAvailability = .checking
+    @Published private(set) var isSyncing = false
+    @Published private(set) var syncStatusMessage: String?
     @Published var presentedShare: CKShare?
 
     private let statusService = SyncStatusService()
@@ -44,6 +47,15 @@ final class FamilySyncViewModel: ObservableObject {
         }
     }
 
+    func resumeSharing(context: ModelContext) async {
+        do {
+            try await sharingService.resumeFamilyShare(context: context)
+            await refresh()
+        } catch {
+            state.lastErrorMessage = error.localizedDescription
+        }
+    }
+
     func manageSharing() async {
         do {
             presentedShare = try await sharingService.existingShare()
@@ -54,10 +66,18 @@ final class FamilySyncViewModel: ObservableObject {
     }
 
     func syncNow(context: ModelContext) async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        syncStatusMessage = "Syncing shared family data..."
+        defer { isSyncing = false }
         do {
-            try await sharingService.syncNow(context: context, reason: .manual)
+            let changed = try await sharingService.syncNow(context: context, reason: .manual)
             await refresh()
+            syncStatusMessage = changed
+                ? "Shared family data is up to date."
+                : "No new family sync changes."
         } catch {
+            syncStatusMessage = nil
             state.lastErrorMessage = error.localizedDescription
         }
     }

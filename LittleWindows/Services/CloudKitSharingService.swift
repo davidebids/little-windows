@@ -133,6 +133,7 @@ final class CloudKitSharingService {
         let syncMode = PersistenceService.familySyncMode(defaults: defaults)
         let role = storedRole
         let hasShare = storedRootRecordID != nil
+        let canUseStoredShare = hasShare && role != .none
         let availability = privateSyncAvailable ?? syncMode.requiresICloudAccount
         let lastError = defaults.string(forKey: DefaultsKey.lastError)
         let status: FamilyShareStatus
@@ -161,8 +162,9 @@ final class CloudKitSharingService {
             lastSyncAt: defaults.object(forKey: DefaultsKey.lastSyncAt) as? Date,
             pendingUploadCount: defaults.bool(forKey: DefaultsKey.pendingUpload) ? 1 : 0,
             pendingDownloadCount: 0,
+            canResumeShare: syncMode == .privateICloudSync && availability && canUseStoredShare,
             canCreateShare: syncMode != .localOnly && availability && !hasShare,
-            canManageShare: syncMode == .sharedFamilySync && role == .owner && hasShare,
+            canManageShare: availability && role == .owner && hasShare,
             canSyncNow: syncMode == .sharedFamilySync && hasShare,
             canLeaveShare: syncMode == .sharedFamilySync,
             lastErrorMessage: lastError
@@ -222,6 +224,23 @@ final class CloudKitSharingService {
         defaults.removeObject(forKey: DefaultsKey.lastError)
         markSynced(uploaded: true, downloaded: false)
         return share
+    }
+
+    func resumeFamilyShare(context: ModelContext) async throws {
+        try await requireICloudAccount()
+        guard let rootID = storedRootRecordID,
+              storedRole != .none else {
+            throw FamilySharingError.missingShare
+        }
+        PersistenceService.setFamilySyncMode(.sharedFamilySync, defaults: defaults)
+        do {
+            try await ensureFamilySyncPushSubscription(rootRecordID: rootID, role: storedRole)
+            _ = try await syncNow(context: context, reason: .manual)
+            defaults.removeObject(forKey: DefaultsKey.lastError)
+        } catch {
+            PersistenceService.setFamilySyncMode(.privateICloudSync, defaults: defaults)
+            throw error
+        }
     }
 
     func existingShare() async throws -> CKShare? {

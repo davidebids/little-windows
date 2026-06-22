@@ -20,12 +20,7 @@ struct FamilySyncSettingsView: View {
                 LabeledContent("Role", value: viewModel.state.role.displayName)
                 LabeledContent("Owner", value: viewModel.state.ownerDescription)
                 LabeledContent("Participant", value: viewModel.state.participantDescription)
-                if let lastSyncAt = viewModel.state.lastSyncAt {
-                    LabeledContent(
-                        "Last sync",
-                        value: lastSyncAt.formatted(date: .abbreviated, time: .shortened)
-                    )
-                }
+                LabeledContent("Last sync", value: lastSyncText)
             }
 
             Section("How family sync works") {
@@ -38,6 +33,14 @@ struct FamilySyncSettingsView: View {
             }
 
             Section("Family sharing") {
+                if viewModel.state.canResumeShare {
+                    Button {
+                        Task { await viewModel.resumeSharing(context: modelContext) }
+                    } label: {
+                        Label("Turn On Family Sync", systemImage: "person.2.badge.gearshape.fill")
+                    }
+                }
+
                 if viewModel.state.canCreateShare {
                     Button {
                         Task { await viewModel.startSharing(context: modelContext) }
@@ -58,7 +61,26 @@ struct FamilySyncSettingsView: View {
                     Button {
                         Task { await viewModel.syncNow(context: modelContext) }
                     } label: {
-                        Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                        if viewModel.isSyncing {
+                            Label("Syncing Family Data", systemImage: "arrow.triangle.2.circlepath")
+                        } else {
+                            Label("Upload and Download Now", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .disabled(viewModel.isSyncing)
+
+                    if viewModel.isSyncing {
+                        Label("Checking the shared iCloud record for newer changes and uploading local edits.", systemImage: "icloud")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if let message = viewModel.syncStatusMessage {
+                        Label(message, systemImage: "checkmark.icloud")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Manually checks the shared iCloud family record, downloads newer caregiver changes, and uploads local edits from this device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -149,6 +171,11 @@ struct FamilySyncSettingsView: View {
         } message: {
             Text("This stops syncing this device with the shared family data.")
         }
+    }
+
+    private var lastSyncText: String {
+        guard let lastSyncAt = viewModel.state.lastSyncAt else { return "Never" }
+        return lastSyncAt.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
