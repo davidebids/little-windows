@@ -17,6 +17,8 @@ struct InsightMetricCard: View {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(accent)
                         .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
 
@@ -62,10 +64,14 @@ struct InsightMetricGrid: View {
     let metrics: [InsightMetric]
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+        LazyVGrid(columns: columns, spacing: 10) {
             ForEach(metrics) { metric in
                 InsightMetricCard(metric: metric)
             }
         }
+    }
+
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 158), spacing: 10)]
     }
 }

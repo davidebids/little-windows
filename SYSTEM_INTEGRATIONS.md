@@ -54,6 +54,7 @@ If Xcode reports that the App Group is unavailable for a Personal Team, a paid A
 The app target includes:
 
 - `NSSupportsLiveActivities = YES`
+- `CKSharingSupported = YES` so installed TestFlight/App Store builds can open CloudKit Family Sync invitations
 - the `littlewindows` URL scheme
 - `LittleWindows/LittleWindows.entitlements`
 
@@ -225,6 +226,8 @@ Family Sync creates a CloudKit record-zone subscription for the shared family zo
 16. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
 
 Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit sync, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
+
+Simulator app launches use the local validation store by default so unsigned simulator builds do not initialize the CloudKit-backed SwiftData store. Set `LW_CLOUDKIT_SYNC_SMOKE` when intentionally running the manual CloudKit simulator smoke test.
 
 Family Sync also needs two signed physical devices or simulator/device installs with different Apple Accounts. Verify share creation, invitation acceptance, start/stop timer handoff, offline edits that sync later, and local widget/Live Activity refresh after synced changes arrive.
 

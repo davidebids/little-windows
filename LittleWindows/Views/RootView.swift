@@ -40,19 +40,60 @@ struct AppSectionHeader: View {
     var subtitle: String?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(.primary)
-            Spacer()
-            if let subtitle {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        content
+            .textCase(nil)
+            .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let subtitle {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    headerTitle
+                    Spacer(minLength: 12)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    headerTitle
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            headerTitle
+        }
+    }
+
+    private var headerTitle: some View {
+        Text(title)
+            .font(.headline)
+            .foregroundStyle(.primary)
+    }
+}
+
+struct AdaptiveLabeledContentStyle: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                configuration.label
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 8)
+                configuration.content
+                    .multilineTextAlignment(.trailing)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                configuration.label
+                configuration.content
+                    .multilineTextAlignment(.leading)
             }
         }
-        .textCase(nil)
-        .padding(.horizontal, 4)
     }
 }
 

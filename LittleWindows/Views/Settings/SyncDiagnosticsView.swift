@@ -10,6 +10,7 @@ struct SyncDiagnosticsView: View {
                     LabeledContent(item.name, value: "\(item.count)")
                 }
             }
+            .labeledContentStyle(AdaptiveLabeledContentStyle())
 
             Section("Profile scope") {
                 LabeledContent("Orphaned records", value: "\(snapshot.orphanedProfileScopedRecordCount)")
@@ -17,6 +18,7 @@ struct SyncDiagnosticsView: View {
                 Text("Records with missing or unknown profile IDs are assigned to an existing child profile during migration when possible.")
                     .foregroundStyle(.secondary)
             }
+            .labeledContentStyle(AdaptiveLabeledContentStyle())
 
             Section("Migration") {
                 LabeledContent(
@@ -33,6 +35,7 @@ struct SyncDiagnosticsView: View {
                         .foregroundStyle(.orange)
                 }
             }
+            .labeledContentStyle(AdaptiveLabeledContentStyle())
 
             Section("CloudKit Dashboard checks") {
                 Text("Verify record types in the private database development environment, then deploy the schema to production before TestFlight or App Store distribution.")

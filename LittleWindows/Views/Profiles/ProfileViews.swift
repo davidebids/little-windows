@@ -243,18 +243,27 @@ struct ProfileEditorView: View {
                                     matching: .images,
                                     photoLibrary: .shared()
                                 ) {
-                                    Label("Change", systemImage: "photo")
+                                    ProfilePhotoActionIcon(
+                                        systemImage: "photo",
+                                        tint: .accentColor
+                                    )
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Change photo")
 
-                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                Button(role: .destructive) {
                                     profilePhotoLoadToken = UUID()
                                     selectedPhotoItem = nil
                                     profilePhotoDraft = nil
                                     removesProfilePhoto = true
+                                } label: {
+                                    ProfilePhotoActionIcon(
+                                        systemImage: "trash",
+                                        tint: .red
+                                    )
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(.red)
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove photo")
                             }
                         }
                     }
@@ -513,6 +522,20 @@ private struct ProfilePhotoPreview: View {
             .compactMap(\.first)
         let value = String(parts).uppercased()
         return value.isEmpty ? "?" : value
+    }
+}
+
+private struct ProfilePhotoActionIcon: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: 54, height: 54)
+            .background(tint.opacity(0.12), in: Circle())
+            .contentShape(Circle())
     }
 }
 

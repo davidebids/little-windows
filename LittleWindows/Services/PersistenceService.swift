@@ -92,7 +92,11 @@ enum PersistenceService {
         if environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil {
             return true
         }
+#if targetEnvironment(simulator)
+        return true
+#else
         return environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+#endif
     }
 
     private static func makeLocalModelContainer(startupMessage: String? = nil) -> ModelContainer {

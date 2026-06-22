@@ -112,25 +112,16 @@ struct InsightsDashboardView: View {
 
     private var controls: some View {
         VStack(spacing: 14) {
-            HStack {
-                Picker("Date range", selection: $viewModel.selectedRange) {
-                    ForEach(InsightsDateRange.allCases) { range in
-                        Text(range.title).tag(range)
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    dateRangePicker
+                    Spacer(minLength: 8)
+                    compareToggle
                 }
-                .pickerStyle(.menu)
-                .disabled(!isDogProfile && !viewModel.selectedSection.usesDateRange)
 
-                Spacer()
-
-                if !isDogProfile {
-                    Toggle(
-                        "Compare to previous period",
-                        isOn: $viewModel.comparesToPreviousPeriod
-                    )
-                        .font(.subheadline)
-                        .fixedSize()
-                        .disabled(!viewModel.selectedSection.supportsPreviousPeriodComparison)
+                VStack(alignment: .leading, spacing: 10) {
+                    dateRangePicker
+                    compareToggle
                 }
             }
             .opacity(isDogProfile || viewModel.selectedSection.usesDateRange ? 1 : 0.38)
@@ -208,6 +199,30 @@ struct InsightsDashboardView: View {
         }
         .padding(14)
         .appSurface()
+    }
+
+    private var dateRangePicker: some View {
+        Picker("Date range", selection: $viewModel.selectedRange) {
+            ForEach(InsightsDateRange.allCases) { range in
+                Text(range.title).tag(range)
+            }
+        }
+        .pickerStyle(.menu)
+        .disabled(!isDogProfile && !viewModel.selectedSection.usesDateRange)
+    }
+
+    @ViewBuilder
+    private var compareToggle: some View {
+        if !isDogProfile {
+            Toggle(
+                "Compare to previous period",
+                isOn: $viewModel.comparesToPreviousPeriod
+            )
+            .font(.subheadline)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .disabled(!viewModel.selectedSection.supportsPreviousPeriodComparison)
+        }
     }
 
     private var filterStatusText: String {

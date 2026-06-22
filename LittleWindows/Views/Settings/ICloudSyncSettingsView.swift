@@ -47,6 +47,7 @@ struct ICloudSyncSettingsView: View {
                         .foregroundStyle(.orange)
                 }
             }
+            .labeledContentStyle(AdaptiveLabeledContentStyle())
 
             Section("How sync works") {
                 Text(viewModel.availability.detail)
@@ -99,6 +100,7 @@ struct ICloudSyncSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .labeledContentStyle(AdaptiveLabeledContentStyle())
 
             Section("Back up before testing") {
                 Text("Use Settings > Data > Export JSON backup before changing CloudKit containers, resetting development data, or testing migrations on devices.")

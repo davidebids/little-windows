@@ -22,6 +22,7 @@ struct FamilySyncSettingsView: View {
                 LabeledContent("Participant", value: viewModel.state.participantDescription)
                 LabeledContent("Last sync", value: lastSyncText)
             }
+            .labeledContentStyle(AdaptiveLabeledContentStyle())
 
             Section("How family sync works") {
                 Text("Family Sync uses an iCloud shared record between Apple Accounts. It is separate from Apple Family Sharing membership.")
