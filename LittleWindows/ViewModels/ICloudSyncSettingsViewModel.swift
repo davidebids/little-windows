@@ -12,6 +12,7 @@ final class ICloudSyncSettingsViewModel: ObservableObject {
     @Published private(set) var containerStatusDescription = PersistenceService.iCloudContainerIdentifier
     @Published private(set) var lastCheckedAt: Date?
     @Published private(set) var diagnostics: SyncDiagnosticSnapshot?
+    @Published private(set) var isLoadingDiagnostics = false
     @Published private(set) var startupErrorMessage = PersistenceService.startupErrorMessage
 
     private let statusService = SyncStatusService()
@@ -23,8 +24,8 @@ final class ICloudSyncSettingsViewModel: ObservableObject {
         requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
     }
 
-    func refresh(context: ModelContext) async {
-        await statusService.refreshStatus()
+    func refreshStatus(force: Bool = false) async {
+        await statusService.refreshStatus(force: force)
         availability = statusService.availability
         isICloudSyncEnabled = PersistenceService.isICloudSyncEnabled()
         syncMode = PersistenceService.familySyncMode()
@@ -32,7 +33,18 @@ final class ICloudSyncSettingsViewModel: ObservableObject {
         accountStatusDescription = statusService.accountStatusDescription
         containerStatusDescription = statusService.containerStatusDescription
         lastCheckedAt = statusService.lastCheckedAt
-        diagnostics = SyncDiagnosticsService.snapshot(context: context)
         startupErrorMessage = PersistenceService.startupErrorMessage
+    }
+
+    func refresh(context: ModelContext) async {
+        await refreshStatus(force: true)
+        await loadDiagnostics(context: context)
+    }
+
+    func loadDiagnostics(context: ModelContext) async {
+        guard !isLoadingDiagnostics else { return }
+        isLoadingDiagnostics = true
+        defer { isLoadingDiagnostics = false }
+        diagnostics = SyncDiagnosticsService.snapshot(context: context)
     }
 }

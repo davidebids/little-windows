@@ -20,6 +20,7 @@ struct TodayView: View {
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
 
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
+    @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
     @AppStorage("bedtimePredictionEnabled") private var bedtimePredictionEnabled = true
@@ -131,6 +132,12 @@ struct TodayView: View {
         )
     }
     private var isDogProfile: Bool { profile?.profileType == .dog }
+    private var activeCaregiverName: String {
+        CaregiverIdentityService.currentCaregiverName(
+            currentName: currentCaregiverName,
+            primaryName: caregiverOne
+        )
+    }
     private var relevantAppointments: [DoctorAppointment] {
         let now = Date()
         let soon = now.addingTimeInterval(3 * 24 * 60 * 60)
@@ -179,7 +186,7 @@ struct TodayView: View {
             Section {
                 HStack(alignment: .center, spacing: 14) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Good \(greeting), \(caregiverOne)")
+                        Text("Good \(greeting), \(activeCaregiverName)")
                             .font(.title2.bold())
                         if let profile {
                             Text(profile.profileType == .dog
@@ -928,7 +935,7 @@ struct TodayView: View {
             nursingSide: nursingSide,
             sleepKind: sleepKind,
             activityType: activityType,
-            caregiverName: caregiverOne,
+            caregiverName: activeCaregiverName,
             events: scopedEvents,
             profileID: selectedProfileID,
             profileType: profile?.profileType,
@@ -963,7 +970,7 @@ struct TodayView: View {
             type: .potty,
             startDate: now,
             endDate: now,
-            caregiverName: caregiverOne
+            caregiverName: activeCaregiverName
         )
         event.profileTypeSnapshot = .dog
         event.dogDetails = details
@@ -982,7 +989,7 @@ struct TodayView: View {
             type: .grooming,
             startDate: now,
             endDate: now,
-            caregiverName: caregiverOne
+            caregiverName: activeCaregiverName
         )
         event.profileTypeSnapshot = .dog
         event.dogDetails = details

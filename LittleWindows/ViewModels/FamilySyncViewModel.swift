@@ -32,8 +32,8 @@ final class FamilySyncViewModel: ObservableObject {
     private let statusService = SyncStatusService()
     private let sharingService = CloudKitSharingService.shared
 
-    func refresh() async {
-        await statusService.refreshStatus()
+    func refresh(force: Bool = false) async {
+        await statusService.refreshStatus(force: force)
         availability = statusService.availability
         state = sharingService.currentState(privateSyncAvailable: statusService.isICloudAvailable)
     }

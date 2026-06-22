@@ -8,6 +8,9 @@ struct FamilySyncSettingsView: View {
     @StateObject private var viewModel = FamilySyncViewModel()
     @AppStorage("familySyncActivityNotificationsEnabled")
     private var activityNotificationsEnabled = true
+    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
+    @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
+    @AppStorage("familySync.needsLogNamePrompt") private var needsLogNamePrompt = false
     @State private var confirmLeave = false
     @State private var deleteLocalDataOnLeave = false
 
@@ -104,6 +107,23 @@ struct FamilySyncSettingsView: View {
                 }
             }
 
+            Section("Caregiver") {
+                TextField("Your name on this device", text: $currentCaregiverName)
+                    .textContentType(.name)
+                    .onChange(of: currentCaregiverName) { _, value in
+                        if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            needsLogNamePrompt = false
+                        }
+                    }
+                Text("Family Sync controls who can access the shared data. This caregiver name is attached to new events from this device.")
+                    .foregroundStyle(.secondary)
+                if currentCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Using \(caregiverOne) until you enter a name here.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if viewModel.state.syncMode == .sharedFamilySync {
                 Section("Notifications") {
                     Toggle(
@@ -139,7 +159,7 @@ struct FamilySyncSettingsView: View {
         .navigationTitle("Family Sync")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            await viewModel.refresh()
+            await viewModel.refresh(force: true)
         }
         .task {
             await viewModel.refresh()

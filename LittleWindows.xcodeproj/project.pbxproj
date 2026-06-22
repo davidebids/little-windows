@@ -118,6 +118,7 @@
 		B00000000000000000000080 /* Services/SyncStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000080 /* Services/SyncStatusService.swift */; };
 		B00000000000000000000081 /* Services/SyncDiagnosticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000081 /* Services/SyncDiagnosticsService.swift */; };
 		B00000000000000000000082 /* Services/CloudKitSharingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000082 /* Services/CloudKitSharingService.swift */; };
+		B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008E /* Services/CaregiverIdentityService.swift */; };
 		B00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift */; };
 		B00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift */; };
 		B00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */; };
@@ -280,6 +281,7 @@
 		F00000000000000000000080 /* Services/SyncStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SyncStatusService.swift; sourceTree = "<group>"; };
 		F00000000000000000000081 /* Services/SyncDiagnosticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SyncDiagnosticsService.swift; sourceTree = "<group>"; };
 		F00000000000000000000082 /* Services/CloudKitSharingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CloudKitSharingService.swift; sourceTree = "<group>"; };
+		F0000000000000000000008E /* Services/CaregiverIdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaregiverIdentityService.swift; sourceTree = "<group>"; };
 		F00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/ICloudSyncSettingsViewModel.swift; sourceTree = "<group>"; };
 		F00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/FamilySyncViewModel.swift; sourceTree = "<group>"; };
 		F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/ICloudSyncSettingsView.swift; sourceTree = "<group>"; };
@@ -391,6 +393,7 @@
 				F00000000000000000000080 /* Services/SyncStatusService.swift */,
 				F00000000000000000000081 /* Services/SyncDiagnosticsService.swift */,
 				F00000000000000000000082 /* Services/CloudKitSharingService.swift */,
+				F0000000000000000000008E /* Services/CaregiverIdentityService.swift */,
 				F00000000000000000000089 /* Services/FoodHomeServices.swift */,
 				F00000000000000000000025 /* ViewModels/InsightsViewModel.swift */,
 				F00000000000000000000064 /* ViewModels/NightLightViewModel.swift */,
@@ -713,6 +716,7 @@
 				B00000000000000000000080 /* Services/SyncStatusService.swift in Sources */,
 				B00000000000000000000081 /* Services/SyncDiagnosticsService.swift in Sources */,
 				B00000000000000000000082 /* Services/CloudKitSharingService.swift in Sources */,
+				B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */,
 				B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */,
 				B00000000000000000000023 /* ViewModels/InsightsViewModel.swift in Sources */,
 				B00000000000000000000064 /* ViewModels/NightLightViewModel.swift in Sources */,

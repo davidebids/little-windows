@@ -275,6 +275,9 @@ final class CloudKitSharingService {
         try await ensureFamilySyncPushSubscription(rootRecordID: rootID, role: .participant)
         try importDataset(from: root, context: context)
         defaults.removeObject(forKey: DefaultsKey.lastError)
+        if !CaregiverIdentityService.hasExplicitCurrentCaregiverName(defaults: defaults) {
+            defaults.set(true, forKey: CaregiverIdentityService.needsLogNamePromptKey)
+        }
         markSynced(uploaded: false, downloaded: true)
     }
 

@@ -7,6 +7,8 @@ struct EventEditorView: View {
     @Query private var recentEvents: [BabyEvent]
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @StateObject private var profileService = ProfileService.shared
+    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
+    @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
 
     let existingEvent: BabyEvent?
     let onSave: (BabyEvent) -> Void
@@ -201,6 +203,12 @@ struct EventEditorView: View {
     private var activeProfileType: CareProfileType {
         existingEvent?.profileTypeSnapshot ?? selectedProfile?.profileType ?? .child
     }
+    private var activeCaregiverName: String {
+        CaregiverIdentityService.currentCaregiverName(
+            currentName: currentCaregiverName,
+            primaryName: caregiverOne
+        )
+    }
 
     var body: some View {
         Form {
@@ -232,6 +240,11 @@ struct EventEditorView: View {
         }
         .navigationTitle(existingEvent == nil ? "Add Event" : "Edit Event")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            guard existingEvent == nil,
+                  caregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            caregiverName = activeCaregiverName
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }

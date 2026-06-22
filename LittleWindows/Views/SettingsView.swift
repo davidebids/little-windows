@@ -13,7 +13,7 @@ struct SettingsView: View {
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
 
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
-    @AppStorage("caregiverTwo") private var caregiverTwo = "Caregiver 2"
+    @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
     @AppStorage("bedtimePredictionEnabled") private var bedtimePredictionEnabled = true
@@ -101,9 +101,11 @@ struct SettingsView: View {
             }
 
             Section("Caregivers") {
-                TextField("Caregiver 1", text: $caregiverOne)
-                TextField("Caregiver 2", text: $caregiverTwo)
-                Text("Names are attached to logs; there is no account or password system.")
+                TextField("Your name on this device", text: $currentCaregiverName)
+                    .textContentType(.name)
+                TextField("Primary name", text: $caregiverOne)
+                    .textContentType(.name)
+                Text("Your name is attached to new care entries from this device. Family Sync invitees set their own caregiver name on their device.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

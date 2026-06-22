@@ -64,8 +64,8 @@ struct ICloudSyncSettingsView: View {
                 }
             }
 
-            if let diagnostics = viewModel.diagnostics {
-                Section("Local data") {
+            Section("Local data") {
+                if let diagnostics = viewModel.diagnostics {
                     LabeledContent("Profiles", value: "\(diagnostics.profileCount)")
                     LabeledContent("Active profiles", value: "\(diagnostics.activeProfileCount)")
                     LabeledContent("Records", value: "\(diagnostics.recordCounts.dropFirst().map(\.count).reduce(0, +))")
@@ -81,12 +81,22 @@ struct ICloudSyncSettingsView: View {
                     if let migrationCompletedAt = diagnostics.migrationState.migrationCompletedAt {
                         LabeledContent("Migrated at", value: migrationCompletedAt.formatted(date: .abbreviated, time: .shortened))
                     }
-                }
-
-                NavigationLink {
-                    SyncDiagnosticsView(snapshot: diagnostics)
-                } label: {
-                    Label("Sync diagnostics", systemImage: "stethoscope")
+                    NavigationLink {
+                        SyncDiagnosticsView(snapshot: diagnostics)
+                    } label: {
+                        Label("Sync diagnostics", systemImage: "stethoscope")
+                    }
+                } else if viewModel.isLoadingDiagnostics {
+                    ProgressView("Checking local data")
+                } else {
+                    Button {
+                        Task { await viewModel.loadDiagnostics(context: modelContext) }
+                    } label: {
+                        Label("Load Local Data Counts", systemImage: "stethoscope")
+                    }
+                    Text("Detailed local counts can take a moment on large histories, so they load only when requested.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -101,7 +111,7 @@ struct ICloudSyncSettingsView: View {
             await viewModel.refresh(context: modelContext)
         }
         .task {
-            await viewModel.refresh(context: modelContext)
+            await viewModel.refreshStatus()
         }
     }
 

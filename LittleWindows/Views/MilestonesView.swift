@@ -1285,7 +1285,8 @@ struct MilestoneEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
-    @AppStorage("caregiverOne") private var caregiverName = "Caregiver 1"
+    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
+    @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
     @StateObject private var profileService = ProfileService.shared
 
     let milestone: MilestoneEntry?
@@ -1300,6 +1301,12 @@ struct MilestoneEditorView: View {
     @State private var removedAttachmentIDs: Set<UUID> = []
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var isImportingPhotos = false
+    private var activeCaregiverName: String {
+        CaregiverIdentityService.currentCaregiverName(
+            currentName: currentCaregiverName,
+            primaryName: caregiverOne
+        )
+    }
 
     init(milestone: MilestoneEntry? = nil, template: MilestoneTemplate? = nil) {
         self.milestone = milestone
@@ -1506,7 +1513,7 @@ struct MilestoneEditorView: View {
                 photoAttachmentIDs: attachmentIDs,
                 createdAt: now,
                 updatedAt: now,
-                caregiverName: caregiverName,
+                caregiverName: activeCaregiverName,
                 isFavorite: isFavorite
             ))
         }

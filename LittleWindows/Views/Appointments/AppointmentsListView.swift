@@ -203,6 +203,7 @@ struct AppointmentEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
+    @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
 
     let appointment: DoctorAppointment?
     let babyName: String
@@ -224,6 +225,12 @@ struct AppointmentEditorView: View {
     @State private var remindersEnabled: Bool
     @State private var selectedLeadTimes: Set<AppointmentReminderLeadTime>
     @State private var validationMessage: String?
+    private var activeCaregiverName: String {
+        CaregiverIdentityService.currentCaregiverName(
+            currentName: currentCaregiverName,
+            primaryName: caregiverOne
+        )
+    }
 
     init(
         appointment: DoctorAppointment? = nil,
@@ -388,7 +395,7 @@ struct AppointmentEditorView: View {
         value.questionsToAsk = clean(questionsToAsk)
         value.remindersEnabled = remindersEnabled
         value.reminderLeadTimes = Array(selectedLeadTimes)
-        value.caregiverName = caregiverOne
+        value.caregiverName = activeCaregiverName
         value.updatedAt = Date()
         try? modelContext.save()
         Task {

@@ -274,6 +274,8 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @AppStorage(FirstRunOnboarding.completedKey) private var hasCompletedInitialOnboarding = false
+    @AppStorage(CaregiverIdentityService.currentCaregiverNameKey) private var currentCaregiverName = ""
+    @AppStorage(CaregiverIdentityService.needsLogNamePromptKey) private var needsLogNamePrompt = false
     @StateObject private var router = DeepLinkRouter.shared
     @State private var shouldOpenSettingsAfterOnboarding = false
     @State private var hasCheckedInitialOnboardingState = false
@@ -365,8 +367,25 @@ struct RootView: View {
                                 router.showingSettings = false
                             }
                         }
-                    }
+                }
             }
+        }
+        .alert("Set your caregiver name", isPresented: Binding(
+            get: {
+                needsLogNamePrompt &&
+                    currentCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            },
+            set: { if !$0 { needsLogNamePrompt = false } }
+        )) {
+            Button("Open Settings") {
+                needsLogNamePrompt = false
+                router.showingSettings = true
+            }
+            Button("Later", role: .cancel) {
+                needsLogNamePrompt = false
+            }
+        } message: {
+            Text("Enter the caregiver name this device should use for new care entries.")
         }
         .onOpenURL { url in
             route(url)
@@ -452,7 +471,6 @@ private enum FirstRunOnboardingStep: Int {
 private struct FirstRunOnboardingView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
-    @AppStorage("caregiverTwo") private var caregiverTwo = "Caregiver 2"
     @StateObject private var profileService = ProfileService.shared
 
     var completeOnboarding: () -> Void
@@ -460,7 +478,6 @@ private struct FirstRunOnboardingView: View {
 
     @State private var step = FirstRunOnboardingStep.caregiver
     @State private var primaryCaregiverName = ""
-    @State private var secondaryCaregiverName = ""
     @State private var profileType = CareProfileType.child
     @State private var profileName = ""
     @State private var birthDate = Date()
@@ -472,10 +489,6 @@ private struct FirstRunOnboardingView: View {
 
     private var trimmedPrimaryCaregiverName: String {
         primaryCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var trimmedSecondaryCaregiverName: String {
-        secondaryCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var trimmedProfileName: String {
@@ -546,7 +559,7 @@ private struct FirstRunOnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(step == .caregiver
-                ? "Little Windows uses caregiver names on logs so the history makes sense later."
+                ? "Little Windows uses your name on logs so the history makes sense later."
                 : "Choose whether you are tracking a child or dog, then add the details needed for daily care.")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -557,20 +570,15 @@ private struct FirstRunOnboardingView: View {
     private var caregiverStep: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Caregivers")
+                Text("Caregiver")
                     .font(.headline)
 
                 TextField("Your name", text: $primaryCaregiverName)
                     .textContentType(.name)
-                    .submitLabel(.next)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Second caregiver, optional", text: $secondaryCaregiverName)
-                    .textContentType(.name)
                     .submitLabel(.done)
                     .textFieldStyle(.roundedBorder)
 
-                Text("You can edit these names later in Settings.")
+                Text("This name is attached to care entries created on this device.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -605,9 +613,6 @@ private struct FirstRunOnboardingView: View {
         .onAppear {
             if primaryCaregiverName.isEmpty, caregiverOne != "Caregiver 1" {
                 primaryCaregiverName = caregiverOne
-            }
-            if secondaryCaregiverName.isEmpty, caregiverTwo != "Caregiver 2" {
-                secondaryCaregiverName = caregiverTwo
             }
         }
     }
@@ -693,7 +698,7 @@ private struct FirstRunOnboardingView: View {
         }
 
         caregiverOne = trimmedPrimaryCaregiverName
-        caregiverTwo = trimmedSecondaryCaregiverName
+        CaregiverIdentityService.seedCurrentCaregiverNameIfNeeded(from: trimmedPrimaryCaregiverName)
 
         if profileType == .dog {
             profileService.createDogProfile(
@@ -757,7 +762,8 @@ enum DebugSimulatorSmokeSeedService {
         try? DataExportImportService.deleteAll(context: context)
         UserDefaults.standard.removeObject(forKey: FirstRunOnboarding.completedKey)
         UserDefaults.standard.removeObject(forKey: "caregiverOne")
-        UserDefaults.standard.removeObject(forKey: "caregiverTwo")
+        UserDefaults.standard.removeObject(forKey: CaregiverIdentityService.currentCaregiverNameKey)
+        UserDefaults.standard.removeObject(forKey: CaregiverIdentityService.needsLogNamePromptKey)
         UserDefaults.standard.removeObject(forKey: "selectedCareProfileID")
         PersistenceService.setICloudSyncEnabled(false)
     }
@@ -766,7 +772,7 @@ enum DebugSimulatorSmokeSeedService {
     static func seedIfNeeded(context: ModelContext, now: Date = Date()) {
         UserDefaults.standard.set(true, forKey: FirstRunOnboarding.completedKey)
         UserDefaults.standard.set("Sample Caregiver", forKey: "caregiverOne")
-        UserDefaults.standard.set("Backup Caregiver", forKey: "caregiverTwo")
+        UserDefaults.standard.set("Sample Caregiver", forKey: CaregiverIdentityService.currentCaregiverNameKey)
         PersistenceService.setICloudSyncEnabled(false)
 
         let calendar = Calendar.current

@@ -3,6 +3,17 @@ import Foundation
 
 @MainActor
 final class SyncStatusService {
+    private struct CachedStatus {
+        var availability: ICloudSyncAvailability
+        var accountStatusDescription: String
+        var containerStatusDescription: String
+        var lastCheckedAt: Date
+        var userFriendlyErrorMessage: String?
+    }
+
+    private static var cachedStatus: CachedStatus?
+    private static let cacheDuration: TimeInterval = 30
+
     private let containerIdentifier: String
     private let defaults: UserDefaults
 
@@ -24,13 +35,25 @@ final class SyncStatusService {
         self.defaults = defaults
     }
 
-    func refreshStatus() async {
+    func refreshStatus(force: Bool = false) async {
+        if !force,
+           let cached = Self.cachedStatus,
+           Date().timeIntervalSince(cached.lastCheckedAt) < Self.cacheDuration {
+            availability = cached.availability
+            accountStatusDescription = cached.accountStatusDescription
+            containerStatusDescription = cached.containerStatusDescription
+            lastCheckedAt = cached.lastCheckedAt
+            userFriendlyErrorMessage = cached.userFriendlyErrorMessage
+            return
+        }
+
         lastCheckedAt = Date()
         guard PersistenceService.isICloudSyncEnabled(defaults: defaults) else {
             availability = .disabled
             accountStatusDescription = "Off"
             containerStatusDescription = "Local only"
             userFriendlyErrorMessage = nil
+            cacheCurrentStatus()
             return
         }
 
@@ -74,5 +97,17 @@ final class SyncStatusService {
             accountStatusDescription = "Status check failed"
             userFriendlyErrorMessage = error.localizedDescription
         }
+        cacheCurrentStatus()
+    }
+
+    private func cacheCurrentStatus() {
+        guard let lastCheckedAt else { return }
+        Self.cachedStatus = CachedStatus(
+            availability: availability,
+            accountStatusDescription: accountStatusDescription,
+            containerStatusDescription: containerStatusDescription,
+            lastCheckedAt: lastCheckedAt,
+            userFriendlyErrorMessage: userFriendlyErrorMessage
+        )
     }
 }
