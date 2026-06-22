@@ -785,7 +785,7 @@ struct CaregiverNameFields: View {
                     .onSubmit(saveNow)
                     .onChange(of: currentName) { _, _ in scheduleSave() }
             }
-            LabeledContent("Family Sync share name") {
+            LabeledContent("Share name") {
                 TextField("Optional", text: $primaryName)
                     .textContentType(.name)
                     .multilineTextAlignment(.trailing)
@@ -846,12 +846,12 @@ private struct WakeWindowTuningView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Shortest wake window") {
+                LabeledContent("Shortest") {
                     TextField("Minutes", value: $minimum, format: .number)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Longest wake window") {
+                LabeledContent("Longest") {
                     TextField("Minutes", value: $maximum, format: .number)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
