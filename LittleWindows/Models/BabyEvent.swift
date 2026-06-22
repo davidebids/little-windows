@@ -258,6 +258,14 @@ final class BabyEvent {
         (leftDurationSeconds ?? 0) + (rightDurationSeconds ?? 0)
     }
 
+    var timelineDurationDescription: String? {
+        if type == .nursing, totalNursingDurationSeconds > 0 {
+            return DurationFormatting.string(seconds: totalNursingDurationSeconds)
+        }
+        guard let duration, duration >= 60 else { return nil }
+        return DurationFormatting.string(seconds: duration)
+    }
+
     var timerState: EventTimerState? {
         get {
             guard isTimerDraft else { return nil }

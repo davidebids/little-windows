@@ -46,14 +46,11 @@ struct EventRow: View {
         if let endDate = event.endDate {
             pieces[0] = DateFormatting.window(start: event.startDate, end: endDate)
         }
-        if let duration = event.duration, duration >= 60 {
-            pieces.append(DurationFormatting.string(seconds: duration))
+        if let duration = event.timelineDurationDescription {
+            pieces.append(duration)
         }
         if event.type == .feed, let amount = event.amountOz {
             pieces.append(String(format: "%.1f oz", amount))
-        }
-        if event.type == .nursing, event.totalNursingDurationSeconds > 0 {
-            pieces.append(DurationFormatting.string(seconds: event.totalNursingDurationSeconds))
         }
         if let caregiver = event.caregiverName, !caregiver.isEmpty {
             pieces.append(caregiver)

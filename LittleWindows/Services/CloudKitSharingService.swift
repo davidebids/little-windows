@@ -245,12 +245,24 @@ final class CloudKitSharingService {
 
     func existingShare() async throws -> CKShare? {
         guard storedRole == .owner,
-              let shareID = storedShareRecordID else { return nil }
+              let shareID = storedShareRecordID else {
+            throw FamilySharingError.missingShare
+        }
         let result = try await CKContainer(identifier: containerIdentifier)
             .privateCloudDatabase
             .records(for: [shareID])
-        guard case .success(let record)? = result[shareID] else { return nil }
-        return record as? CKShare
+        guard let shareResult = result[shareID] else {
+            throw FamilySharingError.missingShare
+        }
+        switch shareResult {
+        case .success(let record):
+            guard let share = record as? CKShare else {
+                throw FamilySharingError.missingShare
+            }
+            return share
+        case .failure(let error):
+            throw error
+        }
     }
 
     func acceptFamilyShare(metadata: CKShare.Metadata, context: ModelContext) async throws {

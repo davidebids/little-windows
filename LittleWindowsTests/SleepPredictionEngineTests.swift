@@ -2877,6 +2877,20 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(medicine.displayTitle, "Medicine: Tylenol, 2.5 mL")
     }
 
+    func testNursingTimelineDurationPrefersSideTotalOverWindowDuration() {
+        let start = Date()
+        let event = BabyEvent(
+            type: .nursing,
+            startDate: start,
+            endDate: start.addingTimeInterval(4 * 60)
+        )
+        event.nursingSide = .left
+        event.leftDurationSeconds = 4 * 60
+
+        XCTAssertEqual(event.displayTitle, "Left nursing")
+        XCTAssertEqual(event.timelineDurationDescription, "4m")
+    }
+
     func testTemperatureStoresCanonicalCelsiusAndConvertsForDisplay() {
         let event = BabyEvent(type: .temperature)
         event.temperatureCelsius = 37

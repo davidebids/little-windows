@@ -1158,14 +1158,11 @@ private struct CalendarEventBlock: View {
     }
 
     private var detailText: String? {
-        if let duration = event.duration, duration >= 60 {
-            return DurationFormatting.string(seconds: duration)
+        if let duration = event.timelineDurationDescription {
+            return duration
         }
         if event.type == .feed, let amount = event.amountOz {
             return String(format: "%.1f oz", amount)
-        }
-        if event.type == .nursing, event.totalNursingDurationSeconds > 0 {
-            return DurationFormatting.string(seconds: event.totalNursingDurationSeconds)
         }
         return event.caregiverName
     }

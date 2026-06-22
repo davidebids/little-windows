@@ -12,8 +12,6 @@ struct SettingsView: View {
     @Query private var records: [SleepPredictionRecord]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
 
-    @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
-    @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
     @AppStorage("bedtimePredictionEnabled") private var bedtimePredictionEnabled = true
@@ -41,9 +39,24 @@ struct SettingsView: View {
     @State private var statusMessage: String?
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
+    @State private var pendingNotificationRefresh: Task<Void, Never>?
 
     private var selectedProfile: BabyProfile? {
         profileService.selectedProfile(in: profiles)
+    }
+
+    private var selectedProfileID: UUID? {
+        selectedProfile?.id
+    }
+
+    private var selectedProfileAppointments: [DoctorAppointment] {
+        let profileID = selectedProfileID
+        return appointments.filter { $0.matchesProfile(profileID) }
+    }
+
+    private var selectedProfileAgeGuideReadStates: [AgeGuideReadState] {
+        let profileID = selectedProfileID
+        return ageGuideReadStates.filter { $0.matchesProfile(profileID) }
     }
 
     private var isDogProfile: Bool {
@@ -77,7 +90,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            if let profile = profileService.selectedProfile(in: profiles) {
+            if let profile = selectedProfile {
                 ProfileSettingsSection(profile: profile)
             }
 
@@ -87,7 +100,7 @@ struct SettingsView: View {
                 } label: {
                     LabeledContent {
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(profileService.selectedProfile(in: profiles)?.name ?? "None")
+                            Text(selectedProfile?.name ?? "None")
                             Text("Switch or edit")
                                 .font(.caption2)
                         }
@@ -101,28 +114,24 @@ struct SettingsView: View {
             }
 
             Section("Caregivers") {
-                TextField("Your name on this device", text: $currentCaregiverName)
-                    .textContentType(.name)
-                TextField("Primary name", text: $caregiverOne)
-                    .textContentType(.name)
-                Text("Your name is attached to new care entries from this device. Family Sync invitees set their own caregiver name on their device.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                CaregiverNameFields(
+                    detail: "Your name is attached to new care entries from this device. Family Sync invitees set their own caregiver name on their device."
+                )
             }
 
             if !isDogProfile {
                 Section("Prediction") {
                     Toggle("Use feed timing", isOn: $feedAdjustmentEnabled)
                         .onChange(of: feedAdjustmentEnabled) { _, _ in
-                            Task { await rescheduleNotification() }
+                            scheduleNotificationRefresh()
                         }
                     Toggle("Use nursing timing", isOn: $nursingAdjustmentEnabled)
                         .onChange(of: nursingAdjustmentEnabled) { _, _ in
-                            Task { await rescheduleNotification() }
+                            scheduleNotificationRefresh()
                         }
                     Toggle("Predict bedtime", isOn: $bedtimePredictionEnabled)
                         .onChange(of: bedtimePredictionEnabled) { _, _ in
-                            Task { await rescheduleNotification() }
+                            scheduleNotificationRefresh()
                         }
                     NavigationLink("Wake-window tuning") {
                         WakeWindowTuningView(
@@ -160,16 +169,16 @@ struct SettingsView: View {
                         Text("30 minutes before").tag(30)
                     }
                     .onChange(of: notificationLeadMinutes) { _, _ in
-                        Task { await rescheduleNotification() }
+                        scheduleNotificationRefresh()
                     }
 
                     Toggle("Nap alerts", isOn: $napAlertsEnabled)
                         .onChange(of: napAlertsEnabled) { _, _ in
-                            Task { await rescheduleNotification() }
+                            scheduleNotificationRefresh()
                         }
                     Toggle("Bedtime alerts", isOn: $bedtimeAlertsEnabled)
                         .onChange(of: bedtimeAlertsEnabled) { _, _ in
-                            Task { await rescheduleNotification() }
+                            scheduleNotificationRefresh()
                         }
 
                     Picker("Minimum confidence", selection: $confidenceThresholdRawValue) {
@@ -178,7 +187,7 @@ struct SettingsView: View {
                         }
                     }
                     .onChange(of: confidenceThresholdRawValue) { _, _ in
-                        Task { await rescheduleNotification() }
+                        scheduleNotificationRefresh()
                     }
 
                     LabeledContent("Next alert") {
@@ -237,7 +246,7 @@ struct SettingsView: View {
                     AppointmentsListView()
                 } label: {
                     LabeledContent {
-                        Text("\(appointments.filter { $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id) }.count)")
+                        Text("\(selectedProfileAppointments.count)")
                             .foregroundStyle(.secondary)
                     } label: {
                         Label("Appointments and visits", systemImage: "stethoscope")
@@ -246,15 +255,17 @@ struct SettingsView: View {
                 Toggle("Appointment reminders", isOn: $appointmentRemindersEnabled)
                     .onChange(of: appointmentRemindersEnabled) { _, enabled in
                         Task {
+                            let profile = selectedProfile
+                            let profileAppointments = selectedProfileAppointments
                             if enabled {
-                                for appointment in appointments.filter({ $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id) }) where !appointment.isCompleted {
+                                for appointment in profileAppointments where !appointment.isCompleted {
                                     await notificationManager.rescheduleAppointmentReminders(
                                         appointment: appointment,
-                                        babyName: profileService.selectedProfile(in: profiles)?.name ?? "Baby"
+                                        babyName: profile?.name ?? "Baby"
                                     )
                                 }
                             } else {
-                                for appointment in appointments.filter({ $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id) }) {
+                                for appointment in profileAppointments {
                                     await notificationManager.cancelAppointmentReminders(
                                         appointmentID: appointment.id
                                     )
@@ -311,9 +322,7 @@ struct SettingsView: View {
                             currentMonth: selectedProfile.map {
                                 AgeGuideService.shared.ageMonth(for: $0)
                             },
-                            readStates: ageGuideReadStates.filter {
-                                $0.matchesProfile(selectedProfile?.id)
-                            }
+                            readStates: selectedProfileAgeGuideReadStates
                         )
                     } label: {
                         Label("Browse age guides", systemImage: "book.pages.fill")
@@ -437,6 +446,9 @@ struct SettingsView: View {
         .task {
             await notificationManager.configure()
         }
+        .onDisappear {
+            pendingNotificationRefresh?.cancel()
+        }
     }
 
     private var settings: PredictionSettings {
@@ -450,19 +462,30 @@ struct SettingsView: View {
     }
 
     private func rescheduleNotification() async {
+        let profile = selectedProfile
+        let profileID = profile?.id
         await EventMutationService.refreshPrediction(
-            profile: profileService.selectedProfile(in: profiles),
+            profile: profile,
             events: events.filter {
-                $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id)
+                $0.matchesProfile(profileID)
             },
             records: records.filter {
-                $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id)
+                $0.matchesProfile(profileID)
             },
             context: modelContext,
             settings: settings,
             notificationsEnabled: notificationsEnabled,
             notificationLeadMinutes: notificationLeadMinutes
         )
+    }
+
+    private func scheduleNotificationRefresh() {
+        pendingNotificationRefresh?.cancel()
+        pendingNotificationRefresh = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await rescheduleNotification()
+        }
     }
 
     private func rescheduleMonthlyAgeGuideNotification() async {
@@ -479,18 +502,20 @@ struct SettingsView: View {
     }
 
     private var currentPrediction: SleepPrediction? {
-        records.first(where: {
+        let profileID = selectedProfileID
+        return records.first(where: {
             $0.actualSleepEventID == nil &&
-            $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id)
+            $0.matchesProfile(profileID)
         })?.prediction
     }
 
     private var notificationStatus: String {
-        notificationManager.statusText(
+        let profileID = selectedProfileID
+        return notificationManager.statusText(
             prediction: currentPrediction,
             settings: .current,
             isSleeping: events.contains {
-                $0.matchesProfile(profileService.selectedProfile(in: profiles)?.id) &&
+                $0.matchesProfile(profileID) &&
                 $0.type == .sleep && $0.isTimerRunning
             }
         )
@@ -500,7 +525,7 @@ struct SettingsView: View {
         if let currentPrediction {
             return NotificationManager.notificationCopy(
                 for: currentPrediction,
-                babyName: profileService.selectedProfile(in: profiles)?.name ?? "Baby",
+                babyName: selectedProfile?.name ?? "Baby",
                 leadMinutes: notificationLeadMinutes
             )
         }
@@ -645,6 +670,15 @@ private struct SyncSettingsSection: View {
 
 private struct ProfileSettingsSection: View {
     @Bindable var profile: BabyProfile
+    @State private var draftName = ""
+    @State private var draftNotes = ""
+    @State private var pendingSave: Task<Void, Never>?
+
+    init(profile: BabyProfile) {
+        self.profile = profile
+        _draftName = State(initialValue: profile.name)
+        _draftNotes = State(initialValue: profile.notes)
+    }
 
     var body: some View {
         Section {
@@ -652,7 +686,7 @@ private struct ProfileSettingsSection: View {
                 ProfileAvatarView(profile: profile, size: 58)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(profile.name)
+                    Text(draftName.isEmpty ? profile.name : draftName)
                         .font(.headline)
                     Text(DateFormatting.age(from: profile.birthDate))
                         .font(.subheadline)
@@ -661,8 +695,9 @@ private struct ProfileSettingsSection: View {
             }
             .padding(.vertical, 4)
 
-            TextField("Name", text: $profile.name)
-                .onChange(of: profile.name) { _, _ in profile.updatedAt = Date() }
+            TextField("Name", text: $draftName)
+                .onSubmit(saveNow)
+                .onChange(of: draftName) { _, _ in scheduleSave() }
             DatePicker("Birthdate", selection: $profile.birthDate, in: ...Date(), displayedComponents: .date)
                 .onChange(of: profile.birthDate) { _, _ in profile.updatedAt = Date() }
             Picker("Sex for growth charts", selection: Binding(
@@ -676,9 +711,129 @@ private struct ProfileSettingsSection: View {
                     Text($0.displayName).tag($0)
                 }
             }
-            TextField("Notes", text: $profile.notes, axis: .vertical)
+            TextField("Notes", text: $draftNotes, axis: .vertical)
+                .onSubmit(saveNow)
+                .onChange(of: draftNotes) { _, _ in scheduleSave() }
         } header: {
             Label("Baby profile", systemImage: "face.smiling")
+        }
+        .onAppear(perform: syncDraftsFromProfile)
+        .onChange(of: profile.id) { _, _ in syncDraftsFromProfile() }
+        .onDisappear(perform: saveNow)
+    }
+
+    private func syncDraftsFromProfile() {
+        pendingSave?.cancel()
+        draftName = profile.name
+        draftNotes = profile.notes
+    }
+
+    private func scheduleSave() {
+        let name = draftName
+        let notes = draftNotes
+        pendingSave?.cancel()
+        pendingSave = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            save(name: name, notes: notes)
+        }
+    }
+
+    private func saveNow() {
+        pendingSave?.cancel()
+        save(name: draftName, notes: draftNotes)
+    }
+
+    private func save(name: String, notes: String) {
+        guard profile.name != name || profile.notes != notes else { return }
+        profile.name = name
+        profile.notes = notes
+        profile.updatedAt = Date()
+    }
+}
+
+struct CaregiverNameFields: View {
+    let detail: String
+    var clearsFamilySyncPrompt = false
+    var showsFallback = true
+
+    @State private var currentName: String
+    @State private var primaryName: String
+    @State private var pendingSave: Task<Void, Never>?
+
+    init(
+        detail: String,
+        clearsFamilySyncPrompt: Bool = false,
+        showsFallback: Bool = true
+    ) {
+        self.detail = detail
+        self.clearsFamilySyncPrompt = clearsFamilySyncPrompt
+        self.showsFallback = showsFallback
+        _currentName = State(
+            initialValue: UserDefaults.standard.string(
+                forKey: CaregiverIdentityService.currentCaregiverNameKey
+            ) ?? ""
+        )
+        _primaryName = State(
+            initialValue: UserDefaults.standard.string(
+                forKey: CaregiverIdentityService.primaryCaregiverNameKey
+            ) ?? "Caregiver 1"
+        )
+    }
+
+    var body: some View {
+        Group {
+            TextField("Your name on this device", text: $currentName)
+                .textContentType(.name)
+                .onSubmit(saveNow)
+                .onChange(of: currentName) { _, _ in scheduleSave() }
+            TextField("Primary name", text: $primaryName)
+                .textContentType(.name)
+                .onSubmit(saveNow)
+                .onChange(of: primaryName) { _, _ in scheduleSave() }
+            Text(detail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if showsFallback && currentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Using \(fallbackName) until you enter a name here.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onDisappear(perform: saveNow)
+    }
+
+    private var fallbackName: String {
+        CaregiverIdentityService.currentCaregiverName(
+            currentName: "",
+            primaryName: primaryName,
+            fallback: "Caregiver"
+        )
+    }
+
+    private func scheduleSave() {
+        let currentName = currentName
+        let primaryName = primaryName
+        pendingSave?.cancel()
+        pendingSave = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            save(currentName: currentName, primaryName: primaryName)
+        }
+    }
+
+    private func saveNow() {
+        pendingSave?.cancel()
+        save(currentName: currentName, primaryName: primaryName)
+    }
+
+    private func save(currentName: String, primaryName: String) {
+        let defaults = UserDefaults.standard
+        defaults.set(currentName, forKey: CaregiverIdentityService.currentCaregiverNameKey)
+        defaults.set(primaryName, forKey: CaregiverIdentityService.primaryCaregiverNameKey)
+        if clearsFamilySyncPrompt,
+           !currentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            defaults.set(false, forKey: CaregiverIdentityService.needsLogNamePromptKey)
         }
     }
 }

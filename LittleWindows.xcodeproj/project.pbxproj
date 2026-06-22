@@ -118,7 +118,6 @@
 		B00000000000000000000080 /* Services/SyncStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000080 /* Services/SyncStatusService.swift */; };
 		B00000000000000000000081 /* Services/SyncDiagnosticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000081 /* Services/SyncDiagnosticsService.swift */; };
 		B00000000000000000000082 /* Services/CloudKitSharingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000082 /* Services/CloudKitSharingService.swift */; };
-		B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008E /* Services/CaregiverIdentityService.swift */; };
 		B00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift */; };
 		B00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift */; };
 		B00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */; };
@@ -130,6 +129,7 @@
 		B0000000000000000000008B /* Views/Food/FoodHomeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */; };
 		B0000000000000000000008C /* UserVisibleFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008C /* UserVisibleFlowUITests.swift */; };
 		B0000000000000000000008D /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
+		B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008E /* Services/CaregiverIdentityService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -281,7 +281,6 @@
 		F00000000000000000000080 /* Services/SyncStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SyncStatusService.swift; sourceTree = "<group>"; };
 		F00000000000000000000081 /* Services/SyncDiagnosticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SyncDiagnosticsService.swift; sourceTree = "<group>"; };
 		F00000000000000000000082 /* Services/CloudKitSharingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CloudKitSharingService.swift; sourceTree = "<group>"; };
-		F0000000000000000000008E /* Services/CaregiverIdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaregiverIdentityService.swift; sourceTree = "<group>"; };
 		F00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/ICloudSyncSettingsViewModel.swift; sourceTree = "<group>"; };
 		F00000000000000000000084 /* ViewModels/FamilySyncViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/FamilySyncViewModel.swift; sourceTree = "<group>"; };
 		F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/ICloudSyncSettingsView.swift; sourceTree = "<group>"; };
@@ -293,6 +292,7 @@
 		F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Food/FoodHomeViews.swift; sourceTree = "<group>"; };
 		F0000000000000000000008C /* UserVisibleFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserVisibleFlowUITests.swift; sourceTree = "<group>"; };
 		F0000000000000000000008D /* LittleWindowsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LittleWindowsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0000000000000000000008E /* Services/CaregiverIdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaregiverIdentityService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -957,13 +957,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -982,13 +982,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1036,11 +1036,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-					MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1056,11 +1056,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-					MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
