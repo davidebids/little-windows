@@ -108,6 +108,58 @@ enum InsightsChartFormatting {
         return DateFormatting.time.string(from: date)
     }
 
+    static func clockDomain(
+        values: [Double],
+        bounds: ClosedRange<Double>,
+        minimumSpan: Double = 120,
+        padding: Double = 30
+    ) -> ClosedRange<Double> {
+        guard let minValue = values.min(), let maxValue = values.max() else {
+            return bounds
+        }
+
+        let tickSize = 30.0
+        var lower = ((minValue - padding) / tickSize).rounded(.down) * tickSize
+        var upper = ((maxValue + padding) / tickSize).rounded(.up) * tickSize
+
+        if upper - lower < minimumSpan {
+            let center = (minValue + maxValue) / 2
+            lower = ((center - minimumSpan / 2) / tickSize).rounded(.down) * tickSize
+            upper = lower + minimumSpan
+        }
+
+        if lower < bounds.lowerBound {
+            upper = min(bounds.upperBound, upper + (bounds.lowerBound - lower))
+            lower = bounds.lowerBound
+        }
+
+        if upper > bounds.upperBound {
+            lower = max(bounds.lowerBound, lower - (upper - bounds.upperBound))
+            upper = bounds.upperBound
+        }
+
+        return lower...upper
+    }
+
+    static func clockAxisValues(for domain: ClosedRange<Double>) -> [Double] {
+        let span = domain.upperBound - domain.lowerBound
+        let step: Double
+        if span <= 180 {
+            step = 30
+        } else if span <= 360 {
+            step = 60
+        } else {
+            step = 120
+        }
+        var values: [Double] = []
+        var current = (domain.lowerBound / step).rounded(.up) * step
+        while current <= domain.upperBound + 0.1 {
+            values.append(current)
+            current += step
+        }
+        return values
+    }
+
     static func napLabel(_ index: Int) -> String {
         index == 5 ? "Pre-bed" : "Nap \(index)"
     }

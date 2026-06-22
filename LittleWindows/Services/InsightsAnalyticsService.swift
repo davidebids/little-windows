@@ -1227,7 +1227,7 @@ enum InsightsAnalyticsService {
                 metricName: "Most consistent",
                 currentValueDescription: duration(mean),
                 direction: .flat,
-                interpretation: "\(profileName)'s \(napLabel(most.0).lowercased()) is the most consistent at about \(duration(mean)).",
+                interpretation: "\(profileName)'s \(wakeWindowLabel(most.0)) is the most consistent at about \(duration(mean)).",
                 significance: .medium
             ))
         }
@@ -1385,6 +1385,23 @@ enum InsightsAnalyticsService {
 
     private static func napLabel(_ index: Int) -> String {
         index == 5 ? "Pre-bed" : "Nap \(index)"
+    }
+
+    private static func wakeWindowLabel(_ index: Int) -> String {
+        switch index {
+        case 1:
+            "wake window before the first nap"
+        case 2:
+            "wake window before the second nap"
+        case 3:
+            "wake window before the third nap"
+        case 4:
+            "wake window before the fourth nap"
+        case 5:
+            "pre-bed wake window"
+        default:
+            "wake window before nap \(index)"
+        }
     }
 
     private static func duration(_ minutes: Double) -> String {

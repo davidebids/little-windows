@@ -5,13 +5,11 @@ import SwiftUI
 struct InsightsDashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
     let navigationTitle: String
     @StateObject private var viewModel = InsightsViewModel()
     @StateObject private var profileService = ProfileService.shared
     @State private var events: [BabyEvent] = []
     @State private var appointments: [DoctorAppointment] = []
-    @State private var milestones: [MilestoneEntry] = []
     @State private var records: [SleepPredictionRecord] = []
 
     init(navigationTitle: String = "Insights") {
@@ -29,12 +27,6 @@ struct InsightsDashboardView: View {
     }
     private var scopedAppointments: [DoctorAppointment] {
         appointments.filter { $0.matchesProfile(profile?.id) }
-    }
-    private var scopedMilestones: [MilestoneEntry] {
-        milestones.filter { $0.matchesProfile(profile?.id) }
-    }
-    private var scopedReadStates: [AgeGuideReadState] {
-        ageGuideReadStates.filter { $0.matchesProfile(profile?.id) }
     }
     private var scopedRecords: [SleepPredictionRecord] {
         records.filter { $0.matchesProfile(profile?.id) }
@@ -90,13 +82,6 @@ struct InsightsDashboardView: View {
                         )
                     case .temperature:
                         TemperatureInsightsView(snapshot: viewModel.snapshot)
-                    case .milestones:
-                        MilestoneInsightsView(
-                            milestones: scopedMilestones,
-                            profile: profile,
-                            period: viewModel.selectedPeriodRange,
-                            readStates: scopedReadStates
-                        )
                     case .predictionAccuracy:
                         PredictionAccuracyInsightsView(snapshot: viewModel.snapshot)
                     }
@@ -304,16 +289,6 @@ struct InsightsDashboardView: View {
             appointments = try modelContext.fetch(appointmentDescriptor)
                 .filter { $0.matchesProfile(selectedProfileID) }
 
-            let milestoneStart = profile?.birthDate ?? .distantPast
-            let milestoneDescriptor = FetchDescriptor<MilestoneEntry>(
-                predicate: #Predicate<MilestoneEntry> { milestone in
-                    milestone.date >= milestoneStart
-                },
-                sortBy: [SortDescriptor(\MilestoneEntry.date)]
-            )
-            milestones = try modelContext.fetch(milestoneDescriptor)
-                .filter { $0.matchesProfile(selectedProfileID) }
-
             let recordStart = calendar.date(byAdding: .day, value: -45, to: range.lowerBound) ?? range.lowerBound
             let recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
                 predicate: #Predicate<SleepPredictionRecord> { record in
@@ -326,7 +301,6 @@ struct InsightsDashboardView: View {
         } catch {
             events = []
             appointments = []
-            milestones = []
             records = []
         }
 

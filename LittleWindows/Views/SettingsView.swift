@@ -113,9 +113,9 @@ struct SettingsView: View {
                 Label("Profiles", systemImage: "person.crop.circle")
             }
 
-            Section("Caregivers") {
+            Section("Your name") {
                 CaregiverNameFields(
-                    detail: "Your name is attached to new care entries from this device. Family Sync invitees set their own caregiver name on their device."
+                    detail: "Name on this device appears on new care entries you log here. Family Sync share name labels the shared family space; most people can keep both names the same."
                 )
             }
 
@@ -225,11 +225,6 @@ struct SettingsView: View {
             SyncSettingsSection()
 
             Section {
-                NavigationLink {
-                    FoodHomeView()
-                } label: {
-                    Label("Food & Home", systemImage: "cart.fill")
-                }
                 NavigationLink {
                     FoodReminderSettingsLauncher()
                 } label: {
@@ -783,14 +778,20 @@ struct CaregiverNameFields: View {
 
     var body: some View {
         Group {
-            TextField("Your name on this device", text: $currentName)
-                .textContentType(.name)
-                .onSubmit(saveNow)
-                .onChange(of: currentName) { _, _ in scheduleSave() }
-            TextField("Primary name", text: $primaryName)
-                .textContentType(.name)
-                .onSubmit(saveNow)
-                .onChange(of: primaryName) { _, _ in scheduleSave() }
+            LabeledContent("Name on this device") {
+                TextField("Your name", text: $currentName)
+                    .textContentType(.name)
+                    .multilineTextAlignment(.trailing)
+                    .onSubmit(saveNow)
+                    .onChange(of: currentName) { _, _ in scheduleSave() }
+            }
+            LabeledContent("Family Sync share name") {
+                TextField("Optional", text: $primaryName)
+                    .textContentType(.name)
+                    .multilineTextAlignment(.trailing)
+                    .onSubmit(saveNow)
+                    .onChange(of: primaryName) { _, _ in scheduleSave() }
+            }
             Text(detail)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -845,18 +846,24 @@ private struct WakeWindowTuningView: View {
     var body: some View {
         Form {
             Section {
-                TextField("Minimum minutes", value: $minimum, format: .number)
-                    .keyboardType(.numberPad)
-                TextField("Maximum minutes", value: $maximum, format: .number)
-                    .keyboardType(.numberPad)
+                LabeledContent("Shortest wake window") {
+                    TextField("Minutes", value: $minimum, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Longest wake window") {
+                    TextField("Minutes", value: $maximum, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
                 Button("Use age-based defaults") {
                     minimum = 0
                     maximum = 0
                 }
             } header: {
-                Text("Custom baseline")
+                Text("Fallback wake-window range")
             } footer: {
-                Text("Leave both at 0 to use the editable age priors in SleepPredictionEngine. Personal history still takes precedence as data grows.")
+                Text("Used when there is not enough personal sleep history yet. Set both fields to 0 to use the age-based default range.")
             }
         }
         .navigationTitle("Wake Windows")

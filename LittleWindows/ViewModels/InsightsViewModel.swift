@@ -38,7 +38,6 @@ enum InsightsSection: String, CaseIterable, Identifiable {
     case appointments = "Appointments"
     case growth = "Growth"
     case temperature = "Temperature"
-    case milestones = "Milestones"
     case predictionAccuracy = "Prediction Accuracy"
 
     var id: String { rawValue }
@@ -48,7 +47,7 @@ enum InsightsSection: String, CaseIterable, Identifiable {
     }
 
     var supportsPreviousPeriodComparison: Bool {
-        self != .growth && self != .milestones
+        self != .growth
     }
 }
 

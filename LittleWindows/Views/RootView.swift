@@ -277,8 +277,13 @@ struct RootView: View {
     @AppStorage(CaregiverIdentityService.currentCaregiverNameKey) private var currentCaregiverName = ""
     @AppStorage(CaregiverIdentityService.needsLogNamePromptKey) private var needsLogNamePrompt = false
     @StateObject private var router = DeepLinkRouter.shared
+    @StateObject private var profileService = ProfileService.shared
     @State private var shouldOpenSettingsAfterOnboarding = false
     @State private var hasCheckedInitialOnboardingState = false
+
+    private var selectedProfile: CareProfile? {
+        profileService.selectedProfile(in: profiles)
+    }
 
     var body: some View {
         TabView(selection: $router.selectedTab) {
@@ -324,7 +329,7 @@ struct RootView: View {
 
             Group {
                 if router.selectedTab == .nightLight {
-                    NavigationStack { NightLightView() }
+                    NavigationStack { NightLightView(profile: selectedProfile) }
                 } else {
                     Color.clear
                 }

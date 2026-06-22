@@ -109,8 +109,9 @@ struct SleepInsightsView: View {
                     )
                     .foregroundStyle(.indigo)
                 }
+                .chartYScale(domain: bedtimeTimeDomain)
                 .chartYAxis {
-                    AxisMarks(position: .leading) { value in
+                    AxisMarks(position: .leading, values: bedtimeAxisValues) { value in
                         AxisGridLine()
                         AxisValueLabel {
                             if let minutes = value.as(Double.self) {
@@ -138,8 +139,9 @@ struct SleepInsightsView: View {
                     )
                     .foregroundStyle(.orange)
                 }
+                .chartYScale(domain: morningWakeTimeDomain)
                 .chartYAxis {
-                    AxisMarks(position: .leading) { value in
+                    AxisMarks(position: .leading, values: morningWakeAxisValues) { value in
                         AxisGridLine()
                         AxisValueLabel {
                             if let minutes = value.as(Double.self) {
@@ -152,6 +154,28 @@ struct SleepInsightsView: View {
 
             dailySleepBlocks
         }
+    }
+
+    private var bedtimeTimeDomain: ClosedRange<Double> {
+        InsightsChartFormatting.clockDomain(
+            values: snapshot.bedtimes.map(\.value),
+            bounds: 1_020...1_440
+        )
+    }
+
+    private var bedtimeAxisValues: [Double] {
+        InsightsChartFormatting.clockAxisValues(for: bedtimeTimeDomain)
+    }
+
+    private var morningWakeTimeDomain: ClosedRange<Double> {
+        InsightsChartFormatting.clockDomain(
+            values: snapshot.morningWakes.map(\.value),
+            bounds: 0...720
+        )
+    }
+
+    private var morningWakeAxisValues: [Double] {
+        InsightsChartFormatting.clockAxisValues(for: morningWakeTimeDomain)
     }
 
     private var sleepScoreSection: some View {

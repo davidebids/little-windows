@@ -104,9 +104,9 @@ struct FamilySyncSettingsView: View {
                 }
             }
 
-            Section("Caregiver") {
+            Section("Your name") {
                 CaregiverNameFields(
-                    detail: "Family Sync controls who can access the shared data. This caregiver name is attached to new events from this device.",
+                    detail: "Name on this device appears on new care entries you log here. Family Sync share name labels the shared family space; most people can keep both names the same.",
                     clearsFamilySyncPrompt: true
                 )
             }

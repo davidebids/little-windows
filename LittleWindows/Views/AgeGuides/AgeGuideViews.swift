@@ -165,7 +165,6 @@ struct AgeGuideDetailView: View {
         List {
             Section {
                 header
-                    .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -220,6 +219,7 @@ struct AgeGuideDetailView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(MilestonePalette.background)
         .navigationTitle(guide.ageLabel)

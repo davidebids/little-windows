@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NightLightView: View {
+    let profile: CareProfile?
     @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var viewModel = NightLightViewModel()
 
@@ -32,9 +33,16 @@ struct NightLightView: View {
                 Button {
                     router.presentSettings()
                 } label: {
-                    Image(systemName: "gearshape.fill")
+                    if let profile {
+                        ProfileAvatarView(profile: profile, size: 32)
+                    } else {
+                        Image(systemName: "person.crop.circle")
+                            .font(.title2)
+                            .foregroundStyle(AppTheme.accent)
+                    }
                 }
-                .accessibilityLabel("Settings")
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(profile?.name ?? "Profile") settings")
             }
         }
         .preferredColorScheme(.dark)

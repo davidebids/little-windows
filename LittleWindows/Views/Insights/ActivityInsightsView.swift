@@ -71,23 +71,6 @@ struct ActivityInsightsView: View {
                 .chartLegend(.hidden)
             }
 
-            if !snapshot.medicineNames.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Medicines logged", systemImage: "cross.case.fill")
-                        .font(.headline)
-                        .foregroundStyle(.red)
-                    ForEach(snapshot.medicineNames, id: \.self) { name in
-                        Text(name)
-                            .font(.subheadline)
-                    }
-                    Text("This is a log summary only, not medical guidance.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .appSurface()
-            }
         }
     }
 }
