@@ -1693,6 +1693,51 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(plan.segments.filter { $0.kind == .nap }.map(\.napIndex), [1, 2])
     }
 
+    func testBackwardsPlanManualNapAdjustmentReflowsFollowingWindows() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        let adjustedNapStart = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 9))!
+        let adjustedNapEnd = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10, minute: 15))!
+
+        let plan = SleepPredictionEngine.backwardsPlan(
+            profile: profile,
+            events: makeTwoNapHistory(today: today, calendar: calendar),
+            targetBedtime: target,
+            now: today,
+            calendar: calendar,
+            adjustments: [
+                BackwardsSleepPlanAdjustment(
+                    kind: .nap,
+                    napIndex: 1,
+                    startDate: adjustedNapStart,
+                    endDate: adjustedNapEnd
+                )
+            ]
+        )
+
+        let firstWake = try XCTUnwrap(plan.segments.first { $0.kind == .wakeWindow && $0.napIndex == 1 })
+        let firstNap = try XCTUnwrap(plan.segments.first { $0.kind == .nap && $0.napIndex == 1 })
+        let secondWake = try XCTUnwrap(plan.segments.first { $0.kind == .wakeWindow && $0.napIndex == 2 })
+        let secondNap = try XCTUnwrap(plan.segments.first { $0.kind == .nap && $0.napIndex == 2 })
+
+        XCTAssertEqual(firstWake.endDate, adjustedNapStart)
+        XCTAssertEqual(firstNap.startDate, adjustedNapStart)
+        XCTAssertEqual(firstNap.endDate, adjustedNapEnd)
+        XCTAssertEqual(secondWake.startDate, adjustedNapEnd)
+        XCTAssertEqual(
+            secondNap.startDate,
+            calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 12, minute: 45))
+        )
+        XCTAssertEqual(plan.segments.last?.startDate, target)
+        XCTAssertEqual(plan.segmentAdjustments.count, 1)
+    }
+
     func testActiveSleepPlanWakeAlertUsesPlannedNapEndForCurrentNap() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -1737,6 +1782,50 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         XCTAssertEqual(alert?.wakeByDate, plannedWake)
         XCTAssertEqual(alert?.targetBedtime, target)
+    }
+
+    func testActiveSleepPlanWakeAlertUsesAdjustedPlannedNapEnd() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8, minute: 45))!
+        let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        let adjustedNapEnd = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10, minute: 15))!
+        var events = makeTwoNapHistory(today: now, calendar: calendar)
+        let activeSleep = activeNap(
+            profileID: profile.id,
+            start: now
+        )
+        events.append(activeSleep)
+        let activePlan = ActiveSleepPlan(
+            profileID: profile.id,
+            targetBedtime: target,
+            historyRangeRawValue: BackwardsSleepPlanHistoryRange.sevenDays.rawValue,
+            activatedAt: now,
+            generatedAt: now,
+            segmentAdjustments: [
+                BackwardsSleepPlanAdjustment(
+                    kind: .nap,
+                    napIndex: 1,
+                    startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 9))!,
+                    endDate: adjustedNapEnd
+                )
+            ]
+        )
+
+        let alert = ActiveSleepPlanService.wakeAlert(
+            for: activePlan,
+            profile: profile,
+            events: events,
+            activeSleep: activeSleep,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(alert?.wakeByDate, adjustedNapEnd)
     }
 
     func testActiveSleepPlanWakeAlertUsesBedtimeWakeWindowForLateNap() throws {

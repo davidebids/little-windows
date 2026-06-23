@@ -75,6 +75,7 @@ struct BackwardsSleepPlanView: View {
 
     @State private var targetBedtime: Date
     @State private var historyRange: BackwardsSleepPlanHistoryRange = .sevenDays
+    @State private var segmentAdjustments: [BackwardsSleepPlanAdjustment] = []
 
     init(
         profile: BabyProfile,
@@ -95,6 +96,7 @@ struct BackwardsSleepPlanView: View {
             initialValue: activePlan?.targetBedtime ?? Self.defaultTargetBedtime(now: now)
         )
         _historyRange = State(initialValue: activePlan?.historyRange ?? .sevenDays)
+        _segmentAdjustments = State(initialValue: activePlan?.segmentAdjustments ?? [])
     }
 
     private var plan: BackwardsSleepPlan {
@@ -103,7 +105,8 @@ struct BackwardsSleepPlanView: View {
             events: events,
             targetBedtime: targetBedtime,
             historyRange: historyRange,
-            settings: settings
+            settings: settings,
+            adjustments: segmentAdjustments
         )
     }
 
@@ -112,7 +115,8 @@ struct BackwardsSleepPlanView: View {
         let isActivePlan = activePlan.map {
             $0.profileID == profile.id &&
                 abs($0.targetBedtime.timeIntervalSince(plan.targetBedtime)) < 60 &&
-                $0.historyRange == historyRange
+                $0.historyRange == historyRange &&
+                $0.segmentAdjustments == plan.segmentAdjustments
         } ?? false
 
         List {
@@ -139,6 +143,13 @@ struct BackwardsSleepPlanView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(isActivePlan ? .green : .indigo)
+                if !segmentAdjustments.isEmpty {
+                    Button("Reset Manual Adjustments", role: .destructive) {
+                        withAnimation(.snappy) {
+                            segmentAdjustments.removeAll()
+                        }
+                    }
+                }
             } header: {
                 Text("Target")
             } footer: {
@@ -187,7 +198,22 @@ struct BackwardsSleepPlanView: View {
 
             Section {
                 ForEach(plan.segments) { segment in
-                    BackwardsSleepPlanRow(segment: segment)
+                    BackwardsSleepPlanRow(
+                        segment: segment,
+                        adjustment: adjustment(for: segment),
+                        updateAdjustment: { startDate, endDate in
+                            updateAdjustment(
+                                for: segment,
+                                startDate: startDate,
+                                endDate: endDate
+                            )
+                        },
+                        resetAdjustment: {
+                            withAnimation(.snappy) {
+                                resetAdjustment(for: segment)
+                            }
+                        }
+                    )
                 }
             } header: {
                 Text("Day Layout")
@@ -219,6 +245,36 @@ struct BackwardsSleepPlanView: View {
         let roundedOffset = (5 - (minute % 5)) % 5
         return calendar.date(byAdding: .minute, value: roundedOffset, to: later) ?? later
     }
+
+    private func adjustment(for segment: BackwardsSleepPlanSegment) -> BackwardsSleepPlanAdjustment? {
+        segmentAdjustments.first { $0.matches(segment) }
+    }
+
+    private func updateAdjustment(
+        for segment: BackwardsSleepPlanSegment,
+        startDate: Date? = nil,
+        endDate: Date? = nil
+    ) {
+        guard segment.kind != .bedtime else { return }
+        var adjustment = adjustment(for: segment) ?? BackwardsSleepPlanAdjustment(segment: segment)
+        let newStartDate = startDate ?? adjustment.startDate
+        let minimumEndDate = newStartDate.addingTimeInterval(5 * 60)
+        let newEndDate = max(endDate ?? adjustment.endDate, minimumEndDate)
+        adjustment.startDate = newStartDate
+        adjustment.endDate = newEndDate
+
+        withAnimation(.snappy) {
+            if let index = segmentAdjustments.firstIndex(where: { $0.id == adjustment.id }) {
+                segmentAdjustments[index] = adjustment
+            } else {
+                segmentAdjustments.append(adjustment)
+            }
+        }
+    }
+
+    private func resetAdjustment(for segment: BackwardsSleepPlanSegment) {
+        segmentAdjustments.removeAll { $0.matches(segment) }
+    }
 }
 
 private struct PlanMetric: View {
@@ -246,31 +302,105 @@ private struct PlanMetric: View {
 
 private struct BackwardsSleepPlanRow: View {
     let segment: BackwardsSleepPlanSegment
+    let adjustment: BackwardsSleepPlanAdjustment?
+    let updateAdjustment: (_ startDate: Date?, _ endDate: Date?) -> Void
+    let resetAdjustment: () -> Void
+
+    @State private var showingEditor = false
+    @State private var draftStartDate = Date()
+    @State private var draftEndDate = Date()
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.headline)
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(tint.opacity(0.12), in: Circle())
-                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.headline)
+                    .foregroundStyle(tint)
+                    .frame(width: 28, height: 28)
+                    .background(tint.opacity(0.12), in: Circle())
+                    .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title)
-                        .font(.headline)
-                    Spacer()
-                    Text(timeText)
-                        .font(.subheadline.monospacedDigit())
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(title)
+                            .font(.headline)
+                        if adjustment != nil {
+                            Text("Adjusted")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(tint)
+                        }
+                        Spacer()
+                        Text(timeText)
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(detailText)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Text(detailText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            }
+
+            if segment.kind != .bedtime {
+                HStack {
+                    Button {
+                        beginEditing()
+                    } label: {
+                        Label(adjustment == nil ? "Edit" : "Edit Adjustment", systemImage: "pencil")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+
+                    if adjustment != nil {
+                        Button("Reset", role: .destructive) {
+                            resetAdjustment()
+                        }
+                        .font(.subheadline.weight(.semibold))
+                    }
+                }
             }
         }
         .padding(.vertical, 4)
+        .sheet(isPresented: $showingEditor) {
+            NavigationStack {
+                Form {
+                    Section {
+                        DatePicker(
+                            "Start",
+                            selection: $draftStartDate,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .datePickerStyle(.wheel)
+
+                        if canEditEndDate {
+                            DatePicker(
+                                "End",
+                                selection: $draftEndDate,
+                                displayedComponents: .hourAndMinute
+                            )
+                            .datePickerStyle(.wheel)
+                        } else {
+                            LabeledContent("End", value: DateFormatting.time.string(from: segment.endDate))
+                        }
+                    }
+                }
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showingEditor = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Apply") {
+                            applyDraft()
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
     }
 
     private var systemImage: String {
@@ -325,5 +455,23 @@ private struct BackwardsSleepPlanRow: View {
 
     private var durationText: String {
         DurationFormatting.string(seconds: segment.durationMinutes * 60)
+    }
+
+    private var canEditEndDate: Bool {
+        segment.kind == .nap || segment.napIndex != nil
+    }
+
+    private func beginEditing() {
+        draftStartDate = adjustment?.startDate ?? segment.startDate
+        draftEndDate = adjustment?.endDate ?? segment.endDate
+        showingEditor = true
+    }
+
+    private func applyDraft() {
+        updateAdjustment(
+            draftStartDate,
+            canEditEndDate ? draftEndDate : nil
+        )
+        showingEditor = false
     }
 }

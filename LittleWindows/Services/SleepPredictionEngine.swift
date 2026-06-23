@@ -35,7 +35,7 @@ struct WakeWindowStatistics: Hashable {
     var effectiveSampleCount: Double
 }
 
-enum BackwardsSleepPlanSegmentKind: Hashable {
+enum BackwardsSleepPlanSegmentKind: String, Codable, Hashable {
     case wakeWindow
     case nap
     case bedtime
@@ -50,11 +50,48 @@ struct BackwardsSleepPlanSegment: Hashable, Identifiable {
 
     var id: String {
         [
-            "\(kind)",
+            kind.rawValue,
             napIndex.map(String.init) ?? "none",
-            "\(startDate.timeIntervalSince1970)",
-            "\(endDate.timeIntervalSince1970)"
         ].joined(separator: "-")
+    }
+}
+
+struct BackwardsSleepPlanAdjustment: Codable, Hashable, Identifiable {
+    var kind: BackwardsSleepPlanSegmentKind
+    var napIndex: Int?
+    var startDate: Date
+    var endDate: Date
+
+    var id: String {
+        [
+            kind.rawValue,
+            napIndex.map(String.init) ?? "none"
+        ].joined(separator: "-")
+    }
+
+    init(
+        kind: BackwardsSleepPlanSegmentKind,
+        napIndex: Int?,
+        startDate: Date,
+        endDate: Date
+    ) {
+        self.kind = kind
+        self.napIndex = napIndex
+        self.startDate = startDate
+        self.endDate = endDate
+    }
+
+    init(segment: BackwardsSleepPlanSegment) {
+        self.init(
+            kind: segment.kind,
+            napIndex: segment.napIndex,
+            startDate: segment.startDate,
+            endDate: segment.endDate
+        )
+    }
+
+    func matches(_ segment: BackwardsSleepPlanSegment) -> Bool {
+        kind == segment.kind && napIndex == segment.napIndex
     }
 }
 
@@ -68,6 +105,7 @@ struct BackwardsSleepPlan: Hashable {
     var confidence: Double
     var confidenceLabel: ConfidenceLabel
     var segments: [BackwardsSleepPlanSegment]
+    var segmentAdjustments: [BackwardsSleepPlanAdjustment] = []
     var explanation: [String]
 }
 
@@ -77,9 +115,48 @@ struct ActiveSleepPlan: Codable, Equatable {
     var historyRangeRawValue: String
     var activatedAt: Date
     var generatedAt: Date
+    var segmentAdjustments: [BackwardsSleepPlanAdjustment]
 
     var historyRange: BackwardsSleepPlanHistoryRange {
         BackwardsSleepPlanHistoryRange(rawValue: historyRangeRawValue) ?? .sevenDays
+    }
+
+    init(
+        profileID: UUID,
+        targetBedtime: Date,
+        historyRangeRawValue: String,
+        activatedAt: Date,
+        generatedAt: Date,
+        segmentAdjustments: [BackwardsSleepPlanAdjustment] = []
+    ) {
+        self.profileID = profileID
+        self.targetBedtime = targetBedtime
+        self.historyRangeRawValue = historyRangeRawValue
+        self.activatedAt = activatedAt
+        self.generatedAt = generatedAt
+        self.segmentAdjustments = segmentAdjustments
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case profileID
+        case targetBedtime
+        case historyRangeRawValue
+        case activatedAt
+        case generatedAt
+        case segmentAdjustments
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        profileID = try container.decode(UUID.self, forKey: .profileID)
+        targetBedtime = try container.decode(Date.self, forKey: .targetBedtime)
+        historyRangeRawValue = try container.decode(String.self, forKey: .historyRangeRawValue)
+        activatedAt = try container.decode(Date.self, forKey: .activatedAt)
+        generatedAt = try container.decode(Date.self, forKey: .generatedAt)
+        segmentAdjustments = try container.decodeIfPresent(
+            [BackwardsSleepPlanAdjustment].self,
+            forKey: .segmentAdjustments
+        ) ?? []
     }
 }
 
@@ -174,7 +251,8 @@ enum ActiveSleepPlanService {
             targetBedtime: plan.targetBedtime,
             historyRangeRawValue: plan.historyRange.rawValue,
             activatedAt: Date(),
-            generatedAt: plan.generatedAt
+            generatedAt: plan.generatedAt,
+            segmentAdjustments: plan.segmentAdjustments
         )
         save(activePlan, defaults: defaults)
         return activePlan
@@ -239,7 +317,8 @@ enum ActiveSleepPlanService {
             now: now,
             calendar: calendar,
             historyRange: activePlan.historyRange,
-            settings: settings
+            settings: settings,
+            adjustments: activePlan.segmentAdjustments
         )
         let napIndex = SleepPredictionEngine.napIndex(
             for: activeSleep,
@@ -249,7 +328,9 @@ enum ActiveSleepPlanService {
         let plannedNapWakeBy = plan.segments.first {
             $0.kind == .nap && $0.napIndex == napIndex
         }?.endDate
-        let bedtimeWakeBy = SleepPredictionEngine.latestWakeDateForBedtime(
+        let bedtimeWakeBy = plan.segments.last {
+            $0.kind == .wakeWindow && $0.napIndex == nil
+        }?.startDate ?? SleepPredictionEngine.latestWakeDateForBedtime(
             profile: profile,
             events: events,
             targetBedtime: activePlan.targetBedtime,
@@ -348,7 +429,8 @@ enum SleepPredictionEngine {
         now: Date = Date(),
         calendar: Calendar = .current,
         historyRange: BackwardsSleepPlanHistoryRange = .sevenDays,
-        settings: PredictionSettings = .default
+        settings: PredictionSettings = .default,
+        adjustments: [BackwardsSleepPlanAdjustment] = []
     ) -> BackwardsSleepPlan {
         let todayStart = calendar.startOfDay(for: now)
         let tomorrowStart = calendar.startOfNextDay(for: now)
@@ -433,6 +515,7 @@ enum SleepPredictionEngine {
                         durationMinutes: 0
                     )
                 ],
+                segmentAdjustments: [],
                 explanation: explanations
             )
         }
@@ -519,6 +602,15 @@ enum SleepPredictionEngine {
             )
         )
 
+        let usableAdjustments = adjustments.filter { adjustment in
+            segments.contains { adjustment.matches($0) && $0.kind != .bedtime }
+        }
+        segments = adjustedBackwardsPlanSegments(
+            segments,
+            targetBedtime: target,
+            adjustments: usableAdjustments
+        )
+
         let plannedNaps = segments.filter { $0.kind == .nap }
         if plannedNaps.isEmpty {
             explanations.append("No naps fit comfortably into the full-day layout before the selected bedtime.")
@@ -526,6 +618,9 @@ enum SleepPredictionEngine {
             explanations.append(
                 "The full-day layout starts from the usual morning wake and lands on bedtime using typical nap lengths and wake windows by nap order."
             )
+        }
+        if !usableAdjustments.isEmpty {
+            explanations.append("Manual window adjustments are applied before the remaining timeline is recalculated.")
         }
         explanations.append("This is a planning aid based on local logs, not medical advice.")
 
@@ -545,6 +640,7 @@ enum SleepPredictionEngine {
             confidence: confidence,
             confidenceLabel: confidenceLabel(for: confidence),
             segments: segments,
+            segmentAdjustments: usableAdjustments,
             explanation: explanations
         )
     }
@@ -1130,6 +1226,99 @@ enum SleepPredictionEngine {
         let napScore = min(0.18, Double(napDurationCount) * 0.045)
         let wakeScore = min(0.24, Double(wakeWindowCount) * 0.04)
         return min(0.86, max(0.20, 0.22 + dayScore + napScore + wakeScore))
+    }
+
+    private static func adjustedBackwardsPlanSegments(
+        _ segments: [BackwardsSleepPlanSegment],
+        targetBedtime: Date,
+        adjustments: [BackwardsSleepPlanAdjustment]
+    ) -> [BackwardsSleepPlanSegment] {
+        guard !adjustments.isEmpty else { return segments }
+
+        var adjustmentsByID = [String: BackwardsSleepPlanAdjustment]()
+        for adjustment in adjustments {
+            adjustmentsByID[adjustment.id] = adjustment
+        }
+        var output = [(segment: BackwardsSleepPlanSegment, isManual: Bool)]()
+        var cursor: Date?
+        var hasAppliedManualAdjustment = false
+
+        for baseSegment in segments {
+            if baseSegment.kind == .bedtime {
+                output.append((
+                    BackwardsSleepPlanSegment(
+                        kind: .bedtime,
+                        napIndex: nil,
+                        startDate: targetBedtime,
+                        endDate: targetBedtime,
+                        durationMinutes: 0
+                    ),
+                    false
+                ))
+                continue
+            }
+
+            if let adjustment = adjustmentsByID[BackwardsSleepPlanAdjustment(segment: baseSegment).id] {
+                var start = min(adjustment.startDate, targetBedtime)
+                if let previous = output.last?.segment, output.last?.isManual == true {
+                    start = max(start, previous.endDate)
+                }
+                let end = max(start, min(adjustment.endDate, targetBedtime))
+
+                if let previous = output.last, !previous.isManual {
+                    var precedingSegment = previous.segment
+                    precedingSegment.endDate = max(precedingSegment.startDate, start)
+                    precedingSegment.durationMinutes = precedingSegment.endDate
+                        .timeIntervalSince(precedingSegment.startDate) / 60
+                    output[output.count - 1] = (precedingSegment, false)
+                }
+
+                output.append((
+                    BackwardsSleepPlanSegment(
+                        kind: baseSegment.kind,
+                        napIndex: baseSegment.napIndex,
+                        startDate: start,
+                        endDate: end,
+                        durationMinutes: end.timeIntervalSince(start) / 60
+                    ),
+                    true
+                ))
+                cursor = end
+                hasAppliedManualAdjustment = true
+                continue
+            }
+
+            guard hasAppliedManualAdjustment, let shiftedStart = cursor else {
+                output.append((baseSegment, false))
+                continue
+            }
+
+            let end: Date
+            if baseSegment.kind == .wakeWindow && baseSegment.napIndex == nil {
+                end = targetBedtime
+            } else {
+                end = min(
+                    shiftedStart.addingTimeInterval(max(0, baseSegment.durationMinutes) * 60),
+                    targetBedtime
+                )
+            }
+
+            guard end > shiftedStart else { continue }
+
+            output.append((
+                BackwardsSleepPlanSegment(
+                    kind: baseSegment.kind,
+                    napIndex: baseSegment.napIndex,
+                    startDate: shiftedStart,
+                    endDate: end,
+                    durationMinutes: end.timeIntervalSince(shiftedStart) / 60
+                ),
+                false
+            ))
+            cursor = end
+        }
+
+        return output.map(\.segment)
     }
 
     private static func clippedAverage(
