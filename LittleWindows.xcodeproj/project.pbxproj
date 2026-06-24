@@ -31,6 +31,7 @@
 		B00000000000000000000018 /* Views/Components/ActiveTimerCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */; };
 		B00000000000000000000019 /* Views/Components/EventRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* Views/Components/EventRow.swift */; };
 		B0000000000000000000001A /* Views/Components/PredictionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* Views/Components/PredictionCard.swift */; };
+		B00000000000000000000090 /* Views/Components/PlanDayArcView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000090 /* Views/Components/PlanDayArcView.swift */; };
 		B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* SleepPredictionEngineTests.swift */; };
 		B0000000000000000000001C /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
 		B0000000000000000000001D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* Assets.xcassets */; };
@@ -195,6 +196,7 @@
 		F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/ActiveTimerCard.swift; sourceTree = "<group>"; };
 		F00000000000000000000019 /* Views/Components/EventRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/EventRow.swift; sourceTree = "<group>"; };
 		F0000000000000000000001A /* Views/Components/PredictionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/PredictionCard.swift; sourceTree = "<group>"; };
+		F00000000000000000000090 /* Views/Components/PlanDayArcView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/PlanDayArcView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001B /* SleepPredictionEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepPredictionEngineTests.swift; sourceTree = "<group>"; };
 		F0000000000000000000001C /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 		F0000000000000000000001D /* LittleWindows.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LittleWindows.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -418,6 +420,7 @@
 				F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */,
 				F00000000000000000000019 /* Views/Components/EventRow.swift */,
 				F0000000000000000000001A /* Views/Components/PredictionCard.swift */,
+				F00000000000000000000090 /* Views/Components/PlanDayArcView.swift */,
 				F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */,
 				F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */,
 				F00000000000000000000073 /* Views/AgeGuides/AgeGuideViews.swift */,
@@ -741,6 +744,7 @@
 				B00000000000000000000018 /* Views/Components/ActiveTimerCard.swift in Sources */,
 				B00000000000000000000019 /* Views/Components/EventRow.swift in Sources */,
 				B0000000000000000000001A /* Views/Components/PredictionCard.swift in Sources */,
+				B00000000000000000000090 /* Views/Components/PlanDayArcView.swift in Sources */,
 				B0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift in Sources */,
 				B0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift in Sources */,
 				B00000000000000000000073 /* Views/AgeGuides/AgeGuideViews.swift in Sources */,

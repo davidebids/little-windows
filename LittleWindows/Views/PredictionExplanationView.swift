@@ -197,24 +197,7 @@ struct BackwardsSleepPlanView: View {
             }
 
             Section {
-                ForEach(plan.segments) { segment in
-                    BackwardsSleepPlanRow(
-                        segment: segment,
-                        adjustment: adjustment(for: segment),
-                        updateAdjustment: { startDate, endDate in
-                            updateAdjustment(
-                                for: segment,
-                                startDate: startDate,
-                                endDate: endDate
-                            )
-                        },
-                        resetAdjustment: {
-                            withAnimation(.snappy) {
-                                resetAdjustment(for: segment)
-                            }
-                        }
-                    )
-                }
+                dayLayoutContent(for: plan)
             } header: {
                 Text("Day Layout")
             }
@@ -274,6 +257,52 @@ struct BackwardsSleepPlanView: View {
 
     private func resetAdjustment(for segment: BackwardsSleepPlanSegment) {
         segmentAdjustments.removeAll { $0.matches(segment) }
+    }
+
+    @ViewBuilder
+    private func dayLayoutContent(for plan: BackwardsSleepPlan) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                PlanDayArcView(plan: plan)
+                    .frame(width: 210)
+                dayLayoutRows(for: plan)
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                PlanDayArcView(plan: plan)
+                dayLayoutRows(for: plan)
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+    }
+
+    private func dayLayoutRows(for plan: BackwardsSleepPlan) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(plan.segments.enumerated()), id: \.element.id) { index, segment in
+                BackwardsSleepPlanRow(
+                    segment: segment,
+                    adjustment: adjustment(for: segment),
+                    updateAdjustment: { startDate, endDate in
+                        updateAdjustment(
+                            for: segment,
+                            startDate: startDate,
+                            endDate: endDate
+                        )
+                    },
+                    resetAdjustment: {
+                        withAnimation(.snappy) {
+                            resetAdjustment(for: segment)
+                        }
+                    }
+                )
+                .padding(.vertical, 6)
+
+                if index < plan.segments.count - 1 {
+                    Divider()
+                        .padding(.leading, 40)
+                }
+            }
+        }
     }
 }
 

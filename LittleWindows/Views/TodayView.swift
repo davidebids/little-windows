@@ -241,11 +241,7 @@ struct TodayView: View {
                     if isDogProfile {
                         dogTodaySummarySection
                         puppyStageGuideSection
-                    } else {
-                        monthlyAgeGuideSection
                     }
-
-                    appointmentsSection
 
                     if !isDogProfile {
                         Section {
@@ -313,6 +309,12 @@ struct TodayView: View {
                         )
                     }
                     .id(TodayScrollAnchor.timeline)
+
+                    if !isDogProfile {
+                        monthlyAgeGuideSection
+                    }
+
+                    appointmentsSection
                 }
             }
             .listStyle(.insetGrouped)

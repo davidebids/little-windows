@@ -3,6 +3,49 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testPlanDayArcAppearsInPlanner() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 8),
+            "Expected app to foreground for plan day arc"
+        )
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        var planButton = firstExistingButton(["Plan", "Plan bedtime"])
+        for _ in 0..<6 where !planButton.exists {
+            app.swipeUp()
+            planButton = firstExistingButton(["Plan", "Plan bedtime"])
+        }
+        XCTAssertTrue(planButton.waitForExistence(timeout: 4), "Expected the planner button on Today")
+        planButton.tap()
+
+        XCTAssertTrue(
+            waitForAnyText(["Plan bedtime", "Day Layout"], timeout: 6),
+            "Expected the backwards sleep planner to open"
+        )
+        for _ in 0..<5 where !app.staticTexts["Wake to bedtime"].exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            app.staticTexts["Wake to bedtime"].waitForExistence(timeout: 4),
+            "Expected the plan day arc to be visible"
+        )
+        app.swipeUp()
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "plan-day-arc"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testPhysicalUserVisibleFlowPass() {
         continueAfterFailure = false
 
@@ -126,5 +169,15 @@ final class UserVisibleFlowUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
         return false
+    }
+
+    private func firstExistingButton(_ labels: [String]) -> XCUIElement {
+        for label in labels {
+            let button = app.buttons[label]
+            if button.exists {
+                return button
+            }
+        }
+        return app.buttons[labels[0]]
     }
 }
