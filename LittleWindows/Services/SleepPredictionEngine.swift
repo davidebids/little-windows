@@ -12,6 +12,62 @@ struct SleepPrediction: Hashable {
     var napIndex: Int
 }
 
+enum SleepPressureBand: String, Hashable, CaseIterable {
+    case learning
+    case low
+    case building
+    case ready
+    case high
+
+    var displayName: String {
+        switch self {
+        case .learning: "Learning"
+        case .low: "Low"
+        case .building: "Building"
+        case .ready: "Ready"
+        case .high: "High"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .learning: "sparkle.magnifyingglass"
+        case .low: "cloud.sun.fill"
+        case .building: "timer"
+        case .ready: "checkmark.seal.fill"
+        case .high: "exclamationmark.triangle.fill"
+        }
+    }
+
+    var statusText: String {
+        switch self {
+        case .learning: "Learning rhythm"
+        case .low: "Pressure is low"
+        case .building: "Pressure is building"
+        case .ready: "Ready for sleep soon"
+        case .high: "Sleep pressure is high"
+        }
+    }
+}
+
+struct SleepPressure: Hashable {
+    var score: Double?
+    var band: SleepPressureBand
+    var confidence: Double
+    var confidenceLabel: ConfidenceLabel
+    var awakeMinutes: Double?
+    var targetMinutes: Double?
+    var readyAt: Date?
+    var highAt: Date?
+    var nextThresholdDate: Date?
+    var explanation: [String]
+    var contributingFactors: [PredictionFactorValue]
+
+    var isActionable: Bool {
+        score != nil && band != .learning
+    }
+}
+
 struct WakeWindowSample: Hashable {
     var minutes: Double
     var napIndex: Int
@@ -328,9 +384,7 @@ enum ActiveSleepPlanService {
         let plannedNapWakeBy = plan.segments.first {
             $0.kind == .nap && $0.napIndex == napIndex
         }?.endDate
-        let bedtimeWakeBy = plan.segments.last {
-            $0.kind == .wakeWindow && $0.napIndex == nil
-        }?.startDate ?? SleepPredictionEngine.latestWakeDateForBedtime(
+        let bedtimeWakeBy = SleepPredictionEngine.latestWakeDateForBedtime(
             profile: profile,
             events: events,
             targetBedtime: activePlan.targetBedtime,
@@ -878,6 +932,259 @@ enum SleepPredictionEngine {
         )
     }
 
+    static func sleepPressure(
+        profile: BabyProfile?,
+        events: [BabyEvent],
+        records: [SleepPredictionRecord] = [],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        settings: PredictionSettings = .default
+    ) -> SleepPressure? {
+        guard let profile, profile.profileType == .child else { return nil }
+        guard !events.contains(where: { $0.type == .sleep && $0.isTimerRunning }) else {
+            return nil
+        }
+
+        let ageDays = max(0, calendar.dateComponents([.day], from: profile.birthDate, to: now).day ?? 0)
+        let ageMonths = Double(ageDays) / 30.4375
+        if ageMonths < 4 {
+            return SleepPressure(
+                score: nil,
+                band: .learning,
+                confidence: 0.20,
+                confidenceLabel: .low,
+                awakeMinutes: nil,
+                targetMinutes: nil,
+                readyAt: nil,
+                highAt: nil,
+                nextThresholdDate: nil,
+                explanation: [
+                    "Sleep pressure is still learning for babies under 4 months because early sleep rhythms vary widely.",
+                    "Complete sleep logs will still help Little Windows learn this profile's rhythm."
+                ],
+                contributingFactors: []
+            )
+        }
+
+        let committedEvents = events.filter { !$0.isTimerDraft }
+        let completedSleeps = committedEvents
+            .filter { $0.type == .sleep && $0.endDate != nil && $0.startDate <= now }
+            .sorted { $0.startDate < $1.startDate }
+        guard let lastSleep = completedSleeps.last,
+              let lastSleepEnd = lastSleep.endDate,
+              lastSleepEnd <= now else {
+            return SleepPressure(
+                score: nil,
+                band: .learning,
+                confidence: 0.25,
+                confidenceLabel: .low,
+                awakeMinutes: nil,
+                targetMinutes: nil,
+                readyAt: nil,
+                highAt: nil,
+                nextThresholdDate: nil,
+                explanation: [
+                    "Complete one sleep log to start estimating sleep pressure from awake time.",
+                    "This is a planning aid based on local logs, not medical advice."
+                ],
+                contributingFactors: []
+            )
+        }
+
+        let awakeMinutes = max(0, now.timeIntervalSince(lastSleepEnd) / 60)
+        let napsToday = committedEvents.filter {
+            $0.type == .sleep &&
+                $0.sleepKind == .nap &&
+                calendar.isDate($0.startDate, inSameDayAs: now)
+        }.count
+        let typicalNapCount = typicalDailyNapCount(events: completedSleeps, now: now, calendar: calendar)
+        let bedtimeCandidate = settings.bedtimePredictionEnabled &&
+            Double(napsToday) >= max(1, typicalNapCount - 0.5)
+        let nextSleepIndex = bedtimeCandidate ? 5 : nextNapIndex(events: committedEvents, date: now, calendar: calendar)
+        let samples = preferredPredictionSamples(
+            wakeWindowSamples(from: completedSleeps, now: now, calendar: calendar)
+                .filter { $0.napIndex == nextSleepIndex },
+            now: now,
+            calendar: calendar
+        )
+        let stats = statistics(for: clipOutliers(samples))
+        let baseline = ageBaselineMinutes(
+            birthDate: profile.birthDate,
+            date: now,
+            customMinimum: settings.customBaselineMinimum,
+            customMaximum: settings.customBaselineMaximum,
+            calendar: calendar
+        )
+        let baselineCenter = (baseline.lowerBound + baseline.upperBound) / 2
+        let personalTarget = stats.map(planningWakeWindowMinutes) ?? baselineCenter
+        let personalWeight: Double
+        switch stats?.effectiveSampleCount ?? 0 {
+        case ..<3: personalWeight = 0.20
+        case 3..<10: personalWeight = 0.45
+        default: personalWeight = 0.65
+        }
+        var targetMinutes = baselineCenter * (1 - personalWeight) + personalTarget * personalWeight
+        var rawScore = pressureScore(awakeMinutes: awakeMinutes, targetMinutes: targetMinutes)
+        var explanations = [String]()
+        var factors = [PredictionFactorValue]()
+
+        if let stats {
+            let sampleLabel = nextSleepIndex == 5 ? "pre-bed" : "nap \(nextSleepIndex)"
+            explanations.append(
+                "\(profile.name)'s recent \(sampleLabel) wake-window median is \(minutesText(stats.weightedMedian)); pressure is compared with a \(minutesText(targetMinutes)) planning target."
+            )
+            factors.append(PredictionFactorValue(
+                name: "Recent wake rhythm",
+                valueDescription: "\(stats.sampleCount) samples",
+                impactMinutes: targetMinutes - baselineCenter,
+                confidenceImpact: min(0.18, stats.effectiveSampleCount * 0.018),
+                explanation: "Recent matching wake windows tune the pressure target for this profile."
+            ))
+        } else {
+            explanations.append(
+                "There is not enough matching wake-window history yet, so pressure leans on the editable age-based baseline."
+            )
+        }
+
+        if let lastNapMinutes = lastSleep.duration.map({ $0 / 60 }),
+           lastSleep.sleepKind == .nap {
+            let recentNapCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? .distantPast
+            let recentNapDurations = completedSleeps
+                .filter { $0.sleepKind == .nap && $0.startDate >= recentNapCutoff }
+                .compactMap(\.duration)
+                .map { $0 / 60 }
+            let adjustment = napDurationAdjustment(
+                lastNapMinutes: lastNapMinutes,
+                recentNapMinutes: recentNapDurations
+            )
+            if adjustment < 0 {
+                rawScore += min(10, abs(adjustment) * 0.55)
+                targetMinutes += adjustment
+                explanations.append("The last nap was short, so pressure builds a little sooner.")
+                factors.append(PredictionFactorValue(
+                    name: "Last nap",
+                    valueDescription: minutesText(lastNapMinutes),
+                    impactMinutes: adjustment,
+                    confidenceImpact: -0.01,
+                    explanation: "Shorter naps can leave sleep pressure higher in the next wake window."
+                ))
+            } else if adjustment > 0 {
+                rawScore -= min(6, adjustment * 0.35)
+                targetMinutes += adjustment
+                explanations.append("The last nap was longer than usual, so pressure builds more gradually.")
+                factors.append(PredictionFactorValue(
+                    name: "Last nap",
+                    valueDescription: minutesText(lastNapMinutes),
+                    impactMinutes: adjustment,
+                    confidenceImpact: -0.01,
+                    explanation: "Longer naps can lower near-term sleep pressure."
+                ))
+            }
+        }
+
+        let recentSleepMinutes = totalSleepMinutes(
+            events: completedSleeps,
+            start: now.addingTimeInterval(-24 * 60 * 60),
+            end: now
+        )
+        if let minimumSleep = dailySleepMinimumMinutes(ageMonths: ageMonths),
+           recentSleepMinutes < minimumSleep {
+            let debtMinutes = minimumSleep - recentSleepMinutes
+            let boost = min(10, debtMinutes / 30 * 2)
+            rawScore += boost
+            explanations.append(
+                "Recent 24-hour sleep is below the broad age-based range, so pressure is nudged upward."
+            )
+            factors.append(PredictionFactorValue(
+                name: "Recent sleep total",
+                valueDescription: minutesText(recentSleepMinutes),
+                impactMinutes: -boost,
+                confidenceImpact: -0.02,
+                explanation: "Broad pediatric sleep-duration ranges are used only as guardrails."
+            ))
+        }
+
+        let typicalBedtimes = completedSleeps
+            .filter {
+                $0.sleepKind == .nightSleep &&
+                    calendar.component(.hour, from: $0.startDate) >= 17
+            }
+            .suffix(14)
+            .map(\.startDate)
+        if bedtimeCandidate,
+           let bedtime = circularTypicalTime(for: typicalBedtimes, on: now, calendar: calendar),
+           now >= bedtime.addingTimeInterval(-75 * 60),
+           now <= bedtime.addingTimeInterval(45 * 60) {
+            rawScore += 5
+            explanations.append("This is near the usual bedtime pattern, which raises readiness slightly.")
+            factors.append(PredictionFactorValue(
+                name: "Bedtime context",
+                valueDescription: DateFormatting.time.string(from: bedtime),
+                impactMinutes: 0,
+                confidenceImpact: typicalBedtimes.count >= 5 ? 0.04 : 0,
+                explanation: "Circadian timing helps separate a late nap from bedtime."
+            ))
+        }
+
+        let bias = PredictionTuningService.conservativeBiasCorrection(
+            records: records,
+            napIndex: nextSleepIndex
+        )
+        if abs(bias) >= 2 {
+            rawScore += bias < 0 ? min(5, abs(bias) * 0.4) : -min(5, bias * 0.25)
+            explanations.append(
+                "Recent prediction accuracy adds a cautious pressure adjustment."
+            )
+            factors.append(PredictionFactorValue(
+                name: "Accuracy tuning",
+                valueDescription: "Conservative recent bias",
+                impactMinutes: bias,
+                confidenceImpact: 0,
+                explanation: "Past early or late prediction errors are corrected gradually."
+            ))
+        }
+
+        let score = min(100, max(0, rawScore))
+        let band = pressureBand(for: score)
+        let readyMinutes = targetMinutes * 0.85
+        let highMinutes = targetMinutes * 1.12
+        let readyAt = lastSleepEnd.addingTimeInterval(readyMinutes * 60)
+        let highAt = lastSleepEnd.addingTimeInterval(highMinutes * 60)
+        let nextThresholdDate: Date?
+        switch band {
+        case .learning:
+            nextThresholdDate = nil
+        case .low, .building:
+            nextThresholdDate = readyAt > now ? readyAt : nil
+        case .ready:
+            nextThresholdDate = highAt > now ? highAt : nil
+        case .high:
+            nextThresholdDate = nil
+        }
+
+        var confidence = confidenceScore(
+            sampleCount: Int((stats?.effectiveSampleCount ?? 0).rounded(.down)),
+            variability: stats?.standardDeviation
+        )
+        if stats == nil { confidence = min(confidence, 0.42) }
+        confidence = min(0.92, max(0.18, confidence))
+        explanations.append("This is a planning aid based on local logs, not medical advice.")
+
+        return SleepPressure(
+            score: score,
+            band: band,
+            confidence: confidence,
+            confidenceLabel: confidenceLabel(for: confidence),
+            awakeMinutes: awakeMinutes,
+            targetMinutes: targetMinutes,
+            readyAt: readyAt,
+            highAt: highAt,
+            nextThresholdDate: nextThresholdDate,
+            explanation: explanations,
+            contributingFactors: factors
+        )
+    }
+
     static func wakeWindowSamples(
         from sleeps: [BabyEvent],
         now: Date = Date(),
@@ -1211,6 +1518,57 @@ enum SleepPredictionEngine {
             calendar: calendar
         )
         return (baseline.lowerBound + baseline.upperBound) / 2
+    }
+
+    private static func pressureScore(awakeMinutes: Double, targetMinutes: Double) -> Double {
+        guard targetMinutes > 0 else { return 0 }
+        let ratio = awakeMinutes / targetMinutes
+        switch ratio {
+        case ..<0.55:
+            return max(0, ratio / 0.55 * 30)
+        case 0.55..<0.85:
+            return 30 + ((ratio - 0.55) / 0.30) * 35
+        case 0.85..<1.12:
+            return 65 + ((ratio - 0.85) / 0.27) * 23
+        default:
+            return min(100, 88 + ((ratio - 1.12) / 0.35) * 12)
+        }
+    }
+
+    private static func pressureBand(for score: Double) -> SleepPressureBand {
+        switch score {
+        case ..<30: return .low
+        case 30..<65: return .building
+        case 65..<88: return .ready
+        default: return .high
+        }
+    }
+
+    private static func dailySleepMinimumMinutes(ageMonths: Double) -> Double? {
+        switch ageMonths {
+        case ..<4:
+            return nil
+        case ..<12:
+            return 12 * 60
+        case ..<36:
+            return 11 * 60
+        default:
+            return 10 * 60
+        }
+    }
+
+    private static func totalSleepMinutes(
+        events: [BabyEvent],
+        start: Date,
+        end: Date
+    ) -> Double {
+        events.reduce(0) { total, event in
+            guard event.type == .sleep, let eventEnd = event.endDate else { return total }
+            let overlapStart = max(event.startDate, start)
+            let overlapEnd = min(eventEnd, end)
+            guard overlapEnd > overlapStart else { return total }
+            return total + overlapEnd.timeIntervalSince(overlapStart) / 60
+        }
     }
 
     private static func sourceDayCount(from sleeps: [BabyEvent], calendar: Calendar) -> Int {

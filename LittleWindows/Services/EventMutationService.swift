@@ -99,7 +99,8 @@ enum EventMutationService {
                 prediction: prediction,
                 scheduleNotification: event.type.affectsSleepPrediction,
                 notificationsEnabled: notificationsEnabled,
-                notificationLeadMinutes: notificationLeadMinutes
+                notificationLeadMinutes: notificationLeadMinutes,
+                settings: settings
             )
         }
     }
@@ -139,7 +140,8 @@ enum EventMutationService {
                 prediction: prediction,
                 scheduleNotification: shouldRefreshPrediction,
                 notificationsEnabled: notificationsEnabled,
-                notificationLeadMinutes: notificationLeadMinutes
+                notificationLeadMinutes: notificationLeadMinutes,
+                settings: settings
             )
         } else {
             Task { @MainActor in
@@ -149,7 +151,8 @@ enum EventMutationService {
                     prediction: prediction,
                     scheduleNotification: shouldRefreshPrediction,
                     notificationsEnabled: notificationsEnabled,
-                    notificationLeadMinutes: notificationLeadMinutes
+                    notificationLeadMinutes: notificationLeadMinutes,
+                    settings: settings
                 )
             }
         }
@@ -180,7 +183,8 @@ enum EventMutationService {
                 prediction: prediction,
                 scheduleNotification: true,
                 notificationsEnabled: notificationsEnabled,
-                notificationLeadMinutes: notificationLeadMinutes
+                notificationLeadMinutes: notificationLeadMinutes,
+                settings: settings
             )
         }
     }
@@ -235,7 +239,8 @@ enum EventMutationService {
         prediction: SleepPrediction?,
         scheduleNotification: Bool,
         notificationsEnabled: Bool,
-        notificationLeadMinutes: Int
+        notificationLeadMinutes: Int,
+        settings: PredictionSettings
     ) async {
         WidgetSnapshotService.refresh(profile: profile, events: events, prediction: prediction)
         if scheduleNotification {
@@ -245,6 +250,22 @@ enum EventMutationService {
                 profileID: profile?.id,
                 leadMinutes: notificationLeadMinutes,
                 enabled: notificationsEnabled
+            )
+            let isSleeping = events.contains {
+                $0.type == .sleep && $0.isTimerRunning
+            }
+            let pressure = SleepPredictionEngine.sleepPressure(
+                profile: profile,
+                events: events,
+                now: Date(),
+                settings: settings
+            )
+            await NotificationManager.shared.rescheduleSleepPressureAlertIfNeeded(
+                pressure: pressure,
+                babyName: profile?.name ?? "Baby",
+                profileID: profile?.id,
+                enabled: UserDefaults.standard.bool(forKey: "sleepPressureAlertsEnabled"),
+                isSleeping: isSleeping
             )
         }
         await LiveActivityManager.shared.synchronize(profile: profile, events: events)

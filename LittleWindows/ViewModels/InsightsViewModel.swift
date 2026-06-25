@@ -61,6 +61,7 @@ final class InsightsViewModel: ObservableObject {
     @Published private(set) var snapshot = InsightsSnapshot.empty
 
     private var profileName = "Baby"
+    private var profile: BabyProfile?
     private var events = [BabyEvent]()
     private var records = [SleepPredictionRecord]()
     private var now = Date()
@@ -73,11 +74,13 @@ final class InsightsViewModel: ObservableObject {
 
     func refresh(
         profileName: String,
+        profile: BabyProfile? = nil,
         events: [BabyEvent],
         records: [SleepPredictionRecord],
         now: Date = Date()
     ) {
         self.profileName = profileName
+        self.profile = profile
         self.events = events
         self.records = records
         self.now = now
@@ -88,6 +91,7 @@ final class InsightsViewModel: ObservableObject {
         let period = selectedPeriod()
         snapshot = InsightsAnalyticsService.snapshot(
             profileName: profileName,
+            profile: profile,
             events: events,
             records: records,
             periodStart: period.lowerBound,

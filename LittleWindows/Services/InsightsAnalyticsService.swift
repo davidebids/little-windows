@@ -19,6 +19,16 @@ struct WakeWindowSummary: Identifiable, Hashable {
     var label: String { napIndex == 5 ? "Pre-bed" : "Nap \(napIndex)" }
 }
 
+struct SleepPressureSummary: Identifiable, Hashable {
+    var id: String { eventID.uuidString }
+    var eventID: UUID
+    var date: Date
+    var score: Double
+    var band: SleepPressureBand
+    var sleepKind: SleepKind?
+    var napIndex: Int
+}
+
 struct DailyFeedingSummary: Identifiable, Hashable {
     var id: Date { date }
     var date: Date
@@ -132,6 +142,9 @@ struct InsightsSnapshot {
     var predictionTrends: [InsightTrend]
     var dailySleep: [DailySleepSummary]
     var wakeWindows: [WakeWindowSummary]
+    var sleepPressureBeforeSleep: [SleepPressureSummary]
+    var sleepPressureBandCounts: [CategoryValue]
+    var sleepPressureAverages: [CategoryValue]
     var dailyFeeding: [DailyFeedingSummary]
     var dailyDiapers: [DailyDiaperSummary]
     var dailyActivities: [DailyActivitySummary]
@@ -183,6 +196,9 @@ struct InsightsSnapshot {
         predictionTrends: [],
         dailySleep: [],
         wakeWindows: [],
+        sleepPressureBeforeSleep: [],
+        sleepPressureBandCounts: [],
+        sleepPressureAverages: [],
         dailyFeeding: [],
         dailyDiapers: [],
         dailyActivities: [],
@@ -209,6 +225,7 @@ struct InsightsSnapshot {
 enum InsightsAnalyticsService {
     static func snapshot(
         profileName: String,
+        profile: BabyProfile? = nil,
         events: [BabyEvent],
         records: [SleepPredictionRecord],
         periodStart: Date,
@@ -233,6 +250,20 @@ enum InsightsAnalyticsService {
         let previousSleep = dailySleepTotals(events: completed, range: previousRange, calendar: calendar)
         let wakeWindows = wakeWindowCalculations(events: completed, range: currentRange, calendar: calendar)
         let previousWake = wakeWindowCalculations(events: completed, range: previousRange, calendar: calendar)
+        let sleepPressureBeforeSleep = sleepPressureBeforeSleepCalculations(
+            profile: profile,
+            events: completed,
+            records: records,
+            range: currentRange,
+            calendar: calendar
+        )
+        let previousSleepPressureBeforeSleep = sleepPressureBeforeSleepCalculations(
+            profile: profile,
+            events: completed,
+            records: records,
+            range: previousRange,
+            calendar: calendar
+        )
         let dailyFeeding = feedingAggregation(events: events, range: currentRange, calendar: calendar)
         let previousFeeding = feedingAggregation(events: events, range: previousRange, calendar: calendar)
         let dailyDiapers = diaperAggregation(events: events, range: currentRange, calendar: calendar)
@@ -355,6 +386,28 @@ enum InsightsAnalyticsService {
         ]
 
         let wakeGrouped = Dictionary(grouping: wakeWindows, by: \.napIndex)
+        let readyPressureStarts = sleepPressureBeforeSleep.filter {
+            $0.band == .ready || $0.band == .high
+        }
+        let previousReadyPressureStarts = previousSleepPressureBeforeSleep.filter {
+            $0.band == .ready || $0.band == .high
+        }
+        let highPressureStarts = sleepPressureBeforeSleep.filter { $0.band == .high }
+        let previousHighPressureStarts = previousSleepPressureBeforeSleep.filter { $0.band == .high }
+        let pressureAverage = average(sleepPressureBeforeSleep.map(\.score))
+        let previousPressureAverage = average(previousSleepPressureBeforeSleep.map(\.score))
+        let readyPressureShare = sleepPressureBeforeSleep.isEmpty
+            ? nil
+            : Double(readyPressureStarts.count) / Double(sleepPressureBeforeSleep.count)
+        let previousReadyPressureShare = previousSleepPressureBeforeSleep.isEmpty
+            ? nil
+            : Double(previousReadyPressureStarts.count) / Double(previousSleepPressureBeforeSleep.count)
+        let highPressureShare = sleepPressureBeforeSleep.isEmpty
+            ? nil
+            : Double(highPressureStarts.count) / Double(sleepPressureBeforeSleep.count)
+        let previousHighPressureShare = previousSleepPressureBeforeSleep.isEmpty
+            ? nil
+            : Double(previousHighPressureStarts.count) / Double(previousSleepPressureBeforeSleep.count)
         let wakeAverages = (1...5).compactMap { index -> CategoryValue? in
             guard let values = wakeGrouped[index], !values.isEmpty else { return nil }
             return CategoryValue(category: napLabel(index), value: average(values.map(\.minutes)) ?? 0)
@@ -362,6 +415,20 @@ enum InsightsAnalyticsService {
         let wakeVariability = (1...5).compactMap { index -> CategoryValue? in
             guard let values = wakeGrouped[index], !values.isEmpty else { return nil }
             return CategoryValue(category: napLabel(index), value: standardDeviation(values.map(\.minutes)) ?? 0)
+        }
+        let pressureBySleepOrder = Dictionary(grouping: sleepPressureBeforeSleep, by: \.napIndex)
+        let sleepPressureAverages = (1...5).compactMap { index -> CategoryValue? in
+            guard let values = pressureBySleepOrder[index], !values.isEmpty else { return nil }
+            return CategoryValue(category: napLabel(index), value: average(values.map(\.score)) ?? 0)
+        }
+        let sleepPressureBandCounts = [
+            SleepPressureBand.low,
+            SleepPressureBand.building,
+            SleepPressureBand.ready,
+            SleepPressureBand.high
+        ].compactMap { band -> CategoryValue? in
+            let count = sleepPressureBeforeSleep.filter { $0.band == band }.count
+            return count > 0 ? CategoryValue(category: band.displayName, value: Double(count)) : nil
         }
         let mostPredictable = wakeVariability.min { $0.value < $1.value }
         let leastPredictable = wakeVariability.max { $0.value < $1.value }
@@ -373,6 +440,9 @@ enum InsightsAnalyticsService {
         }
         wakeMetrics += [
             metric("Wake variability", standardDeviation(wakeWindows.map(\.minutes)), standardDeviation(previousWake.map(\.minutes)), compare: compareToPrevious, format: duration, icon: "waveform.path", interpretation: "Spread across recent wake windows."),
+            metric("Pressure before sleep", pressureAverage, previousPressureAverage, compare: compareToPrevious, format: whole, icon: "gauge.with.dots.needle.50percent", interpretation: "Average sleep-pressure score immediately before completed sleep starts."),
+            metric("Ready/high starts", readyPressureShare, previousReadyPressureShare, compare: compareToPrevious, format: percent, icon: "checkmark.seal.fill", interpretation: "Share of completed sleeps that began in the ready or high pressure band."),
+            metric("High-pressure starts", highPressureShare, previousHighPressureShare, compare: compareToPrevious, format: percent, icon: "exclamationmark.triangle.fill", interpretation: "Share of completed sleeps that began after pressure moved above the usual ready range."),
             InsightMetric(title: "Most predictable", value: mostPredictable?.category ?? "-", interpretation: mostPredictable.map { "\(duration($0.value)) typical variation." } ?? "More sleep logs are needed.", systemImage: "checkmark.circle.fill"),
             InsightMetric(title: "Least predictable", value: leastPredictable?.category ?? "-", interpretation: leastPredictable.map { "\(duration($0.value)) typical variation." } ?? "More sleep logs are needed.", systemImage: "questionmark.circle")
         ]
@@ -650,6 +720,9 @@ enum InsightsAnalyticsService {
             predictionTrends: predictionObservations(profileName: profileName, current: predictionErrors, previous: previousPredictions),
             dailySleep: dailySleep,
             wakeWindows: wakeWindows,
+            sleepPressureBeforeSleep: sleepPressureBeforeSleep,
+            sleepPressureBandCounts: sleepPressureBandCounts,
+            sleepPressureAverages: sleepPressureAverages,
             dailyFeeding: dailyFeeding,
             dailyDiapers: dailyDiapers,
             dailyActivities: dailyActivities,
@@ -740,6 +813,48 @@ enum InsightsAnalyticsService {
                     minutes: $0.minutes
                 )
             }
+    }
+
+    static func sleepPressureBeforeSleepCalculations(
+        profile: BabyProfile?,
+        events: [BabyEvent],
+        records: [SleepPredictionRecord] = [],
+        range: Range<Date>,
+        calendar: Calendar = .current
+    ) -> [SleepPressureSummary] {
+        guard let profile, profile.profileType == .child else { return [] }
+        let sleeps = events
+            .filter { $0.type == .sleep && $0.endDate != nil }
+            .sorted { $0.startDate < $1.startDate }
+
+        return sleeps.compactMap { sleep -> SleepPressureSummary? in
+            guard range.contains(sleep.startDate) else { return nil }
+            let priorEvents = events.filter {
+                $0.id != sleep.id && $0.startDate < sleep.startDate
+            }
+            guard let pressure = SleepPredictionEngine.sleepPressure(
+                profile: profile,
+                events: priorEvents,
+                records: records.filter { $0.generatedAt <= sleep.startDate },
+                now: sleep.startDate,
+                calendar: calendar
+            ),
+                  let score = pressure.score else {
+                return nil
+            }
+            return SleepPressureSummary(
+                eventID: sleep.id,
+                date: sleep.startDate,
+                score: score,
+                band: pressure.band,
+                sleepKind: sleep.sleepKind,
+                napIndex: SleepPredictionEngine.napIndex(
+                    for: sleep,
+                    among: sleeps,
+                    calendar: calendar
+                )
+            )
+        }
     }
 
     static func bedtimeExtraction(

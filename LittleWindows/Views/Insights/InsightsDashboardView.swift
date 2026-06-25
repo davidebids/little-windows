@@ -321,6 +321,7 @@ struct InsightsDashboardView: View {
 
         viewModel.refresh(
             profileName: profile?.name ?? "Baby",
+            profile: profile,
             events: scopedEvents.filter { !$0.isTimerDraft },
             records: scopedRecords,
             now: now

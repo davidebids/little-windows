@@ -4,6 +4,7 @@ struct PredictionCard: View {
     let prediction: SleepPrediction?
     let babyName: String
     var awakeSinceDate: Date?
+    var sleepPressure: ((Date) -> SleepPressure?)?
     var alertStatusText: String?
     var alertsEnabled = false
     var toggleAlerts: (() -> Void)?
@@ -54,6 +55,10 @@ struct PredictionCard: View {
 
                 if let awakeSinceDate, awakeSinceDate <= now {
                     awakeBanner(since: awakeSinceDate, now: now)
+                }
+
+                if let pressure = sleepPressure?(now) {
+                    sleepPressureMeter(pressure, now: now)
                 }
 
                 if let prediction {
@@ -297,6 +302,142 @@ struct PredictionCard: View {
                 .stroke(.white.opacity(0.12), lineWidth: 1)
         }
         .accessibilityLabel("\(babyName) has been up for \(duration)")
+    }
+
+    private func sleepPressureMeter(_ pressure: SleepPressure, now: Date) -> some View {
+        let color = pressureColor(pressure.band)
+        let score = pressure.score ?? 0
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: pressure.band.systemImage)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(color)
+                    .frame(width: 28, height: 28)
+                    .background(.white.opacity(0.12), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pressure.band.statusText)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text(pressureSubtitle(pressure, now: now))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.70))
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 8)
+
+                if let score = pressure.score {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("\(Int(score.rounded()))")
+                            .font(.title3.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(color)
+                        Text("pressure")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.58))
+                    }
+                } else {
+                    Text("Learning")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            }
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(.white.opacity(0.15))
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            LinearGradient(
+                                colors: pressureGradientColors(pressure.band),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(10, geometry.size.width * score / 100))
+                    HStack(spacing: 0) {
+                        ForEach(0..<4, id: \.self) { index in
+                            if index > 0 {
+                                Rectangle()
+                                    .fill(.white.opacity(0.30))
+                                    .frame(width: 1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
+            }
+            .frame(height: 9)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.45), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(pressureAccessibilityLabel(pressure, now: now))
+    }
+
+    private func pressureSubtitle(_ pressure: SleepPressure, now: Date) -> String {
+        if pressure.score == nil {
+            return "Pressure appears after 4 months and completed sleep logs."
+        }
+        let awake = pressure.awakeMinutes.map { DurationFormatting.string(seconds: $0 * 60) } ?? nil
+        switch pressure.band {
+        case .learning:
+            return "Learning from completed sleep logs."
+        case .low:
+            return awake.map { "Awake \($0); pressure is still low." } ?? "Pressure is still low."
+        case .building:
+            if let readyAt = pressure.readyAt, readyAt > now {
+                return "Ready range around \(DateFormatting.time.string(from: readyAt))."
+            }
+            return awake.map { "Awake \($0); nearing the ready range." } ?? "Nearing the ready range."
+        case .ready:
+            if let highAt = pressure.highAt, highAt > now {
+                return "Ready now; high around \(DateFormatting.time.string(from: highAt))."
+            }
+            return "Ready now; watch the next sleep window."
+        case .high:
+            return awake.map { "Awake \($0); pressure is above the usual range." } ?? "Pressure is above the usual range."
+        }
+    }
+
+    private func pressureAccessibilityLabel(_ pressure: SleepPressure, now: Date) -> String {
+        if let score = pressure.score {
+            return "Sleep pressure \(pressure.band.displayName), \(Int(score.rounded())) out of 100. \(pressureSubtitle(pressure, now: now))"
+        }
+        return "Sleep pressure learning rhythm. \(pressureSubtitle(pressure, now: now))"
+    }
+
+    private func pressureColor(_ band: SleepPressureBand) -> Color {
+        switch band {
+        case .learning: return .white.opacity(0.72)
+        case .low: return .cyan
+        case .building: return .teal
+        case .ready: return .green
+        case .high: return .orange
+        }
+    }
+
+    private func pressureGradientColors(_ band: SleepPressureBand) -> [Color] {
+        switch band {
+        case .learning:
+            return [.white.opacity(0.20), .white.opacity(0.32)]
+        case .low:
+            return [.cyan.opacity(0.55), .cyan]
+        case .building:
+            return [.cyan.opacity(0.55), .teal]
+        case .ready:
+            return [.teal.opacity(0.65), .green]
+        case .high:
+            return [.yellow.opacity(0.78), .orange]
+        }
     }
 
     private func resolvedAlertStatus(phase: PredictionTimingPhase) -> String? {

@@ -249,6 +249,9 @@ struct TodayView: View {
                                 prediction: prediction,
                                 babyName: profile?.name ?? "Baby",
                                 awakeSinceDate: awakeSinceDate,
+                                sleepPressure: { now in
+                                    sleepPressure(at: now)
+                                },
                                 alertStatusText: notificationManager.statusText(
                                     prediction: prediction,
                                     settings: .current,
@@ -379,7 +382,10 @@ struct TodayView: View {
         }
         .sheet(isPresented: $showingExplanation) {
             NavigationStack {
-                PredictionExplanationView(prediction: prediction)
+                PredictionExplanationView(
+                    prediction: prediction,
+                    sleepPressure: sleepPressure(at: Date())
+                )
             }
         }
         .sheet(isPresented: $showingBackwardsPlanner) {
@@ -1345,6 +1351,16 @@ struct TodayView: View {
             isSleeping: activeEvents.contains {
                 $0.type == .sleep && $0.isTimerRunning
             }
+        )
+    }
+
+    private func sleepPressure(at now: Date) -> SleepPressure? {
+        SleepPredictionEngine.sleepPressure(
+            profile: profile,
+            events: scopedEvents,
+            records: scopedRecords,
+            now: now,
+            settings: predictionSettings
         )
     }
 

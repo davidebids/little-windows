@@ -1903,6 +1903,111 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(plan.segments.last?.startDate, target)
     }
 
+    func testSleepPressureLearnsRhythmUnderFourMonths() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 4, day: 1))!
+        )
+
+        let pressure = try XCTUnwrap(SleepPredictionEngine.sleepPressure(
+            profile: profile,
+            events: [
+                makeSleep(
+                    kind: .nap,
+                    start: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!,
+                    end: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8))!
+                )
+            ],
+            now: now,
+            calendar: calendar
+        ))
+
+        XCTAssertEqual(pressure.band, .learning)
+        XCTAssertNil(pressure.score)
+        XCTAssertTrue(pressure.explanation.contains { $0.contains("under 4 months") })
+    }
+
+    func testSleepPressureMovesIntoReadyBandFromAwakeTime() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        )
+        let lastNap = makeSleep(
+            kind: .nap,
+            start: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7, minute: 30))!,
+            end: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8, minute: 15))!
+        )
+        let settings = PredictionSettings(
+            feedAdjustmentEnabled: true,
+            nursingAdjustmentEnabled: true,
+            bedtimePredictionEnabled: true,
+            customBaselineMinimum: 119,
+            customBaselineMaximum: 121
+        )
+
+        let pressure = try XCTUnwrap(SleepPredictionEngine.sleepPressure(
+            profile: profile,
+            events: [lastNap],
+            now: now,
+            calendar: calendar,
+            settings: settings
+        ))
+
+        XCTAssertEqual(pressure.band, .ready)
+        XCTAssertEqual(try XCTUnwrap(pressure.awakeMinutes), 105, accuracy: 0.001)
+        XCTAssertNotNil(pressure.score)
+        XCTAssertGreaterThan(try XCTUnwrap(pressure.highAt), now)
+    }
+
+    @MainActor
+    func testSleepPressureAlertSchedulesReadyThresholdSeparately() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 9))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        )
+        let lastNap = makeSleep(
+            kind: .nap,
+            start: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!,
+            end: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8))!
+        )
+        let settings = PredictionSettings(
+            feedAdjustmentEnabled: true,
+            nursingAdjustmentEnabled: true,
+            bedtimePredictionEnabled: true,
+            customBaselineMinimum: 119,
+            customBaselineMaximum: 121
+        )
+        let pressure = try XCTUnwrap(SleepPredictionEngine.sleepPressure(
+            profile: profile,
+            events: [lastNap],
+            now: now,
+            calendar: calendar,
+            settings: settings
+        ))
+
+        let decision = NotificationManager.sleepPressureAlertDecision(
+            pressure: pressure,
+            enabled: true,
+            now: now
+        )
+
+        guard case .schedule(let fireDate, let band) = decision else {
+            XCTFail("Expected pressure alert to schedule")
+            return
+        }
+        XCTAssertEqual(band, .ready)
+        XCTAssertEqual(fireDate, pressure.readyAt)
+    }
+
     private func makeTwoNapHistory(
         today: Date,
         calendar: Calendar,
@@ -2370,6 +2475,48 @@ final class SleepPredictionEngineTests: XCTestCase {
             accuracy: 0.001
         )
         XCTAssertEqual(snapshot.comparisonLabel, "Compared with the previous 2 days")
+    }
+
+    func testInsightsSnapshotIncludesSleepPressureBeforeSleep() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        )
+        let firstNap = makeSleep(
+            kind: .nap,
+            start: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!,
+            end: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8))!
+        )
+        let secondNap = makeSleep(
+            kind: .nap,
+            start: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10, minute: 15))!,
+            end: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 11))!
+        )
+
+        let snapshot = InsightsAnalyticsService.snapshot(
+            profileName: "Test Child",
+            profile: profile,
+            events: [firstNap, secondNap],
+            records: [],
+            periodStart: day,
+            periodEnd: day,
+            now: day,
+            compareToPrevious: false,
+            calendar: calendar
+        )
+
+        let pressurePoint = try XCTUnwrap(snapshot.sleepPressureBeforeSleep.first)
+        XCTAssertEqual(pressurePoint.eventID, secondNap.id)
+        XCTAssertEqual(pressurePoint.band, .ready)
+        XCTAssertTrue(snapshot.wakeMetrics.contains { $0.title == "Pressure before sleep" })
+        XCTAssertTrue(snapshot.wakeMetrics.contains { $0.title == "Ready/high starts" })
+        XCTAssertEqual(snapshot.sleepPressureBandCounts.first?.category, SleepPressureBand.ready.displayName)
+        XCTAssertEqual(snapshot.sleepPressureBandCounts.first?.value, 1)
+        XCTAssertEqual(snapshot.sleepPressureAverages.first?.category, "Nap 2")
+        XCTAssertEqual(try XCTUnwrap(snapshot.sleepPressureAverages.first?.value), pressurePoint.score, accuracy: 0.001)
     }
 
     @MainActor

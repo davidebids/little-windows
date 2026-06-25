@@ -78,6 +78,21 @@ enum LittleWindowAlertDecision: Equatable {
     case skip(LittleWindowAlertSkipReason)
 }
 
+enum SleepPressureAlertSkipReason: String, Codable, Equatable {
+    case alertsOff
+    case noPressure
+    case learning
+    case sleeping
+    case alreadyHigh
+    case alertTimePassed
+    case permissionDenied
+}
+
+enum SleepPressureAlertDecision: Equatable {
+    case schedule(Date, SleepPressureBand)
+    case skip(SleepPressureAlertSkipReason)
+}
+
 struct LittleWindowNotificationState: Codable, Equatable {
     var lastScheduledPredictionID: String?
     var lastScheduledPredictionStart: Date?
@@ -118,6 +133,7 @@ final class NotificationManager: NSObject, ObservableObject {
     static let completeAppointmentActionID = "COMPLETE_APPOINTMENT"
     static let addVisitNotesActionID = "ADD_VISIT_NOTES"
     static let activeSleepPlanWakeNotificationBaseID = "activeSleepPlan.wake"
+    static let sleepPressureNotificationBaseID = "sleepPressure.ready"
     static let activeSleepPlanCategoryID = "ACTIVE_SLEEP_PLAN_WAKE"
     static let ageGuideCategoryID = "MONTHLY_AGE_GUIDE"
     static let openAgeGuideActionID = "OPEN_AGE_GUIDE"
@@ -408,6 +424,57 @@ final class NotificationManager: NSObject, ObservableObject {
         if clearState {
             updateState(.empty)
         }
+    }
+
+    func rescheduleSleepPressureAlertIfNeeded(
+        pressure: SleepPressure?,
+        babyName: String,
+        profileID: UUID? = nil,
+        enabled: Bool,
+        isSleeping: Bool = false,
+        now: Date = Date()
+    ) async {
+        let decision = Self.sleepPressureAlertDecision(
+            pressure: pressure,
+            enabled: enabled,
+            isSleeping: isSleeping,
+            now: now
+        )
+
+        await cancelPendingSleepPressureAlerts(profileID: profileID)
+        guard case .schedule(let fireDate, let targetBand) = decision,
+              let pressure else {
+            return
+        }
+
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            return
+        }
+
+        let content = buildSleepPressureNotificationContent(
+            pressure: pressure,
+            targetBand: targetBand,
+            babyName: babyName,
+            profileID: profileID
+        )
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: fireDate
+        )
+        let request = UNNotificationRequest(
+            identifier: Self.sleepPressureNotificationID(profileID: profileID),
+            content: content,
+            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelPendingSleepPressureAlerts(profileID: UUID? = nil) async {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.sleepPressureNotificationID(profileID: profileID)]
+        )
     }
 
     func scheduleAppointmentReminders(
@@ -805,6 +872,38 @@ final class NotificationManager: NSObject, ObservableObject {
         return content
     }
 
+    func buildSleepPressureNotificationContent(
+        pressure: SleepPressure,
+        targetBand: SleepPressureBand,
+        babyName: String,
+        profileID: UUID? = nil
+    ) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        switch targetBand {
+        case .high:
+            content.title = "Sleep pressure is high"
+            content.body = "\(babyName) is past the usual ready range. A sleep window may be close."
+        default:
+            content.title = "Sleep pressure is ready"
+            content.body = "\(babyName) is entering the usual ready range for sleep."
+        }
+        content.sound = .default
+        content.categoryIdentifier = Self.categoryID
+        var userInfo: [String: Any] = [
+            "babyName": babyName,
+            "sleepPressureBand": targetBand.rawValue,
+            "deepLink": Self.deepLink(path: "prediction", profileID: profileID)
+        ]
+        if let score = pressure.score {
+            userInfo["sleepPressureScore"] = Int(score.rounded())
+        }
+        if let profileID {
+            userInfo["profileID"] = profileID.uuidString
+        }
+        content.userInfo = userInfo
+        return content
+    }
+
     func handleNotificationAction(_ response: UNNotificationResponse) async {
         let action = response.actionIdentifier
         if action == Self.snoozeActionID {
@@ -977,6 +1076,70 @@ final class NotificationManager: NSObject, ObservableObject {
         return .schedule(fireDate)
     }
 
+    static func sleepPressureAlertDecision(
+        pressure: SleepPressure?,
+        enabled: Bool,
+        isSleeping: Bool = false,
+        now: Date = Date()
+    ) -> SleepPressureAlertDecision {
+        guard enabled else { return .skip(.alertsOff) }
+        guard let pressure else { return .skip(.noPressure) }
+        guard !isSleeping else { return .skip(.sleeping) }
+        guard pressure.isActionable else { return .skip(.learning) }
+
+        let fireDate: Date?
+        let targetBand: SleepPressureBand
+        switch pressure.band {
+        case .learning:
+            return .skip(.learning)
+        case .low, .building:
+            fireDate = pressure.readyAt
+            targetBand = .ready
+        case .ready:
+            fireDate = pressure.highAt
+            targetBand = .high
+        case .high:
+            return .skip(.alreadyHigh)
+        }
+
+        guard let fireDate, fireDate > now else {
+            return .skip(.alertTimePassed)
+        }
+        return .schedule(fireDate, targetBand)
+    }
+
+    static func sleepPressureStatusText(
+        pressure: SleepPressure?,
+        enabled: Bool,
+        isSleeping: Bool = false,
+        authorizationStatus: UNAuthorizationStatus = .authorized,
+        now: Date = Date()
+    ) -> String {
+        let decision = sleepPressureAlertDecision(
+            pressure: pressure,
+            enabled: enabled,
+            isSleeping: isSleeping,
+            now: now
+        )
+        switch decision {
+        case .schedule(let date, let band):
+            if authorizationStatus == .denied {
+                return "Notifications disabled in iOS Settings"
+            }
+            return "\(band.displayName) alert at \(DateFormatting.time.string(from: date))"
+        case .skip(let reason):
+            switch reason {
+            case .alertsOff: return "Pressure alerts off"
+            case .noPressure: return "Waiting for sleep pressure"
+            case .learning: return "Learning rhythm"
+            case .sleeping: return "Sleeping now - pressure alert paused"
+            case .alreadyHigh: return "Pressure is already high"
+            case .alertTimePassed: return "Ready range has already started"
+            case .permissionDenied: return "Notifications disabled in iOS Settings"
+            }
+        }
+    }
+
     static func shouldKeepExistingSchedule(
         state: LittleWindowNotificationState,
         prediction: SleepPrediction,
@@ -1077,6 +1240,10 @@ final class NotificationManager: NSObject, ObservableObject {
 
     static func activeSleepPlanWakeNotificationID(profileID: UUID? = nil) -> String {
         scopedNotificationID(activeSleepPlanWakeNotificationBaseID, profileID: profileID)
+    }
+
+    static func sleepPressureNotificationID(profileID: UUID? = nil) -> String {
+        scopedNotificationID(sleepPressureNotificationBaseID, profileID: profileID)
     }
 
     static func scopedNotificationID(_ identifier: String, profileID: UUID?) -> String {

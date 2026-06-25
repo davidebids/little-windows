@@ -3,6 +3,7 @@ import SwiftUI
 struct PredictionExplanationView: View {
     @Environment(\.dismiss) private var dismiss
     let prediction: SleepPrediction?
+    var sleepPressure: SleepPressure?
 
     var body: some View {
         List {
@@ -45,12 +46,18 @@ struct PredictionExplanationView: View {
                         }
                     }
                 }
+                if let sleepPressure {
+                    pressureSection(sleepPressure)
+                }
             } else {
                 ContentUnavailableView(
                     "No prediction yet",
                     systemImage: "moon.zzz",
                     description: Text("A completed sleep event is needed first.")
                 )
+                if let sleepPressure {
+                    pressureSection(sleepPressure)
+                }
             }
         }
         .navigationTitle("Prediction details")
@@ -58,6 +65,52 @@ struct PredictionExplanationView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pressureSection(_ pressure: SleepPressure) -> some View {
+        Section("Sleep pressure") {
+            LabeledContent("State", value: pressure.band.displayName)
+            if let score = pressure.score {
+                LabeledContent("Score", value: "\(Int(score.rounded())) / 100")
+            }
+            if let awakeMinutes = pressure.awakeMinutes {
+                LabeledContent(
+                    "Awake",
+                    value: DurationFormatting.string(seconds: awakeMinutes * 60)
+                )
+            }
+            if let targetMinutes = pressure.targetMinutes {
+                LabeledContent(
+                    "Planning target",
+                    value: DurationFormatting.string(seconds: targetMinutes * 60)
+                )
+            }
+            LabeledContent(
+                "Confidence",
+                value: "\(pressure.confidenceLabel.displayName) - \(Int(pressure.confidence * 100))%"
+            )
+            if let nextThreshold = pressure.nextThresholdDate {
+                LabeledContent(
+                    "Next threshold",
+                    value: DateFormatting.time.string(from: nextThreshold)
+                )
+            }
+        }
+
+        Section("Pressure factors") {
+            ForEach(Array(pressure.explanation.enumerated()), id: \.offset) { _, explanation in
+                Text(explanation)
+            }
+            ForEach(pressure.contributingFactors) { factor in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(factor.name).font(.headline)
+                    Text(factor.explanation)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
     @AppStorage("bedtimePredictionEnabled") private var bedtimePredictionEnabled = true
     @AppStorage("predictionNotificationsEnabled") private var notificationsEnabled = false
+    @AppStorage("sleepPressureAlertsEnabled") private var sleepPressureAlertsEnabled = false
     @AppStorage("notificationLeadMinutes") private var notificationLeadMinutes = 10
     @AppStorage("littleWindowNapAlertsEnabled") private var napAlertsEnabled = true
     @AppStorage("littleWindowBedtimeAlertsEnabled") private var bedtimeAlertsEnabled = true
@@ -219,6 +220,55 @@ struct SettingsView: View {
                     Label("Little Window Alerts", systemImage: "bell.badge.fill")
                 } footer: {
                     Text("Little Windows can remind you before the next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
+                }
+
+                Section {
+                    Toggle(
+                        "Enable Sleep Pressure Alerts",
+                        isOn: Binding(
+                            get: { sleepPressureAlertsEnabled },
+                            set: { enabled in
+                                if enabled {
+                                    Task { await enableSleepPressureAlerts() }
+                                } else {
+                                    sleepPressureAlertsEnabled = false
+                                    Task {
+                                        await notificationManager.cancelPendingSleepPressureAlerts(
+                                            profileID: selectedProfileID
+                                        )
+                                    }
+                                }
+                            }
+                        )
+                    )
+
+                    if sleepPressureAlertsEnabled {
+                        LabeledContent("Next pressure alert") {
+                            Text(sleepPressureStatus)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Pressure preview")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Label(
+                            currentPressure?.band.statusText ?? "Learning rhythm",
+                            systemImage: currentPressure?.band.systemImage ?? "sparkle.magnifyingglass"
+                        )
+                        .font(.subheadline.weight(.semibold))
+                        Text(sleepPressurePreviewText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+                } header: {
+                    Label("Sleep Pressure Alerts", systemImage: "gauge.with.dots.needle.50percent")
+                } footer: {
+                    Text("These are separate from Little Window Alerts. They use the current pressure band and are hidden for babies under 4 months while Little Windows is learning rhythm.")
                 }
             }
 
@@ -507,15 +557,48 @@ struct SettingsView: View {
     }
 
     private var notificationStatus: String {
-        let profileID = selectedProfileID
         return notificationManager.statusText(
             prediction: currentPrediction,
             settings: .current,
-            isSleeping: events.contains {
-                $0.matchesProfile(profileID) &&
-                $0.type == .sleep && $0.isTimerRunning
-            }
+            isSleeping: selectedProfileIsSleeping
         )
+    }
+
+    private var currentPressure: SleepPressure? {
+        let profileID = selectedProfileID
+        return SleepPredictionEngine.sleepPressure(
+            profile: selectedProfile,
+            events: events.filter { $0.matchesProfile(profileID) },
+            records: records.filter { $0.matchesProfile(profileID) },
+            settings: settings
+        )
+    }
+
+    private var selectedProfileIsSleeping: Bool {
+        let profileID = selectedProfileID
+        return events.contains {
+            $0.matchesProfile(profileID) &&
+                $0.type == .sleep && $0.isTimerRunning
+        }
+    }
+
+    private var sleepPressureStatus: String {
+        NotificationManager.sleepPressureStatusText(
+            pressure: currentPressure,
+            enabled: sleepPressureAlertsEnabled,
+            isSleeping: selectedProfileIsSleeping,
+            authorizationStatus: notificationManager.authorizationStatus
+        )
+    }
+
+    private var sleepPressurePreviewText: String {
+        guard let pressure = currentPressure else {
+            return "Complete a sleep log to start learning pressure."
+        }
+        guard let score = pressure.score else {
+            return "No pressure score yet; Little Windows is learning rhythm."
+        }
+        return "\(Int(score.rounded())) / 100 · \(pressure.confidenceLabel.displayName.lowercased()) confidence"
     }
 
     private var notificationPreview: LittleWindowNotificationCopy {
@@ -547,6 +630,23 @@ struct SettingsView: View {
         }
         notificationsEnabled = true
         await rescheduleNotification()
+    }
+
+    private func enableSleepPressureAlerts() async {
+        let status = await notificationManager.getAuthorizationStatus()
+        let granted: Bool
+        if status == .notDetermined {
+            granted = await notificationManager.requestAuthorization()
+        } else {
+            granted = status == .authorized || status == .provisional || status == .ephemeral
+        }
+        guard granted else {
+            sleepPressureAlertsEnabled = false
+            showingPermissionDenied = true
+            return
+        }
+        sleepPressureAlertsEnabled = true
+        scheduleNotificationRefresh()
     }
 
     private func openNotificationSettings() {
