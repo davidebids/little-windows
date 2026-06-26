@@ -97,7 +97,10 @@ final class InsightsViewModel: ObservableObject {
             periodStart: period.lowerBound,
             periodEnd: period.upperBound,
             now: now,
-            compareToPrevious: comparesToPreviousPeriod
+            compareToPrevious: comparesToPreviousPeriod,
+            options: InsightsSnapshotOptions(
+                includeSleepPressure: selectedSection == .wakeWindows
+            )
         )
     }
 

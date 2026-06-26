@@ -222,6 +222,12 @@ struct InsightsSnapshot {
     )
 }
 
+struct InsightsSnapshotOptions {
+    var includeSleepPressure = true
+
+    static let full = InsightsSnapshotOptions()
+}
+
 enum InsightsAnalyticsService {
     static func snapshot(
         profileName: String,
@@ -232,6 +238,7 @@ enum InsightsAnalyticsService {
         periodEnd: Date,
         now: Date = Date(),
         compareToPrevious: Bool = true,
+        options: InsightsSnapshotOptions = .full,
         calendar: Calendar = .current
     ) -> InsightsSnapshot {
         let start = calendar.startOfDay(for: min(periodStart, periodEnd))
@@ -250,20 +257,27 @@ enum InsightsAnalyticsService {
         let previousSleep = dailySleepTotals(events: completed, range: previousRange, calendar: calendar)
         let wakeWindows = wakeWindowCalculations(events: completed, range: currentRange, calendar: calendar)
         let previousWake = wakeWindowCalculations(events: completed, range: previousRange, calendar: calendar)
-        let sleepPressureBeforeSleep = sleepPressureBeforeSleepCalculations(
-            profile: profile,
-            events: completed,
-            records: records,
-            range: currentRange,
-            calendar: calendar
-        )
-        let previousSleepPressureBeforeSleep = sleepPressureBeforeSleepCalculations(
-            profile: profile,
-            events: completed,
-            records: records,
-            range: previousRange,
-            calendar: calendar
-        )
+        let sleepPressureBeforeSleep: [SleepPressureSummary]
+        let previousSleepPressureBeforeSleep: [SleepPressureSummary]
+        if options.includeSleepPressure {
+            sleepPressureBeforeSleep = sleepPressureBeforeSleepCalculations(
+                profile: profile,
+                events: completed,
+                records: records,
+                range: currentRange,
+                calendar: calendar
+            )
+            previousSleepPressureBeforeSleep = sleepPressureBeforeSleepCalculations(
+                profile: profile,
+                events: completed,
+                records: records,
+                range: previousRange,
+                calendar: calendar
+            )
+        } else {
+            sleepPressureBeforeSleep = []
+            previousSleepPressureBeforeSleep = []
+        }
         let dailyFeeding = feedingAggregation(events: events, range: currentRange, calendar: calendar)
         let previousFeeding = feedingAggregation(events: events, range: previousRange, calendar: calendar)
         let dailyDiapers = diaperAggregation(events: events, range: currentRange, calendar: calendar)
@@ -823,19 +837,28 @@ enum InsightsAnalyticsService {
         calendar: Calendar = .current
     ) -> [SleepPressureSummary] {
         guard let profile, profile.profileType == .child else { return [] }
+        let sortedEvents = events.sorted { $0.startDate < $1.startDate }
+        let sortedRecords = records.sorted { $0.generatedAt < $1.generatedAt }
         let sleeps = events
             .filter { $0.type == .sleep && $0.endDate != nil }
             .sorted { $0.startDate < $1.startDate }
+        let candidateSleeps = sleeps.filter { range.contains($0.startDate) }
 
-        return sleeps.compactMap { sleep -> SleepPressureSummary? in
-            guard range.contains(sleep.startDate) else { return nil }
-            let priorEvents = events.filter {
-                $0.id != sleep.id && $0.startDate < sleep.startDate
+        var eventPrefixEnd = 0
+        var recordPrefixEnd = 0
+        return candidateSleeps.compactMap { sleep -> SleepPressureSummary? in
+            while eventPrefixEnd < sortedEvents.count,
+                  sortedEvents[eventPrefixEnd].startDate < sleep.startDate {
+                eventPrefixEnd += 1
+            }
+            while recordPrefixEnd < sortedRecords.count,
+                  sortedRecords[recordPrefixEnd].generatedAt <= sleep.startDate {
+                recordPrefixEnd += 1
             }
             guard let pressure = SleepPredictionEngine.sleepPressure(
                 profile: profile,
-                events: priorEvents,
-                records: records.filter { $0.generatedAt <= sleep.startDate },
+                events: Array(sortedEvents[..<eventPrefixEnd]),
+                records: Array(sortedRecords[..<recordPrefixEnd]),
                 now: sleep.startDate,
                 calendar: calendar
             ),
@@ -964,13 +987,23 @@ enum InsightsAnalyticsService {
         let bottles = events.filter {
             $0.type == .feed && $0.feedKind == .bottle && range.contains($0.startDate)
         }
+        let sessionsByDay = Dictionary(grouping: sessions) {
+            calendar.startOfDay(for: $0)
+        }.mapValues { $0.count }
+        let nursingByDay = Dictionary(grouping: nursing) {
+            calendar.startOfDay(for: $0)
+        }.mapValues { $0.count }
+        let bottleOuncesByDay = Dictionary(grouping: bottles) {
+            calendar.startOfDay(for: $0.startDate)
+        }.mapValues { values in
+            values.compactMap(\.amountOz).reduce(0, +)
+        }
         return dates(in: range, calendar: calendar).map { day in
             DailyFeedingSummary(
                 date: day,
-                careSessions: sessions.filter { calendar.isDate($0, inSameDayAs: day) }.count,
-                nursingSessions: nursing.filter { calendar.isDate($0, inSameDayAs: day) }.count,
-                bottleOunces: bottles.filter { calendar.isDate($0.startDate, inSameDayAs: day) }
-                    .compactMap(\.amountOz).reduce(0, +)
+                careSessions: sessionsByDay[day] ?? 0,
+                nursingSessions: nursingByDay[day] ?? 0,
+                bottleOunces: bottleOuncesByDay[day] ?? 0
             )
         }
     }
@@ -981,8 +1014,11 @@ enum InsightsAnalyticsService {
         calendar: Calendar = .current
     ) -> [DailyDiaperSummary] {
         let diapers = events.filter { $0.type == .diaper && range.contains($0.startDate) }
+        let diapersByDay = Dictionary(grouping: diapers) {
+            calendar.startOfDay(for: $0.startDate)
+        }
         return dates(in: range, calendar: calendar).map { day in
-            let values = diapers.filter { calendar.isDate($0.startDate, inSameDayAs: day) }
+            let values = diapersByDay[day] ?? []
             return DailyDiaperSummary(
                 date: day,
                 wet: values.filter { $0.diaperKind == .wet }.count,
@@ -998,8 +1034,11 @@ enum InsightsAnalyticsService {
         calendar: Calendar = .current
     ) -> [DailyActivitySummary] {
         let values = events.filter { range.contains($0.startDate) }
+        let valuesByDay = Dictionary(grouping: values) {
+            calendar.startOfDay(for: $0.startDate)
+        }
         return dates(in: range, calendar: calendar).map { day in
-            let daily = values.filter { calendar.isDate($0.startDate, inSameDayAs: day) }
+            let daily = valuesByDay[day] ?? []
             return DailyActivitySummary(
                 date: day,
                 tummyMinutes: daily.filter {

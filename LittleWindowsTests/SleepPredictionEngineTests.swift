@@ -2546,6 +2546,41 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testInsightsViewModelCalculatesSleepPressureOnlyForWakeWindows() {
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: Date(timeIntervalSinceReferenceDate: 804_000_000))
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(byAdding: .day, value: -180, to: day)!
+        )
+        let firstNap = makeSleep(
+            kind: .nap,
+            start: calendar.date(bySettingHour: 7, minute: 0, second: 0, of: day)!,
+            end: calendar.date(bySettingHour: 8, minute: 0, second: 0, of: day)!
+        )
+        let secondNap = makeSleep(
+            kind: .nap,
+            start: calendar.date(bySettingHour: 10, minute: 15, second: 0, of: day)!,
+            end: calendar.date(bySettingHour: 11, minute: 0, second: 0, of: day)!
+        )
+        let viewModel = InsightsViewModel(now: day, calendar: calendar)
+
+        viewModel.refresh(
+            profileName: "Test Child",
+            profile: profile,
+            events: [firstNap, secondNap],
+            records: [],
+            now: day
+        )
+        XCTAssertTrue(viewModel.snapshot.sleepPressureBeforeSleep.isEmpty)
+
+        viewModel.selectedSection = .wakeWindows
+        viewModel.rebuild()
+
+        XCTAssertFalse(viewModel.snapshot.sleepPressureBeforeSleep.isEmpty)
+    }
+
     func testInsightsBedtimeExtractionIgnoresEarlyMorningSegments() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
