@@ -82,7 +82,9 @@ struct ICloudSyncSettingsView: View {
                         LabeledContent("Migrated at", value: migrationCompletedAt.formatted(date: .abbreviated, time: .shortened))
                     }
                     NavigationLink {
-                        SyncDiagnosticsView(snapshot: diagnostics)
+                        LazySettingsDestination {
+                            SyncDiagnosticsView(snapshot: diagnostics)
+                        }
                     } label: {
                         Label("Sync diagnostics", systemImage: "stethoscope")
                     }
