@@ -5,12 +5,232 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.openURL) private var openURL
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+
+    @StateObject private var profileService = ProfileService.shared
+    @State private var showingDeleteConfirmation = false
+    @State private var showingExporter = false
+    @State private var showingImporter = false
+    @State private var showingImportConfirmation = false
+    @State private var exportDocument = BackupDocument()
+    @State private var pendingImportData: Data?
+    @State private var statusMessage: String?
+
+    private var selectedProfile: BabyProfile? {
+        profileService.selectedProfile(in: profiles)
+    }
+
+    private var isDogProfile: Bool {
+        selectedProfile?.profileType == .dog
+    }
+
+    var body: some View {
+        Form {
+            if let profile = selectedProfile {
+                ProfileSettingsSection(profile: profile)
+            }
+
+            Section {
+                NavigationLink {
+                    LazySettingsDestination {
+                        ManageProfilesView()
+                    }
+                } label: {
+                    LabeledContent {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(selectedProfile?.name ?? "None")
+                            Text("Switch or edit")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                    } label: {
+                        Label("Profiles", systemImage: "person.2.fill")
+                    }
+                }
+            } header: {
+                Label("Profiles", systemImage: "person.crop.circle")
+            }
+
+            Section("Your name") {
+                CaregiverNameFields(
+                    detail: "Name on this device appears on new care entries you log here. Family Sync share name labels the shared family space; most people can keep both names the same."
+                )
+            }
+
+            if !isDogProfile {
+                ChildSleepSettingsSections(profile: selectedProfile)
+            }
+
+            SyncSettingsSection()
+
+            Section {
+                NavigationLink {
+                    LazySettingsDestination {
+                        FoodReminderSettingsLauncher()
+                    }
+                } label: {
+                    Label("Food reminders", systemImage: "bell.badge.fill")
+                }
+            } header: {
+                Label("Food & Home", systemImage: "fork.knife")
+            } footer: {
+                Text("Food & Home records are household-level and sync through the same private iCloud store when iCloud Sync is available.")
+            }
+
+            AppointmentSettingsSection(profile: selectedProfile)
+
+            if !isDogProfile {
+                MonthlyAgeGuideSettingsSection(profile: selectedProfile)
+            }
+
+            Section("Data") {
+                Button("Export JSON backup", systemImage: "square.and.arrow.up") {
+                    export()
+                }
+                Button("Import JSON backup", systemImage: "square.and.arrow.down") {
+                    showingImporter = true
+                }
+                Button("Delete all data", systemImage: "trash", role: .destructive) {
+                    showingDeleteConfirmation = true
+                }
+            }
+
+            Section {
+                Text("Sleep predictions are a planning aid, not medical advice.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            SettingsBuildInfoFooter()
+        }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle("Settings")
+        .fileExporter(
+            isPresented: $showingExporter,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: "Little-Windows-Backup"
+        ) { result in
+            if case .failure(let error) = result {
+                statusMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
+            importBackup(result)
+        }
+        .appActionSheet(
+            isPresented: $showingImportConfirmation,
+            title: "Replace Current Data?",
+            message: "This replaces every current profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
+            systemImage: "square.and.arrow.down",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Import Backup",
+                    subtitle: "Replace all current Little Windows data.",
+                    systemImage: "square.and.arrow.down.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    performPendingImport()
+                }
+            ],
+            cancelAction: {
+                pendingImportData = nil
+            }
+        )
+        .appActionSheet(
+            isPresented: $showingDeleteConfirmation,
+            title: "Delete All Data?",
+            message: "This permanently deletes every profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
+            systemImage: "trash",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete All Data",
+                    subtitle: "Remove all local Little Windows history.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    deleteAll()
+                }
+            ]
+        )
+        .alert("Little Windows", isPresented: Binding(
+            get: { statusMessage != nil },
+            set: { if !$0 { statusMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(statusMessage ?? "")
+        }
+    }
+
+    private func export() {
+        do {
+            exportDocument = BackupDocument(data: try DataExportImportService.exportData(context: modelContext))
+            showingExporter = true
+        } catch {
+            statusMessage = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func importBackup(_ result: Result<URL, Error>) {
+        do {
+            let url = try result.get()
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            pendingImportData = data
+            showingImportConfirmation = true
+        } catch {
+            statusMessage = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func performPendingImport() {
+        guard let data = pendingImportData else { return }
+        do {
+            try DataExportImportService.importData(data, context: modelContext)
+            pendingImportData = nil
+            statusMessage = "Backup imported."
+        } catch {
+            pendingImportData = nil
+            statusMessage = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteAll() {
+        do {
+            try DataExportImportService.deleteAll(context: modelContext)
+            statusMessage = "All history was deleted."
+        } catch {
+            statusMessage = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+struct LazySettingsDestination<Content: View>: View {
+    private let content: () -> Content
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        content()
+    }
+}
+
+private struct ChildSleepSettingsSections: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @Query private var events: [BabyEvent]
-    @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
     @Query private var records: [SleepPredictionRecord]
-    @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
+
+    let profile: BabyProfile?
 
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
@@ -24,47 +244,15 @@ struct SettingsView: View {
         LittleWindowConfidenceThreshold.medium.rawValue
     @AppStorage("customWakeMinimum") private var customWakeMinimum = 0.0
     @AppStorage("customWakeMaximum") private var customWakeMaximum = 0.0
-    @AppStorage("appointmentRemindersEnabled") private var appointmentRemindersEnabled = true
-    @AppStorage("monthlyAgeGuideNotificationsEnabled") private var monthlyAgeGuideNotificationsEnabled = false
-    @AppStorage("monthlyAgeGuideNotificationTiming") private var monthlyAgeGuideNotificationTimingRawValue =
-        MonthlyAgeGuideNotificationTiming.monthlyBirthday.rawValue
 
     @StateObject private var notificationManager = NotificationManager.shared
-    @StateObject private var profileService = ProfileService.shared
-    @State private var showingDeleteConfirmation = false
-    @State private var showingExporter = false
-    @State private var showingImporter = false
-    @State private var showingImportConfirmation = false
-    @State private var exportDocument = BackupDocument()
-    @State private var pendingImportData: Data?
-    @State private var statusMessage: String?
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
     @State private var pendingNotificationRefresh: Task<Void, Never>?
 
-    private var selectedProfile: BabyProfile? {
-        profileService.selectedProfile(in: profiles)
-    }
+    init(profile: BabyProfile?) {
+        self.profile = profile
 
-    private var selectedProfileID: UUID? {
-        selectedProfile?.id
-    }
-
-    private var selectedProfileAppointments: [DoctorAppointment] {
-        let profileID = selectedProfileID
-        return appointments.filter { $0.matchesProfile(profileID) }
-    }
-
-    private var selectedProfileAgeGuideReadStates: [AgeGuideReadState] {
-        let profileID = selectedProfileID
-        return ageGuideReadStates.filter { $0.matchesProfile(profileID) }
-    }
-
-    private var isDogProfile: Bool {
-        selectedProfile?.profileType == .dog
-    }
-
-    init() {
         let recentCutoff = Calendar.current.date(
             byAdding: .day,
             value: -45,
@@ -90,59 +278,31 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            if let profile = selectedProfile {
-                ProfileSettingsSection(profile: profile)
-            }
-
-            Section {
-                NavigationLink {
-                    ManageProfilesView()
-                } label: {
-                    LabeledContent {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(selectedProfile?.name ?? "None")
-                            Text("Switch or edit")
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(.secondary)
-                    } label: {
-                        Label("Profiles", systemImage: "person.2.fill")
+        Group {
+            Section("Prediction") {
+                Toggle("Use feed timing", isOn: $feedAdjustmentEnabled)
+                    .onChange(of: feedAdjustmentEnabled) { _, _ in
+                        scheduleNotificationRefresh()
                     }
-                }
-            } header: {
-                Label("Profiles", systemImage: "person.crop.circle")
-            }
-
-            Section("Your name") {
-                CaregiverNameFields(
-                    detail: "Name on this device appears on new care entries you log here. Family Sync share name labels the shared family space; most people can keep both names the same."
-                )
-            }
-
-            if !isDogProfile {
-                Section("Prediction") {
-                    Toggle("Use feed timing", isOn: $feedAdjustmentEnabled)
-                        .onChange(of: feedAdjustmentEnabled) { _, _ in
-                            scheduleNotificationRefresh()
-                        }
-                    Toggle("Use nursing timing", isOn: $nursingAdjustmentEnabled)
-                        .onChange(of: nursingAdjustmentEnabled) { _, _ in
-                            scheduleNotificationRefresh()
-                        }
-                    Toggle("Predict bedtime", isOn: $bedtimePredictionEnabled)
-                        .onChange(of: bedtimePredictionEnabled) { _, _ in
-                            scheduleNotificationRefresh()
-                        }
-                    NavigationLink("Wake-window tuning") {
+                Toggle("Use nursing timing", isOn: $nursingAdjustmentEnabled)
+                    .onChange(of: nursingAdjustmentEnabled) { _, _ in
+                        scheduleNotificationRefresh()
+                    }
+                Toggle("Predict bedtime", isOn: $bedtimePredictionEnabled)
+                    .onChange(of: bedtimePredictionEnabled) { _, _ in
+                        scheduleNotificationRefresh()
+                    }
+                NavigationLink("Wake-window tuning") {
+                    LazySettingsDestination {
                         WakeWindowTuningView(
                             minimum: $customWakeMinimum,
                             maximum: $customWakeMaximum
                         )
                     }
                 }
+            }
 
-                Section {
+            Section {
                 Toggle(
                     "Enable Little Window Alerts",
                     isOn: Binding(
@@ -216,259 +376,60 @@ struct SettingsView: View {
                 }
                 .padding(12)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-                } header: {
-                    Label("Little Window Alerts", systemImage: "bell.badge.fill")
-                } footer: {
-                    Text("Little Windows can remind you before the next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
-                }
-
-                Section {
-                    Toggle(
-                        "Enable Sleep Pressure Alerts",
-                        isOn: Binding(
-                            get: { sleepPressureAlertsEnabled },
-                            set: { enabled in
-                                if enabled {
-                                    Task { await enableSleepPressureAlerts() }
-                                } else {
-                                    sleepPressureAlertsEnabled = false
-                                    Task {
-                                        await notificationManager.cancelPendingSleepPressureAlerts(
-                                            profileID: selectedProfileID
-                                        )
-                                    }
-                                }
-                            }
-                        )
-                    )
-
-                    if sleepPressureAlertsEnabled {
-                        LabeledContent("Next pressure alert") {
-                            Text(sleepPressureStatus)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Pressure preview")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Label(
-                            currentPressure?.band.statusText ?? "Learning rhythm",
-                            systemImage: currentPressure?.band.systemImage ?? "sparkle.magnifyingglass"
-                        )
-                        .font(.subheadline.weight(.semibold))
-                        Text(sleepPressurePreviewText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(12)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-                } header: {
-                    Label("Sleep Pressure Alerts", systemImage: "gauge.with.dots.needle.50percent")
-                } footer: {
-                    Text("These are separate from Little Window Alerts. They use the current pressure band and are hidden for babies under 4 months while Little Windows is learning rhythm.")
-                }
-            }
-
-            SyncSettingsSection()
-
-            Section {
-                NavigationLink {
-                    FoodReminderSettingsLauncher()
-                } label: {
-                    Label("Food reminders", systemImage: "bell.badge.fill")
-                }
             } header: {
-                Label("Food & Home", systemImage: "fork.knife")
+                Label("Little Window Alerts", systemImage: "bell.badge.fill")
             } footer: {
-                Text("Food & Home records are household-level and sync through the same private iCloud store when iCloud Sync is available.")
+                Text("Little Windows can remind you before the next likely nap or bedtime window. Alerts are based on logged patterns and are not medical advice.")
             }
 
             Section {
-                NavigationLink {
-                    AppointmentsListView()
-                } label: {
-                    LabeledContent {
-                        Text("\(selectedProfileAppointments.count)")
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        Label("Appointments and visits", systemImage: "stethoscope")
-                    }
-                }
-                Toggle("Appointment reminders", isOn: $appointmentRemindersEnabled)
-                    .onChange(of: appointmentRemindersEnabled) { _, enabled in
-                        Task {
-                            let profile = selectedProfile
-                            let profileAppointments = selectedProfileAppointments
+                Toggle(
+                    "Enable Sleep Pressure Alerts",
+                    isOn: Binding(
+                        get: { sleepPressureAlertsEnabled },
+                        set: { enabled in
                             if enabled {
-                                for appointment in profileAppointments where !appointment.isCompleted {
-                                    await notificationManager.rescheduleAppointmentReminders(
-                                        appointment: appointment,
-                                        babyName: profile?.name ?? "Baby"
-                                    )
-                                }
+                                Task { await enableSleepPressureAlerts() }
                             } else {
-                                for appointment in profileAppointments {
-                                    await notificationManager.cancelAppointmentReminders(
-                                        appointmentID: appointment.id
+                                sleepPressureAlertsEnabled = false
+                                Task {
+                                    await notificationManager.cancelPendingSleepPressureAlerts(
+                                        profileID: profileID
                                     )
                                 }
                             }
                         }
-                    }
-            } header: {
-                Label("Appointments", systemImage: "calendar.badge.clock")
-            } footer: {
-                Text("Appointment reminders are separate from Little Window sleep alerts.")
-            }
-
-            if !isDogProfile {
-                Section {
-                    Toggle(
-                        "Monthly guide notifications",
-                        isOn: Binding(
-                            get: { monthlyAgeGuideNotificationsEnabled },
-                            set: { enabled in
-                                if enabled {
-                                    Task {
-                                        let granted = await notificationManager.requestAuthorization()
-                                        if granted {
-                                            monthlyAgeGuideNotificationsEnabled = true
-                                            await rescheduleMonthlyAgeGuideNotification()
-                                        } else {
-                                            monthlyAgeGuideNotificationsEnabled = false
-                                            showingPermissionDenied = true
-                                        }
-                                    }
-                                } else {
-                                    monthlyAgeGuideNotificationsEnabled = false
-                                    Task {
-                                        await notificationManager.cancelMonthlyAgeGuideNotifications()
-                                    }
-                                }
-                            }
-                        )
                     )
-                    if monthlyAgeGuideNotificationsEnabled {
-                        Picker("Timing", selection: $monthlyAgeGuideNotificationTimingRawValue) {
-                            ForEach(MonthlyAgeGuideNotificationTiming.allCases) { timing in
-                                Text(timing.displayName).tag(timing.rawValue)
-                            }
-                        }
-                        .onChange(of: monthlyAgeGuideNotificationTimingRawValue) { _, _ in
-                            Task { await rescheduleMonthlyAgeGuideNotification() }
-                        }
+                )
+
+                if sleepPressureAlertsEnabled {
+                    LabeledContent("Next pressure alert") {
+                        Text(sleepPressureStatus)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
                     }
-                    NavigationLink {
-                        AgeGuidesListView(
-                            guides: AgeGuideService.shared.allAgeGuides(),
-                            currentMonth: selectedProfile.map {
-                                AgeGuideService.shared.ageMonth(for: $0)
-                            },
-                            readStates: selectedProfileAgeGuideReadStates
-                        )
-                    } label: {
-                        Label("Browse age guides", systemImage: "book.pages.fill")
-                    }
-                } header: {
-                    Label("Monthly Age Guides", systemImage: "calendar.badge.clock")
-                } footer: {
-                    Text("One gentle reminder per monthly age at most. Guides are parent education and memory prompts, not medical advice.")
                 }
-            }
 
-            Section("Data") {
-                Button("Export JSON backup", systemImage: "square.and.arrow.up") {
-                    export()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Pressure preview")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Label(
+                        currentPressure?.band.statusText ?? "Learning rhythm",
+                        systemImage: currentPressure?.band.systemImage ?? "sparkle.magnifyingglass"
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    Text(sleepPressurePreviewText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Button("Import JSON backup", systemImage: "square.and.arrow.down") {
-                    showingImporter = true
-                }
-                Button("Delete all data", systemImage: "trash", role: .destructive) {
-                    showingDeleteConfirmation = true
-                }
+                .padding(12)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+            } header: {
+                Label("Sleep Pressure Alerts", systemImage: "gauge.with.dots.needle.50percent")
+            } footer: {
+                Text("These are separate from Little Window Alerts. They use the current pressure band and are hidden for babies under 4 months while Little Windows is learning rhythm.")
             }
-
-            Section {
-                Text("Sleep predictions are a planning aid, not medical advice.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsBuildInfoFooter()
-        }
-        .scrollContentBackground(.hidden)
-        .background(AppTheme.background)
-        .navigationTitle("Settings")
-        .task {
-            await notificationManager.refreshAuthorizationStatus()
-            if UserDefaults.standard.object(forKey: "monthlyAgeGuideNotificationsEnabled") == nil,
-               notificationManager.authorizationStatus == .authorized {
-                monthlyAgeGuideNotificationsEnabled = true
-                await rescheduleMonthlyAgeGuideNotification()
-            }
-        }
-        .fileExporter(
-            isPresented: $showingExporter,
-            document: exportDocument,
-            contentType: .json,
-            defaultFilename: "Little-Windows-Backup"
-        ) { result in
-            if case .failure(let error) = result {
-                statusMessage = error.localizedDescription
-            }
-        }
-        .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
-            importBackup(result)
-        }
-        .appActionSheet(
-            isPresented: $showingImportConfirmation,
-            title: "Replace Current Data?",
-            message: "This replaces every current profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
-            systemImage: "square.and.arrow.down",
-            tint: .red,
-            options: [
-                AppActionSheetOption(
-                    title: "Import Backup",
-                    subtitle: "Replace all current Little Windows data.",
-                    systemImage: "square.and.arrow.down.fill",
-                    tint: .red,
-                    role: .destructive
-                ) {
-                    performPendingImport()
-                }
-            ],
-            cancelAction: {
-                pendingImportData = nil
-            }
-        )
-        .appActionSheet(
-            isPresented: $showingDeleteConfirmation,
-            title: "Delete All Data?",
-            message: "This permanently deletes every profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
-            systemImage: "trash",
-            tint: .red,
-            options: [
-                AppActionSheetOption(
-                    title: "Delete All Data",
-                    subtitle: "Remove all local Little Windows history.",
-                    systemImage: "trash.fill",
-                    tint: .red,
-                    role: .destructive
-                ) {
-                    deleteAll()
-                }
-            ]
-        )
-        .alert("Little Windows", isPresented: Binding(
-            get: { statusMessage != nil },
-            set: { if !$0 { statusMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(statusMessage ?? "")
         }
         .confirmationDialog(
             "Turn on Little Window Alerts?",
@@ -491,11 +452,16 @@ struct SettingsView: View {
             Text("You can allow Little Window Alerts in iOS Settings whenever you're ready.")
         }
         .task {
+            await notificationManager.refreshAuthorizationStatus()
             await notificationManager.configure()
         }
         .onDisappear {
             pendingNotificationRefresh?.cancel()
         }
+    }
+
+    private var profileID: UUID? {
+        profile?.id
     }
 
     private var settings: PredictionSettings {
@@ -509,8 +475,6 @@ struct SettingsView: View {
     }
 
     private func rescheduleNotification() async {
-        let profile = selectedProfile
-        let profileID = profile?.id
         await EventMutationService.refreshPrediction(
             profile: profile,
             events: events.filter {
@@ -535,22 +499,8 @@ struct SettingsView: View {
         }
     }
 
-    private func rescheduleMonthlyAgeGuideNotification() async {
-        guard let profile = profileService.selectedProfile(in: profiles) else { return }
-        let timing = MonthlyAgeGuideNotificationTiming(
-            rawValue: monthlyAgeGuideNotificationTimingRawValue
-        ) ?? .monthlyBirthday
-        await notificationManager.scheduleMonthlyAgeGuideNotification(
-            profile: profile,
-            readStates: ageGuideReadStates.filter { $0.matchesProfile(profile.id) },
-            context: modelContext,
-            timing: timing
-        )
-    }
-
     private var currentPrediction: SleepPrediction? {
-        let profileID = selectedProfileID
-        return records.first(where: {
+        records.first(where: {
             $0.actualSleepEventID == nil &&
             $0.matchesProfile(profileID)
         })?.prediction
@@ -565,9 +515,8 @@ struct SettingsView: View {
     }
 
     private var currentPressure: SleepPressure? {
-        let profileID = selectedProfileID
-        return SleepPredictionEngine.sleepPressure(
-            profile: selectedProfile,
+        SleepPredictionEngine.sleepPressure(
+            profile: profile,
             events: events.filter { $0.matchesProfile(profileID) },
             records: records.filter { $0.matchesProfile(profileID) },
             settings: settings
@@ -575,8 +524,7 @@ struct SettingsView: View {
     }
 
     private var selectedProfileIsSleeping: Bool {
-        let profileID = selectedProfileID
-        return events.contains {
+        events.contains {
             $0.matchesProfile(profileID) &&
                 $0.type == .sleep && $0.isTimerRunning
         }
@@ -605,7 +553,7 @@ struct SettingsView: View {
         if let currentPrediction {
             return NotificationManager.notificationCopy(
                 for: currentPrediction,
-                babyName: selectedProfile?.name ?? "Baby",
+                babyName: profile?.name ?? "Baby",
                 leadMinutes: notificationLeadMinutes
             )
         }
@@ -655,48 +603,173 @@ struct SettingsView: View {
         }
         openURL(url)
     }
+}
 
-    private func export() {
-        do {
-            exportDocument = BackupDocument(data: try DataExportImportService.exportData(context: modelContext))
-            showingExporter = true
-        } catch {
-            statusMessage = "Export failed: \(error.localizedDescription)"
+private struct AppointmentSettingsSection: View {
+    @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
+    @AppStorage("appointmentRemindersEnabled") private var appointmentRemindersEnabled = true
+    @StateObject private var notificationManager = NotificationManager.shared
+
+    let profile: BabyProfile?
+
+    private var profileID: UUID? {
+        profile?.id
+    }
+
+    private var selectedProfileAppointments: [DoctorAppointment] {
+        appointments.filter { $0.matchesProfile(profileID) }
+    }
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                LazySettingsDestination {
+                    AppointmentsListView()
+                }
+            } label: {
+                LabeledContent {
+                    Text("\(selectedProfileAppointments.count)")
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("Appointments and visits", systemImage: "stethoscope")
+                }
+            }
+            Toggle("Appointment reminders", isOn: $appointmentRemindersEnabled)
+                .onChange(of: appointmentRemindersEnabled) { _, enabled in
+                    Task {
+                        let appointments = selectedProfileAppointments
+                        if enabled {
+                            for appointment in appointments where !appointment.isCompleted {
+                                await notificationManager.rescheduleAppointmentReminders(
+                                    appointment: appointment,
+                                    babyName: profile?.name ?? "Baby"
+                                )
+                            }
+                        } else {
+                            for appointment in appointments {
+                                await notificationManager.cancelAppointmentReminders(
+                                    appointmentID: appointment.id
+                                )
+                            }
+                        }
+                    }
+                }
+        } header: {
+            Label("Appointments", systemImage: "calendar.badge.clock")
+        } footer: {
+            Text("Appointment reminders are separate from Little Window sleep alerts.")
+        }
+    }
+}
+
+private struct MonthlyAgeGuideSettingsSection: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
+    @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
+
+    let profile: BabyProfile?
+
+    @AppStorage("monthlyAgeGuideNotificationsEnabled") private var monthlyAgeGuideNotificationsEnabled = false
+    @AppStorage("monthlyAgeGuideNotificationTiming") private var monthlyAgeGuideNotificationTimingRawValue =
+        MonthlyAgeGuideNotificationTiming.monthlyBirthday.rawValue
+    @StateObject private var notificationManager = NotificationManager.shared
+    @State private var showingPermissionDenied = false
+
+    private var selectedProfileAgeGuideReadStates: [AgeGuideReadState] {
+        ageGuideReadStates.filter { $0.matchesProfile(profile?.id) }
+    }
+
+    var body: some View {
+        Section {
+            Toggle(
+                "Monthly guide notifications",
+                isOn: Binding(
+                    get: { monthlyAgeGuideNotificationsEnabled },
+                    set: { enabled in
+                        if enabled {
+                            Task {
+                                let granted = await notificationManager.requestAuthorization()
+                                if granted {
+                                    monthlyAgeGuideNotificationsEnabled = true
+                                    await rescheduleMonthlyAgeGuideNotification()
+                                } else {
+                                    monthlyAgeGuideNotificationsEnabled = false
+                                    showingPermissionDenied = true
+                                }
+                            }
+                        } else {
+                            monthlyAgeGuideNotificationsEnabled = false
+                            Task {
+                                await notificationManager.cancelMonthlyAgeGuideNotifications()
+                            }
+                        }
+                    }
+                )
+            )
+            if monthlyAgeGuideNotificationsEnabled {
+                Picker("Timing", selection: $monthlyAgeGuideNotificationTimingRawValue) {
+                    ForEach(MonthlyAgeGuideNotificationTiming.allCases) { timing in
+                        Text(timing.displayName).tag(timing.rawValue)
+                    }
+                }
+                .onChange(of: monthlyAgeGuideNotificationTimingRawValue) { _, _ in
+                    Task { await rescheduleMonthlyAgeGuideNotification() }
+                }
+            }
+            NavigationLink {
+                LazySettingsDestination {
+                    AgeGuidesListView(
+                        guides: AgeGuideService.shared.allAgeGuides(),
+                        currentMonth: profile.map {
+                            AgeGuideService.shared.ageMonth(for: $0)
+                        },
+                        readStates: selectedProfileAgeGuideReadStates
+                    )
+                }
+            } label: {
+                Label("Browse age guides", systemImage: "book.pages.fill")
+            }
+        } header: {
+            Label("Monthly Age Guides", systemImage: "calendar.badge.clock")
+        } footer: {
+            Text("One gentle reminder per monthly age at most. Guides are parent education and memory prompts, not medical advice.")
+        }
+        .task {
+            await notificationManager.refreshAuthorizationStatus()
+            if UserDefaults.standard.object(forKey: "monthlyAgeGuideNotificationsEnabled") == nil,
+               notificationManager.authorizationStatus == .authorized {
+                monthlyAgeGuideNotificationsEnabled = true
+                await rescheduleMonthlyAgeGuideNotification()
+            }
+        }
+        .alert("Notifications are turned off", isPresented: $showingPermissionDenied) {
+            Button("Open Settings") {
+                openNotificationSettings()
+            }
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text("You can allow Little Window Alerts in iOS Settings whenever you're ready.")
         }
     }
 
-    private func importBackup(_ result: Result<URL, Error>) {
-        do {
-            let url = try result.get()
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            let data = try Data(contentsOf: url)
-            pendingImportData = data
-            showingImportConfirmation = true
-        } catch {
-            statusMessage = "Import failed: \(error.localizedDescription)"
-        }
+    private func rescheduleMonthlyAgeGuideNotification() async {
+        guard let profile else { return }
+        let timing = MonthlyAgeGuideNotificationTiming(
+            rawValue: monthlyAgeGuideNotificationTimingRawValue
+        ) ?? .monthlyBirthday
+        await notificationManager.scheduleMonthlyAgeGuideNotification(
+            profile: profile,
+            readStates: selectedProfileAgeGuideReadStates,
+            context: modelContext,
+            timing: timing
+        )
     }
 
-    private func performPendingImport() {
-        guard let data = pendingImportData else { return }
-        do {
-            try DataExportImportService.importData(data, context: modelContext)
-            pendingImportData = nil
-            statusMessage = "Backup imported."
-        } catch {
-            pendingImportData = nil
-            statusMessage = "Import failed: \(error.localizedDescription)"
+    private func openNotificationSettings() {
+        guard let url = URL(string: UIApplication.openNotificationSettingsURLString) else {
+            return
         }
-    }
-
-    private func deleteAll() {
-        do {
-            try DataExportImportService.deleteAll(context: modelContext)
-            statusMessage = "All history was deleted."
-        } catch {
-            statusMessage = "Delete failed: \(error.localizedDescription)"
-        }
+        openURL(url)
     }
 }
 
@@ -784,7 +857,9 @@ private struct SyncSettingsSection: View {
     var body: some View {
         Section {
             NavigationLink {
-                ICloudSyncSettingsView()
+                LazySettingsDestination {
+                    ICloudSyncSettingsView()
+                }
             } label: {
                 LabeledContent {
                     Text(isICloudSyncEnabled ? "On" : "Off")
@@ -794,7 +869,9 @@ private struct SyncSettingsSection: View {
                 }
             }
             NavigationLink {
-                FamilySyncSettingsView()
+                LazySettingsDestination {
+                    FamilySyncSettingsView()
+                }
             } label: {
                 LabeledContent {
                     Text(syncMode == .sharedFamilySync ? "On" : "Off")
