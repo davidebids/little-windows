@@ -606,11 +606,32 @@ private struct ChildSleepSettingsSections: View {
 }
 
 private struct AppointmentSettingsSection: View {
-    @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
+    @Query private var appointments: [DoctorAppointment]
     @AppStorage("appointmentRemindersEnabled") private var appointmentRemindersEnabled = true
     @StateObject private var notificationManager = NotificationManager.shared
 
     let profile: BabyProfile?
+
+    init(profile: BabyProfile?) {
+        self.profile = profile
+
+        if let profileID = profile?.id {
+            _appointments = Query(
+                FetchDescriptor<DoctorAppointment>(
+                    predicate: #Predicate<DoctorAppointment> { appointment in
+                        appointment.profileID == profileID
+                    },
+                    sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
+                )
+            )
+        } else {
+            _appointments = Query(
+                FetchDescriptor<DoctorAppointment>(
+                    sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
+                )
+            )
+        }
+    }
 
     private var profileID: UUID? {
         profile?.id
@@ -665,7 +686,7 @@ private struct AppointmentSettingsSection: View {
 private struct MonthlyAgeGuideSettingsSection: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
-    @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
+    @Query private var ageGuideReadStates: [AgeGuideReadState]
 
     let profile: BabyProfile?
 
@@ -674,6 +695,27 @@ private struct MonthlyAgeGuideSettingsSection: View {
         MonthlyAgeGuideNotificationTiming.monthlyBirthday.rawValue
     @StateObject private var notificationManager = NotificationManager.shared
     @State private var showingPermissionDenied = false
+
+    init(profile: BabyProfile?) {
+        self.profile = profile
+
+        if let profileID = profile?.id {
+            _ageGuideReadStates = Query(
+                FetchDescriptor<AgeGuideReadState>(
+                    predicate: #Predicate<AgeGuideReadState> { state in
+                        state.profileID == profileID
+                    },
+                    sortBy: [SortDescriptor(\AgeGuideReadState.updatedAt)]
+                )
+            )
+        } else {
+            _ageGuideReadStates = Query(
+                FetchDescriptor<AgeGuideReadState>(
+                    sortBy: [SortDescriptor(\AgeGuideReadState.updatedAt)]
+                )
+            )
+        }
+    }
 
     private var selectedProfileAgeGuideReadStates: [AgeGuideReadState] {
         ageGuideReadStates.filter { $0.matchesProfile(profile?.id) }

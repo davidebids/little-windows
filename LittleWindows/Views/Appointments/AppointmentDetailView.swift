@@ -6,13 +6,13 @@ struct AppointmentDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var appointment: DoctorAppointment
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @Query(sort: \BabyEvent.startDate, order: .reverse) private var events: [BabyEvent]
     @StateObject private var profileService = ProfileService.shared
 
     @State private var showingEditor = false
     @State private var eventRoute: EventEditorRoute?
     @State private var milestoneTemplate: MilestoneTemplate?
     @State private var showingDeleteConfirmation = false
+    @State private var events: [BabyEvent] = []
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
     private var growthEntryTitle: String {
@@ -159,6 +159,9 @@ struct AppointmentDetailView: View {
                 Button("Edit") { showingEditor = true }
             }
         }
+        .task(id: healthContextRefreshToken) {
+            refreshHealthContext()
+        }
         .sheet(isPresented: $showingEditor) {
             NavigationStack {
                 AppointmentEditorView(
@@ -220,6 +223,89 @@ struct AppointmentDetailView: View {
         scopedEvents.filter {
             $0.type == .medicine &&
             Date().timeIntervalSince($0.startDate) <= 30 * 24 * 60 * 60
+        }
+    }
+
+    private var healthContextRefreshToken: String {
+        [
+            appointment.id.uuidString,
+            (appointment.profileID ?? profile?.id)?.uuidString ?? "all",
+            appointment.updatedAt.timeIntervalSinceReferenceDate.description
+        ].joined(separator: "-")
+    }
+
+    private func refreshHealthContext() {
+        let selectedProfileID = appointment.profileID ?? profile?.id
+        let now = Date()
+        let temperatureCutoff = now.addingTimeInterval(-14 * 24 * 60 * 60)
+        let medicineCutoff = now.addingTimeInterval(-30 * 24 * 60 * 60)
+
+        do {
+            let growthEvents: [BabyEvent]
+            let temperatureEvents: [BabyEvent]
+            let medicineEvents: [BabyEvent]
+            if let selectedProfileID {
+                var growthDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.profileID == selectedProfileID && event.typeRawValue == "growth"
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                growthDescriptor.fetchLimit = 1
+                growthEvents = try modelContext.fetch(growthDescriptor)
+
+                var temperatureDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.profileID == selectedProfileID &&
+                            event.typeRawValue == "temperature" &&
+                            event.startDate >= temperatureCutoff
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                temperatureDescriptor.fetchLimit = 1
+                temperatureEvents = try modelContext.fetch(temperatureDescriptor)
+
+                var medicineDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.profileID == selectedProfileID &&
+                            event.typeRawValue == "medicine" &&
+                            event.startDate >= medicineCutoff
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                medicineDescriptor.fetchLimit = 3
+                medicineEvents = try modelContext.fetch(medicineDescriptor)
+            } else {
+                var growthDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.typeRawValue == "growth"
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                growthDescriptor.fetchLimit = 1
+                growthEvents = try modelContext.fetch(growthDescriptor)
+
+                var temperatureDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.typeRawValue == "temperature" && event.startDate >= temperatureCutoff
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                temperatureDescriptor.fetchLimit = 1
+                temperatureEvents = try modelContext.fetch(temperatureDescriptor)
+
+                var medicineDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.typeRawValue == "medicine" && event.startDate >= medicineCutoff
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                medicineDescriptor.fetchLimit = 3
+                medicineEvents = try modelContext.fetch(medicineDescriptor)
+            }
+            events = growthEvents + temperatureEvents + medicineEvents
+        } catch {
+            events = []
         }
     }
 

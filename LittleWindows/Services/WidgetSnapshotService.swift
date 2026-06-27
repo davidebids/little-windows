@@ -92,22 +92,73 @@ enum WidgetSnapshotService {
         context: ModelContext,
         now: Date = Date()
     ) -> FoodWidgetSnapshot {
-        let householdID = ((try? context.fetch(FetchDescriptor<Household>())) ?? []).first?.id
-        let lists = ((try? context.fetch(FetchDescriptor<ShoppingList>())) ?? [])
-            .filter { list in
-                !list.isArchived && (householdID == nil || list.householdID == householdID)
-            }
-            .sorted { lhs, rhs in
-                ((lhs.sortOrder ?? 0), lhs.name) < ((rhs.sortOrder ?? 0), rhs.name)
-            }
-        let items = ((try? context.fetch(FetchDescriptor<ShoppingListItem>())) ?? [])
-            .filter { item in
-                householdID == nil || item.householdID == householdID
-            }
-        let sections = ((try? context.fetch(FetchDescriptor<FoodStoreSection>())) ?? [])
-            .filter { section in
-                householdID == nil || section.householdID == householdID
-            }
+        var householdDescriptor = FetchDescriptor<Household>(
+            sortBy: [SortDescriptor(\Household.createdAt)]
+        )
+        householdDescriptor.fetchLimit = 1
+        let householdID = ((try? context.fetch(householdDescriptor)) ?? []).first?.id
+
+        let lists: [ShoppingList]
+        let items: [ShoppingListItem]
+        let sections: [FoodStoreSection]
+        if let householdID {
+            var listDescriptor = FetchDescriptor<ShoppingList>(
+                predicate: #Predicate<ShoppingList> { list in
+                    list.householdID == householdID && !list.isArchived
+                },
+                sortBy: [
+                    SortDescriptor(\ShoppingList.sortOrder),
+                    SortDescriptor(\ShoppingList.name)
+                ]
+            )
+            listDescriptor.fetchLimit = 12
+            lists = (try? context.fetch(listDescriptor)) ?? []
+
+            let listIDs = Set(lists.map(\.id))
+            items = ((try? context.fetch(
+                FetchDescriptor<ShoppingListItem>(
+                    predicate: #Predicate<ShoppingListItem> { item in
+                        item.householdID == householdID
+                    },
+                    sortBy: [
+                        SortDescriptor(\ShoppingListItem.sortOrder),
+                        SortDescriptor(\ShoppingListItem.name)
+                    ]
+                )
+            )) ?? []).filter { listIDs.contains($0.shoppingListID) }
+
+            sections = (try? context.fetch(
+                FetchDescriptor<FoodStoreSection>(
+                    predicate: #Predicate<FoodStoreSection> { section in
+                        section.householdID == householdID
+                    }
+                )
+            )) ?? []
+        } else {
+            var listDescriptor = FetchDescriptor<ShoppingList>(
+                predicate: #Predicate<ShoppingList> { list in
+                    !list.isArchived
+                },
+                sortBy: [
+                    SortDescriptor(\ShoppingList.sortOrder),
+                    SortDescriptor(\ShoppingList.name)
+                ]
+            )
+            listDescriptor.fetchLimit = 12
+            lists = (try? context.fetch(listDescriptor)) ?? []
+
+            let listIDs = Set(lists.map(\.id))
+            items = ((try? context.fetch(
+                FetchDescriptor<ShoppingListItem>(
+                    sortBy: [
+                        SortDescriptor(\ShoppingListItem.sortOrder),
+                        SortDescriptor(\ShoppingListItem.name)
+                    ]
+                )
+            )) ?? []).filter { listIDs.contains($0.shoppingListID) }
+
+            sections = (try? context.fetch(FetchDescriptor<FoodStoreSection>())) ?? []
+        }
         let sectionNames = Dictionary(uniqueKeysWithValues: sections.map { ($0.id, $0.name) })
         let snapshots = lists.map { list in
             shoppingListSnapshot(

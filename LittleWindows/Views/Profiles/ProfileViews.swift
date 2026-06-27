@@ -6,7 +6,30 @@ import UIKit
 struct ProfileAvatarView: View {
     let profile: CareProfile
     var size: CGFloat = 42
-    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
+    @Query private var photoAttachments: [PhotoAttachment]
+
+    init(profile: CareProfile, size: CGFloat = 42) {
+        self.profile = profile
+        self.size = size
+
+        if let attachmentID = profile.profilePhotoAttachmentID {
+            var descriptor = FetchDescriptor<PhotoAttachment>(
+                predicate: #Predicate<PhotoAttachment> { attachment in
+                    attachment.id == attachmentID
+                }
+            )
+            descriptor.fetchLimit = 1
+            _photoAttachments = Query(descriptor)
+        } else {
+            var descriptor = FetchDescriptor<PhotoAttachment>(
+                predicate: #Predicate<PhotoAttachment> { attachment in
+                    attachment.ownerKindRawValue == "__missing_profile_photo__"
+                }
+            )
+            descriptor.fetchLimit = 1
+            _photoAttachments = Query(descriptor)
+        }
+    }
 
     var body: some View {
         ZStack {

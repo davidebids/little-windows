@@ -414,14 +414,14 @@ struct MilestonesView: View {
         await Task.yield()
         do {
             let birthDate = Calendar.current.startOfDay(for: profile.birthDate)
+            let profileID = profile.id
             let descriptor = FetchDescriptor<BabyEvent>(
                 predicate: #Predicate<BabyEvent> { event in
-                    event.startDate >= birthDate
+                    event.profileID == profileID && event.startDate >= birthDate
                 },
                 sortBy: [SortDescriptor(\BabyEvent.startDate)]
             )
             let fetchedEvents = try modelContext.fetch(descriptor)
-                .filter { $0.matchesProfile(profile.id) }
             events = fetchedEvents
             automaticSummaries = AutomaticMilestoneSummaryService.summaries(
                 profile: profile,
@@ -1133,7 +1133,31 @@ struct MilestoneTimelineRow: View {
     let milestone: MilestoneEntry
     let babyName: String
     let birthDate: Date?
-    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
+    @Query private var photoAttachments: [PhotoAttachment]
+
+    init(milestone: MilestoneEntry, babyName: String, birthDate: Date?) {
+        self.milestone = milestone
+        self.babyName = babyName
+        self.birthDate = birthDate
+
+        if let attachmentID = milestone.photoAttachmentIDs.first {
+            var descriptor = FetchDescriptor<PhotoAttachment>(
+                predicate: #Predicate<PhotoAttachment> { attachment in
+                    attachment.id == attachmentID
+                }
+            )
+            descriptor.fetchLimit = 1
+            _photoAttachments = Query(descriptor)
+        } else {
+            var descriptor = FetchDescriptor<PhotoAttachment>(
+                predicate: #Predicate<PhotoAttachment> { attachment in
+                    attachment.ownerKindRawValue == "__missing_milestone_photo__"
+                }
+            )
+            descriptor.fetchLimit = 1
+            _photoAttachments = Query(descriptor)
+        }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 13) {

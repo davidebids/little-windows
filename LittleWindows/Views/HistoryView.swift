@@ -519,32 +519,64 @@ struct HistoryView: View {
         let selectedProfileID = profile?.id
 
         do {
-            let eventDescriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { event in
-                    event.startDate >= start && event.startDate < end
-                },
-                sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
-            )
-            events = try modelContext.fetch(eventDescriptor)
-                .filter { Self.visibleDayEvent($0, selectedProfileID: selectedProfileID) }
+            if let selectedProfileID {
+                let eventDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.profileID == selectedProfileID &&
+                            event.startDate >= start &&
+                            event.startDate < end
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                events = try modelContext.fetch(eventDescriptor)
+                    .filter { Self.visibleDayEvent($0, selectedProfileID: selectedProfileID) }
 
-            let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
-                predicate: #Predicate<DoctorAppointment> { appointment in
-                    appointment.startDate >= start && appointment.startDate < end
-                },
-                sortBy: [SortDescriptor(\DoctorAppointment.startDate, order: .reverse)]
-            )
-            appointments = try modelContext.fetch(appointmentDescriptor)
-                .filter { $0.matchesProfile(selectedProfileID) }
+                let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
+                    predicate: #Predicate<DoctorAppointment> { appointment in
+                        appointment.profileID == selectedProfileID &&
+                            appointment.startDate >= start &&
+                            appointment.startDate < end
+                    },
+                    sortBy: [SortDescriptor(\DoctorAppointment.startDate, order: .reverse)]
+                )
+                appointments = try modelContext.fetch(appointmentDescriptor)
 
-            let milestoneDescriptor = FetchDescriptor<MilestoneEntry>(
-                predicate: #Predicate<MilestoneEntry> { milestone in
-                    milestone.date >= start && milestone.date < end
-                },
-                sortBy: [SortDescriptor(\MilestoneEntry.date, order: .reverse)]
-            )
-            milestones = try modelContext.fetch(milestoneDescriptor)
-                .filter { $0.matchesProfile(selectedProfileID) }
+                let milestoneDescriptor = FetchDescriptor<MilestoneEntry>(
+                    predicate: #Predicate<MilestoneEntry> { milestone in
+                        milestone.profileID == selectedProfileID &&
+                            milestone.date >= start &&
+                            milestone.date < end
+                    },
+                    sortBy: [SortDescriptor(\MilestoneEntry.date, order: .reverse)]
+                )
+                milestones = try modelContext.fetch(milestoneDescriptor)
+            } else {
+                let eventDescriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.startDate >= start &&
+                            event.startDate < end
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                events = try modelContext.fetch(eventDescriptor)
+                    .filter { Self.visibleDayEvent($0, selectedProfileID: selectedProfileID) }
+
+                let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
+                    predicate: #Predicate<DoctorAppointment> { appointment in
+                        appointment.startDate >= start && appointment.startDate < end
+                    },
+                    sortBy: [SortDescriptor(\DoctorAppointment.startDate, order: .reverse)]
+                )
+                appointments = try modelContext.fetch(appointmentDescriptor)
+
+                let milestoneDescriptor = FetchDescriptor<MilestoneEntry>(
+                    predicate: #Predicate<MilestoneEntry> { milestone in
+                        milestone.date >= start && milestone.date < end
+                    },
+                    sortBy: [SortDescriptor(\MilestoneEntry.date, order: .reverse)]
+                )
+                milestones = try modelContext.fetch(milestoneDescriptor)
+            }
         } catch {
             events = []
             appointments = []

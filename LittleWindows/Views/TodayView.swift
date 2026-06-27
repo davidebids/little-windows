@@ -76,6 +76,18 @@ struct TodayView: View {
         eventDescriptor.fetchLimit = 900
         _allEvents = Query(eventDescriptor)
 
+        let appointmentEnd = calendar.date(byAdding: .day, value: 3, to: todayStart)
+            ?? todayStart.addingTimeInterval(3 * 24 * 60 * 60)
+        let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
+            predicate: #Predicate<DoctorAppointment> { appointment in
+                appointment.isCompleted == false &&
+                    appointment.startDate >= todayStart &&
+                    appointment.startDate <= appointmentEnd
+            },
+            sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
+        )
+        _appointments = Query(appointmentDescriptor)
+
         var recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
             predicate: #Predicate<SleepPredictionRecord> { record in
                 record.actualSleepEventID == nil || record.generatedAt >= recentCutoff
@@ -1593,7 +1605,18 @@ struct TodayView: View {
             showingAppointments = true
         case .detail(let id), .notes(let id):
             appointmentToOpen = scopedAppointments.first { $0.id == id }
+                ?? fetchAppointment(id: id)
         }
+    }
+
+    private func fetchAppointment(id: UUID) -> DoctorAppointment? {
+        var descriptor = FetchDescriptor<DoctorAppointment>(
+            predicate: #Predicate<DoctorAppointment> { appointment in
+                appointment.id == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 
     private func handlePendingPuppyGuideDeepLink() {
