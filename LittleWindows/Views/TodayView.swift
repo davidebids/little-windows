@@ -12,6 +12,33 @@ private enum TodayScrollAnchor {
     case timeline
 }
 
+private struct TodayRenderState {
+    var profile: BabyProfile?
+    var profileID: UUID?
+    var scopedEvents: [BabyEvent]
+    var scopedRecords: [SleepPredictionRecord]
+    var scopedAppointments: [DoctorAppointment]
+    var scopedAgeGuideReadStates: [AgeGuideReadState]
+    var scopedPuppyGuideReadStates: [PuppyStageGuideReadState]
+    var todayEvents: [BabyEvent]
+    var activeEvents: [BabyEvent]
+    var prediction: SleepPrediction?
+    var isDogProfile: Bool
+    var currentHouseholdID: UUID?
+    var visibleCareRoutines: [CareRoutine]
+    var suggestedRoutineTemplates: [CareRoutineTemplate]
+    var currentAgeGuide: AgeGuide?
+    var shouldShowAgeGuideCard: Bool
+    var currentPuppyGuide: PuppyStageGuide?
+    var shouldShowPuppyGuideCard: Bool
+    var relevantAppointments: [DoctorAppointment]
+    var runningSleepTimer: BabyEvent?
+    var awakeSinceDate: Date?
+    var isSleeping: Bool
+    var dogLastEventTitles: [EventType: String]
+    var dogPottyTitles: [DogPottyType: String]
+}
+
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
@@ -215,11 +242,136 @@ struct TodayView: View {
             .compactMap { $0 }
             .max()
     }
+    private var renderState: TodayRenderState {
+        let profile = profile
+        let profileID = profile?.id
+        let scopedEvents = allEvents.filter { $0.matchesProfile(profileID) }
+        let scopedRecords = records.filter { $0.matchesProfile(profileID) }
+        let scopedAppointments = appointments.filter { $0.matchesProfile(profileID) }
+        let scopedAgeGuideReadStates = ageGuideReadStates.filter { $0.matchesProfile(profileID) }
+        let scopedPuppyGuideReadStates = puppyStageGuideReadStates.filter { $0.matchesProfile(profileID) }
+        let currentHouseholdID = households.first?.id
+        let visibleCareRoutines = CareRoutineService.visibleRoutines(
+            routines: careRoutines,
+            profileID: profileID,
+            householdID: currentHouseholdID
+        )
+        let existingRoutineKinds = Set(visibleCareRoutines.compactMap(\.templateKind))
+        let suggestedRoutineTemplates = CareRoutineService.templates(for: profile?.profileType).filter {
+            !existingRoutineKinds.contains($0.kind)
+        }
+        let currentAgeGuide = profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
+        let shouldShowAgeGuideCard: Bool
+        if let profile, let currentAgeGuide {
+            let state = scopedAgeGuideReadStates.first { $0.guideID == currentAgeGuide.id }
+            shouldShowAgeGuideCard = AgeGuideService.shared.shouldShowMonthlyCard(
+                profile: profile,
+                readState: state
+            )
+        } else {
+            shouldShowAgeGuideCard = false
+        }
+        let currentPuppyGuide = profile.flatMap { PuppyStageGuideService.shared.currentGuide(for: $0) }
+        let shouldShowPuppyGuideCard: Bool
+        if let profile, let currentPuppyGuide {
+            let state = scopedPuppyGuideReadStates.first { $0.guideID == currentPuppyGuide.id }
+            shouldShowPuppyGuideCard = PuppyStageGuideService.shared.shouldShowStageCard(
+                profile: profile,
+                readState: state
+            )
+        } else {
+            shouldShowPuppyGuideCard = false
+        }
+        let todayEvents = scopedEvents.filter {
+            !$0.isTimerDraft && Calendar.current.isDateInToday($0.startDate)
+        }
+        let activeEvents = scopedEvents.filter(\.isTimerDraft).sorted { $0.startDate < $1.startDate }
+        let prediction = PredictionTuningService.currentPrediction(
+            profile: profile,
+            events: scopedEvents,
+            records: scopedRecords,
+            settings: predictionSettings
+        )
+        let now = Date()
+        let soon = now.addingTimeInterval(3 * 24 * 60 * 60)
+        let relevantAppointments = scopedAppointments
+            .filter { !$0.isCompleted && $0.startDate >= Calendar.current.startOfDay(for: now) && $0.startDate <= soon }
+            .sorted { $0.startDate < $1.startDate }
+        let runningSleepTimer = activeEvents.first {
+            $0.type == .sleep && $0.isTimerRunning
+        }
+        let completedSleepEnd = scopedEvents
+            .filter { $0.type == .sleep && !$0.isTimerDraft }
+            .compactMap(\.endDate)
+            .filter { $0 <= now }
+            .max()
+        let stoppedDraftSleepEnd = activeEvents
+            .filter { $0.type == .sleep && !$0.isTimerRunning }
+            .map(\.updatedAt)
+            .filter { $0 <= now }
+            .max()
+        let awakeSinceDate = runningSleepTimer == nil
+            ? [completedSleepEnd, stoppedDraftSleepEnd].compactMap { $0 }.max()
+            : nil
+        var dogLastEventTitles: [EventType: String] = [:]
+        var dogPottyTitles: [DogPottyType: String] = [:]
+        if profile?.profileType == .dog {
+            let committedEvents = scopedEvents.filter { !$0.isTimerDraft }
+            for type in [EventType.food, .water, .walk, .medicine] {
+                dogLastEventTitles[type] = committedEvents
+                    .filter { $0.type == type }
+                    .max { $0.startDate < $1.startDate }?
+                    .displayTitle ?? "Not logged"
+            }
+            dogPottyTitles[.pee] = committedEvents
+                .filter {
+                    $0.type == .potty
+                        && ($0.dogDetails.pottyType == .pee || $0.dogDetails.pottyType == .both)
+                }
+                .max { $0.startDate < $1.startDate }?
+                .displayTitle ?? "Not logged"
+            dogPottyTitles[.poop] = committedEvents
+                .filter {
+                    $0.type == .potty
+                        && ($0.dogDetails.pottyType == .poop || $0.dogDetails.pottyType == .both)
+                }
+                .max { $0.startDate < $1.startDate }?
+                .displayTitle ?? "Not logged"
+        }
+        return TodayRenderState(
+            profile: profile,
+            profileID: profileID,
+            scopedEvents: scopedEvents,
+            scopedRecords: scopedRecords,
+            scopedAppointments: scopedAppointments,
+            scopedAgeGuideReadStates: scopedAgeGuideReadStates,
+            scopedPuppyGuideReadStates: scopedPuppyGuideReadStates,
+            todayEvents: todayEvents,
+            activeEvents: activeEvents,
+            prediction: prediction,
+            isDogProfile: profile?.profileType == .dog,
+            currentHouseholdID: currentHouseholdID,
+            visibleCareRoutines: visibleCareRoutines,
+            suggestedRoutineTemplates: suggestedRoutineTemplates,
+            currentAgeGuide: currentAgeGuide,
+            shouldShowAgeGuideCard: shouldShowAgeGuideCard,
+            currentPuppyGuide: currentPuppyGuide,
+            shouldShowPuppyGuideCard: shouldShowPuppyGuideCard,
+            relevantAppointments: relevantAppointments,
+            runningSleepTimer: runningSleepTimer,
+            awakeSinceDate: awakeSinceDate,
+            isSleeping: runningSleepTimer != nil,
+            dogLastEventTitles: dogLastEventTitles,
+            dogPottyTitles: dogPottyTitles
+        )
+    }
 
     var body: some View {
-        let todayEvents = todayEvents
-        let activeEvents = activeEvents
-        let prediction = prediction
+        let state = renderState
+        let todayEvents = state.todayEvents
+        let activeEvents = state.activeEvents
+        let prediction = state.prediction
+        let profile = state.profile
 
         ScrollViewReader { scrollProxy in
             List {
@@ -273,26 +425,24 @@ struct TodayView: View {
                 } else {
                     activeTimersSection(activeEvents)
 
-                    if isDogProfile {
-                        dogTodaySummarySection
-                        puppyStageGuideSection
+                    if state.isDogProfile {
+                        dogTodaySummarySection(state)
+                        puppyStageGuideSection(state)
                     }
 
-                    if !isDogProfile {
+                    if !state.isDogProfile {
                         Section {
                             PredictionCard(
                                 prediction: prediction,
                                 babyName: profile?.name ?? "Baby",
-                                awakeSinceDate: awakeSinceDate,
+                                awakeSinceDate: state.awakeSinceDate,
                                 sleepPressure: { now in
-                                    sleepPressure(at: now)
+                                    sleepPressure(at: now, state: state)
                                 },
                                 alertStatusText: notificationManager.statusText(
                                     prediction: prediction,
                                     settings: .current,
-                                    isSleeping: activeEvents.contains {
-                                        $0.type == .sleep && $0.isTimerRunning
-                                    }
+                                    isSleeping: state.isSleeping
                                 ),
                                 alertsEnabled: notificationsEnabled,
                                 toggleAlerts: toggleLittleWindowAlerts,
@@ -305,13 +455,13 @@ struct TodayView: View {
                         }
                     }
 
-                    if isDogProfile {
+                    if state.isDogProfile {
                         dogQuickActionsSection
                     } else {
                         childQuickActionsSection
                     }
 
-                    careRoutinesSection
+                    careRoutinesSection(state)
 
                     Section {
                         if todayEvents.isEmpty {
@@ -350,11 +500,11 @@ struct TodayView: View {
                     }
                     .id(TodayScrollAnchor.timeline)
 
-                    if !isDogProfile {
-                        monthlyAgeGuideSection
+                    if !state.isDogProfile {
+                        monthlyAgeGuideSection(state)
                     }
 
-                    appointmentsSection
+                    appointmentsSection(state)
                 }
             }
             .listStyle(.insetGrouped)
@@ -460,16 +610,16 @@ struct TodayView: View {
             NavigationStack {
                 PredictionExplanationView(
                     prediction: prediction,
-                    sleepPressure: sleepPressure(at: Date())
+                    sleepPressure: sleepPressure(at: Date(), state: state)
                 )
             }
         }
         .sheet(isPresented: $showingBackwardsPlanner) {
-            if let profile {
+            if let profile = state.profile {
                 NavigationStack {
                     BackwardsSleepPlanView(
                         profile: profile,
-                        events: scopedEvents,
+                        events: state.scopedEvents,
                         settings: predictionSettings,
                         activePlan: activeSleepPlan,
                         activatePlan: activateSleepPlan,
@@ -656,15 +806,15 @@ struct TodayView: View {
     }
 
     @ViewBuilder
-    private var monthlyAgeGuideSection: some View {
-        if shouldShowAgeGuideCard, let profile, let guide = currentAgeGuide {
+    private func monthlyAgeGuideSection(_ state: TodayRenderState) -> some View {
+        if state.shouldShowAgeGuideCard, let profile = state.profile, let guide = state.currentAgeGuide {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     AgeGuideFeatureCard(
                         guide: guide,
                         babyName: profile.name,
                         isCurrent: true,
-                        isUnread: !scopedAgeGuideReadStates.contains {
+                        isUnread: !state.scopedAgeGuideReadStates.contains {
                             $0.guideID == guide.id && $0.firstOpenedAt != nil
                         },
                         reachedDate: AgeGuideService.shared.monthlyBirthdayDate(
@@ -675,8 +825,8 @@ struct TodayView: View {
                             AgeGuideService.shared.markMonthlyCardDismissed(
                                 guide,
                                 in: modelContext,
-                                readStates: scopedAgeGuideReadStates,
-                                profileID: selectedProfileID
+                                readStates: state.scopedAgeGuideReadStates,
+                                profileID: state.profileID
                             )
                         },
                         onAddMilestone: {
@@ -704,8 +854,8 @@ struct TodayView: View {
     }
 
     @ViewBuilder
-    private var puppyStageGuideSection: some View {
-        if shouldShowPuppyGuideCard, let profile, let guide = currentPuppyGuide {
+    private func puppyStageGuideSection(_ state: TodayRenderState) -> some View {
+        if state.shouldShowPuppyGuideCard, let profile = state.profile, let guide = state.currentPuppyGuide {
             Section {
                 PuppyStageGuideCard(
                     profile: profile,
@@ -714,8 +864,8 @@ struct TodayView: View {
                         PuppyStageGuideService.shared.markStageCardDismissed(
                             guide,
                             in: modelContext,
-                            readStates: scopedPuppyGuideReadStates,
-                            profileID: selectedProfileID
+                            readStates: state.scopedPuppyGuideReadStates,
+                            profileID: state.profileID
                         )
                     },
                     onRead: {
@@ -902,15 +1052,15 @@ struct TodayView: View {
         }
     }
 
-    private var dogTodaySummarySection: some View {
+    private func dogTodaySummarySection(_ state: TodayRenderState) -> some View {
         Section {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                DogSummaryCard(title: "Last food", value: lastEventTitle(.food), icon: "fork.knife", color: .orange)
-                DogSummaryCard(title: "Last water", value: lastEventTitle(.water), icon: "drop.fill", color: .cyan)
-                DogSummaryCard(title: "Last pee", value: lastDogPottyTitle(.pee), icon: "pawprint.fill", color: .teal)
-                DogSummaryCard(title: "Last poop", value: lastDogPottyTitle(.poop), icon: "pawprint.circle.fill", color: .teal)
-                DogSummaryCard(title: "Last walk", value: lastEventTitle(.walk), icon: "figure.walk", color: .green)
-                DogSummaryCard(title: "Medicine", value: lastEventTitle(.medicine), icon: "cross.case.fill", color: .red)
+                DogSummaryCard(title: "Last food", value: dogLastEventTitle(.food, state: state), icon: "fork.knife", color: .orange)
+                DogSummaryCard(title: "Last water", value: dogLastEventTitle(.water, state: state), icon: "drop.fill", color: .cyan)
+                DogSummaryCard(title: "Last pee", value: dogPottyTitle(.pee, state: state), icon: "pawprint.fill", color: .teal)
+                DogSummaryCard(title: "Last poop", value: dogPottyTitle(.poop, state: state), icon: "pawprint.circle.fill", color: .teal)
+                DogSummaryCard(title: "Last walk", value: dogLastEventTitle(.walk, state: state), icon: "figure.walk", color: .green)
+                DogSummaryCard(title: "Medicine", value: dogLastEventTitle(.medicine, state: state), icon: "cross.case.fill", color: .red)
             }
             .padding(14)
             .appSurface()
@@ -918,7 +1068,7 @@ struct TodayView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         } header: {
-            AppSectionHeader(title: "\(profile?.name ?? "Dog") today", subtitle: "Quick snapshot")
+            AppSectionHeader(title: "\(state.profile?.name ?? "Dog") today", subtitle: "Quick snapshot")
         }
     }
 
@@ -938,12 +1088,12 @@ struct TodayView: View {
         }
     }
 
-    private var careRoutinesSection: some View {
+    private func careRoutinesSection(_ state: TodayRenderState) -> some View {
         CareRoutinesTodayCard(
-            routines: visibleCareRoutines,
+            routines: state.visibleCareRoutines,
             steps: careRoutineSteps,
             runs: careRoutineRuns,
-            templates: suggestedRoutineTemplates,
+            templates: state.suggestedRoutineTemplates,
             addTemplate: addRoutineTemplate,
             startRoutine: startRoutine,
             archiveRoutine: archiveRoutine,
@@ -954,10 +1104,10 @@ struct TodayView: View {
     }
 
     @ViewBuilder
-    private var appointmentsSection: some View {
-        if !relevantAppointments.isEmpty {
+    private func appointmentsSection(_ state: TodayRenderState) -> some View {
+        if !state.relevantAppointments.isEmpty {
             Section {
-                ForEach(relevantAppointments.prefix(2)) { appointment in
+                ForEach(state.relevantAppointments.prefix(2)) { appointment in
                     Button {
                         appointmentToOpen = appointment
                     } label: {
@@ -1455,6 +1605,14 @@ struct TodayView: View {
             .displayTitle ?? "Not logged"
     }
 
+    private func dogLastEventTitle(_ type: EventType, state: TodayRenderState) -> String {
+        state.dogLastEventTitles[type] ?? "Not logged"
+    }
+
+    private func dogPottyTitle(_ pottyType: DogPottyType, state: TodayRenderState) -> String {
+        state.dogPottyTitles[pottyType] ?? "Not logged"
+    }
+
     private func startNursing(_ side: NursingSide) {
         if let event = startTimer(.nursing, nursingSide: side) {
             activeTimerToEdit = event
@@ -1791,6 +1949,16 @@ struct TodayView: View {
             profile: profile,
             events: scopedEvents,
             records: scopedRecords,
+            now: now,
+            settings: predictionSettings
+        )
+    }
+
+    private func sleepPressure(at now: Date, state: TodayRenderState) -> SleepPressure? {
+        SleepPredictionEngine.sleepPressure(
+            profile: state.profile,
+            events: state.scopedEvents,
+            records: state.scopedRecords,
             now: now,
             settings: predictionSettings
         )

@@ -224,6 +224,18 @@ struct LazySettingsDestination<Content: View>: View {
     }
 }
 
+private struct ChildSleepSettingsRenderState {
+    var scopedEvents: [BabyEvent]
+    var scopedRecords: [SleepPredictionRecord]
+    var currentPrediction: SleepPrediction?
+    var currentPressure: SleepPressure?
+    var selectedProfileIsSleeping: Bool
+    var notificationStatus: String
+    var sleepPressureStatus: String
+    var sleepPressurePreviewText: String
+    var notificationPreview: LittleWindowNotificationCopy
+}
+
 private struct ChildSleepSettingsSections: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
@@ -278,6 +290,8 @@ private struct ChildSleepSettingsSections: View {
     }
 
     var body: some View {
+        let state = renderState
+
         Group {
             Section("Prediction") {
                 Toggle("Use feed timing", isOn: $feedAdjustmentEnabled)
@@ -352,7 +366,7 @@ private struct ChildSleepSettingsSections: View {
                     }
 
                     LabeledContent("Next alert") {
-                        Text(notificationStatus)
+                        Text(state.notificationStatus)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
@@ -368,9 +382,9 @@ private struct ChildSleepSettingsSections: View {
                     Text("Notification preview")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(notificationPreview.title)
+                    Text(state.notificationPreview.title)
                         .font(.subheadline.weight(.semibold))
-                    Text(notificationPreview.body)
+                    Text(state.notificationPreview.body)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -404,7 +418,7 @@ private struct ChildSleepSettingsSections: View {
 
                 if sleepPressureAlertsEnabled {
                     LabeledContent("Next pressure alert") {
-                        Text(sleepPressureStatus)
+                        Text(state.sleepPressureStatus)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
@@ -415,11 +429,11 @@ private struct ChildSleepSettingsSections: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Label(
-                        currentPressure?.band.statusText ?? "Learning rhythm",
-                        systemImage: currentPressure?.band.systemImage ?? "sparkle.magnifyingglass"
+                        state.currentPressure?.band.statusText ?? "Learning rhythm",
+                        systemImage: state.currentPressure?.band.systemImage ?? "sparkle.magnifyingglass"
                     )
                     .font(.subheadline.weight(.semibold))
-                    Text(sleepPressurePreviewText)
+                    Text(state.sleepPressurePreviewText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -464,6 +478,68 @@ private struct ChildSleepSettingsSections: View {
         profile?.id
     }
 
+    private var renderState: ChildSleepSettingsRenderState {
+        let scopedEvents = events.filter { $0.matchesProfile(profileID) }
+        let scopedRecords = records.filter { $0.matchesProfile(profileID) }
+        let currentPrediction = scopedRecords.first(where: {
+            $0.actualSleepEventID == nil
+        })?.prediction
+        let selectedProfileIsSleeping = scopedEvents.contains {
+            $0.type == .sleep && $0.isTimerRunning
+        }
+        let currentPressure = SleepPredictionEngine.sleepPressure(
+            profile: profile,
+            events: scopedEvents,
+            records: scopedRecords,
+            settings: settings
+        )
+        let notificationStatus = notificationManager.statusText(
+            prediction: currentPrediction,
+            settings: .current,
+            isSleeping: selectedProfileIsSleeping
+        )
+        let sleepPressureStatus = NotificationManager.sleepPressureStatusText(
+            pressure: currentPressure,
+            enabled: sleepPressureAlertsEnabled,
+            isSleeping: selectedProfileIsSleeping,
+            authorizationStatus: notificationManager.authorizationStatus
+        )
+        let sleepPressurePreviewText: String
+        if let pressure = currentPressure {
+            if let score = pressure.score {
+                sleepPressurePreviewText = "\(Int(score.rounded())) / 100 · \(pressure.confidenceLabel.displayName.lowercased()) confidence"
+            } else {
+                sleepPressurePreviewText = "No pressure score yet; Little Windows is learning rhythm."
+            }
+        } else {
+            sleepPressurePreviewText = "Complete a sleep log to start learning pressure."
+        }
+        let notificationPreview: LittleWindowNotificationCopy
+        if let currentPrediction {
+            notificationPreview = NotificationManager.notificationCopy(
+                for: currentPrediction,
+                babyName: profile?.name ?? "Baby",
+                leadMinutes: notificationLeadMinutes
+            )
+        } else {
+            notificationPreview = LittleWindowNotificationCopy(
+                title: "Nap window soon",
+                body: "Baby's Little Window is estimated for 1:55-2:35 PM."
+            )
+        }
+        return ChildSleepSettingsRenderState(
+            scopedEvents: scopedEvents,
+            scopedRecords: scopedRecords,
+            currentPrediction: currentPrediction,
+            currentPressure: currentPressure,
+            selectedProfileIsSleeping: selectedProfileIsSleeping,
+            notificationStatus: notificationStatus,
+            sleepPressureStatus: sleepPressureStatus,
+            sleepPressurePreviewText: sleepPressurePreviewText,
+            notificationPreview: notificationPreview
+        )
+    }
+
     private var settings: PredictionSettings {
         PredictionSettings(
             feedAdjustmentEnabled: feedAdjustmentEnabled,
@@ -475,14 +551,11 @@ private struct ChildSleepSettingsSections: View {
     }
 
     private func rescheduleNotification() async {
+        let state = renderState
         await EventMutationService.refreshPrediction(
             profile: profile,
-            events: events.filter {
-                $0.matchesProfile(profileID)
-            },
-            records: records.filter {
-                $0.matchesProfile(profileID)
-            },
+            events: state.scopedEvents,
+            records: state.scopedRecords,
             context: modelContext,
             settings: settings,
             notificationsEnabled: notificationsEnabled,
@@ -500,67 +573,31 @@ private struct ChildSleepSettingsSections: View {
     }
 
     private var currentPrediction: SleepPrediction? {
-        records.first(where: {
-            $0.actualSleepEventID == nil &&
-            $0.matchesProfile(profileID)
-        })?.prediction
+        renderState.currentPrediction
     }
 
     private var notificationStatus: String {
-        return notificationManager.statusText(
-            prediction: currentPrediction,
-            settings: .current,
-            isSleeping: selectedProfileIsSleeping
-        )
+        renderState.notificationStatus
     }
 
     private var currentPressure: SleepPressure? {
-        SleepPredictionEngine.sleepPressure(
-            profile: profile,
-            events: events.filter { $0.matchesProfile(profileID) },
-            records: records.filter { $0.matchesProfile(profileID) },
-            settings: settings
-        )
+        renderState.currentPressure
     }
 
     private var selectedProfileIsSleeping: Bool {
-        events.contains {
-            $0.matchesProfile(profileID) &&
-                $0.type == .sleep && $0.isTimerRunning
-        }
+        renderState.selectedProfileIsSleeping
     }
 
     private var sleepPressureStatus: String {
-        NotificationManager.sleepPressureStatusText(
-            pressure: currentPressure,
-            enabled: sleepPressureAlertsEnabled,
-            isSleeping: selectedProfileIsSleeping,
-            authorizationStatus: notificationManager.authorizationStatus
-        )
+        renderState.sleepPressureStatus
     }
 
     private var sleepPressurePreviewText: String {
-        guard let pressure = currentPressure else {
-            return "Complete a sleep log to start learning pressure."
-        }
-        guard let score = pressure.score else {
-            return "No pressure score yet; Little Windows is learning rhythm."
-        }
-        return "\(Int(score.rounded())) / 100 · \(pressure.confidenceLabel.displayName.lowercased()) confidence"
+        renderState.sleepPressurePreviewText
     }
 
     private var notificationPreview: LittleWindowNotificationCopy {
-        if let currentPrediction {
-            return NotificationManager.notificationCopy(
-                for: currentPrediction,
-                babyName: profile?.name ?? "Baby",
-                leadMinutes: notificationLeadMinutes
-            )
-        }
-        return LittleWindowNotificationCopy(
-            title: "Nap window soon",
-            body: "Baby's Little Window is estimated for 1:55-2:35 PM."
-        )
+        renderState.notificationPreview
     }
 
     private func enableLittleWindowAlerts() async {
