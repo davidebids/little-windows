@@ -548,15 +548,33 @@ final class CloudKitSharingService {
         if defaults.string(forKey: DefaultsKey.pushSubscriptionID) == subscriptionID {
             return
         }
-        let subscription = CKRecordZoneSubscription(
-            zoneID: rootRecordID.zoneID,
+        let subscription = Self.familySyncPushSubscription(
+            rootRecordID: rootRecordID,
+            role: role,
             subscriptionID: subscriptionID
         )
+        _ = try await database(for: role).save(subscription)
+        defaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
+    }
+
+    nonisolated static func familySyncPushSubscription(
+        rootRecordID: CKRecord.ID,
+        role: FamilyShareRole,
+        subscriptionID: String
+    ) -> CKSubscription {
+        let subscription: CKSubscription
+        if role == .participant {
+            subscription = CKDatabaseSubscription(subscriptionID: subscriptionID)
+        } else {
+            subscription = CKRecordZoneSubscription(
+                zoneID: rootRecordID.zoneID,
+                subscriptionID: subscriptionID
+            )
+        }
         let notificationInfo = CKSubscription.NotificationInfo()
         notificationInfo.shouldSendContentAvailable = true
         subscription.notificationInfo = notificationInfo
-        _ = try await database(for: role).save(subscription)
-        defaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
+        return subscription
     }
 
     private func deleteFamilySyncPushSubscription(

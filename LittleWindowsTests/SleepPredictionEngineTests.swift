@@ -201,6 +201,40 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(notification.deepLinkPath, "profile/\(profileID.uuidString)/history")
     }
 
+    func testFamilySyncParticipantPushSubscriptionUsesSharedDatabaseSubscription() throws {
+        let rootID = CKRecord.ID(
+            recordName: "FamilyRoot",
+            zoneID: CKRecordZone.ID(zoneName: "LittleWindowsFamily", ownerName: "owner")
+        )
+
+        let subscription = CloudKitSharingService.familySyncPushSubscription(
+            rootRecordID: rootID,
+            role: .participant,
+            subscriptionID: "family-sync-participant-test"
+        )
+
+        XCTAssertTrue(subscription is CKDatabaseSubscription)
+        XCTAssertFalse(subscription is CKRecordZoneSubscription)
+        XCTAssertEqual(subscription.subscriptionID, "family-sync-participant-test")
+        XCTAssertEqual(subscription.notificationInfo?.shouldSendContentAvailable, true)
+    }
+
+    func testFamilySyncOwnerPushSubscriptionUsesPrivateZoneSubscription() throws {
+        let zoneID = CKRecordZone.ID(zoneName: "LittleWindowsFamily", ownerName: CKCurrentUserDefaultName)
+        let rootID = CKRecord.ID(recordName: "FamilyRoot", zoneID: zoneID)
+
+        let subscription = CloudKitSharingService.familySyncPushSubscription(
+            rootRecordID: rootID,
+            role: .owner,
+            subscriptionID: "family-sync-owner-test"
+        )
+        let zoneSubscription = try XCTUnwrap(subscription as? CKRecordZoneSubscription)
+
+        XCTAssertEqual(zoneSubscription.zoneID, zoneID)
+        XCTAssertEqual(subscription.subscriptionID, "family-sync-owner-test")
+        XCTAssertEqual(subscription.notificationInfo?.shouldSendContentAvailable, true)
+    }
+
     @MainActor
     private func fetchOrCreateSmokeProfile(
         named name: String,
