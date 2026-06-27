@@ -3,6 +3,29 @@ import CloudKit
 import Foundation
 import SwiftData
 
+enum FamilySyncOperation: Equatable {
+    case create
+    case resume
+    case manage
+    case sync
+    case leave
+
+    var statusText: String {
+        switch self {
+        case .create:
+            return "Creating the iCloud family share..."
+        case .resume:
+            return "Turning on Family Sync..."
+        case .manage:
+            return "Opening caregiver management..."
+        case .sync:
+            return "Syncing shared family data..."
+        case .leave:
+            return "Leaving Family Sync..."
+        }
+    }
+}
+
 @MainActor
 final class FamilySyncViewModel: ObservableObject {
     @Published private(set) var state = FamilyShareState(
@@ -28,6 +51,7 @@ final class FamilySyncViewModel: ObservableObject {
     @Published private(set) var availability: ICloudSyncAvailability = .checking
     @Published private(set) var isSyncing = false
     @Published private(set) var syncStatusMessage: String?
+    @Published private(set) var activeOperation: FamilySyncOperation?
     @Published var presentedShare: CKShare?
 
     private let statusService = SyncStatusService()
@@ -40,6 +64,11 @@ final class FamilySyncViewModel: ObservableObject {
     }
 
     func startSharing(context: ModelContext) async {
+        guard activeOperation == nil else { return }
+        activeOperation = .create
+        clearActionError()
+        await Task.yield()
+        defer { activeOperation = nil }
         do {
             presentedShare = try await sharingService.createFamilyShare(context: context)
             await refresh()
@@ -49,6 +78,11 @@ final class FamilySyncViewModel: ObservableObject {
     }
 
     func resumeSharing(context: ModelContext) async {
+        guard activeOperation == nil else { return }
+        activeOperation = .resume
+        clearActionError()
+        await Task.yield()
+        defer { activeOperation = nil }
         do {
             try await sharingService.resumeFamilyShare(context: context)
             await refresh()
@@ -58,6 +92,11 @@ final class FamilySyncViewModel: ObservableObject {
     }
 
     func manageSharing() async {
+        guard activeOperation == nil else { return }
+        activeOperation = .manage
+        clearActionError()
+        await Task.yield()
+        defer { activeOperation = nil }
         do {
             presentedShare = try await sharingService.existingShare()
             await refresh()
@@ -67,10 +106,16 @@ final class FamilySyncViewModel: ObservableObject {
     }
 
     func syncNow(context: ModelContext) async {
-        guard !isSyncing else { return }
+        guard activeOperation == nil, !isSyncing else { return }
+        activeOperation = .sync
         isSyncing = true
         syncStatusMessage = "Syncing shared family data..."
-        defer { isSyncing = false }
+        clearActionError()
+        await Task.yield()
+        defer {
+            isSyncing = false
+            activeOperation = nil
+        }
         do {
             let changed = try await sharingService.syncNow(context: context, reason: .manual)
             await refresh()
@@ -84,6 +129,11 @@ final class FamilySyncViewModel: ObservableObject {
     }
 
     func leaveShare(context: ModelContext, deleteLocalData: Bool) async {
+        guard activeOperation == nil else { return }
+        activeOperation = .leave
+        clearActionError()
+        await Task.yield()
+        defer { activeOperation = nil }
         do {
             try await sharingService.leaveFamilyShare(
                 context: context,
@@ -93,5 +143,9 @@ final class FamilySyncViewModel: ObservableObject {
         } catch {
             state.lastErrorMessage = error.localizedDescription
         }
+    }
+
+    private func clearActionError() {
+        state.lastErrorMessage = nil
     }
 }
