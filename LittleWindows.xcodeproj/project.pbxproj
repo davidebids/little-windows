@@ -31,7 +31,6 @@
 		B00000000000000000000018 /* Views/Components/ActiveTimerCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */; };
 		B00000000000000000000019 /* Views/Components/EventRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* Views/Components/EventRow.swift */; };
 		B0000000000000000000001A /* Views/Components/PredictionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* Views/Components/PredictionCard.swift */; };
-		B00000000000000000000090 /* Views/Components/PlanDayArcView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000090 /* Views/Components/PlanDayArcView.swift */; };
 		B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* SleepPredictionEngineTests.swift */; };
 		B0000000000000000000001C /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
 		B0000000000000000000001D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* Assets.xcassets */; };
@@ -131,6 +130,10 @@
 		B0000000000000000000008C /* UserVisibleFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008C /* UserVisibleFlowUITests.swift */; };
 		B0000000000000000000008D /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* XCTest.framework */; };
 		B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000008E /* Services/CaregiverIdentityService.swift */; };
+		B00000000000000000000090 /* Views/Components/PlanDayArcView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000090 /* Views/Components/PlanDayArcView.swift */; };
+		B00000000000000000000091 /* Models/CareRoutineModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000091 /* Models/CareRoutineModels.swift */; };
+		B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000092 /* Services/CareRoutineService.swift */; };
+		B00000000000000000000093 /* Views/CareRoutineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000093 /* Views/CareRoutineViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -196,7 +199,6 @@
 		F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/ActiveTimerCard.swift; sourceTree = "<group>"; };
 		F00000000000000000000019 /* Views/Components/EventRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/EventRow.swift; sourceTree = "<group>"; };
 		F0000000000000000000001A /* Views/Components/PredictionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/PredictionCard.swift; sourceTree = "<group>"; };
-		F00000000000000000000090 /* Views/Components/PlanDayArcView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/PlanDayArcView.swift; sourceTree = "<group>"; };
 		F0000000000000000000001B /* SleepPredictionEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepPredictionEngineTests.swift; sourceTree = "<group>"; };
 		F0000000000000000000001C /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 		F0000000000000000000001D /* LittleWindows.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LittleWindows.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -295,6 +297,10 @@
 		F0000000000000000000008C /* UserVisibleFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserVisibleFlowUITests.swift; sourceTree = "<group>"; };
 		F0000000000000000000008D /* LittleWindowsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LittleWindowsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F0000000000000000000008E /* Services/CaregiverIdentityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CaregiverIdentityService.swift; sourceTree = "<group>"; };
+		F00000000000000000000090 /* Views/Components/PlanDayArcView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/PlanDayArcView.swift; sourceTree = "<group>"; };
+		F00000000000000000000091 /* Models/CareRoutineModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CareRoutineModels.swift; sourceTree = "<group>"; };
+		F00000000000000000000092 /* Services/CareRoutineService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareRoutineService.swift; sourceTree = "<group>"; };
+		F00000000000000000000093 /* Views/CareRoutineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CareRoutineViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -370,6 +376,7 @@
 				F00000000000000000000079 /* Models/PuppyStageGuide.swift */,
 				F0000000000000000000007D /* Models/SyncState.swift */,
 				F00000000000000000000088 /* Models/FoodHomeModels.swift */,
+				F00000000000000000000091 /* Models/CareRoutineModels.swift */,
 				F00000000000000000000008 /* Services/DailySummaryService.swift */,
 				F00000000000000000000009 /* Services/DataExportImportService.swift */,
 				F0000000000000000000000A /* Services/EventMutationService.swift */,
@@ -397,6 +404,7 @@
 				F00000000000000000000082 /* Services/CloudKitSharingService.swift */,
 				F0000000000000000000008E /* Services/CaregiverIdentityService.swift */,
 				F00000000000000000000089 /* Services/FoodHomeServices.swift */,
+				F00000000000000000000092 /* Services/CareRoutineService.swift */,
 				F00000000000000000000025 /* ViewModels/InsightsViewModel.swift */,
 				F00000000000000000000064 /* ViewModels/NightLightViewModel.swift */,
 				F00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift */,
@@ -416,6 +424,7 @@
 				F00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift */,
 				F00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift */,
 				F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */,
+				F00000000000000000000093 /* Views/CareRoutineViews.swift */,
 				F00000000000000000000017 /* Views/PredictionExplanationView.swift */,
 				F00000000000000000000018 /* Views/Components/ActiveTimerCard.swift */,
 				F00000000000000000000019 /* Views/Components/EventRow.swift */,
@@ -694,6 +703,7 @@
 				B00000000000000000000079 /* Models/PuppyStageGuide.swift in Sources */,
 				B0000000000000000000007D /* Models/SyncState.swift in Sources */,
 				B00000000000000000000088 /* Models/FoodHomeModels.swift in Sources */,
+				B00000000000000000000091 /* Models/CareRoutineModels.swift in Sources */,
 				B00000000000000000000008 /* Services/DailySummaryService.swift in Sources */,
 				B00000000000000000000009 /* Services/DataExportImportService.swift in Sources */,
 				B0000000000000000000000A /* Services/EventMutationService.swift in Sources */,
@@ -721,6 +731,7 @@
 				B00000000000000000000082 /* Services/CloudKitSharingService.swift in Sources */,
 				B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */,
 				B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */,
+				B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */,
 				B00000000000000000000023 /* ViewModels/InsightsViewModel.swift in Sources */,
 				B00000000000000000000064 /* ViewModels/NightLightViewModel.swift in Sources */,
 				B00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift in Sources */,
@@ -740,6 +751,7 @@
 				B00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift in Sources */,
 				B00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift in Sources */,
 				B0000000000000000000008B /* Views/Food/FoodHomeViews.swift in Sources */,
+				B00000000000000000000093 /* Views/CareRoutineViews.swift in Sources */,
 				B00000000000000000000017 /* Views/PredictionExplanationView.swift in Sources */,
 				B00000000000000000000018 /* Views/Components/ActiveTimerCard.swift in Sources */,
 				B00000000000000000000019 /* Views/Components/EventRow.swift in Sources */,
@@ -961,13 +973,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3;
+				CURRENT_PROJECT_VERSION = 1.3.1;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -986,13 +998,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3;
+				CURRENT_PROJECT_VERSION = 1.3.1;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1040,11 +1052,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3;
+				CURRENT_PROJECT_VERSION = 1.3.1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1060,11 +1072,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3;
+				CURRENT_PROJECT_VERSION = 1.3.1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

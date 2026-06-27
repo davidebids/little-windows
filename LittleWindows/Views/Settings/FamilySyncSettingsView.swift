@@ -129,6 +129,13 @@ struct FamilySyncSettingsView: View {
                 }
             }
 
+            if let message = viewModel.state.lastAcceptanceMessage {
+                Section("Invite status") {
+                    Label(message, systemImage: inviteStatusImage(for: message))
+                        .foregroundStyle(inviteStatusColor(for: message))
+                }
+            }
+
             if viewModel.state.canLeaveShare {
                 Section("Leaving") {
                     Toggle("Delete local shared data when leaving", isOn: $deleteLocalDataOnLeave)
@@ -151,6 +158,13 @@ struct FamilySyncSettingsView: View {
         }
         .task {
             await viewModel.refresh()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: CloudKitSharingService.acceptanceStatusDidChangeNotification
+            )
+        ) { _ in
+            Task { await viewModel.refresh(force: true) }
         }
         .sheet(
             isPresented: Binding(
@@ -184,6 +198,26 @@ struct FamilySyncSettingsView: View {
     private var lastSyncText: String {
         guard let lastSyncAt = viewModel.state.lastSyncAt else { return "Never" }
         return lastSyncAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func inviteStatusImage(for message: String) -> String {
+        if message.localizedCaseInsensitiveContains("failed") {
+            return "exclamationmark.triangle"
+        }
+        if message.localizedCaseInsensitiveContains("accepted") {
+            return "checkmark.icloud"
+        }
+        return "icloud.and.arrow.down"
+    }
+
+    private func inviteStatusColor(for message: String) -> Color {
+        if message.localizedCaseInsensitiveContains("failed") {
+            return .orange
+        }
+        if message.localizedCaseInsensitiveContains("accepted") {
+            return .secondary
+        }
+        return .secondary
     }
 }
 
@@ -223,7 +257,7 @@ private struct CloudSharingControllerView: UIViewControllerRepresentable {
         }
 
         func itemType(for csc: UICloudSharingController) -> String? {
-            "com.debidia.LittleWindows.family-sync"
+            "app.littlewindows.family-sync"
         }
 
         func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {}

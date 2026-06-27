@@ -19,7 +19,7 @@ final class SyncStatusService {
 
     private(set) var availability: ICloudSyncAvailability = .checking
     private(set) var accountStatusDescription = "Checking iCloud..."
-    private(set) var containerStatusDescription = PersistenceService.iCloudContainerIdentifier
+    private(set) var containerStatusDescription = "Little Windows iCloud"
     private(set) var lastCheckedAt: Date?
     private(set) var userFriendlyErrorMessage: String?
 

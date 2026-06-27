@@ -116,6 +116,19 @@ struct LittleWindowsApp: App {
 final class LittleWindowsAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(
+            name: nil,
+            sessionRole: connectingSceneSession.role
+        )
+        configuration.delegateClass = LittleWindowsSceneDelegate.self
+        return configuration
+    }
+
+    func application(
+        _ application: UIApplication,
         userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata
     ) {
         CloudKitSharingService.handleAcceptedShare(metadata: cloudKitShareMetadata)
@@ -130,5 +143,27 @@ final class LittleWindowsAppDelegate: NSObject, UIApplicationDelegate {
             userInfo,
             completion: completionHandler
         )
+    }
+}
+
+final class LittleWindowsSceneDelegate: NSObject, UIWindowSceneDelegate {
+    func windowScene(
+        _ windowScene: UIWindowScene,
+        userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata
+    ) {
+        CloudKitSharingService.handleAcceptedShare(metadata: cloudKitShareMetadata)
+    }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        Task { @MainActor in
+            for context in URLContexts {
+                let url = context.url
+                if await IntegrationCommandStore.deliverToRunningApp(url) {
+                    IntegrationCommandStore.clearPendingURL(matching: url)
+                } else {
+                    DeepLinkRouter.shared.route(url)
+                }
+            }
+        }
     }
 }

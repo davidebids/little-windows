@@ -139,6 +139,8 @@ final class NotificationManager: NSObject, ObservableObject {
     static let openAgeGuideActionID = "OPEN_AGE_GUIDE"
     static let foodReminderCategoryID = "FOOD_HOME_REMINDER"
     static let openFoodActionID = "OPEN_FOOD_HOME"
+    static let routineReminderCategoryID = "CARE_ROUTINE_REMINDER"
+    static let openRoutineActionID = "OPEN_CARE_ROUTINES"
     static let familySyncActivityCategoryID = "FAMILY_SYNC_ACTIVITY"
     static let openFamilySyncActivityActionID = "OPEN_FAMILY_SYNC_ACTIVITY"
 
@@ -256,6 +258,17 @@ final class NotificationManager: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
+        let openRoutine = UNNotificationAction(
+            identifier: Self.openRoutineActionID,
+            title: "Open Routines",
+            options: [.foreground]
+        )
+        let routineCategory = UNNotificationCategory(
+            identifier: Self.routineReminderCategoryID,
+            actions: [openRoutine],
+            intentIdentifiers: [],
+            options: []
+        )
         let openFamilySyncActivity = UNNotificationAction(
             identifier: Self.openFamilySyncActivityActionID,
             title: "Open",
@@ -273,6 +286,7 @@ final class NotificationManager: NSObject, ObservableObject {
             activePlanCategory,
             ageGuideCategory,
             foodCategory,
+            routineCategory,
             familySyncActivityCategory
         ])
     }
@@ -757,6 +771,34 @@ final class NotificationManager: NSObject, ObservableObject {
         )
     }
 
+    func scheduleRoutineReminder(routine: CareRoutine) async {
+        await cancelRoutineReminder(routineID: routine.id)
+        guard routine.reminderEnabled,
+              let minutes = routine.reminderTimeMinutesAfterMidnight else {
+            return
+        }
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            return
+        }
+        var components = DateComponents()
+        components.hour = minutes / 60
+        components.minute = minutes % 60
+        let request = UNNotificationRequest(
+            identifier: Self.routineReminderNotificationID(routineID: routine.id),
+            content: buildRoutineReminderNotificationContent(routine: routine),
+            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelRoutineReminder(routineID: UUID) async {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.routineReminderNotificationID(routineID: routineID)]
+        )
+    }
+
     func buildMonthlyAgeGuideNotificationContent(
         guide: AgeGuide,
         babyName: String,
@@ -773,6 +815,25 @@ final class NotificationManager: NSObject, ObservableObject {
         ]
         if let profileID {
             userInfo["profileID"] = profileID.uuidString
+        }
+        content.userInfo = userInfo
+        return content
+    }
+
+    func buildRoutineReminderNotificationContent(
+        routine: CareRoutine
+    ) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = routine.title
+        content.body = "Open your routine when you are ready."
+        content.sound = .default
+        content.categoryIdentifier = Self.routineReminderCategoryID
+        var userInfo: [String: Any] = [
+            "routineID": routine.id.uuidString,
+            "deepLink": Self.deepLink(path: "routines", profileID: routine.profileID)
+        ]
+        if let householdID = routine.householdID {
+            userInfo["householdID"] = householdID.uuidString
         }
         content.userInfo = userInfo
         return content
@@ -1236,6 +1297,10 @@ final class NotificationManager: NSObject, ObservableObject {
 
     static func foodReminderNotificationID(reminderID: UUID) -> String {
         "food.reminder.\(reminderID.uuidString)"
+    }
+
+    static func routineReminderNotificationID(routineID: UUID) -> String {
+        "routine.reminder.\(routineID.uuidString)"
     }
 
     static func activeSleepPlanWakeNotificationID(profileID: UUID? = nil) -> String {

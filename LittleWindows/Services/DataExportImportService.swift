@@ -45,6 +45,9 @@ private struct BackupEnvelope: Codable {
     var mealPrepItems: [MealPrepItemDTO]?
     var mealPrepUsages: [MealPrepUsageDTO]?
     var foodReminders: [FoodReminderDTO]?
+    var careRoutines: [CareRoutineDTO]?
+    var careRoutineSteps: [CareRoutineStepDTO]?
+    var careRoutineRuns: [CareRoutineRunDTO]?
 }
 
 private struct ProfileDTO: Codable {
@@ -382,6 +385,56 @@ private struct FoodReminderDTO: Codable {
     var updatedAt: Date
 }
 
+private struct CareRoutineDTO: Codable {
+    var id: UUID
+    var scopeRawValue: String
+    var profileID: UUID?
+    var householdID: UUID?
+    var title: String
+    var notes: String?
+    var iconName: String
+    var tintName: String
+    var templateKindRawValue: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var isArchived: Bool
+    var sortOrder: Int
+    var reminderEnabled: Bool
+    var reminderTimeMinutesAfterMidnight: Int?
+    var lastStartedAt: Date?
+    var lastCompletedAt: Date?
+}
+
+private struct CareRoutineStepDTO: Codable {
+    var id: UUID
+    var routineID: UUID
+    var title: String
+    var notes: String?
+    var actionRawValue: String
+    var eventTypeRawValue: String?
+    var activityTypeRawValue: String?
+    var nursingSideRawValue: String?
+    var sleepKindRawValue: String?
+    var sortOrder: Int
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct CareRoutineRunDTO: Codable {
+    var id: UUID
+    var routineID: UUID
+    var profileID: UUID?
+    var householdID: UUID?
+    var stateRawValue: String
+    var startedAt: Date
+    var completedAt: Date?
+    var cancelledAt: Date?
+    var completedStepIDsData: Data?
+    var skippedStepIDsData: Data?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 enum DataExportImportService {
     @MainActor
     static func exportData(context: ModelContext) throws -> Data {
@@ -713,8 +766,61 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
+        let careRoutines = try context.fetch(FetchDescriptor<CareRoutine>()).map {
+            CareRoutineDTO(
+                id: $0.id,
+                scopeRawValue: $0.scopeRawValue,
+                profileID: $0.profileID,
+                householdID: $0.householdID,
+                title: $0.title,
+                notes: $0.notes,
+                iconName: $0.iconName,
+                tintName: $0.tintName,
+                templateKindRawValue: $0.templateKindRawValue,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                isArchived: $0.isArchived,
+                sortOrder: $0.sortOrder,
+                reminderEnabled: $0.reminderEnabled,
+                reminderTimeMinutesAfterMidnight: $0.reminderTimeMinutesAfterMidnight,
+                lastStartedAt: $0.lastStartedAt,
+                lastCompletedAt: $0.lastCompletedAt
+            )
+        }
+        let careRoutineSteps = try context.fetch(FetchDescriptor<CareRoutineStep>()).map {
+            CareRoutineStepDTO(
+                id: $0.id,
+                routineID: $0.routineID,
+                title: $0.title,
+                notes: $0.notes,
+                actionRawValue: $0.actionRawValue,
+                eventTypeRawValue: $0.eventTypeRawValue,
+                activityTypeRawValue: $0.activityTypeRawValue,
+                nursingSideRawValue: $0.nursingSideRawValue,
+                sleepKindRawValue: $0.sleepKindRawValue,
+                sortOrder: $0.sortOrder,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let careRoutineRuns = try context.fetch(FetchDescriptor<CareRoutineRun>()).map {
+            CareRoutineRunDTO(
+                id: $0.id,
+                routineID: $0.routineID,
+                profileID: $0.profileID,
+                householdID: $0.householdID,
+                stateRawValue: $0.stateRawValue,
+                startedAt: $0.startedAt,
+                completedAt: $0.completedAt,
+                cancelledAt: $0.cancelledAt,
+                completedStepIDsData: $0.completedStepIDsData,
+                skippedStepIDsData: $0.skippedStepIDsData,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
         let envelope = BackupEnvelope(
-            version: 9,
+            version: 10,
             exportedAt: Date(),
             profiles: profiles,
             photoAttachments: photoAttachments,
@@ -734,7 +840,10 @@ enum DataExportImportService {
             inventoryItems: inventoryItems,
             mealPrepItems: mealPrepItems,
             mealPrepUsages: mealPrepUsages,
-            foodReminders: foodReminders
+            foodReminders: foodReminders,
+            careRoutines: careRoutines,
+            careRoutineSteps: careRoutineSteps,
+            careRoutineRuns: careRoutineRuns
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -751,7 +860,7 @@ enum DataExportImportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
-        guard (1...9).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
+        guard (1...10).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
         try deleteAll(context: context)
 
         for value in envelope.profiles {
@@ -1132,6 +1241,64 @@ enum DataExportImportService {
                 updatedAt: value.updatedAt
             ))
         }
+        for value in envelope.careRoutines ?? [] {
+            let scope = CareRoutineScope(rawValue: value.scopeRawValue) ?? .profile
+            context.insert(CareRoutine(
+                id: value.id,
+                scope: scope,
+                profileID: scope == .profile ? value.profileID ?? fallbackProfileID : value.profileID,
+                householdID: value.householdID,
+                title: value.title,
+                notes: value.notes,
+                iconName: value.iconName,
+                tintName: value.tintName,
+                templateKind: value.templateKindRawValue.flatMap(CareRoutineTemplateKind.init(rawValue:)),
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                isArchived: value.isArchived,
+                sortOrder: value.sortOrder,
+                reminderEnabled: value.reminderEnabled,
+                reminderTimeMinutesAfterMidnight: value.reminderTimeMinutesAfterMidnight,
+                lastStartedAt: value.lastStartedAt,
+                lastCompletedAt: value.lastCompletedAt
+            ))
+        }
+        for value in envelope.careRoutineSteps ?? [] {
+            context.insert(CareRoutineStep(
+                id: value.id,
+                routineID: value.routineID,
+                title: value.title,
+                notes: value.notes,
+                action: CareRoutineStepAction(rawValue: value.actionRawValue) ?? .checklist,
+                eventType: value.eventTypeRawValue.map(EventType.normalized(rawValue:)),
+                activityType: value.activityTypeRawValue.flatMap(ActivityType.init(rawValue:)),
+                nursingSide: value.nursingSideRawValue.flatMap(NursingSide.init(rawValue:)),
+                sleepKind: value.sleepKindRawValue.flatMap(SleepKind.init(rawValue:)),
+                sortOrder: value.sortOrder,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.careRoutineRuns ?? [] {
+            let routineScope = (envelope.careRoutines ?? [])
+                .first { $0.id == value.routineID }
+                .flatMap { CareRoutineScope(rawValue: $0.scopeRawValue) } ?? .profile
+            let run = CareRoutineRun(
+                id: value.id,
+                routineID: value.routineID,
+                profileID: routineScope == .profile ? value.profileID ?? fallbackProfileID : value.profileID,
+                householdID: value.householdID,
+                state: CareRoutineRunState(rawValue: value.stateRawValue) ?? .active,
+                startedAt: value.startedAt,
+                completedAt: value.completedAt,
+                cancelledAt: value.cancelledAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+            run.completedStepIDsData = value.completedStepIDsData
+            run.skippedStepIDsData = value.skippedStepIDsData
+            context.insert(run)
+        }
         CloudKitFamilySyncConflictResolver.resolveDuplicateActiveTimers(in: context)
         try context.save()
         if recordLocalSave {
@@ -1143,6 +1310,9 @@ enum DataExportImportService {
 
     @MainActor
     static func deleteAll(context: ModelContext) throws {
+        try deleteAll(CareRoutineRun.self, context: context)
+        try deleteAll(CareRoutineStep.self, context: context)
+        try deleteAll(CareRoutine.self, context: context)
         try deleteAll(FoodReminder.self, context: context)
         try deleteAll(MealPrepUsage.self, context: context)
         try deleteAll(MealPrepItem.self, context: context)
