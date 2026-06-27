@@ -58,7 +58,7 @@ struct SettingsView: View {
             }
 
             if !isDogProfile {
-                ChildSleepSettingsSections(profile: selectedProfile)
+                DeferredChildSleepSettingsSections(profile: selectedProfile)
             }
 
             SyncSettingsSection()
@@ -225,8 +225,6 @@ struct LazySettingsDestination<Content: View>: View {
 }
 
 private struct ChildSleepSettingsRenderState {
-    var scopedEvents: [BabyEvent]
-    var scopedRecords: [SleepPredictionRecord]
     var currentPrediction: SleepPrediction?
     var currentPressure: SleepPressure?
     var selectedProfileIsSleeping: Bool
@@ -234,6 +232,47 @@ private struct ChildSleepSettingsRenderState {
     var sleepPressureStatus: String
     var sleepPressurePreviewText: String
     var notificationPreview: LittleWindowNotificationCopy
+
+    static let placeholder = ChildSleepSettingsRenderState(
+        currentPrediction: nil,
+        currentPressure: nil,
+        selectedProfileIsSleeping: false,
+        notificationStatus: "Checking next alert",
+        sleepPressureStatus: "Checking pressure",
+        sleepPressurePreviewText: "Checking recent sleep rhythm.",
+        notificationPreview: LittleWindowNotificationCopy(
+            title: "Nap window soon",
+            body: "Little Windows will show the next alert preview after it checks recent sleep."
+        )
+    )
+}
+
+private struct DeferredChildSleepSettingsSections: View {
+    let profile: BabyProfile?
+    @State private var isReady = false
+
+    var body: some View {
+        Group {
+            if isReady {
+                ChildSleepSettingsSections(profile: profile)
+            } else {
+                Section("Prediction") {
+                    LabeledContent {
+                        ProgressView()
+                            .controlSize(.small)
+                    } label: {
+                        Label("Preparing sleep settings", systemImage: "moon.stars.fill")
+                    }
+                }
+            }
+        }
+        .task(id: profile?.id) {
+            isReady = false
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            isReady = true
+        }
+    }
 }
 
 private struct ChildSleepSettingsSections: View {
@@ -261,6 +300,8 @@ private struct ChildSleepSettingsSections: View {
     @State private var showingAlertPermissionPrompt = false
     @State private var showingPermissionDenied = false
     @State private var pendingNotificationRefresh: Task<Void, Never>?
+    @State private var cachedRenderState = ChildSleepSettingsRenderState.placeholder
+    @State private var renderRefreshTask: Task<Void, Never>?
 
     init(profile: BabyProfile?) {
         self.profile = profile
@@ -290,20 +331,23 @@ private struct ChildSleepSettingsSections: View {
     }
 
     var body: some View {
-        let state = renderState
+        let state = cachedRenderState
 
         Group {
             Section("Prediction") {
                 Toggle("Use feed timing", isOn: $feedAdjustmentEnabled)
                     .onChange(of: feedAdjustmentEnabled) { _, _ in
+                        scheduleRenderStateRefresh()
                         scheduleNotificationRefresh()
                     }
                 Toggle("Use nursing timing", isOn: $nursingAdjustmentEnabled)
                     .onChange(of: nursingAdjustmentEnabled) { _, _ in
+                        scheduleRenderStateRefresh()
                         scheduleNotificationRefresh()
                     }
                 Toggle("Predict bedtime", isOn: $bedtimePredictionEnabled)
                     .onChange(of: bedtimePredictionEnabled) { _, _ in
+                        scheduleRenderStateRefresh()
                         scheduleNotificationRefresh()
                     }
                 NavigationLink("Wake-window tuning") {
@@ -344,15 +388,18 @@ private struct ChildSleepSettingsSections: View {
                         Text("30 minutes before").tag(30)
                     }
                     .onChange(of: notificationLeadMinutes) { _, _ in
+                        scheduleRenderStateRefresh()
                         scheduleNotificationRefresh()
                     }
 
                     Toggle("Nap alerts", isOn: $napAlertsEnabled)
                         .onChange(of: napAlertsEnabled) { _, _ in
+                            scheduleRenderStateRefresh()
                             scheduleNotificationRefresh()
                         }
                     Toggle("Bedtime alerts", isOn: $bedtimeAlertsEnabled)
                         .onChange(of: bedtimeAlertsEnabled) { _, _ in
+                            scheduleRenderStateRefresh()
                             scheduleNotificationRefresh()
                         }
 
@@ -362,6 +409,7 @@ private struct ChildSleepSettingsSections: View {
                         }
                     }
                     .onChange(of: confidenceThresholdRawValue) { _, _ in
+                        scheduleRenderStateRefresh()
                         scheduleNotificationRefresh()
                     }
 
@@ -468,9 +516,32 @@ private struct ChildSleepSettingsSections: View {
         .task {
             await notificationManager.refreshAuthorizationStatus()
             await notificationManager.configure()
+            await refreshRenderState()
+        }
+        .onChange(of: profileID) { _, _ in
+            scheduleRenderStateRefresh()
+        }
+        .onChange(of: events.count) { _, _ in
+            scheduleRenderStateRefresh()
+        }
+        .onChange(of: records.count) { _, _ in
+            scheduleRenderStateRefresh()
+        }
+        .onChange(of: sleepPressureAlertsEnabled) { _, _ in
+            scheduleRenderStateRefresh()
+        }
+        .onChange(of: notificationsEnabled) { _, _ in
+            scheduleRenderStateRefresh()
+        }
+        .onChange(of: customWakeMinimum) { _, _ in
+            scheduleRenderStateRefresh()
+        }
+        .onChange(of: customWakeMaximum) { _, _ in
+            scheduleRenderStateRefresh()
         }
         .onDisappear {
             pendingNotificationRefresh?.cancel()
+            renderRefreshTask?.cancel()
         }
     }
 
@@ -478,9 +549,17 @@ private struct ChildSleepSettingsSections: View {
         profile?.id
     }
 
-    private var renderState: ChildSleepSettingsRenderState {
-        let scopedEvents = events.filter { $0.matchesProfile(profileID) }
-        let scopedRecords = records.filter { $0.matchesProfile(profileID) }
+    private var scopedEventsForProfile: [BabyEvent] {
+        events.filter { $0.matchesProfile(profileID) }
+    }
+
+    private var scopedRecordsForProfile: [SleepPredictionRecord] {
+        records.filter { $0.matchesProfile(profileID) }
+    }
+
+    private func makeRenderState() -> ChildSleepSettingsRenderState {
+        let scopedEvents = scopedEventsForProfile
+        let scopedRecords = scopedRecordsForProfile
         let currentPrediction = scopedRecords.first(where: {
             $0.actualSleepEventID == nil
         })?.prediction
@@ -528,8 +607,6 @@ private struct ChildSleepSettingsSections: View {
             )
         }
         return ChildSleepSettingsRenderState(
-            scopedEvents: scopedEvents,
-            scopedRecords: scopedRecords,
             currentPrediction: currentPrediction,
             currentPressure: currentPressure,
             selectedProfileIsSleeping: selectedProfileIsSleeping,
@@ -538,6 +615,22 @@ private struct ChildSleepSettingsSections: View {
             sleepPressurePreviewText: sleepPressurePreviewText,
             notificationPreview: notificationPreview
         )
+    }
+
+    @MainActor
+    private func refreshRenderState() async {
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        cachedRenderState = makeRenderState()
+    }
+
+    private func scheduleRenderStateRefresh() {
+        renderRefreshTask?.cancel()
+        renderRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            cachedRenderState = makeRenderState()
+        }
     }
 
     private var settings: PredictionSettings {
@@ -551,11 +644,10 @@ private struct ChildSleepSettingsSections: View {
     }
 
     private func rescheduleNotification() async {
-        let state = renderState
         await EventMutationService.refreshPrediction(
             profile: profile,
-            events: state.scopedEvents,
-            records: state.scopedRecords,
+            events: scopedEventsForProfile,
+            records: scopedRecordsForProfile,
             context: modelContext,
             settings: settings,
             notificationsEnabled: notificationsEnabled,
@@ -573,31 +665,31 @@ private struct ChildSleepSettingsSections: View {
     }
 
     private var currentPrediction: SleepPrediction? {
-        renderState.currentPrediction
+        cachedRenderState.currentPrediction
     }
 
     private var notificationStatus: String {
-        renderState.notificationStatus
+        cachedRenderState.notificationStatus
     }
 
     private var currentPressure: SleepPressure? {
-        renderState.currentPressure
+        cachedRenderState.currentPressure
     }
 
     private var selectedProfileIsSleeping: Bool {
-        renderState.selectedProfileIsSleeping
+        cachedRenderState.selectedProfileIsSleeping
     }
 
     private var sleepPressureStatus: String {
-        renderState.sleepPressureStatus
+        cachedRenderState.sleepPressureStatus
     }
 
     private var sleepPressurePreviewText: String {
-        renderState.sleepPressurePreviewText
+        cachedRenderState.sleepPressurePreviewText
     }
 
     private var notificationPreview: LittleWindowNotificationCopy {
-        renderState.notificationPreview
+        cachedRenderState.notificationPreview
     }
 
     private func enableLittleWindowAlerts() async {
@@ -615,6 +707,7 @@ private struct ChildSleepSettingsSections: View {
         }
         notificationsEnabled = true
         await rescheduleNotification()
+        await refreshRenderState()
     }
 
     private func enableSleepPressureAlerts() async {
@@ -632,6 +725,7 @@ private struct ChildSleepSettingsSections: View {
         }
         sleepPressureAlertsEnabled = true
         scheduleNotificationRefresh()
+        scheduleRenderStateRefresh()
     }
 
     private func openNotificationSettings() {

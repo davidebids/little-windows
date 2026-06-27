@@ -10,6 +10,7 @@ struct FamilySyncSettingsView: View {
     private var activityNotificationsEnabled = true
     @State private var confirmLeave = false
     @State private var deleteLocalDataOnLeave = false
+    @State private var isConfirmingLeave = false
 
     var body: some View {
         List {
@@ -34,28 +35,58 @@ struct FamilySyncSettingsView: View {
             }
 
             Section("Family sharing") {
+                if let operationStatusText {
+                    Label(operationStatusText, systemImage: "hourglass")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 if viewModel.state.canResumeShare {
                     Button {
                         Task { await viewModel.resumeSharing(context: modelContext) }
                     } label: {
-                        Label("Turn On Family Sync", systemImage: "person.2.badge.gearshape.fill")
+                        Label(
+                            viewModel.activeOperation == .resume
+                                ? "Turning On Family Sync"
+                                : "Turn On Family Sync",
+                            systemImage: viewModel.activeOperation == .resume
+                                ? "hourglass"
+                                : "person.2.badge.gearshape.fill"
+                        )
                     }
+                    .disabled(familyActionIsRunning)
                 }
 
                 if viewModel.state.canCreateShare {
                     Button {
                         Task { await viewModel.startSharing(context: modelContext) }
                     } label: {
-                        Label("Create Family Share", systemImage: "person.crop.circle.badge.plus")
+                        Label(
+                            viewModel.activeOperation == .create
+                                ? "Creating Family Share"
+                                : "Create Family Share",
+                            systemImage: viewModel.activeOperation == .create
+                                ? "hourglass"
+                                : "person.crop.circle.badge.plus"
+                        )
                     }
+                    .disabled(familyActionIsRunning)
                 }
 
                 if viewModel.state.canManageShare {
                     Button {
                         Task { await viewModel.manageSharing() }
                     } label: {
-                        Label("Manage Caregivers", systemImage: "person.2")
+                        Label(
+                            viewModel.activeOperation == .manage
+                                ? "Opening Caregivers"
+                                : "Manage Caregivers",
+                            systemImage: viewModel.activeOperation == .manage
+                                ? "hourglass"
+                                : "person.2"
+                        )
                     }
+                    .disabled(familyActionIsRunning)
                 }
 
                 if viewModel.state.canSyncNow {
@@ -68,7 +99,7 @@ struct FamilySyncSettingsView: View {
                             Label("Upload and Download Now", systemImage: "arrow.triangle.2.circlepath")
                         }
                     }
-                    .disabled(viewModel.isSyncing)
+                    .disabled(familyActionIsRunning)
 
                     if viewModel.isSyncing {
                         Label("Checking the shared iCloud record for newer changes and uploading local edits.", systemImage: "icloud")
@@ -95,8 +126,16 @@ struct FamilySyncSettingsView: View {
                     Button(role: .destructive) {
                         confirmLeave = true
                     } label: {
-                        Label("Leave Family Sync", systemImage: "person.crop.circle.badge.minus")
+                        Label(
+                            leaveActionIsRunning
+                                ? "Leaving Family Sync"
+                                : "Leave Family Sync",
+                            systemImage: leaveActionIsRunning
+                                ? "hourglass"
+                                : "person.crop.circle.badge.minus"
+                        )
                     }
+                    .disabled(familyActionIsRunning)
                 }
 
                 if viewModel.state.status == .localOnly {
@@ -182,14 +221,19 @@ struct FamilySyncSettingsView: View {
             titleVisibility: .visible
         ) {
             Button("Leave Family Sync", role: .destructive) {
+                isConfirmingLeave = true
+                confirmLeave = false
                 Task {
                     await viewModel.leaveShare(
                         context: modelContext,
                         deleteLocalData: deleteLocalDataOnLeave
                     )
+                    isConfirmingLeave = false
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {
+                isConfirmingLeave = false
+            }
         } message: {
             Text("This stops syncing this device with the shared family data.")
         }
@@ -198,6 +242,21 @@ struct FamilySyncSettingsView: View {
     private var lastSyncText: String {
         guard let lastSyncAt = viewModel.state.lastSyncAt else { return "Never" }
         return lastSyncAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var familyActionIsRunning: Bool {
+        viewModel.activeOperation != nil || isConfirmingLeave
+    }
+
+    private var leaveActionIsRunning: Bool {
+        viewModel.activeOperation == .leave || isConfirmingLeave
+    }
+
+    private var operationStatusText: String? {
+        if isConfirmingLeave {
+            return FamilySyncOperation.leave.statusText
+        }
+        return viewModel.activeOperation?.statusText
     }
 
     private func inviteStatusImage(for message: String) -> String {
