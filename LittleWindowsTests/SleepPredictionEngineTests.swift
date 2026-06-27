@@ -4399,14 +4399,39 @@ final class SleepPredictionEngineTests: XCTestCase {
         context.insert(second)
         try context.save()
 
-        let run = CareRoutineService.startRun(routine: routine, activeRuns: [], context: context)
-        CareRoutineService.completeStep(first, in: run, routine: routine, allSteps: [first, second], context: context)
+        let run = CareRoutineService.startRun(
+            routine: routine,
+            activeRuns: [],
+            context: context,
+            caregiverName: "Caregiver A"
+        )
+        CareRoutineService.completeStep(
+            first,
+            in: run,
+            routine: routine,
+            allSteps: [first, second],
+            context: context,
+            caregiverName: "Caregiver A"
+        )
         XCTAssertEqual(run.state, .active)
 
-        CareRoutineService.skipStep(second, in: run, routine: routine, allSteps: [first, second], context: context)
+        CareRoutineService.skipStep(
+            second,
+            in: run,
+            routine: routine,
+            allSteps: [first, second],
+            context: context,
+            caregiverName: "Caregiver B"
+        )
         XCTAssertEqual(run.state, .completed)
+        XCTAssertEqual(run.startedByCaregiverName, "Caregiver A")
+        XCTAssertEqual(run.completedByCaregiverName, "Caregiver B")
         XCTAssertEqual(run.completedStepIDs, [first.id])
         XCTAssertEqual(run.skippedStepIDs, [second.id])
+        XCTAssertEqual(run.resolutionRecord(for: first.id)?.caregiverName, "Caregiver A")
+        XCTAssertEqual(run.resolutionRecord(for: first.id)?.resolution, .completed)
+        XCTAssertEqual(run.resolutionRecord(for: second.id)?.caregiverName, "Caregiver B")
+        XCTAssertEqual(run.resolutionRecord(for: second.id)?.resolution, .skipped)
         XCTAssertEqual(try context.fetch(FetchDescriptor<BabyEvent>()).count, 0)
     }
 
@@ -4428,6 +4453,47 @@ final class SleepPredictionEngineTests: XCTestCase {
         let secondRun = CareRoutineService.startRun(routine: routine, activeRuns: [firstRun], context: context)
         XCTAssertNotEqual(secondRun.id, firstRun.id)
         XCTAssertEqual(secondRun.state, .active)
+    }
+
+    @MainActor
+    func testCareRoutineStepResolutionTracksLatestCaregiver() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let routine = CareRoutine(scope: .household, householdID: UUID(), title: "Pack bag")
+        let step = CareRoutineStep(routineID: routine.id, title: "Pack water", sortOrder: 0)
+        context.insert(routine)
+        context.insert(step)
+        try context.save()
+
+        let run = CareRoutineService.startRun(
+            routine: routine,
+            activeRuns: [],
+            context: context,
+            caregiverName: "Caregiver A"
+        )
+        CareRoutineService.skipStep(
+            step,
+            in: run,
+            routine: routine,
+            allSteps: [step],
+            context: context,
+            caregiverName: "Caregiver B"
+        )
+        CareRoutineService.completeStep(
+            step,
+            in: run,
+            routine: routine,
+            allSteps: [step],
+            context: context,
+            caregiverName: "Caregiver A"
+        )
+
+        XCTAssertEqual(run.completedStepIDs, [step.id])
+        XCTAssertTrue(run.skippedStepIDs.isEmpty)
+        let record = try XCTUnwrap(run.resolutionRecord(for: step.id))
+        XCTAssertEqual(record.resolution, .completed)
+        XCTAssertEqual(record.caregiverName, "Caregiver A")
+        XCTAssertEqual(run.stepResolutionRecords.count, 1)
     }
 
     @MainActor
@@ -4641,7 +4707,25 @@ final class SleepPredictionEngineTests: XCTestCase {
             existingRoutines: [],
             context: context
         )
-        let run = CareRoutineService.startRun(routine: routine, activeRuns: [], context: context)
+        let run = CareRoutineService.startRun(
+            routine: routine,
+            activeRuns: [],
+            context: context,
+            caregiverName: "Caregiver A"
+        )
+        let routineSteps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+            .filter { $0.routineID == routine.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        if let firstStep = routineSteps.first {
+            CareRoutineService.completeStep(
+                firstStep,
+                in: run,
+                routine: routine,
+                allSteps: routineSteps,
+                context: context,
+                caregiverName: "Caregiver A"
+            )
+        }
         let backup = try DataExportImportService.exportData(context: context)
 
         try DataExportImportService.importData(backup, context: context)
@@ -4653,6 +4737,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(routines.first?.profileID, profile.id)
         XCTAssertEqual(steps.filter { $0.routineID == routine.id }.count, template.steps.count)
         XCTAssertEqual(runs.map(\.id), [run.id])
+        XCTAssertEqual(runs.first?.startedByCaregiverName, "Caregiver A")
+        XCTAssertEqual(runs.first?.resolutionRecord(for: routineSteps[0].id)?.caregiverName, "Caregiver A")
     }
 
     private func rmsWindows(_ samples: [Double], windowSize: Int) -> [Double] {

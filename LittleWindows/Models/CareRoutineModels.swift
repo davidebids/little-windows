@@ -98,6 +98,37 @@ enum CareRoutineRunState: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum CareRoutineStepResolution: String, Codable, CaseIterable, Identifiable {
+    case completed
+    case skipped
+
+    var id: String { rawValue }
+}
+
+struct CareRoutineStepResolutionRecord: Codable, Equatable {
+    var stepID: UUID
+    var resolutionRawValue: String
+    var caregiverName: String?
+    var resolvedAt: Date
+
+    init(
+        stepID: UUID,
+        resolution: CareRoutineStepResolution,
+        caregiverName: String? = nil,
+        resolvedAt: Date = Date()
+    ) {
+        self.stepID = stepID
+        self.resolutionRawValue = resolution.rawValue
+        self.caregiverName = caregiverName
+        self.resolvedAt = resolvedAt
+    }
+
+    var resolution: CareRoutineStepResolution {
+        get { CareRoutineStepResolution(rawValue: resolutionRawValue) ?? .completed }
+        set { resolutionRawValue = newValue.rawValue }
+    }
+}
+
 @Model
 final class CareRoutine {
     var id: UUID = UUID()
@@ -246,8 +277,12 @@ final class CareRoutineRun {
     var startedAt: Date = Date()
     var completedAt: Date?
     var cancelledAt: Date?
+    var startedByCaregiverName: String?
+    var completedByCaregiverName: String?
+    var cancelledByCaregiverName: String?
     var completedStepIDsData: Data?
     var skippedStepIDsData: Data?
+    var stepResolutionRecordsData: Data?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -260,8 +295,12 @@ final class CareRoutineRun {
         startedAt: Date = Date(),
         completedAt: Date? = nil,
         cancelledAt: Date? = nil,
+        startedByCaregiverName: String? = nil,
+        completedByCaregiverName: String? = nil,
+        cancelledByCaregiverName: String? = nil,
         completedStepIDs: [UUID] = [],
         skippedStepIDs: [UUID] = [],
+        stepResolutionRecords: [CareRoutineStepResolutionRecord] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -273,8 +312,12 @@ final class CareRoutineRun {
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.cancelledAt = cancelledAt
+        self.startedByCaregiverName = startedByCaregiverName
+        self.completedByCaregiverName = completedByCaregiverName
+        self.cancelledByCaregiverName = cancelledByCaregiverName
         self.completedStepIDs = completedStepIDs
         self.skippedStepIDs = skippedStepIDs
+        self.stepResolutionRecords = stepResolutionRecords
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -294,12 +337,21 @@ final class CareRoutineRun {
         set { skippedStepIDsData = encodeIDs(newValue) }
     }
 
+    var stepResolutionRecords: [CareRoutineStepResolutionRecord] {
+        get { decodeStepResolutionRecords(stepResolutionRecordsData) }
+        set { stepResolutionRecordsData = encodeStepResolutionRecords(newValue) }
+    }
+
     func isCompleted(stepID: UUID) -> Bool {
         completedStepIDs.contains(stepID)
     }
 
     func isSkipped(stepID: UUID) -> Bool {
         skippedStepIDs.contains(stepID)
+    }
+
+    func resolutionRecord(for stepID: UUID) -> CareRoutineStepResolutionRecord? {
+        stepResolutionRecords.first { $0.stepID == stepID }
     }
 
     private func decodeIDs(_ data: Data?) -> [UUID] {
@@ -309,5 +361,14 @@ final class CareRoutineRun {
 
     private func encodeIDs(_ ids: [UUID]) -> Data? {
         try? JSONEncoder().encode(ids)
+    }
+
+    private func decodeStepResolutionRecords(_ data: Data?) -> [CareRoutineStepResolutionRecord] {
+        guard let data else { return [] }
+        return (try? JSONDecoder().decode([CareRoutineStepResolutionRecord].self, from: data)) ?? []
+    }
+
+    private func encodeStepResolutionRecords(_ records: [CareRoutineStepResolutionRecord]) -> Data? {
+        try? JSONEncoder().encode(records)
     }
 }

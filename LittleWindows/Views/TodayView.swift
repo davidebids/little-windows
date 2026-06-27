@@ -1192,7 +1192,8 @@ struct TodayView: View {
         let run = CareRoutineService.startRun(
             routine: routine,
             activeRuns: careRoutineRuns,
-            context: modelContext
+            context: modelContext,
+            caregiverName: activeCaregiverName
         )
         openRoutineRun(routine, run)
     }
@@ -1203,7 +1204,7 @@ struct TodayView: View {
 
     private func archiveRoutine(_ routine: CareRoutine) {
         if let activeRun = CareRoutineService.activeRun(for: routine, runs: careRoutineRuns) {
-            CareRoutineService.cancelRun(activeRun, context: modelContext)
+            CareRoutineService.cancelRun(activeRun, context: modelContext, caregiverName: activeCaregiverName)
         }
         CareRoutineService.archive(routine, context: modelContext)
         if routineRunRoute?.routineID == routine.id {
@@ -1374,7 +1375,8 @@ struct TodayView: View {
             in: run,
             routine: routine,
             allSteps: careRoutineSteps,
-            context: modelContext
+            context: modelContext,
+            caregiverName: activeCaregiverName
         )
         closeFinishedRoutineRunIfNeeded(run)
     }
@@ -1389,7 +1391,8 @@ struct TodayView: View {
             in: run,
             routine: routine,
             allSteps: careRoutineSteps,
-            context: modelContext
+            context: modelContext,
+            caregiverName: activeCaregiverName
         )
         closeFinishedRoutineRunIfNeeded(run)
     }
@@ -1407,12 +1410,12 @@ struct TodayView: View {
     }
 
     private func finishRoutineRun(_ run: CareRoutineRun, routine: CareRoutine) {
-        CareRoutineService.finishRun(run, routine: routine, context: modelContext)
+        CareRoutineService.finishRun(run, routine: routine, context: modelContext, caregiverName: activeCaregiverName)
         routineRunRoute = nil
     }
 
     private func cancelRoutineRun(_ run: CareRoutineRun) {
-        CareRoutineService.cancelRun(run, context: modelContext)
+        CareRoutineService.cancelRun(run, context: modelContext, caregiverName: activeCaregiverName)
         routineRunRoute = nil
     }
 
