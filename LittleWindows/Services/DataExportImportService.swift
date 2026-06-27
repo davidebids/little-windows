@@ -429,8 +429,12 @@ private struct CareRoutineRunDTO: Codable {
     var startedAt: Date
     var completedAt: Date?
     var cancelledAt: Date?
+    var startedByCaregiverName: String?
+    var completedByCaregiverName: String?
+    var cancelledByCaregiverName: String?
     var completedStepIDsData: Data?
     var skippedStepIDsData: Data?
+    var stepResolutionRecordsData: Data?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -813,14 +817,18 @@ enum DataExportImportService {
                 startedAt: $0.startedAt,
                 completedAt: $0.completedAt,
                 cancelledAt: $0.cancelledAt,
+                startedByCaregiverName: $0.startedByCaregiverName,
+                completedByCaregiverName: $0.completedByCaregiverName,
+                cancelledByCaregiverName: $0.cancelledByCaregiverName,
                 completedStepIDsData: $0.completedStepIDsData,
                 skippedStepIDsData: $0.skippedStepIDsData,
+                stepResolutionRecordsData: $0.stepResolutionRecordsData,
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt
             )
         }
         let envelope = BackupEnvelope(
-            version: 10,
+            version: 11,
             exportedAt: Date(),
             profiles: profiles,
             photoAttachments: photoAttachments,
@@ -860,7 +868,7 @@ enum DataExportImportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
-        guard (1...10).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
+        guard (1...11).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
         try deleteAll(context: context)
 
         for value in envelope.profiles {
@@ -1292,11 +1300,15 @@ enum DataExportImportService {
                 startedAt: value.startedAt,
                 completedAt: value.completedAt,
                 cancelledAt: value.cancelledAt,
+                startedByCaregiverName: value.startedByCaregiverName,
+                completedByCaregiverName: value.completedByCaregiverName,
+                cancelledByCaregiverName: value.cancelledByCaregiverName,
                 createdAt: value.createdAt,
                 updatedAt: value.updatedAt
             )
             run.completedStepIDsData = value.completedStepIDsData
             run.skippedStepIDsData = value.skippedStepIDsData
+            run.stepResolutionRecordsData = value.stepResolutionRecordsData
             context.insert(run)
         }
         CloudKitFamilySyncConflictResolver.resolveDuplicateActiveTimers(in: context)

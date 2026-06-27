@@ -42,10 +42,12 @@ struct CareRoutinesTodayCard: View {
                 ForEach(routines.prefix(3)) { routine in
                     let routineSteps = CareRoutineService.steps(for: routine, steps: steps)
                     let run = CareRoutineService.activeRun(for: routine, runs: runs)
+                    let latestRun = CareRoutineService.latestRun(for: routine, runs: runs)
                     CareRoutineTodayRow(
                         routine: routine,
                         steps: routineSteps,
                         activeRun: run,
+                        latestRun: latestRun,
                         start: { startRoutine(routine) },
                         resume: { run.map { openRun(routine, $0) } }
                     )
@@ -233,6 +235,7 @@ private struct CareRoutineTodayRow: View {
     var routine: CareRoutine
     var steps: [CareRoutineStep]
     var activeRun: CareRoutineRun?
+    var latestRun: CareRoutineRun?
     var start: () -> Void
     var resume: () -> Void
 
@@ -285,6 +288,25 @@ private struct CareRoutineTodayRow: View {
         return routine.scope.displayName
     }
 
+    private var collaborationText: String? {
+        if let activeRun,
+           let name = activeRun.startedByCaregiverName,
+           !name.isEmpty {
+            return "Started by \(name)"
+        }
+
+        guard let latestRun,
+              latestRun.state == .completed,
+              let completedAt = latestRun.completedAt,
+              Calendar.current.isDateInToday(completedAt),
+              let name = latestRun.completedByCaregiverName,
+              !name.isEmpty else {
+            return nil
+        }
+
+        return "Finished by \(name) at \(DateFormatting.time.string(from: completedAt))"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
@@ -311,6 +333,13 @@ private struct CareRoutineTodayRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+
+                    if let collaborationText {
+                        Label(collaborationText, systemImage: "person.2.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: 8)
@@ -986,12 +1015,37 @@ struct CareRoutineRunView: View {
         steps.filter { run.isCompleted(stepID: $0.id) }.count
     }
 
+    private var runActorText: String? {
+        switch run.state {
+        case .active:
+            guard let name = run.startedByCaregiverName, !name.isEmpty else { return nil }
+            return "Started by \(name) at \(DateFormatting.time.string(from: run.startedAt))"
+        case .completed:
+            guard let completedAt = run.completedAt else { return nil }
+            if let name = run.completedByCaregiverName, !name.isEmpty {
+                return "Finished by \(name) at \(DateFormatting.time.string(from: completedAt))"
+            }
+            return "Finished at \(DateFormatting.time.string(from: completedAt))"
+        case .cancelled:
+            guard let cancelledAt = run.cancelledAt else { return nil }
+            if let name = run.cancelledByCaregiverName, !name.isEmpty {
+                return "Cancelled by \(name) at \(DateFormatting.time.string(from: cancelledAt))"
+            }
+            return "Cancelled at \(DateFormatting.time.string(from: cancelledAt))"
+        }
+    }
+
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(routine.title, systemImage: routine.iconName)
                         .font(.title3.bold())
+                    if let runActorText {
+                        Label(runActorText, systemImage: "person.2.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                     ProgressView(value: Double(completedCount), total: Double(max(steps.count, 1)))
                         .accessibilityLabel("\(routine.title) progress")
                         .accessibilityValue("\(completedCount) of \(steps.count) steps completed")
@@ -1008,6 +1062,7 @@ struct CareRoutineRunView: View {
                         step: step,
                         isCompleted: run.isCompleted(stepID: step.id),
                         isSkipped: run.isSkipped(stepID: step.id),
+                        resolutionRecord: run.resolutionRecord(for: step.id),
                         perform: { perform(step) },
                         skip: { skip(step) }
                     )
@@ -1033,6 +1088,7 @@ private struct StepRunRow: View {
     var step: CareRoutineStep
     var isCompleted: Bool
     var isSkipped: Bool
+    var resolutionRecord: CareRoutineStepResolutionRecord?
     var perform: () -> Void
     var skip: () -> Void
 
@@ -1049,6 +1105,11 @@ private struct StepRunRow: View {
                     Text(actionDetailText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    if let resolutionText {
+                        Text(resolutionText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
             }
@@ -1114,6 +1175,19 @@ private struct StepRunRow: View {
              .note:
             return step.action.displayName
         }
+    }
+
+    private var resolutionText: String? {
+        guard isCompleted || isSkipped else { return nil }
+        let fallback = isSkipped ? "Skipped" : "Completed"
+        guard let resolutionRecord else { return fallback }
+
+        let action = resolutionRecord.resolution == .skipped ? "Skipped" : "Completed"
+        let time = DateFormatting.time.string(from: resolutionRecord.resolvedAt)
+        if let name = resolutionRecord.caregiverName, !name.isEmpty {
+            return "\(action) by \(name) at \(time)"
+        }
+        return "\(action) at \(time)"
     }
 
     private var statusIcon: String {

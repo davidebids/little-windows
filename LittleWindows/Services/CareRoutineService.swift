@@ -122,6 +122,15 @@ enum CareRoutineService {
             .max { $0.startedAt < $1.startedAt }
     }
 
+    static func latestRun(
+        for routine: CareRoutine,
+        runs: [CareRoutineRun]
+    ) -> CareRoutineRun? {
+        runs
+            .filter { $0.routineID == routine.id }
+            .max { $0.startedAt < $1.startedAt }
+    }
+
     static func steps(
         for routine: CareRoutine,
         steps: [CareRoutineStep]
@@ -403,7 +412,8 @@ enum CareRoutineService {
     static func startRun(
         routine: CareRoutine,
         activeRuns: [CareRoutineRun],
-        context: ModelContext
+        context: ModelContext,
+        caregiverName: String? = nil
     ) -> CareRoutineRun {
         if let existing = activeRun(for: routine, runs: activeRuns) {
             return existing
@@ -411,7 +421,8 @@ enum CareRoutineService {
         let run = CareRoutineRun(
             routineID: routine.id,
             profileID: routine.profileID,
-            householdID: routine.householdID
+            householdID: routine.householdID,
+            startedByCaregiverName: normalizedCaregiverName(caregiverName)
         )
         routine.lastStartedAt = run.startedAt
         routine.updatedAt = Date()
@@ -425,16 +436,25 @@ enum CareRoutineService {
         in run: CareRoutineRun,
         routine: CareRoutine,
         allSteps: [CareRoutineStep],
-        context: ModelContext
+        context: ModelContext,
+        caregiverName: String? = nil
     ) {
+        let now = Date()
         var completed = run.completedStepIDs
         if !completed.contains(step.id) {
             completed.append(step.id)
         }
         run.completedStepIDs = completed
         run.skippedStepIDs = run.skippedStepIDs.filter { $0 != step.id }
-        run.updatedAt = Date()
-        finishIfDone(run, routine: routine, allSteps: allSteps)
+        recordStepResolution(
+            stepID: step.id,
+            resolution: .completed,
+            caregiverName: caregiverName,
+            resolvedAt: now,
+            in: run
+        )
+        run.updatedAt = now
+        finishIfDone(run, routine: routine, allSteps: allSteps, caregiverName: caregiverName, completedAt: now)
         save(context)
     }
 
@@ -443,32 +463,49 @@ enum CareRoutineService {
         in run: CareRoutineRun,
         routine: CareRoutine,
         allSteps: [CareRoutineStep],
-        context: ModelContext
+        context: ModelContext,
+        caregiverName: String? = nil
     ) {
+        let now = Date()
         var skipped = run.skippedStepIDs
         if !skipped.contains(step.id) {
             skipped.append(step.id)
         }
         run.skippedStepIDs = skipped
-        run.updatedAt = Date()
-        finishIfDone(run, routine: routine, allSteps: allSteps)
+        run.completedStepIDs = run.completedStepIDs.filter { $0 != step.id }
+        recordStepResolution(
+            stepID: step.id,
+            resolution: .skipped,
+            caregiverName: caregiverName,
+            resolvedAt: now,
+            in: run
+        )
+        run.updatedAt = now
+        finishIfDone(run, routine: routine, allSteps: allSteps, caregiverName: caregiverName, completedAt: now)
         save(context)
     }
 
-    static func finishRun(_ run: CareRoutineRun, routine: CareRoutine, context: ModelContext) {
+    static func finishRun(
+        _ run: CareRoutineRun,
+        routine: CareRoutine,
+        context: ModelContext,
+        caregiverName: String? = nil
+    ) {
         let now = Date()
         run.state = .completed
         run.completedAt = now
+        run.completedByCaregiverName = normalizedCaregiverName(caregiverName)
         run.updatedAt = now
         routine.lastCompletedAt = now
         routine.updatedAt = now
         save(context)
     }
 
-    static func cancelRun(_ run: CareRoutineRun, context: ModelContext) {
+    static func cancelRun(_ run: CareRoutineRun, context: ModelContext, caregiverName: String? = nil) {
         let now = Date()
         run.state = .cancelled
         run.cancelledAt = now
+        run.cancelledByCaregiverName = normalizedCaregiverName(caregiverName)
         run.updatedAt = now
         save(context)
     }
@@ -476,16 +513,40 @@ enum CareRoutineService {
     private static func finishIfDone(
         _ run: CareRoutineRun,
         routine: CareRoutine,
-        allSteps: [CareRoutineStep]
+        allSteps: [CareRoutineStep],
+        caregiverName: String?,
+        completedAt: Date
     ) {
         let ids = Set(allSteps.filter { $0.routineID == routine.id }.map(\.id))
         let resolved = Set(run.completedStepIDs + run.skippedStepIDs)
         guard !ids.isEmpty, ids.isSubset(of: resolved) else { return }
-        let now = Date()
         run.state = .completed
-        run.completedAt = now
-        routine.lastCompletedAt = now
-        routine.updatedAt = now
+        run.completedAt = completedAt
+        run.completedByCaregiverName = normalizedCaregiverName(caregiverName)
+        routine.lastCompletedAt = completedAt
+        routine.updatedAt = completedAt
+    }
+
+    private static func recordStepResolution(
+        stepID: UUID,
+        resolution: CareRoutineStepResolution,
+        caregiverName: String?,
+        resolvedAt: Date,
+        in run: CareRoutineRun
+    ) {
+        var records = run.stepResolutionRecords.filter { $0.stepID != stepID }
+        records.append(CareRoutineStepResolutionRecord(
+            stepID: stepID,
+            resolution: resolution,
+            caregiverName: normalizedCaregiverName(caregiverName),
+            resolvedAt: resolvedAt
+        ))
+        run.stepResolutionRecords = records.sorted { $0.resolvedAt < $1.resolvedAt }
+    }
+
+    private static func normalizedCaregiverName(_ name: String?) -> String? {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func save(_ context: ModelContext) {
