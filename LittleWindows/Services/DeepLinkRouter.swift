@@ -48,6 +48,10 @@ enum PuppyGuideRouteCommand: Equatable {
     case current
 }
 
+enum RoutineRouteCommand: Equatable {
+    case list
+}
+
 enum NightLightCommand: Equatable {
     case open
     case start(NightLightPresetKind?)
@@ -77,6 +81,7 @@ final class DeepLinkRouter: ObservableObject {
     @Published var pendingAppointmentCommand: AppointmentRouteCommand?
     @Published var pendingAgeGuideCommand: AgeGuideRouteCommand?
     @Published var pendingPuppyGuideCommand: PuppyGuideRouteCommand?
+    @Published var pendingRoutineCommand: RoutineRouteCommand?
     @Published var pendingFoodCommand: FoodRouteCommand?
     @Published var pendingProfileID: UUID?
     @Published var selectedReportsMode: ReportsDisplayMode = ReportsDisplayMode(
@@ -172,6 +177,9 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["appointments"] || components == ["visits"] {
             selectedTab = .today
             pendingAppointmentCommand = .list
+        } else if components == ["routines"] {
+            selectedTab = .today
+            pendingRoutineCommand = .list
         } else if components.count >= 2, components[0] == "appointment",
                   let uuid = UUID(uuidString: components[1]) {
             selectedTab = .today
@@ -289,6 +297,11 @@ final class DeepLinkRouter: ObservableObject {
     func consumePuppyGuideCommand() -> PuppyGuideRouteCommand? {
         defer { pendingPuppyGuideCommand = nil }
         return pendingPuppyGuideCommand
+    }
+
+    func consumeRoutineCommand() -> RoutineRouteCommand? {
+        defer { pendingRoutineCommand = nil }
+        return pendingRoutineCommand
     }
 
     func presentSettings() {

@@ -9,7 +9,7 @@ final class ICloudSyncSettingsViewModel: ObservableObject {
     @Published private(set) var syncMode = PersistenceService.familySyncMode()
     @Published private(set) var requiresRestart = PersistenceService.iCloudSyncChangeRequiresRestart
     @Published private(set) var accountStatusDescription = "Checking iCloud..."
-    @Published private(set) var containerStatusDescription = PersistenceService.iCloudContainerIdentifier
+    @Published private(set) var containerStatusDescription = "Little Windows iCloud"
     @Published private(set) var lastCheckedAt: Date?
     @Published private(set) var diagnostics: SyncDiagnosticSnapshot?
     @Published private(set) var isLoadingDiagnostics = false

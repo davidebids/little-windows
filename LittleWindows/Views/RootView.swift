@@ -321,6 +321,11 @@ struct RootView: View {
     @StateObject private var profileService = ProfileService.shared
     @State private var shouldOpenSettingsAfterOnboarding = false
     @State private var hasCheckedInitialOnboardingState = false
+    @State private var showingFamilySyncAcceptanceStatus = false
+    @AppStorage(CloudKitSharingService.acceptanceStatusMessageKey)
+    private var familySyncAcceptanceMessage = ""
+    @AppStorage("familySync.lastPresentedAcceptanceStatusMessage")
+    private var lastPresentedFamilySyncAcceptanceMessage = ""
 
     private var selectedProfile: CareProfile? {
         profileService.selectedProfile(in: profiles)
@@ -433,6 +438,17 @@ struct RootView: View {
         } message: {
             Text("Enter the caregiver name this device should use for new care entries.")
         }
+        .alert("Family Sync", isPresented: $showingFamilySyncAcceptanceStatus) {
+            Button("Open Settings") {
+                lastPresentedFamilySyncAcceptanceMessage = familySyncAcceptanceMessage
+                router.showingSettings = true
+            }
+            Button("OK", role: .cancel) {
+                lastPresentedFamilySyncAcceptanceMessage = familySyncAcceptanceMessage
+            }
+        } message: {
+            Text(familySyncAcceptanceMessage)
+        }
         .onOpenURL { url in
             route(url)
         }
@@ -452,6 +468,14 @@ struct RootView: View {
                 route(url)
             }
             consumePendingSystemAction()
+            presentFamilySyncAcceptanceStatusIfNeeded()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: CloudKitSharingService.acceptanceStatusDidChangeNotification
+            )
+        ) { _ in
+            presentFamilySyncAcceptanceStatusIfNeeded()
         }
         .onChange(of: profiles.count) { _, _ in
             markOnboardingCompleteForExistingData()
@@ -498,6 +522,14 @@ struct RootView: View {
         if let url = IntegrationCommandStore.consumePendingURL() {
             route(url)
         }
+    }
+
+    private func presentFamilySyncAcceptanceStatusIfNeeded() {
+        guard !familySyncAcceptanceMessage.isEmpty,
+              familySyncAcceptanceMessage != lastPresentedFamilySyncAcceptanceMessage else {
+            return
+        }
+        showingFamilySyncAcceptanceStatus = true
     }
 }
 

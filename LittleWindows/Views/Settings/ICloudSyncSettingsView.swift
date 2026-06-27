@@ -32,7 +32,6 @@ struct ICloudSyncSettingsView: View {
             Section("Status") {
                 LabeledContent("iCloud Sync", value: viewModel.availability.title)
                 LabeledContent("Apple Account", value: viewModel.accountStatusDescription)
-                LabeledContent("Container", value: viewModel.containerStatusDescription)
                 LabeledContent("Mode", value: viewModel.syncMode.displayName)
                 LabeledContent("Store") {
                     Text(storeDescription)
@@ -58,7 +57,7 @@ struct ICloudSyncSettingsView: View {
                     Text(viewModel.syncMode == .sharedFamilySync ? "Family Sync shares data with accepted iCloud caregivers across Apple Accounts." : "Private iCloud Sync works across devices signed into your Apple Account.")
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("When iCloud Sync is off, Little Windows opens a local-only store and does not check the CloudKit container.")
+                    Text("When iCloud Sync is off, Little Windows opens a local-only store and does not check iCloud.")
                         .foregroundStyle(.secondary)
                     Text("Turn iCloud Sync back on and restart the app when you want same-Apple-Account sync again.")
                         .foregroundStyle(.secondary)
@@ -103,7 +102,7 @@ struct ICloudSyncSettingsView: View {
             .labeledContentStyle(AdaptiveLabeledContentStyle())
 
             Section("Back up before testing") {
-                Text("Use Settings > Data > Export JSON backup before changing CloudKit containers, resetting development data, or testing migrations on devices.")
+                Text("Use Settings > Data > Export JSON backup before changing iCloud sync setup, resetting development data, or testing migrations on devices.")
                     .foregroundStyle(.secondary)
             }
         }

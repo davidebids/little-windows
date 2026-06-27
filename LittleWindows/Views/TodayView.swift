@@ -22,6 +22,10 @@ struct TodayView: View {
     @Query private var records: [SleepPredictionRecord]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
+    @Query(sort: \CareRoutine.sortOrder) private var careRoutines: [CareRoutine]
+    @Query(sort: \CareRoutineStep.sortOrder) private var careRoutineSteps: [CareRoutineStep]
+    @Query(sort: \CareRoutineRun.startedAt, order: .reverse) private var careRoutineRuns: [CareRoutineRun]
+    @Query(sort: \Household.createdAt) private var households: [Household]
 
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
     @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
@@ -49,6 +53,9 @@ struct TodayView: View {
     @State private var puppyGuideToOpen: PuppyStageGuide?
     @State private var puppyGuideProfileToOpen: BabyProfile?
     @State private var showingProfileEditor = false
+    @State private var showingRoutineManager = false
+    @State private var routineRunRoute: CareRoutineRunRoute?
+    @State private var pendingRoutineStepCompletion: PendingRoutineStepCompletion?
     @State private var eventPendingDelete: BabyEvent?
     @State private var showingDeleteEventConfirmation = false
     @State private var activeSleepPlan: ActiveSleepPlan?
@@ -96,6 +103,22 @@ struct TodayView: View {
     }
     private var scopedPuppyGuideReadStates: [PuppyStageGuideReadState] {
         puppyStageGuideReadStates.filter { $0.matchesProfile(selectedProfileID) }
+    }
+    private var currentHouseholdID: UUID? {
+        households.first?.id
+    }
+    private var visibleCareRoutines: [CareRoutine] {
+        CareRoutineService.visibleRoutines(
+            routines: careRoutines,
+            profileID: selectedProfileID,
+            householdID: currentHouseholdID
+        )
+    }
+    private var suggestedRoutineTemplates: [CareRoutineTemplate] {
+        let existingKinds = Set(visibleCareRoutines.compactMap(\.templateKind))
+        return CareRoutineService.templates(for: profile?.profileType).filter {
+            !existingKinds.contains($0.kind)
+        }
     }
     private var currentAgeGuide: AgeGuide? {
         profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
@@ -276,6 +299,8 @@ struct TodayView: View {
                         childQuickActionsSection
                     }
 
+                    careRoutinesSection
+
                     Section {
                         if todayEvents.isEmpty {
                             ContentUnavailableView(
@@ -346,7 +371,46 @@ struct TodayView: View {
         .sheet(item: $editorRoute) { route in
             NavigationStack {
                 EventEditorView(type: route.type, event: route.event) { savedEvent in
-                    Task { await eventChanged(savedEvent) }
+                    Task {
+                        await eventChanged(savedEvent)
+                        completePendingRoutineStepIfNeeded()
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingRoutineManager) {
+            NavigationStack {
+                CareRoutineManagerView(
+                    profileType: profile?.profileType,
+                    routines: visibleCareRoutines,
+                    steps: careRoutineSteps,
+                    runs: careRoutineRuns,
+                    templates: suggestedRoutineTemplates,
+                    addTemplate: addRoutineTemplate,
+                    createRoutine: createCustomRoutine,
+                    updateRoutine: updateCustomRoutine,
+                    duplicateRoutine: duplicateRoutine,
+                    moveRoutines: moveRoutines,
+                    startRoutine: startRoutine,
+                    archiveRoutine: archiveRoutine,
+                    toggleReminder: toggleRoutineReminder,
+                    openRun: openRoutineRun
+                )
+            }
+        }
+        .sheet(item: $routineRunRoute) { route in
+            if let routine = careRoutines.first(where: { $0.id == route.routineID }),
+               let run = careRoutineRuns.first(where: { $0.id == route.runID }) {
+                NavigationStack {
+                    CareRoutineRunView(
+                        routine: routine,
+                        steps: CareRoutineService.steps(for: routine, steps: careRoutineSteps),
+                        run: run,
+                        perform: { performRoutineStep($0, routine: routine, run: run) },
+                        skip: { skipRoutineStep($0, routine: routine, run: run) },
+                        finish: { finishRoutineRun(run, routine: routine) },
+                        cancel: { cancelRoutineRun(run) }
+                    )
                 }
             }
         }
@@ -506,22 +570,28 @@ struct TodayView: View {
         .onChange(of: deepLinkRouter.pendingPuppyGuideCommand) { _, _ in
             handlePendingPuppyGuideDeepLink()
         }
+        .onChange(of: deepLinkRouter.pendingRoutineCommand) { _, _ in
+            handlePendingRoutineDeepLink()
+        }
         .onChange(of: deepLinkRouter.isDataReady) { _, ready in
             if ready {
                 handlePendingProfileSwitch()
                 handlePendingDeepLink()
                 handlePendingAppointmentDeepLink()
                 handlePendingPuppyGuideDeepLink()
+                handlePendingRoutineDeepLink()
             }
         }
         .task {
             await notificationManager.configure()
+            _ = HouseholdService.ensureDefaultHousehold(context: modelContext)
             _ = profileService.ensureSelection(in: profiles)
             refreshActiveSleepPlan()
             handlePendingProfileSwitch()
             handlePendingDeepLink()
             handlePendingAppointmentDeepLink()
             handlePendingPuppyGuideDeepLink()
+            handlePendingRoutineDeepLink()
             await syncActiveSleepPlanWakeAlert()
         }
     }
@@ -856,6 +926,21 @@ struct TodayView: View {
         }
     }
 
+    private var careRoutinesSection: some View {
+        CareRoutinesTodayCard(
+            routines: visibleCareRoutines,
+            steps: careRoutineSteps,
+            runs: careRoutineRuns,
+            templates: suggestedRoutineTemplates,
+            addTemplate: addRoutineTemplate,
+            startRoutine: startRoutine,
+            archiveRoutine: archiveRoutine,
+            cancelRun: cancelRoutineRun,
+            openRun: openRoutineRun,
+            manage: { showingRoutineManager = true }
+        )
+    }
+
     @ViewBuilder
     private var appointmentsSection: some View {
         if !relevantAppointments.isEmpty {
@@ -1019,6 +1104,321 @@ struct TodayView: View {
         modelContext.insert(event)
         Task {
             await eventChanged(event, refreshPrediction: false, waitForSystemIntegrations: true)
+        }
+    }
+
+    private func addRoutineTemplate(_ template: CareRoutineTemplate) {
+        let householdID = template.scope == .household
+            ? HouseholdService.ensureDefaultHousehold(context: modelContext).id
+            : currentHouseholdID
+        let routine = CareRoutineService.createRoutine(
+            from: template,
+            profileID: selectedProfileID,
+            householdID: householdID,
+            existingRoutines: careRoutines,
+            context: modelContext
+        )
+        showingRoutineManager = false
+        startRoutine(routine)
+    }
+
+    private func createCustomRoutine(_ input: CareRoutineInput) {
+        let householdID = input.scope == .household
+            ? HouseholdService.ensureDefaultHousehold(context: modelContext).id
+            : currentHouseholdID
+        guard let routine = CareRoutineService.createRoutine(
+            title: input.title,
+            notes: input.notes,
+            scope: input.scope,
+            iconName: input.iconName,
+            tintName: input.tintName,
+            reminderEnabled: input.reminderEnabled,
+            reminderTimeMinutesAfterMidnight: input.reminderTimeMinutesAfterMidnight,
+            steps: input.steps,
+            profileID: selectedProfileID,
+            householdID: householdID,
+            existingRoutines: careRoutines,
+            context: modelContext
+        ) else {
+            return
+        }
+        showingRoutineManager = false
+        Task {
+            await syncRoutineReminderPreference(for: routine)
+        }
+        startRoutine(routine)
+    }
+
+    private func updateCustomRoutine(_ routine: CareRoutine, input: CareRoutineInput) {
+        let householdID = input.scope == .household
+            ? HouseholdService.ensureDefaultHousehold(context: modelContext).id
+            : currentHouseholdID
+        let updated = CareRoutineService.updateRoutine(
+            routine,
+            input: input,
+            profileID: selectedProfileID,
+            householdID: householdID,
+            existingSteps: careRoutineSteps,
+            context: modelContext
+        )
+        guard updated else { return }
+        Task {
+            await syncRoutineReminderPreference(for: routine)
+        }
+    }
+
+    private func duplicateRoutine(_ routine: CareRoutine) {
+        let copy = CareRoutineService.duplicateRoutine(
+            routine,
+            steps: careRoutineSteps,
+            existingRoutines: careRoutines,
+            context: modelContext
+        )
+        Task {
+            await notificationManager.cancelRoutineReminder(routineID: copy.id)
+        }
+    }
+
+    private func moveRoutines(from source: IndexSet, to destination: Int) {
+        CareRoutineService.reorderRoutines(
+            visibleCareRoutines,
+            from: source,
+            to: destination,
+            context: modelContext
+        )
+    }
+
+    private func startRoutine(_ routine: CareRoutine) {
+        let run = CareRoutineService.startRun(
+            routine: routine,
+            activeRuns: careRoutineRuns,
+            context: modelContext
+        )
+        openRoutineRun(routine, run)
+    }
+
+    private func openRoutineRun(_ routine: CareRoutine, _ run: CareRoutineRun) {
+        routineRunRoute = CareRoutineRunRoute(routineID: routine.id, runID: run.id)
+    }
+
+    private func archiveRoutine(_ routine: CareRoutine) {
+        if let activeRun = CareRoutineService.activeRun(for: routine, runs: careRoutineRuns) {
+            CareRoutineService.cancelRun(activeRun, context: modelContext)
+        }
+        CareRoutineService.archive(routine, context: modelContext)
+        if routineRunRoute?.routineID == routine.id {
+            routineRunRoute = nil
+        }
+        Task {
+            await notificationManager.cancelRoutineReminder(routineID: routine.id)
+        }
+    }
+
+    private func toggleRoutineReminder(_ routine: CareRoutine) {
+        if routine.reminderEnabled {
+            routine.reminderEnabled = false
+            routine.updatedAt = Date()
+            try? modelContext.save()
+            PersistenceService.recordLocalSave()
+            Task {
+                await notificationManager.cancelRoutineReminder(routineID: routine.id)
+            }
+            return
+        }
+
+        Task {
+            let status = await notificationManager.getAuthorizationStatus()
+            let granted: Bool
+            if status == .notDetermined {
+                granted = await notificationManager.requestAuthorization()
+            } else {
+                granted = status == .authorized || status == .provisional || status == .ephemeral
+            }
+            guard granted else {
+                showingPermissionDenied = true
+                return
+            }
+            routine.reminderEnabled = true
+            routine.reminderTimeMinutesAfterMidnight = routine.reminderTimeMinutesAfterMidnight
+                ?? CareRoutineService.defaultReminderMinutes
+            routine.updatedAt = Date()
+            try? modelContext.save()
+            PersistenceService.recordLocalSave()
+            await notificationManager.scheduleRoutineReminder(routine: routine)
+        }
+    }
+
+    private func syncRoutineReminderPreference(for routine: CareRoutine) async {
+        guard routine.reminderEnabled else {
+            await notificationManager.cancelRoutineReminder(routineID: routine.id)
+            return
+        }
+
+        let status = await notificationManager.getAuthorizationStatus()
+        let granted: Bool
+        if status == .notDetermined {
+            granted = await notificationManager.requestAuthorization()
+        } else {
+            granted = status == .authorized || status == .provisional || status == .ephemeral
+        }
+        guard granted else {
+            routine.reminderEnabled = false
+            routine.updatedAt = Date()
+            try? modelContext.save()
+            PersistenceService.recordLocalSave()
+            showingPermissionDenied = true
+            await notificationManager.cancelRoutineReminder(routineID: routine.id)
+            return
+        }
+
+        routine.reminderTimeMinutesAfterMidnight = routine.reminderTimeMinutesAfterMidnight
+            ?? CareRoutineService.defaultReminderMinutes
+        routine.updatedAt = Date()
+        try? modelContext.save()
+        PersistenceService.recordLocalSave()
+        await notificationManager.scheduleRoutineReminder(routine: routine)
+    }
+
+    private func performRoutineStep(
+        _ step: CareRoutineStep,
+        routine: CareRoutine,
+        run: CareRoutineRun
+    ) {
+        switch step.action {
+        case .checklist, .note:
+            completeRoutineStep(step, routine: routine, run: run)
+        case .logEvent:
+            pendingRoutineStepCompletion = PendingRoutineStepCompletion(
+                routineID: routine.id,
+                runID: run.id,
+                stepID: step.id
+            )
+            routineRunRoute = nil
+            editorRoute = EventEditorRoute(type: step.eventType ?? .custom)
+        case .startTimer:
+            let created = startTimer(
+                step.eventType ?? .custom,
+                nursingSide: step.nursingSide,
+                sleepKind: step.sleepKind,
+                activityType: step.activityType
+            )
+            if created != nil {
+                completeRoutineStep(step, routine: routine, run: run)
+            }
+        case .openFoodHome:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .food
+            deepLinkRouter.pendingFoodCommand = .food
+            routineRunRoute = nil
+        case .openFoodQuickAdd:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .food
+            deepLinkRouter.pendingFoodCommand = .quickAdd
+            routineRunRoute = nil
+        case .openShoppingList:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .food
+            deepLinkRouter.pendingFoodCommand = .shopping
+            routineRunRoute = nil
+        case .openInventory:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .food
+            deepLinkRouter.pendingFoodCommand = .inventory
+            routineRunRoute = nil
+        case .openMealPrep:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .food
+            deepLinkRouter.pendingFoodCommand = .mealPrep
+            routineRunRoute = nil
+        case .openReports:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedReportsMode = .day
+            deepLinkRouter.selectedTab = .reports
+            routineRunRoute = nil
+        case .openMilestones:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .milestones
+            routineRunRoute = nil
+        case .openAppointments:
+            completeRoutineStep(step, routine: routine, run: run)
+            routineRunRoute = nil
+            showingAppointments = true
+        case .openAgeGuide:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .milestones
+            deepLinkRouter.pendingAgeGuideCommand = .list
+            routineRunRoute = nil
+        case .openPuppyGuide:
+            completeRoutineStep(step, routine: routine, run: run)
+            routineRunRoute = nil
+            deepLinkRouter.pendingPuppyGuideCommand = .current
+            handlePendingPuppyGuideDeepLink()
+        case .openSettings:
+            completeRoutineStep(step, routine: routine, run: run)
+            routineRunRoute = nil
+            deepLinkRouter.presentSettings()
+        case .openNightLight:
+            completeRoutineStep(step, routine: routine, run: run)
+            deepLinkRouter.selectedTab = .nightLight
+            routineRunRoute = nil
+        }
+    }
+
+    private func skipRoutineStep(
+        _ step: CareRoutineStep,
+        routine: CareRoutine,
+        run: CareRoutineRun
+    ) {
+        CareRoutineService.skipStep(
+            step,
+            in: run,
+            routine: routine,
+            allSteps: careRoutineSteps,
+            context: modelContext
+        )
+        closeFinishedRoutineRunIfNeeded(run)
+    }
+
+    private func completeRoutineStep(
+        _ step: CareRoutineStep,
+        routine: CareRoutine,
+        run: CareRoutineRun
+    ) {
+        CareRoutineService.completeStep(
+            step,
+            in: run,
+            routine: routine,
+            allSteps: careRoutineSteps,
+            context: modelContext
+        )
+        closeFinishedRoutineRunIfNeeded(run)
+    }
+
+    private func completePendingRoutineStepIfNeeded() {
+        guard let pending = pendingRoutineStepCompletion,
+              let routine = careRoutines.first(where: { $0.id == pending.routineID }),
+              let run = careRoutineRuns.first(where: { $0.id == pending.runID }),
+              let step = careRoutineSteps.first(where: { $0.id == pending.stepID }) else {
+            pendingRoutineStepCompletion = nil
+            return
+        }
+        pendingRoutineStepCompletion = nil
+        completeRoutineStep(step, routine: routine, run: run)
+    }
+
+    private func finishRoutineRun(_ run: CareRoutineRun, routine: CareRoutine) {
+        CareRoutineService.finishRun(run, routine: routine, context: modelContext)
+        routineRunRoute = nil
+    }
+
+    private func cancelRoutineRun(_ run: CareRoutineRun) {
+        CareRoutineService.cancelRun(run, context: modelContext)
+        routineRunRoute = nil
+    }
+
+    private func closeFinishedRoutineRunIfNeeded(_ run: CareRoutineRun) {
+        if run.state != .active {
+            routineRunRoute = nil
         }
     }
 
@@ -1205,6 +1605,12 @@ struct TodayView: View {
         }
         puppyGuideProfileToOpen = targetProfile
         puppyGuideToOpen = guide
+    }
+
+    private func handlePendingRoutineDeepLink() {
+        guard deepLinkRouter.isDataReady else { return }
+        guard deepLinkRouter.consumeRoutineCommand() != nil else { return }
+        showingRoutineManager = true
     }
 
     private func dogProfileForPuppyGuide() -> BabyProfile? {

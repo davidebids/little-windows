@@ -14,7 +14,7 @@ First launch presents onboarding for a new empty store. It does not create defau
 
 ## App Areas
 
-- Today: profile-scoped care logging, active timers, quick actions, current prediction, and system integration refresh.
+- Today: profile-scoped care logging, household and profile routines, active timers, quick actions, current prediction, and system integration refresh.
 - Profiles: child and dog profiles with switching, colors, archival support, dog-specific details, and optional profile photos.
 - History and Reports: day and list history, event editing, filtering, summaries, charts, and prediction accuracy review.
 - Milestones and Memories: profile-scoped entries, age prompts, categories, photo attachments, and backup support.

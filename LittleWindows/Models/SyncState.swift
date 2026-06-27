@@ -158,5 +158,6 @@ struct FamilyShareState: Equatable {
     var canManageShare: Bool
     var canSyncNow: Bool
     var canLeaveShare: Bool
+    var lastAcceptanceMessage: String?
     var lastErrorMessage: String?
 }

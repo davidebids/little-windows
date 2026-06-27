@@ -22,6 +22,7 @@ final class FamilySyncViewModel: ObservableObject {
         canManageShare: false,
         canSyncNow: false,
         canLeaveShare: false,
+        lastAcceptanceMessage: nil,
         lastErrorMessage: nil
     )
     @Published private(set) var availability: ICloudSyncAvailability = .checking

@@ -39,7 +39,10 @@ enum PersistenceService {
             InventoryItem.self,
             MealPrepItem.self,
             MealPrepUsage.self,
-            FoodReminder.self
+            FoodReminder.self,
+            CareRoutine.self,
+            CareRoutineStep.self,
+            CareRoutineRun.self
         ])
     }
 

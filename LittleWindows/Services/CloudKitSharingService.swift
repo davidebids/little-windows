@@ -7,6 +7,10 @@ import UIKit
 @MainActor
 final class CloudKitSharingService {
     static let shared = CloudKitSharingService()
+    nonisolated static let acceptanceStatusDidChangeNotification = Notification.Name(
+        "CloudKitSharingService.acceptanceStatusDidChange"
+    )
+    nonisolated static let acceptanceStatusMessageKey = "familySync.acceptanceStatusMessage"
 
     private static var installedContainer: ModelContainer?
     private static var pendingAcceptedShareMetadata: CKShare.Metadata?
@@ -42,6 +46,8 @@ final class CloudKitSharingService {
         static let lastDatasetChecksum = "familySync.lastDatasetChecksum"
         static let lastNotifiedDatasetChecksum = "familySync.lastNotifiedDatasetChecksum"
         static let pushSubscriptionID = "familySync.pushSubscriptionID"
+        static let acceptanceStatusMessage = CloudKitSharingService.acceptanceStatusMessageKey
+        static let acceptanceStatusAt = "familySync.acceptanceStatusAt"
         static let lastError = "familySync.lastError"
         static let pendingUpload = "familySync.pendingUpload"
     }
@@ -59,8 +65,10 @@ final class CloudKitSharingService {
     }
 
     static func handleAcceptedShare(metadata: CKShare.Metadata) {
+        shared.recordAcceptance("Family share invite received. Accepting it now...")
         guard let container = installedContainer else {
             pendingAcceptedShareMetadata = metadata
+            shared.recordAcceptance("Family share invite received. Finishing setup after launch...")
             return
         }
         Task { @MainActor in
@@ -69,8 +77,10 @@ final class CloudKitSharingService {
                     metadata: metadata,
                     context: container.mainContext
                 )
+                shared.recordAcceptance("Family share accepted. Shared family data is ready on this device.")
             } catch {
                 shared.record(error: error)
+                shared.recordAcceptance("Family share invite failed: \(error.localizedDescription)")
             }
         }
     }
@@ -167,6 +177,7 @@ final class CloudKitSharingService {
             canManageShare: availability && role == .owner && hasShare,
             canSyncNow: syncMode == .sharedFamilySync && hasShare,
             canLeaveShare: syncMode == .sharedFamilySync,
+            lastAcceptanceMessage: defaults.string(forKey: DefaultsKey.acceptanceStatusMessage),
             lastErrorMessage: lastError
         )
     }
@@ -494,6 +505,8 @@ final class CloudKitSharingService {
             DefaultsKey.lastDatasetChecksum,
             DefaultsKey.lastNotifiedDatasetChecksum,
             DefaultsKey.pushSubscriptionID,
+            DefaultsKey.acceptanceStatusMessage,
+            DefaultsKey.acceptanceStatusAt,
             DefaultsKey.lastError,
             DefaultsKey.pendingUpload
         ] {
@@ -664,6 +677,15 @@ final class CloudKitSharingService {
 
     private func record(error: Error) {
         defaults.set(error.localizedDescription, forKey: DefaultsKey.lastError)
+    }
+
+    private func recordAcceptance(_ message: String) {
+        defaults.set(message, forKey: DefaultsKey.acceptanceStatusMessage)
+        defaults.set(Date(), forKey: DefaultsKey.acceptanceStatusAt)
+        NotificationCenter.default.post(
+            name: Self.acceptanceStatusDidChangeNotification,
+            object: nil
+        )
     }
 
     private func notifyAboutRemoteChangesIfNeeded(

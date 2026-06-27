@@ -4331,6 +4331,330 @@ final class SleepPredictionEngineTests: XCTestCase {
         return defaults
     }
 
+    @MainActor
+    func testCareRoutineTemplateCreatesScopedRoutineAndSteps() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let household = Household(name: "Home")
+        context.insert(profile)
+        context.insert(household)
+
+        let template = try XCTUnwrap(
+            CareRoutineService.templates(for: .child).first { $0.kind == .childBedtime }
+        )
+        let routine = CareRoutineService.createRoutine(
+            from: template,
+            profileID: profile.id,
+            householdID: household.id,
+            existingRoutines: [],
+            context: context
+        )
+
+        let routines = try context.fetch(FetchDescriptor<CareRoutine>())
+        let steps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+        XCTAssertEqual(routines.map(\.id), [routine.id])
+        XCTAssertEqual(routine.scope, .profile)
+        XCTAssertEqual(routine.profileID, profile.id)
+        XCTAssertNil(routine.householdID)
+        XCTAssertEqual(steps.filter { $0.routineID == routine.id }.count, template.steps.count)
+    }
+
+    @MainActor
+    func testCareRoutineVisibilitySeparatesProfilesHouseholdAndArchived() throws {
+        let profileID = UUID()
+        let otherProfileID = UUID()
+        let householdID = UUID()
+        let otherHouseholdID = UUID()
+        let profileRoutine = CareRoutine(scope: .profile, profileID: profileID, title: "Profile care", sortOrder: 1)
+        let otherProfileRoutine = CareRoutine(scope: .profile, profileID: otherProfileID, title: "Other profile", sortOrder: 0)
+        let householdRoutine = CareRoutine(scope: .household, householdID: householdID, title: "Household reset", sortOrder: 2)
+        let otherHouseholdRoutine = CareRoutine(scope: .household, householdID: otherHouseholdID, title: "Other household", sortOrder: 3)
+        let archivedRoutine = CareRoutine(scope: .profile, profileID: profileID, title: "Archived", isArchived: true, sortOrder: 4)
+
+        let visible = CareRoutineService.visibleRoutines(
+            routines: [
+                otherProfileRoutine,
+                archivedRoutine,
+                householdRoutine,
+                profileRoutine,
+                otherHouseholdRoutine
+            ],
+            profileID: profileID,
+            householdID: householdID
+        )
+
+        XCTAssertEqual(visible.map(\.id), [profileRoutine.id, householdRoutine.id])
+    }
+
+    @MainActor
+    func testCareRoutineCompletedAndSkippedStepsFinishRunWithoutEvents() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let routine = CareRoutine(scope: .household, householdID: UUID(), title: "Grocery reset")
+        let first = CareRoutineStep(routineID: routine.id, title: "Check pantry", sortOrder: 0)
+        let second = CareRoutineStep(routineID: routine.id, title: "Open Food", action: .openFoodHome, sortOrder: 1)
+        context.insert(routine)
+        context.insert(first)
+        context.insert(second)
+        try context.save()
+
+        let run = CareRoutineService.startRun(routine: routine, activeRuns: [], context: context)
+        CareRoutineService.completeStep(first, in: run, routine: routine, allSteps: [first, second], context: context)
+        XCTAssertEqual(run.state, .active)
+
+        CareRoutineService.skipStep(second, in: run, routine: routine, allSteps: [first, second], context: context)
+        XCTAssertEqual(run.state, .completed)
+        XCTAssertEqual(run.completedStepIDs, [first.id])
+        XCTAssertEqual(run.skippedStepIDs, [second.id])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<BabyEvent>()).count, 0)
+    }
+
+    @MainActor
+    func testCareRoutineStartRunReusesActiveRunButStartsAfterCancel() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let routine = CareRoutine(scope: .household, householdID: UUID(), title: "Evening reset")
+        context.insert(routine)
+        try context.save()
+
+        let firstRun = CareRoutineService.startRun(routine: routine, activeRuns: [], context: context)
+        let reusedRun = CareRoutineService.startRun(routine: routine, activeRuns: [firstRun], context: context)
+        XCTAssertEqual(reusedRun.id, firstRun.id)
+
+        CareRoutineService.cancelRun(firstRun, context: context)
+        XCTAssertNil(CareRoutineService.activeRun(for: routine, runs: [firstRun]))
+
+        let secondRun = CareRoutineService.startRun(routine: routine, activeRuns: [firstRun], context: context)
+        XCTAssertNotEqual(secondRun.id, firstRun.id)
+        XCTAssertEqual(secondRun.state, .active)
+    }
+
+    @MainActor
+    func testCustomCareRoutineCreatesActionConfiguredSteps() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        context.insert(profile)
+
+        let routine = try XCTUnwrap(CareRoutineService.createRoutine(
+            title: "Custom evening",
+            notes: "A custom care pass.",
+            scope: .profile,
+            iconName: "moon.stars.fill",
+            tintName: "pink",
+            steps: [
+                CareRoutineStepInput(title: "Log bath", action: .logEvent, eventType: .activity, activityType: .bath),
+                CareRoutineStepInput(title: "Start night sleep", action: .startTimer, eventType: .sleep, sleepKind: .nightSleep),
+                CareRoutineStepInput(title: "Open light", action: .openNightLight)
+            ],
+            profileID: profile.id,
+            householdID: nil,
+            existingRoutines: [],
+            context: context
+        ))
+
+        let steps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+            .filter { $0.routineID == routine.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(routine.title, "Custom evening")
+        XCTAssertEqual(routine.iconName, "moon.stars.fill")
+        XCTAssertEqual(steps.map(\.action), [.logEvent, .startTimer, .openNightLight])
+        XCTAssertEqual(steps[0].eventType, .activity)
+        XCTAssertEqual(steps[0].activityType, .bath)
+        XCTAssertEqual(steps[1].eventType, .sleep)
+        XCTAssertEqual(steps[1].sleepKind, .nightSleep)
+        XCTAssertNil(steps[2].eventType)
+    }
+
+    @MainActor
+    func testCustomCareRoutineRejectsBlankTitleAndBlankSteps() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profileID = UUID()
+
+        let missingTitle = CareRoutineService.createRoutine(
+            title: "   ",
+            scope: .profile,
+            steps: [CareRoutineStepInput(title: "Check bag", action: .checklist)],
+            profileID: profileID,
+            householdID: nil,
+            existingRoutines: [],
+            context: context
+        )
+        let missingSteps = CareRoutineService.createRoutine(
+            title: "Morning",
+            scope: .profile,
+            steps: [CareRoutineStepInput(title: "   ", action: .checklist)],
+            profileID: profileID,
+            householdID: nil,
+            existingRoutines: [],
+            context: context
+        )
+
+        XCTAssertNil(missingTitle)
+        XCTAssertNil(missingSteps)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CareRoutine>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CareRoutineStep>()).count, 0)
+    }
+
+    @MainActor
+    func testUpdatingCustomCareRoutinePreservesReorderedStepsAndReminder() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let household = Household(name: "Home")
+        context.insert(profile)
+        context.insert(household)
+
+        let routine = try XCTUnwrap(CareRoutineService.createRoutine(
+            title: "Evening",
+            scope: .profile,
+            steps: [
+                CareRoutineStepInput(title: "Brush teeth", action: .checklist),
+                CareRoutineStepInput(title: "Start sleep", action: .startTimer, eventType: .sleep, sleepKind: .nap)
+            ],
+            profileID: profile.id,
+            householdID: nil,
+            existingRoutines: [],
+            context: context
+        ))
+        let originalSteps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+            .filter { $0.routineID == routine.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let preservedID = try XCTUnwrap(originalSteps.last?.id)
+
+        var edited = CareRoutineInput(routine: routine, steps: originalSteps)
+        edited.title = "Household evening"
+        edited.scope = .household
+        edited.reminderEnabled = true
+        edited.reminderTimeMinutesAfterMidnight = 19 * 60 + 15
+        edited.steps = [
+            CareRoutineStepInput(step: originalSteps[1]),
+            CareRoutineStepInput(title: "Open shopping", action: .openShoppingList)
+        ]
+
+        XCTAssertTrue(CareRoutineService.updateRoutine(
+            routine,
+            input: edited,
+            profileID: profile.id,
+            householdID: household.id,
+            existingSteps: originalSteps,
+            context: context
+        ))
+
+        let updatedSteps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+            .filter { $0.routineID == routine.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(routine.title, "Household evening")
+        XCTAssertEqual(routine.scope, .household)
+        XCTAssertNil(routine.profileID)
+        XCTAssertEqual(routine.householdID, household.id)
+        XCTAssertTrue(routine.reminderEnabled)
+        XCTAssertEqual(routine.reminderTimeMinutesAfterMidnight, 19 * 60 + 15)
+        XCTAssertEqual(updatedSteps.map(\.title), ["Start sleep", "Open shopping"])
+        XCTAssertEqual(updatedSteps.first?.id, preservedID)
+        XCTAssertEqual(updatedSteps.first?.sleepKind, .nap)
+        XCTAssertEqual(updatedSteps.last?.action, .openShoppingList)
+    }
+
+    @MainActor
+    func testCareRoutineDuplicateCopiesStepsWithoutReminder() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        context.insert(profile)
+
+        let routine = try XCTUnwrap(CareRoutineService.createRoutine(
+            title: "Morning",
+            scope: .profile,
+            reminderEnabled: true,
+            reminderTimeMinutesAfterMidnight: 8 * 60,
+            steps: [
+                CareRoutineStepInput(title: "Log feed", action: .logEvent, eventType: .feed),
+                CareRoutineStepInput(title: "Open guide", action: .openAgeGuide)
+            ],
+            profileID: profile.id,
+            householdID: nil,
+            existingRoutines: [],
+            context: context
+        ))
+        let steps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+        let copy = CareRoutineService.duplicateRoutine(
+            routine,
+            steps: steps,
+            existingRoutines: [routine],
+            context: context
+        )
+
+        let copiedSteps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+            .filter { $0.routineID == copy.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(copy.title, "Morning Copy")
+        XCTAssertEqual(copy.profileID, profile.id)
+        XCTAssertFalse(copy.reminderEnabled)
+        XCTAssertNil(copy.reminderTimeMinutesAfterMidnight)
+        XCTAssertEqual(copiedSteps.map(\.title), ["Log feed", "Open guide"])
+        XCTAssertEqual(copiedSteps.first?.eventType, .feed)
+        XCTAssertEqual(copiedSteps.last?.action, .openAgeGuide)
+    }
+
+    @MainActor
+    func testCareRoutineReorderUpdatesSortOrder() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let first = CareRoutine(scope: .household, householdID: UUID(), title: "First", sortOrder: 0)
+        let second = CareRoutine(scope: .household, householdID: UUID(), title: "Second", sortOrder: 1)
+        let third = CareRoutine(scope: .household, householdID: UUID(), title: "Third", sortOrder: 2)
+        context.insert(first)
+        context.insert(second)
+        context.insert(third)
+        try context.save()
+
+        CareRoutineService.reorderRoutines(
+            [first, second, third],
+            from: IndexSet(integer: 0),
+            to: 3,
+            context: context
+        )
+
+        XCTAssertEqual(second.sortOrder, 0)
+        XCTAssertEqual(third.sortOrder, 1)
+        XCTAssertEqual(first.sortOrder, 2)
+    }
+
+    @MainActor
+    func testCareRoutinesRoundTripThroughBackup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = BabyProfile(name: "Test Dog", birthDate: Date(), sex: .unknown)
+        let household = Household(name: "Home")
+        context.insert(profile)
+        context.insert(household)
+        let template = try XCTUnwrap(
+            CareRoutineService.templates(for: .dog).first { $0.kind == .dogEvening }
+        )
+        let routine = CareRoutineService.createRoutine(
+            from: template,
+            profileID: profile.id,
+            householdID: household.id,
+            existingRoutines: [],
+            context: context
+        )
+        let run = CareRoutineService.startRun(routine: routine, activeRuns: [], context: context)
+        let backup = try DataExportImportService.exportData(context: context)
+
+        try DataExportImportService.importData(backup, context: context)
+
+        let routines = try context.fetch(FetchDescriptor<CareRoutine>())
+        let steps = try context.fetch(FetchDescriptor<CareRoutineStep>())
+        let runs = try context.fetch(FetchDescriptor<CareRoutineRun>())
+        XCTAssertEqual(routines.map(\.id), [routine.id])
+        XCTAssertEqual(routines.first?.profileID, profile.id)
+        XCTAssertEqual(steps.filter { $0.routineID == routine.id }.count, template.steps.count)
+        XCTAssertEqual(runs.map(\.id), [run.id])
+    }
+
     private func rmsWindows(_ samples: [Double], windowSize: Int) -> [Double] {
         stride(from: 0, to: samples.count - windowSize, by: windowSize).map { start in
             rms(Array(samples[start..<start + windowSize]))

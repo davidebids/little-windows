@@ -98,6 +98,7 @@ littlewindows://age-guide/{month}
 littlewindows://puppy-guide
 littlewindows://appointments
 littlewindows://visits
+littlewindows://routines
 littlewindows://appointment/{UUID}
 littlewindows://appointment/{UUID}/notes
 littlewindows://night-light
