@@ -456,9 +456,9 @@ struct TodayView: View {
                     }
 
                     if state.isDogProfile {
-                        dogQuickActionsSection
+                        dogQuickActionsSection(state)
                     } else {
-                        childQuickActionsSection
+                        childQuickActionsSection(state)
                     }
 
                     careRoutinesSection(state)
@@ -889,7 +889,7 @@ struct TodayView: View {
         }
     }
 
-    private var childQuickActionsSection: some View {
+    private func childQuickActionsSection(_ state: TodayRenderState) -> some View {
         Section {
             VStack(spacing: 14) {
                 Button {
@@ -904,7 +904,7 @@ struct TodayView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Start sleep")
                                 .font(.headline)
-                            Text("Choose nap or night sleep")
+                            Text(lastEventSubtitle(.sleep, state: state))
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.72))
                         }
@@ -932,35 +932,71 @@ struct TodayView: View {
                     columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                     spacing: 14
                 ) {
-                    QuickActionButton(title: "Feed", icon: "waterbottle.fill", color: .orange) {
+                    QuickActionButton(
+                        title: "Feed",
+                        subtitle: lastEventSubtitle(.feed, state: state),
+                        icon: "waterbottle.fill",
+                        color: .orange
+                    ) {
                         editorRoute = EventEditorRoute(type: .feed)
                     }
                     QuickActionButton(
                         title: "Nursing",
+                        subtitle: lastEventSubtitle(.nursing, state: state),
                         icon: "figure.and.child.holdinghands",
                         color: .pink
                     ) {
                         showingNursingChooser = true
                     }
-                    QuickActionButton(title: "Diaper", icon: "drop.fill", color: .teal) {
+                    QuickActionButton(
+                        title: "Diaper",
+                        subtitle: lastEventSubtitle(.diaper, state: state),
+                        icon: "drop.fill",
+                        color: .teal
+                    ) {
                         editorRoute = EventEditorRoute(type: .diaper)
                     }
-                    QuickActionButton(title: "Activity", icon: "figure.play", color: .green) {
+                    QuickActionButton(
+                        title: "Activity",
+                        subtitle: lastEventSubtitle(.activity, state: state),
+                        icon: "figure.play",
+                        color: .green
+                    ) {
                         showingActivityChooser = true
                     }
-                    QuickActionButton(title: "Medicine", icon: "cross.case.fill", color: .red) {
+                    QuickActionButton(
+                        title: "Medicine",
+                        subtitle: lastEventSubtitle(.medicine, state: state),
+                        icon: "cross.case.fill",
+                        color: .red
+                    ) {
                         editorRoute = EventEditorRoute(type: .medicine)
                     }
-                    QuickActionButton(title: "Temperature", icon: "thermometer.medium", color: .red) {
+                    QuickActionButton(
+                        title: "Temperature",
+                        subtitle: lastEventSubtitle(.temperature, state: state),
+                        icon: "thermometer.medium",
+                        color: .red
+                    ) {
                         editorRoute = EventEditorRoute(type: .temperature)
                     }
-                    QuickActionButton(title: "Growth", icon: "ruler.fill", color: .mint) {
+                    QuickActionButton(
+                        title: "Growth",
+                        subtitle: lastEventSubtitle(.growth, state: state),
+                        icon: "ruler.fill",
+                        color: .mint
+                    ) {
                         editorRoute = EventEditorRoute(type: .growth)
                     }
                     QuickActionButton(title: "Visits", icon: "stethoscope", color: .indigo) {
                         showingAppointments = true
                     }
-                    QuickActionButton(title: "Custom", icon: "sparkles", color: .purple) {
+                    QuickActionButton(
+                        title: "Custom",
+                        subtitle: lastEventSubtitle(.custom, state: state),
+                        icon: "sparkles",
+                        color: .purple
+                    ) {
                         editorRoute = EventEditorRoute(type: .custom)
                     }
                 }
@@ -978,64 +1014,149 @@ struct TodayView: View {
         }
     }
 
-    private var dogQuickActionsSection: some View {
+    private func dogQuickActionsSection(_ state: TodayRenderState) -> some View {
         Section {
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                 spacing: 14
             ) {
-                QuickActionButton(title: "Food", icon: "fork.knife", color: .orange) {
+                QuickActionButton(
+                    title: "Food",
+                    subtitle: lastEventSubtitle(.food, state: state),
+                    icon: "fork.knife",
+                    color: .orange
+                ) {
                     editorRoute = EventEditorRoute(type: .food)
                 }
-                QuickActionButton(title: "Water", icon: "drop.fill", color: .cyan) {
+                QuickActionButton(
+                    title: "Water",
+                    subtitle: lastEventSubtitle(.water, state: state),
+                    icon: "drop.fill",
+                    color: .cyan
+                ) {
                     editorRoute = EventEditorRoute(type: .water)
                 }
-                QuickActionButton(title: "Treat", icon: "birthday.cake.fill", color: .brown) {
+                QuickActionButton(
+                    title: "Treat",
+                    subtitle: lastEventSubtitle(.treat, state: state),
+                    icon: "birthday.cake.fill",
+                    color: .brown
+                ) {
                     editorRoute = EventEditorRoute(type: .treat)
                 }
-                QuickActionButton(title: "Start Walk", icon: "figure.walk", color: .green) {
+                QuickActionButton(
+                    title: "Start Walk",
+                    subtitle: lastEventSubtitle(.walk, state: state),
+                    icon: "figure.walk",
+                    color: .green
+                ) {
                     startTimer(.walk)
                 }
-                QuickActionButton(title: "Pee", icon: "pawprint.fill", color: .teal) {
+                QuickActionButton(
+                    title: "Pee",
+                    subtitle: dogPottySubtitle(.pee, state: state),
+                    icon: "pawprint.fill",
+                    color: .teal
+                ) {
                     logDogPotty(.pee, accident: false)
                 }
-                QuickActionButton(title: "Poop", icon: "pawprint.circle.fill", color: .teal) {
+                QuickActionButton(
+                    title: "Poop",
+                    subtitle: dogPottySubtitle(.poop, state: state),
+                    icon: "pawprint.circle.fill",
+                    color: .teal
+                ) {
                     logDogPotty(.poop, accident: false)
                 }
-                QuickActionButton(title: "Accident", icon: "exclamationmark.triangle.fill", color: .orange) {
+                QuickActionButton(
+                    title: "Accident",
+                    subtitle: dogPottySubtitle(.pee, state: state, accident: true),
+                    icon: "exclamationmark.triangle.fill",
+                    color: .orange
+                ) {
                     logDogPotty(.pee, accident: true)
                 }
-                QuickActionButton(title: "Rest", icon: "bed.double.fill", color: .indigo) {
+                QuickActionButton(
+                    title: "Rest",
+                    subtitle: lastEventSubtitle(.rest, state: state),
+                    icon: "bed.double.fill",
+                    color: .indigo
+                ) {
                     startTimer(.rest)
                 }
-                QuickActionButton(title: "Training", icon: "graduationcap.fill", color: .purple) {
+                QuickActionButton(
+                    title: "Training",
+                    subtitle: lastEventSubtitle(.training, state: state),
+                    icon: "graduationcap.fill",
+                    color: .purple
+                ) {
                     startTimer(.training)
                 }
-                QuickActionButton(title: "Medicine", icon: "cross.case.fill", color: .red) {
+                QuickActionButton(
+                    title: "Medicine",
+                    subtitle: lastEventSubtitle(.medicine, state: state),
+                    icon: "cross.case.fill",
+                    color: .red
+                ) {
                     editorRoute = EventEditorRoute(type: .medicine)
                 }
-                QuickActionButton(title: "Symptom", icon: "exclamationmark.triangle.fill", color: .red) {
+                QuickActionButton(
+                    title: "Symptom",
+                    subtitle: lastEventSubtitle(.symptom, state: state),
+                    icon: "exclamationmark.triangle.fill",
+                    color: .red
+                ) {
                     editorRoute = EventEditorRoute(type: .symptom)
                 }
-                QuickActionButton(title: "Grooming", icon: "comb.fill", color: .pink) {
+                QuickActionButton(
+                    title: "Grooming",
+                    subtitle: lastEventSubtitle(.grooming, state: state),
+                    icon: "comb.fill",
+                    color: .pink
+                ) {
                     editorRoute = EventEditorRoute(type: .grooming)
                 }
-                QuickActionButton(title: "Teeth", icon: "mouth.fill", color: .mint) {
+                QuickActionButton(
+                    title: "Teeth",
+                    subtitle: dogGroomingSubtitle(.teethBrushing, state: state),
+                    icon: "mouth.fill",
+                    color: .mint
+                ) {
                     logDogGrooming(.teethBrushing)
                 }
-                QuickActionButton(title: "Weight", icon: "scalemass.fill", color: .mint) {
+                QuickActionButton(
+                    title: "Weight",
+                    subtitle: lastEventSubtitle(.growth, state: state),
+                    icon: "scalemass.fill",
+                    color: .mint
+                ) {
                     editorRoute = EventEditorRoute(type: .growth)
                 }
-                QuickActionButton(title: "Temp", icon: "thermometer.medium", color: .red) {
+                QuickActionButton(
+                    title: "Temp",
+                    subtitle: lastEventSubtitle(.temperature, state: state),
+                    icon: "thermometer.medium",
+                    color: .red
+                ) {
                     editorRoute = EventEditorRoute(type: .temperature)
                 }
-                QuickActionButton(title: "Vaccine", icon: "syringe.fill", color: .mint) {
+                QuickActionButton(
+                    title: "Vaccine",
+                    subtitle: lastEventSubtitle(.vaccine, state: state),
+                    icon: "syringe.fill",
+                    color: .mint
+                ) {
                     editorRoute = EventEditorRoute(type: .vaccine)
                 }
                 QuickActionButton(title: "Vet Visit", icon: "stethoscope", color: .indigo) {
                     showingAppointments = true
                 }
-                QuickActionButton(title: "Custom", icon: "sparkles", color: .purple) {
+                QuickActionButton(
+                    title: "Custom",
+                    subtitle: lastEventSubtitle(.custom, state: state),
+                    icon: "sparkles",
+                    color: .purple
+                ) {
                     editorRoute = EventEditorRoute(type: .custom)
                 }
             }
@@ -1594,6 +1715,55 @@ struct TodayView: View {
             .displayTitle ?? "Not logged"
     }
 
+    private func lastEventSubtitle(_ type: EventType, state: TodayRenderState) -> String {
+        lastLoggedSubtitle(state: state) { event in
+            guard event.type == type else { return nil }
+            return event.endDate ?? event.startDate
+        }
+    }
+
+    private func dogPottySubtitle(
+        _ pottyType: DogPottyType,
+        state: TodayRenderState,
+        accident: Bool? = nil
+    ) -> String {
+        lastLoggedSubtitle(state: state) { event in
+            guard event.type == .potty,
+                  (event.dogDetails.pottyType == pottyType || event.dogDetails.pottyType == .both) else {
+                return nil
+            }
+            if let accident, event.dogDetails.accident != accident {
+                return nil
+            }
+            return event.endDate ?? event.startDate
+        }
+    }
+
+    private func dogGroomingSubtitle(_ groomingType: DogGroomingType, state: TodayRenderState) -> String {
+        lastLoggedSubtitle(state: state) { event in
+            guard event.type == .grooming,
+                  event.dogDetails.groomingType == groomingType else {
+                return nil
+            }
+            return event.endDate ?? event.startDate
+        }
+    }
+
+    private func lastLoggedSubtitle(
+        state: TodayRenderState,
+        dateForEvent: (BabyEvent) -> Date?
+    ) -> String {
+        let now = Date()
+        guard let date = state.scopedEvents
+            .filter({ !$0.isTimerDraft })
+            .compactMap(dateForEvent)
+            .filter({ $0 <= now })
+            .max() else {
+            return "Not logged"
+        }
+        return "Last \(DurationFormatting.string(seconds: now.timeIntervalSince(date))) ago"
+    }
+
     private func lastDogPottyTitle(_ pottyType: DogPottyType) -> String {
         scopedEvents
             .filter {
@@ -2011,13 +2181,14 @@ private struct SleepKindChooser: ViewModifier {
 
 private struct QuickActionButton: View {
     var title: String
+    var subtitle: String? = nil
     var icon: String
     var color: Color
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            QuickActionButtonLabel(title: title, icon: icon, color: color)
+            QuickActionButtonLabel(title: title, subtitle: subtitle, icon: icon, color: color)
         }
         .buttonStyle(.plain)
     }
@@ -2025,11 +2196,12 @@ private struct QuickActionButton: View {
 
 private struct QuickActionButtonLabel: View {
     var title: String
+    var subtitle: String? = nil
     var icon: String
     var color: Color
 
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(color)
@@ -2040,8 +2212,16 @@ private struct QuickActionButtonLabel: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
         }
         .frame(maxWidth: .infinity)
+        .frame(minHeight: 84, alignment: .top)
         .contentShape(Rectangle())
     }
 }
