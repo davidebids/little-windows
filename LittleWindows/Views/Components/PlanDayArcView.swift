@@ -817,6 +817,7 @@ private struct PlanDayArcGeometry {
             targetBedtime: bedtime,
             generatedAt: now,
             historyRange: .sevenDays,
+            targetNapCount: nil,
             plannedNapCount: 2,
             typicalNapCount: 2,
             sourceDayCount: 7,

@@ -155,6 +155,7 @@ struct BackwardsSleepPlan: Hashable {
     var targetBedtime: Date
     var generatedAt: Date
     var historyRange: BackwardsSleepPlanHistoryRange
+    var targetNapCount: Int?
     var plannedNapCount: Int
     var typicalNapCount: Int
     var sourceDayCount: Int
@@ -169,6 +170,7 @@ struct ActiveSleepPlan: Codable, Equatable {
     var profileID: UUID
     var targetBedtime: Date
     var historyRangeRawValue: String
+    var targetNapCount: Int?
     var activatedAt: Date
     var generatedAt: Date
     var segmentAdjustments: [BackwardsSleepPlanAdjustment]
@@ -181,6 +183,7 @@ struct ActiveSleepPlan: Codable, Equatable {
         profileID: UUID,
         targetBedtime: Date,
         historyRangeRawValue: String,
+        targetNapCount: Int? = nil,
         activatedAt: Date,
         generatedAt: Date,
         segmentAdjustments: [BackwardsSleepPlanAdjustment] = []
@@ -188,6 +191,7 @@ struct ActiveSleepPlan: Codable, Equatable {
         self.profileID = profileID
         self.targetBedtime = targetBedtime
         self.historyRangeRawValue = historyRangeRawValue
+        self.targetNapCount = targetNapCount
         self.activatedAt = activatedAt
         self.generatedAt = generatedAt
         self.segmentAdjustments = segmentAdjustments
@@ -197,6 +201,7 @@ struct ActiveSleepPlan: Codable, Equatable {
         case profileID
         case targetBedtime
         case historyRangeRawValue
+        case targetNapCount
         case activatedAt
         case generatedAt
         case segmentAdjustments
@@ -207,6 +212,7 @@ struct ActiveSleepPlan: Codable, Equatable {
         profileID = try container.decode(UUID.self, forKey: .profileID)
         targetBedtime = try container.decode(Date.self, forKey: .targetBedtime)
         historyRangeRawValue = try container.decode(String.self, forKey: .historyRangeRawValue)
+        targetNapCount = try container.decodeIfPresent(Int.self, forKey: .targetNapCount)
         activatedAt = try container.decode(Date.self, forKey: .activatedAt)
         generatedAt = try container.decode(Date.self, forKey: .generatedAt)
         segmentAdjustments = try container.decodeIfPresent(
@@ -306,6 +312,7 @@ enum ActiveSleepPlanService {
             profileID: profileID,
             targetBedtime: plan.targetBedtime,
             historyRangeRawValue: plan.historyRange.rawValue,
+            targetNapCount: plan.targetNapCount,
             activatedAt: Date(),
             generatedAt: plan.generatedAt,
             segmentAdjustments: plan.segmentAdjustments
@@ -373,6 +380,7 @@ enum ActiveSleepPlanService {
             now: now,
             calendar: calendar,
             historyRange: activePlan.historyRange,
+            targetNapCount: activePlan.targetNapCount,
             settings: settings,
             adjustments: activePlan.segmentAdjustments
         )
@@ -483,6 +491,7 @@ enum SleepPredictionEngine {
         now: Date = Date(),
         calendar: Calendar = .current,
         historyRange: BackwardsSleepPlanHistoryRange = .sevenDays,
+        targetNapCount: Int? = nil,
         settings: PredictionSettings = .default,
         adjustments: [BackwardsSleepPlanAdjustment] = []
     ) -> BackwardsSleepPlan {
@@ -507,6 +516,8 @@ enum SleepPredictionEngine {
             calendar: calendar,
             settings: settings
         )
+        let selectedNapCount = targetNapCount.map(Self.normalizedPlanningNapCount)
+        let planningNapCount = selectedNapCount ?? typicalNapCount
 
         var explanations = [String]()
         if sourceDays > 0 {
@@ -516,6 +527,11 @@ enum SleepPredictionEngine {
         } else {
             explanations.append(
                 "There are not enough completed sleep logs in \(historyRange.explanationText), so this leans on the age-based wake-window baseline."
+            )
+        }
+        if let selectedNapCount, selectedNapCount != typicalNapCount {
+            explanations.append(
+                "This plan is set for \(selectedNapCount) naps; recent logs usually show \(typicalNapCount)."
             )
         }
 
@@ -546,7 +562,7 @@ enum SleepPredictionEngine {
                 .map { $0 / 60 },
             allowedRange: 15...180
         ) ?? 50
-        let plannedNapIndexes = typicalNapCount > 0 ? Array(1...typicalNapCount) : []
+        let plannedNapIndexes = planningNapCount > 0 ? Array(1...planningNapCount) : []
 
         guard target > planningDayStart, target < tomorrowStart else {
             explanations.append("Choose a bedtime after the usual morning wake to build a full-day plan.")
@@ -555,6 +571,7 @@ enum SleepPredictionEngine {
                 targetBedtime: target,
                 generatedAt: now,
                 historyRange: historyRange,
+                targetNapCount: selectedNapCount,
                 plannedNapCount: 0,
                 typicalNapCount: typicalNapCount,
                 sourceDayCount: sourceDays,
@@ -688,6 +705,7 @@ enum SleepPredictionEngine {
             targetBedtime: target,
             generatedAt: now,
             historyRange: historyRange,
+            targetNapCount: selectedNapCount,
             plannedNapCount: plannedNaps.count,
             typicalNapCount: typicalNapCount,
             sourceDayCount: sourceDays,
@@ -1450,6 +1468,10 @@ enum SleepPredictionEngine {
         case ..<195: return 2
         default: return 1
         }
+    }
+
+    private static func normalizedPlanningNapCount(_ count: Int) -> Int {
+        min(4, max(1, count))
     }
 
     private static func napDurationAveragesByIndex(

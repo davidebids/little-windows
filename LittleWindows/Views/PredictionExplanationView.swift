@@ -127,8 +127,11 @@ struct BackwardsSleepPlanView: View {
     let deactivatePlan: () -> Void
 
     @State private var targetBedtime: Date
+    @State private var targetNapCount: Int?
     @State private var historyRange: BackwardsSleepPlanHistoryRange = .sevenDays
     @State private var segmentAdjustments: [BackwardsSleepPlanAdjustment] = []
+
+    private static let napCountChoices = Array(1...4)
 
     init(
         profile: BabyProfile,
@@ -148,6 +151,7 @@ struct BackwardsSleepPlanView: View {
         _targetBedtime = State(
             initialValue: activePlan?.targetBedtime ?? Self.defaultTargetBedtime(now: now)
         )
+        _targetNapCount = State(initialValue: activePlan?.targetNapCount)
         _historyRange = State(initialValue: activePlan?.historyRange ?? .sevenDays)
         _segmentAdjustments = State(initialValue: activePlan?.segmentAdjustments ?? [])
     }
@@ -158,6 +162,7 @@ struct BackwardsSleepPlanView: View {
             events: events,
             targetBedtime: targetBedtime,
             historyRange: historyRange,
+            targetNapCount: targetNapCount,
             settings: settings,
             adjustments: segmentAdjustments
         )
@@ -169,6 +174,7 @@ struct BackwardsSleepPlanView: View {
             $0.profileID == profile.id &&
                 abs($0.targetBedtime.timeIntervalSince(plan.targetBedtime)) < 60 &&
                 $0.historyRange == historyRange &&
+                $0.targetNapCount == plan.targetNapCount &&
                 $0.segmentAdjustments == plan.segmentAdjustments
         } ?? false
 
@@ -179,6 +185,13 @@ struct BackwardsSleepPlanView: View {
                     selection: $targetBedtime,
                     displayedComponents: .hourAndMinute
                 )
+                Picker("Naps", selection: $targetNapCount) {
+                    Text("Automatic").tag(Int?.none)
+                    ForEach(Self.napCountChoices, id: \.self) { count in
+                        Text("\(count)").tag(Int?.some(count))
+                    }
+                }
+                .pickerStyle(.menu)
                 LabeledContent("Plan", value: "Today")
                 LabeledContent("Confidence", value: "\(plan.confidenceLabel.displayName) - \(Int(plan.confidence * 100))%")
                 Button {
