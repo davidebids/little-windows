@@ -58,7 +58,7 @@ struct SettingsView: View {
             }
 
             if !isDogProfile {
-                DeferredChildSleepSettingsSections(profile: selectedProfile)
+                ChildSleepSettingsNavigationSection(profile: selectedProfile)
             }
 
             SyncSettingsSection()
@@ -77,10 +77,10 @@ struct SettingsView: View {
                 Text("Food & Home records are household-level and sync through the same private iCloud store when iCloud Sync is available.")
             }
 
-            AppointmentSettingsSection(profile: selectedProfile)
+            AppointmentSettingsNavigationSection(profile: selectedProfile)
 
             if !isDogProfile {
-                MonthlyAgeGuideSettingsSection(profile: selectedProfile)
+                MonthlyAgeGuideSettingsNavigationSection(profile: selectedProfile)
             }
 
             Section("Data") {
@@ -93,12 +93,6 @@ struct SettingsView: View {
                 Button("Delete all data", systemImage: "trash", role: .destructive) {
                     showingDeleteConfirmation = true
                 }
-            }
-
-            Section {
-                Text("Sleep predictions are a planning aid, not medical advice.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
 
             SettingsBuildInfoFooter()
@@ -247,31 +241,37 @@ private struct ChildSleepSettingsRenderState {
     )
 }
 
-private struct DeferredChildSleepSettingsSections: View {
+private struct ChildSleepSettingsNavigationSection: View {
     let profile: BabyProfile?
-    @State private var isReady = false
 
     var body: some View {
-        Group {
-            if isReady {
-                ChildSleepSettingsSections(profile: profile)
-            } else {
-                Section("Prediction") {
-                    LabeledContent {
-                        ProgressView()
-                            .controlSize(.small)
-                    } label: {
-                        Label("Preparing sleep settings", systemImage: "moon.stars.fill")
-                    }
+        Section {
+            NavigationLink {
+                LazySettingsDestination {
+                    ChildSleepSettingsView(profile: profile)
                 }
+            } label: {
+                Label("Sleep predictions and alerts", systemImage: "moon.stars.fill")
             }
+        } header: {
+            Label("Prediction", systemImage: "moon.stars.fill")
+        } footer: {
+            Text("Sleep predictions are planning aids based on local logs, not medical advice.")
         }
-        .task(id: profile?.id) {
-            isReady = false
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            isReady = true
+    }
+}
+
+private struct ChildSleepSettingsView: View {
+    let profile: BabyProfile?
+
+    var body: some View {
+        Form {
+            ChildSleepSettingsSections(profile: profile)
         }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle("Sleep")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -814,6 +814,40 @@ private struct AppointmentSettingsSection: View {
     }
 }
 
+private struct AppointmentSettingsNavigationSection: View {
+    let profile: BabyProfile?
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                LazySettingsDestination {
+                    AppointmentSettingsView(profile: profile)
+                }
+            } label: {
+                Label("Appointments and reminders", systemImage: "stethoscope")
+            }
+        } header: {
+            Label("Appointments", systemImage: "calendar.badge.clock")
+        } footer: {
+            Text("Appointment reminders are separate from Little Window sleep alerts.")
+        }
+    }
+}
+
+private struct AppointmentSettingsView: View {
+    let profile: BabyProfile?
+
+    var body: some View {
+        Form {
+            AppointmentSettingsSection(profile: profile)
+        }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle("Appointments")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct MonthlyAgeGuideSettingsSection: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
@@ -943,6 +977,40 @@ private struct MonthlyAgeGuideSettingsSection: View {
             return
         }
         openURL(url)
+    }
+}
+
+private struct MonthlyAgeGuideSettingsNavigationSection: View {
+    let profile: BabyProfile?
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                LazySettingsDestination {
+                    MonthlyAgeGuideSettingsView(profile: profile)
+                }
+            } label: {
+                Label("Monthly guide notifications", systemImage: "book.pages.fill")
+            }
+        } header: {
+            Label("Monthly Age Guides", systemImage: "calendar.badge.clock")
+        } footer: {
+            Text("One gentle reminder per monthly age at most. Guides are parent education and memory prompts, not medical advice.")
+        }
+    }
+}
+
+private struct MonthlyAgeGuideSettingsView: View {
+    let profile: BabyProfile?
+
+    var body: some View {
+        Form {
+            MonthlyAgeGuideSettingsSection(profile: profile)
+        }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle("Monthly Guides")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
