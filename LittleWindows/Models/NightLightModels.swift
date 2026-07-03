@@ -127,6 +127,8 @@ enum NightLightShape: String, Codable, CaseIterable, Identifiable {
 enum NightLightSound: String, Codable, CaseIterable, Identifiable {
     case none
     case whiteNoise
+    case pinkNoise
+    case brownNoise
     case rain
     case lullaby
     case heartbeat
@@ -141,6 +143,8 @@ enum NightLightSound: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .none: "None"
         case .whiteNoise: "White Noise"
+        case .pinkNoise: "Pink Noise"
+        case .brownNoise: "Brown Noise"
         case .rain: "Rain"
         case .lullaby: "Lullaby"
         case .heartbeat: "Heartbeat"
@@ -155,6 +159,8 @@ enum NightLightSound: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .none: "speaker.slash.fill"
         case .whiteNoise: "waveform"
+        case .pinkNoise: "waveform"
+        case .brownNoise: "waveform"
         case .rain: "cloud.rain.fill"
         case .lullaby: "music.note"
         case .heartbeat: "heart.fill"

@@ -1084,6 +1084,21 @@ final class SleepPredictionEngineTests: XCTestCase {
         }
     }
 
+    func testNightLightWhiteNoiseHasBundledMasteredLoop() throws {
+        let url = try XCTUnwrap(
+            NightLightAudioService.masteredLoopURL(for: .whiteNoise)
+        )
+        let data = try Data(contentsOf: url)
+        let samples = try wavSamples(from: data)
+        let middle = trimmedMiddle(samples)
+
+        XCTAssertGreaterThan(samples.count, 44_100 * 20)
+        XCTAssertGreaterThan(rms(middle), 0.12)
+        XCTAssertLessThan(rms(middle), 0.25)
+        XCTAssertNil(NightLightAudioService.masteredLoopURL(for: .pinkNoise))
+        XCTAssertNil(NightLightAudioService.masteredLoopURL(for: .brownNoise))
+    }
+
     func testNightLightAmbientSoundsAvoidHarshStaticProfiles() throws {
         let white = try wavSamples(for: .whiteNoise)
         let whiteZeroCrossings = zeroCrossingRate(white)
@@ -1103,6 +1118,24 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         XCTAssertLessThan(rms(rain), rms(white) * 0.85)
         XCTAssertLessThan(rms(fireplace), rms(white) * 0.85)
+    }
+
+    func testNightLightNoiseColorsGetProgressivelyWarmer() throws {
+        let white = trimmedMiddle(try wavSamples(for: .whiteNoise))
+        let pink = trimmedMiddle(try wavSamples(for: .pinkNoise))
+        let brown = trimmedMiddle(try wavSamples(for: .brownNoise))
+
+        XCTAssertLessThan(
+            zeroCrossingRate(pink),
+            zeroCrossingRate(white) * 0.6
+        )
+        XCTAssertLessThan(
+            zeroCrossingRate(brown),
+            zeroCrossingRate(pink) * 0.35
+        )
+        XCTAssertGreaterThan(rms(pink), 0.06)
+        XCTAssertGreaterThan(rms(brown), 0.04)
+        XCTAssertLessThan(rms(brown), rms(pink))
     }
 
     func testNightLightAudioVolumeUsesFullUsefulRange() throws {
@@ -4439,6 +4472,10 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     private func wavSamples(for sound: NightLightSound) throws -> [Double] {
         let data = NightLightAudioService.generatedWAVData(for: sound)
+        return try wavSamples(from: data)
+    }
+
+    private func wavSamples(from data: Data) throws -> [Double] {
         XCTAssertEqual(String(data: data.prefix(4), encoding: .utf8), "RIFF")
         let sampleBytes = data.dropFirst(44)
         return stride(from: sampleBytes.startIndex, to: sampleBytes.endIndex, by: 2).compactMap {

@@ -134,6 +134,7 @@
 		B00000000000000000000091 /* Models/CareRoutineModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000091 /* Models/CareRoutineModels.swift */; };
 		B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000092 /* Services/CareRoutineService.swift */; };
 		B00000000000000000000093 /* Views/CareRoutineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000093 /* Views/CareRoutineViews.swift */; };
+		B00000000000000000000094 /* Resources/NightLightAudio in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000094 /* Resources/NightLightAudio */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -301,6 +302,7 @@
 		F00000000000000000000091 /* Models/CareRoutineModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CareRoutineModels.swift; sourceTree = "<group>"; };
 		F00000000000000000000092 /* Services/CareRoutineService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareRoutineService.swift; sourceTree = "<group>"; };
 		F00000000000000000000093 /* Views/CareRoutineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CareRoutineViews.swift; sourceTree = "<group>"; };
+		F00000000000000000000094 /* Resources/NightLightAudio */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/NightLightAudio; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -460,6 +462,7 @@
 				F00000000000000000000020 /* SeedData/Sample-Legacy-Tracker-Backup.json */,
 				F0000000000000000000005B /* Resources/GrowthCharts */,
 				F00000000000000000000074 /* Resources/AgeGuides */,
+				F00000000000000000000094 /* Resources/NightLightAudio */,
 			);
 			path = LittleWindows;
 			sourceTree = "<group>";
@@ -651,6 +654,7 @@
 				B0000000000000000000001D /* Assets.xcassets in Resources */,
 				B0000000000000000000005C /* Resources/GrowthCharts in Resources */,
 				B00000000000000000000074 /* Resources/AgeGuides in Resources */,
+				B00000000000000000000094 /* Resources/NightLightAudio in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

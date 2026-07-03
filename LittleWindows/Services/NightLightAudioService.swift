@@ -31,9 +31,14 @@ final class NightLightAudioService: ObservableObject {
             )
             try session.setActive(true)
 
-            let audioPlayer = try AVAudioPlayer(
-                data: Self.generatedWAVData(for: sound)
-            )
+            let audioPlayer: AVAudioPlayer
+            if let masteredLoopURL = Self.masteredLoopURL(for: sound) {
+                audioPlayer = try AVAudioPlayer(contentsOf: masteredLoopURL)
+            } else {
+                audioPlayer = try AVAudioPlayer(
+                    data: Self.generatedWAVData(for: sound)
+                )
+            }
             audioPlayer.numberOfLoops = -1
             audioPlayer.volume = Self.playbackVolume(for: volume)
             audioPlayer.prepareToPlay()
@@ -93,6 +98,15 @@ final class NightLightAudioService: ObservableObject {
         var flameFlutter = 0.0
         var emberEnvelope = 0.0
         var snapEnvelope = 0.0
+        var pinkB0 = 0.0
+        var pinkB1 = 0.0
+        var pinkB2 = 0.0
+        var pinkB3 = 0.0
+        var pinkB4 = 0.0
+        var pinkB5 = 0.0
+        var pinkB6 = 0.0
+        var brownBody = 0.0
+        var brownAir = 0.0
 
         for frame in 0..<sampleCount {
             let time = Double(frame) / Double(sampleRate)
@@ -105,7 +119,23 @@ final class NightLightAudioService: ObservableObject {
 
             switch sound {
             case .whiteNoise:
-                value = rawNoise * 0.20
+                let softHigh = rawNoise - softLow
+                value = rawNoise * 0.15 + softLow * 0.08 + softHigh * 0.04
+            case .pinkNoise:
+                pinkB0 = 0.99886 * pinkB0 + rawNoise * 0.0555179
+                pinkB1 = 0.99332 * pinkB1 + rawNoise * 0.0750759
+                pinkB2 = 0.96900 * pinkB2 + rawNoise * 0.1538520
+                pinkB3 = 0.86650 * pinkB3 + rawNoise * 0.3104856
+                pinkB4 = 0.55000 * pinkB4 + rawNoise * 0.5329522
+                pinkB5 = -0.7616 * pinkB5 - rawNoise * 0.0168980
+                let shapedPink = pinkB0 + pinkB1 + pinkB2 + pinkB3
+                    + pinkB4 + pinkB5 + pinkB6 + rawNoise * 0.5362
+                pinkB6 = rawNoise * 0.115926
+                value = shapedPink * 0.035 + wideLow * 0.08
+            case .brownNoise:
+                brownBody = brownBody * 0.996 + rawNoise * 0.004
+                brownAir = brownAir * 0.982 + rawNoise2 * 0.018
+                value = brownBody * 1.6 + brownAir * 0.14
             case .rain:
                 rainMist = rainMist * 0.76 + rawNoise * 0.24
                 rainRumble = rainRumble * 0.9988 + rawNoise2 * 0.0012
@@ -195,6 +225,18 @@ final class NightLightAudioService: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(
             false,
             options: .notifyOthersOnDeactivation
+        )
+    }
+
+    nonisolated static func masteredLoopURL(
+        for sound: NightLightSound,
+        in bundle: Bundle = .main
+    ) -> URL? {
+        guard sound == .whiteNoise else { return nil }
+        return bundle.url(
+            forResource: "WhiteNoiseMaster",
+            withExtension: "wav",
+            subdirectory: "NightLightAudio"
         )
     }
 
