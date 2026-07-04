@@ -388,6 +388,7 @@ private struct FoodReminderDTO: Codable {
 private struct CareRoutineDTO: Codable {
     var id: UUID
     var scopeRawValue: String
+    var profileTypeRawValue: String?
     var profileID: UUID?
     var householdID: UUID?
     var title: String
@@ -774,6 +775,7 @@ enum DataExportImportService {
             CareRoutineDTO(
                 id: $0.id,
                 scopeRawValue: $0.scopeRawValue,
+                profileTypeRawValue: $0.profileTypeRawValue,
                 profileID: $0.profileID,
                 householdID: $0.householdID,
                 title: $0.title,
@@ -1254,6 +1256,7 @@ enum DataExportImportService {
             context.insert(CareRoutine(
                 id: value.id,
                 scope: scope,
+                profileType: value.profileTypeRawValue.flatMap(CareProfileType.init(rawValue:)),
                 profileID: scope == .profile ? value.profileID ?? fallbackProfileID : value.profileID,
                 householdID: value.householdID,
                 title: value.title,

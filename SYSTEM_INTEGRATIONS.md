@@ -7,12 +7,12 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - Active Timer widget: small, medium, Lock Screen rectangular, and Lock Screen inline.
 - Next Sleep Window widget: small, medium, and Lock Screen rectangular.
 - Today Summary widget: medium.
-- Quick Log widget: medium.
+- Quick Log widget: medium, backed by ranked smart actions and user-pinned actions from Today.
 - Shopping List widget: small and medium, backed by the Food & Home shopping snapshot.
 - Food Quick Add widget: medium, opens quick add and usual shopping lists in the app.
 - Live Activity with Lock Screen, Dynamic Island compact, Dynamic Island minimal, and Dynamic Island expanded presentations.
 - App Intents for timer control, quick logging, app navigation, and night-light presets.
-- App Shortcuts for starting sleep, starting Left or Right nursing, stopping the primary timer, opening the night light, and starting common night-light presets.
+- App Shortcuts for repeat-last logging, high-frequency quick logging, timer control, and dog care.
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
 - Local notifications for sleep windows, appointment reminders, monthly guide reminders, and user-created Food & Home reminders.
 
@@ -138,6 +138,8 @@ Quick-log routes:
 
 ```text
 littlewindows://quick-log/sleep
+littlewindows://quick-log/feed
+littlewindows://quick-log/repeat-last
 littlewindows://quick-log/nursing-left
 littlewindows://quick-log/nursing-right
 littlewindows://quick-log/tummy-time
@@ -150,6 +152,7 @@ littlewindows://quick-log/water
 littlewindows://quick-log/pee
 littlewindows://quick-log/poop
 littlewindows://quick-log/walk
+littlewindows://quick-log/training
 littlewindows://quick-log/medicine
 ```
 
@@ -172,11 +175,17 @@ Timer and quick-log intents:
 - `StartSleepTimerIntent`
 - `StartNursingLeftIntent`
 - `StartNursingRightIntent`
+- `RepeatLastLogIntent`
+- `LogFeedIntent`
+- `LogMedicineIntent`
 - `StartTummyTimeIntent`
 - `StartStoryTimeIntent`
 - `StartBathIntent`
 - `LogDiaperIntent`
 - `LogTemperatureIntent`
+- `LogDogFoodIntent`
+- `LogDogWaterIntent`
+- `StartDogWalkIntent`
 - `StopActiveTimerIntent`
 - `StopTimerIntent`
 - `ResumeTimerIntent`
@@ -191,7 +200,7 @@ Night-light and navigation intents:
 - `StopNightLightIntent`
 - `OpenLittleWindowsIntent`
 
-The `LittleWindowsShortcuts` provider exposes a smaller curated set to Shortcuts/Siri: start sleep, nurse left, nurse right, stop timer, open night light, diaper light, and soothing light.
+The `LittleWindowsShortcuts` provider exposes the iOS maximum of 10 promoted shortcuts to Shortcuts/Siri: start sleep, nurse left, nurse right, stop timer, repeat last, log feed, log medicine, log diaper, log dog food, and start dog walk. Other intents remain available to widgets, controls, deep links, and future shortcut curation.
 
 ## Notifications
 
@@ -216,12 +225,14 @@ Family Sync creates a CloudKit record-zone subscription for the shared family zo
 5. Start a Sleep or Nursing timer.
 6. Lock the phone and verify the Live Activity.
 7. On a Dynamic Island device, verify compact, minimal, and expanded presentations.
-8. Tap **Stop**. The app should open and immediately stop the selected timer.
+8. Tap **Stop**. The app should open and immediately stop the selected timer. The Live Activity should switch to a stopped state and offer **Resume**.
 9. For nursing, tap **Switch** and confirm the active side changes while elapsed time is retained.
-10. Add a Control Center control and verify it opens the app and applies the intended action.
-11. Start diaper-change and soothing night-light presets from shortcuts or controls.
-12. Create an appointment and verify selected reminder lead times.
-13. Enable monthly guide reminders and verify scheduling after guide state changes.
+10. Long-press a Today smart pick, pin it, refresh the Quick Log widget, and confirm the pinned action appears first with a pin indicator.
+11. Run the Repeat Last Log shortcut or widget action after a repeatable log and confirm the app creates a new completed log at the current time.
+12. Add a Control Center control and verify it opens the app and applies the intended action.
+13. Start diaper-change and soothing night-light presets from shortcuts or controls.
+14. Create an appointment and verify selected reminder lead times.
+15. Enable monthly guide reminders and verify scheduling after guide state changes.
 14. Create a Food & Home reminder and verify it opens the relevant Food screen or item.
 15. With two signed devices in the same Family Sync share, allow notifications, background one device, make a shared care or shopping-list change on the other device, and verify the backgrounded device receives a shared-activity alert that opens the relevant Little Windows screen.
 16. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.

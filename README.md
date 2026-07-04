@@ -97,7 +97,7 @@ The WidgetKit extension includes:
 - Shopping List widget
 - Food Quick Add widget
 
-Active timers synchronize to a Live Activity with Lock Screen and Dynamic Island presentations. App Intents, App Shortcuts, deep links, and iOS 18 Control Center controls can start common timers, stop or resume timers, switch nursing sides, quick-log common events, open app destinations, and start night-light presets.
+Active timers synchronize to a Live Activity with Lock Screen and Dynamic Island presentations. App Intents, promoted App Shortcuts, deep links, and iOS 18 Control Center controls can start common timers, stop or resume timers, switch nursing sides, quick-log common events, open app destinations, and start night-light presets where that surface exposes them.
 
 System surfaces pass commands back to the app and read lightweight App Group snapshots. They do not directly mutate the full SwiftData store. See [SYSTEM_INTEGRATIONS.md](SYSTEM_INTEGRATIONS.md) for signing, entitlements, routes, widgets, Live Activities, notification, and real-device testing details.
 

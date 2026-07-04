@@ -69,6 +69,7 @@ enum DeepLinkAction: Equatable {
     case startActivity(ActivityType)
     case logDiaper
     case logEvent(EventType)
+    case repeatLast
 }
 
 @MainActor
@@ -230,6 +231,12 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["quick-log", "sleep"] {
             selectedTab = .today
             pendingAction = .startTimer(.sleep, nil)
+        } else if components == ["quick-log", "feed"] {
+            selectedTab = .today
+            pendingAction = .logEvent(.feed)
+        } else if components == ["quick-log", "repeat-last"] {
+            selectedTab = .today
+            pendingAction = .repeatLast
         } else if components == ["quick-log", "food"] {
             selectedTab = .today
             pendingAction = .logEvent(.food)
@@ -245,6 +252,9 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["quick-log", "walk"] {
             selectedTab = .today
             pendingAction = .startTimer(.walk, nil)
+        } else if components == ["quick-log", "training"] {
+            selectedTab = .today
+            pendingAction = .startTimer(.training, nil)
         } else if components == ["quick-log", "medicine"] {
             selectedTab = .today
             pendingAction = .logEvent(.medicine)

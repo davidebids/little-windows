@@ -20,19 +20,33 @@ struct LittleWindowsLiveActivity: Widget {
                     }
                     HStack(spacing: 13) {
                         WidgetIconBadge(systemImage: timer.systemImage, tint: tint, size: 48)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(timer.eventLabel)
-                                .font(.headline)
-                            Text(timer.startDate, style: .timer)
-                                .font(.title2.weight(.bold).monospacedDigit())
-                        }
-                        Spacer()
-                        Button(intent: StopTimerIntent(eventID: timer.id.uuidString)) {
-                            Label("Stop", systemImage: "stop.fill")
-                                .font(.subheadline.weight(.bold))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(tint)
+	                        VStack(alignment: .leading, spacing: 2) {
+	                            Text(timer.eventLabel)
+	                                .font(.headline)
+	                            if timer.resolvedIsRunning {
+	                                Text(timer.startDate, style: .timer)
+	                                    .font(.title2.weight(.bold).monospacedDigit())
+	                            } else {
+	                                Text(shortDuration(timer.resolvedElapsedSeconds))
+	                                    .font(.title2.weight(.bold).monospacedDigit())
+	                            }
+	                        }
+	                        Spacer()
+	                        if timer.resolvedIsRunning {
+	                            Button(intent: StopTimerIntent(eventID: timer.id.uuidString)) {
+	                                Label("Stop", systemImage: "stop.fill")
+	                                    .font(.subheadline.weight(.bold))
+	                            }
+	                            .buttonStyle(.borderedProminent)
+	                            .tint(tint)
+	                        } else {
+	                            Button(intent: ResumeTimerIntent(eventID: timer.id.uuidString)) {
+	                                Label("Resume", systemImage: "play.fill")
+	                                    .font(.subheadline.weight(.bold))
+	                            }
+	                            .buttonStyle(.borderedProminent)
+	                            .tint(tint)
+	                        }
                     }
                     detailBar(for: timer, tint: tint)
                 }
@@ -58,16 +72,21 @@ struct LittleWindowsLiveActivity: Widget {
                         }
                     }
                 }
-                DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("RUNNING")
-                            .font(.caption2.weight(.heavy))
-                            .tracking(0.8)
-                            .foregroundStyle(tint)
-                        Text(timer.startDate, style: .timer)
-                            .font(.headline.monospacedDigit())
-                    }
-                }
+	                DynamicIslandExpandedRegion(.trailing) {
+	                    VStack(alignment: .trailing, spacing: 1) {
+	                        Text(timer.resolvedIsRunning ? "RUNNING" : "STOPPED")
+	                            .font(.caption2.weight(.heavy))
+	                            .tracking(0.8)
+	                            .foregroundStyle(tint)
+	                        if timer.resolvedIsRunning {
+	                            Text(timer.startDate, style: .timer)
+	                                .font(.headline.monospacedDigit())
+	                        } else {
+	                            Text(shortDuration(timer.resolvedElapsedSeconds))
+	                                .font(.headline.monospacedDigit())
+	                        }
+	                    }
+	                }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 10) {
                         detailBar(for: timer, tint: tint)
@@ -79,23 +98,39 @@ struct LittleWindowsLiveActivity: Widget {
                                 }
                                 .buttonStyle(.bordered)
                             }
-                            Button(intent: StopTimerIntent(eventID: timer.id.uuidString)) {
-                                Label("Stop timer", systemImage: "stop.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(tint)
+	                            if timer.resolvedIsRunning {
+	                                Button(intent: StopTimerIntent(eventID: timer.id.uuidString)) {
+	                                    Label("Stop timer", systemImage: "stop.fill")
+	                                        .frame(maxWidth: .infinity)
+	                                }
+	                                .buttonStyle(.borderedProminent)
+	                                .tint(tint)
+	                            } else {
+	                                Button(intent: ResumeTimerIntent(eventID: timer.id.uuidString)) {
+	                                    Label("Resume timer", systemImage: "play.fill")
+	                                        .frame(maxWidth: .infinity)
+	                                }
+	                                .buttonStyle(.borderedProminent)
+	                                .tint(tint)
+	                            }
                         }
                     }
                 }
             } compactLeading: {
                 Image(systemName: timer.systemImage)
                     .foregroundStyle(tint)
-            } compactTrailing: {
-                Text(timer.startDate, style: .timer)
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .frame(width: 48)
+	            } compactTrailing: {
+	                if timer.resolvedIsRunning {
+	                    Text(timer.startDate, style: .timer)
+	                        .font(.caption.weight(.semibold))
+	                        .monospacedDigit()
+	                        .frame(width: 48)
+	                } else {
+	                    Text(shortDuration(timer.resolvedElapsedSeconds))
+	                        .font(.caption.weight(.semibold))
+	                        .monospacedDigit()
+	                        .frame(width: 48)
+	                }
             } minimal: {
                 Image(systemName: timer.systemImage)
                     .foregroundStyle(tint)

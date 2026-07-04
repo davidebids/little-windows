@@ -44,7 +44,7 @@ struct StopTimerIntent: LittleWindowsURLIntent, LiveActivityIntent {
     }
 }
 
-struct ResumeTimerIntent: LittleWindowsURLIntent {
+struct ResumeTimerIntent: LittleWindowsURLIntent, LiveActivityIntent {
     static let title: LocalizedStringResource = "Resume Timer"
     static let description = IntentDescription("Resumes a stopped timer draft.")
 
@@ -94,6 +94,22 @@ struct StartNursingRightIntent: LittleWindowsURLIntent {
     var destinationURL: URL { URL(string: "littlewindows://quick-log/nursing-right")! }
 }
 
+struct RepeatLastLogIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Repeat Last Log"
+    static let description = IntentDescription("Repeats the most recent quick-repeatable care log.")
+    var destinationURL: URL { URL(string: "littlewindows://quick-log/repeat-last")! }
+}
+
+struct LogFeedIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Log Feed"
+    var destinationURL: URL { URL(string: "littlewindows://quick-log/feed")! }
+}
+
+struct LogMedicineIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Log Medicine"
+    var destinationURL: URL { URL(string: "littlewindows://quick-log/medicine")! }
+}
+
 struct StartTummyTimeIntent: LittleWindowsURLIntent {
     static let title: LocalizedStringResource = "Start Tummy Time"
     var destinationURL: URL { URL(string: "littlewindows://quick-log/tummy-time")! }
@@ -117,6 +133,21 @@ struct LogDiaperIntent: LittleWindowsURLIntent {
 struct LogTemperatureIntent: LittleWindowsURLIntent {
     static let title: LocalizedStringResource = "Log Temperature"
     var destinationURL: URL { URL(string: "littlewindows://quick-log/temperature")! }
+}
+
+struct LogDogFoodIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Log Dog Food"
+    var destinationURL: URL { URL(string: "littlewindows://quick-log/food")! }
+}
+
+struct LogDogWaterIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Log Dog Water"
+    var destinationURL: URL { URL(string: "littlewindows://quick-log/water")! }
+}
+
+struct StartDogWalkIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Start Dog Walk"
+    var destinationURL: URL { URL(string: "littlewindows://quick-log/walk")! }
 }
 
 struct OpenNightLightIntent: LittleWindowsURLIntent {
@@ -198,22 +229,40 @@ struct LittleWindowsShortcuts: AppShortcutsProvider {
             systemImageName: "stop.fill"
         )
         AppShortcut(
-            intent: OpenNightLightIntent(),
-            phrases: ["Open the night light in \(.applicationName)"],
-            shortTitle: "Night Light",
-            systemImageName: "lightbulb.fill"
+            intent: RepeatLastLogIntent(),
+            phrases: ["Repeat last log in \(.applicationName)"],
+            shortTitle: "Repeat Last",
+            systemImageName: "arrow.clockwise"
         )
         AppShortcut(
-            intent: StartDiaperChangeLightIntent(),
-            phrases: ["Start the diaper light in \(.applicationName)"],
-            shortTitle: "Diaper Light",
-            systemImageName: "lightbulb.min.fill"
+            intent: LogFeedIntent(),
+            phrases: ["Log a feed in \(.applicationName)"],
+            shortTitle: "Log Feed",
+            systemImageName: "waterbottle.fill"
         )
         AppShortcut(
-            intent: StartSoothingLightIntent(),
-            phrases: ["Start the soothing light in \(.applicationName)"],
-            shortTitle: "Soothing Light",
-            systemImageName: "moon.stars.fill"
+            intent: LogMedicineIntent(),
+            phrases: ["Log medicine in \(.applicationName)"],
+            shortTitle: "Medicine",
+            systemImageName: "cross.case.fill"
+        )
+        AppShortcut(
+            intent: LogDiaperIntent(),
+            phrases: ["Log a diaper in \(.applicationName)"],
+            shortTitle: "Log Diaper",
+            systemImageName: "drop.fill"
+        )
+        AppShortcut(
+            intent: LogDogFoodIntent(),
+            phrases: ["Log dog food in \(.applicationName)"],
+            shortTitle: "Dog Food",
+            systemImageName: "fork.knife"
+        )
+        AppShortcut(
+            intent: StartDogWalkIntent(),
+            phrases: ["Start dog walk in \(.applicationName)"],
+            shortTitle: "Dog Walk",
+            systemImageName: "figure.walk"
         )
     }
 }

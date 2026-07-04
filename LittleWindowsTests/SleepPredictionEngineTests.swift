@@ -2917,6 +2917,119 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testWidgetSnapshotIncludesRankedQuickActions() {
+        let now = Date(timeIntervalSinceReferenceDate: 340_000)
+        let feed = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-3_600))
+        let diaper = BabyEvent(type: .diaper, startDate: now.addingTimeInterval(-7_200))
+        let sleep = BabyEvent(
+            type: .sleep,
+            startDate: now.addingTimeInterval(-14_400),
+            endDate: now.addingTimeInterval(-10_800)
+        )
+
+        let snapshot = WidgetSnapshotService.makeSnapshot(
+            profileType: .child,
+            babyName: "Test Child",
+            events: [feed, diaper, sleep],
+            prediction: nil,
+            now: now
+        )
+
+        let actionIDs = snapshot.resolvedQuickActions.map(\.id)
+        XCTAssertTrue(actionIDs.contains("feed"))
+        XCTAssertTrue(actionIDs.contains("diaper"))
+        XCTAssertTrue(actionIDs.contains("sleep"))
+        XCTAssertEqual(snapshot.resolvedQuickActions.count, 6)
+    }
+
+    @MainActor
+    func testDogQuickActionsPreferDogCareEvents() {
+        let now = Date(timeIntervalSinceReferenceDate: 345_000)
+        let food = BabyEvent(type: .food, startDate: now.addingTimeInterval(-3_600))
+        let walk = BabyEvent(
+            type: .walk,
+            startDate: now.addingTimeInterval(-9_000),
+            endDate: now.addingTimeInterval(-7_200)
+        )
+
+        let actions = WidgetSnapshotService.makeQuickActions(
+            profileType: .dog,
+            events: [food, walk],
+            now: now
+        )
+
+        let actionIDs = actions.map(\.id)
+        XCTAssertTrue(actionIDs.contains("food"))
+        XCTAssertTrue(actionIDs.contains("walk"))
+        XCTAssertFalse(actionIDs.contains("sleep"))
+    }
+
+    @MainActor
+    func testQuickActionsIncludeRepeatLastAndPinnedActionsFirst() {
+        let now = Date(timeIntervalSinceReferenceDate: 346_000)
+        let feed = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-1_800), endDate: now.addingTimeInterval(-1_800))
+        feed.feedKind = .bottle
+        let diaper = BabyEvent(type: .diaper, startDate: now.addingTimeInterval(-7_200), endDate: now.addingTimeInterval(-7_200))
+        diaper.diaperKind = .wet
+
+        let actions = WidgetSnapshotService.makeQuickActions(
+            profileType: .child,
+            events: [feed, diaper],
+            pinnedActionIDs: ["medicine"],
+            now: now
+        )
+
+        XCTAssertEqual(actions.first?.id, "medicine")
+        XCTAssertEqual(actions.first?.resolvedIsPinned, true)
+        XCTAssertTrue(actions.map(\.id).contains("repeat-last"))
+        XCTAssertEqual(actions.first(where: { $0.id == "repeat-last" })?.subtitle, "Bottle")
+    }
+
+    @MainActor
+    func testRepeatEventClonesStructuredDetailsAtCurrentTime() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profileID = UUID()
+        let oldStart = Date(timeIntervalSinceReferenceDate: 300_000)
+        let now = Date(timeIntervalSinceReferenceDate: 350_000)
+        let source = BabyEvent(
+            profileID: profileID,
+            type: .diaper,
+            startDate: oldStart,
+            endDate: oldStart,
+            caregiverName: "Caregiver A",
+            notes: "After lunch"
+        )
+        source.profileTypeSnapshot = .child
+        source.diaperKind = .both
+        source.peeAmount = .medium
+        source.pooAmount = .little
+        source.pooColor = .brown
+        source.pooTexture = .soft
+
+        let repeated = try XCTUnwrap(EventMutationService.repeatEvent(
+            source,
+            caregiverName: "Caregiver B",
+            profileID: profileID,
+            profileType: .child,
+            context: context,
+            at: now
+        ))
+
+        XCTAssertNotEqual(repeated.id, source.id)
+        XCTAssertEqual(repeated.profileID, profileID)
+        XCTAssertEqual(repeated.startDate, now)
+        XCTAssertEqual(repeated.endDate, now)
+        XCTAssertEqual(repeated.caregiverName, "Caregiver B")
+        XCTAssertEqual(repeated.notes, "After lunch")
+        XCTAssertEqual(repeated.diaperKind, .both)
+        XCTAssertEqual(repeated.peeAmount, .medium)
+        XCTAssertEqual(repeated.pooAmount, .little)
+        XCTAssertEqual(repeated.pooColor, .brown)
+        XCTAssertEqual(repeated.pooTexture, .soft)
+    }
+
+    @MainActor
     func testFoodWidgetSnapshotIncludesActiveShoppingListItems() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -3430,6 +3543,12 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         router.route(URL(string: "littlewindows://quick-log/nursing-right")!)
         XCTAssertEqual(router.consumeAction(), .startTimer(.nursing, .right))
+
+        router.route(URL(string: "littlewindows://quick-log/repeat-last")!)
+        XCTAssertEqual(router.consumeAction(), .repeatLast)
+
+        router.route(URL(string: "littlewindows://quick-log/walk")!)
+        XCTAssertEqual(router.consumeAction(), .startTimer(.walk, nil))
     }
 
     @MainActor
@@ -4528,6 +4647,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let routine = CareRoutineService.createRoutine(
             from: template,
             profileID: profile.id,
+            profileType: profile.profileType,
             householdID: household.id,
             existingRoutines: [],
             context: context
@@ -4537,6 +4657,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let steps = try context.fetch(FetchDescriptor<CareRoutineStep>())
         XCTAssertEqual(routines.map(\.id), [routine.id])
         XCTAssertEqual(routine.scope, .profile)
+        XCTAssertEqual(routine.profileType, .child)
         XCTAssertEqual(routine.profileID, profile.id)
         XCTAssertNil(routine.householdID)
         XCTAssertEqual(steps.filter { $0.routineID == routine.id }.count, template.steps.count)
@@ -4548,9 +4669,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         let otherProfileID = UUID()
         let householdID = UUID()
         let otherHouseholdID = UUID()
-        let profileRoutine = CareRoutine(scope: .profile, profileID: profileID, title: "Profile care", sortOrder: 1)
-        let otherProfileRoutine = CareRoutine(scope: .profile, profileID: otherProfileID, title: "Other profile", sortOrder: 0)
-        let householdRoutine = CareRoutine(scope: .household, householdID: householdID, title: "Household reset", sortOrder: 2)
+        let profileRoutine = CareRoutine(scope: .profile, profileType: .child, profileID: profileID, title: "Profile care", sortOrder: 1)
+        let otherProfileRoutine = CareRoutine(scope: .profile, profileType: .child, profileID: otherProfileID, title: "Other profile", sortOrder: 0)
+        let householdRoutine = CareRoutine(scope: .household, profileType: .child, householdID: householdID, title: "Household reset", sortOrder: 2)
+        let dogHouseholdRoutine = CareRoutine(scope: .household, profileType: .dog, householdID: householdID, title: "Dog reset", sortOrder: 3)
+        let legacyHouseholdRoutine = CareRoutine(scope: .household, householdID: householdID, title: "Legacy shared", sortOrder: 4)
         let otherHouseholdRoutine = CareRoutine(scope: .household, householdID: otherHouseholdID, title: "Other household", sortOrder: 3)
         let archivedRoutine = CareRoutine(scope: .profile, profileID: profileID, title: "Archived", isArchived: true, sortOrder: 4)
 
@@ -4559,14 +4682,25 @@ final class SleepPredictionEngineTests: XCTestCase {
                 otherProfileRoutine,
                 archivedRoutine,
                 householdRoutine,
+                dogHouseholdRoutine,
+                legacyHouseholdRoutine,
                 profileRoutine,
                 otherHouseholdRoutine
             ],
             profileID: profileID,
+            profileType: .child,
             householdID: householdID
         )
 
-        XCTAssertEqual(visible.map(\.id), [profileRoutine.id, householdRoutine.id])
+        XCTAssertEqual(visible.map(\.id), [profileRoutine.id, householdRoutine.id, legacyHouseholdRoutine.id])
+
+        let dogVisible = CareRoutineService.visibleRoutines(
+            routines: [profileRoutine, householdRoutine, dogHouseholdRoutine, legacyHouseholdRoutine],
+            profileID: profileID,
+            profileType: .dog,
+            householdID: householdID
+        )
+        XCTAssertEqual(dogVisible.map(\.id), [dogHouseholdRoutine.id, legacyHouseholdRoutine.id])
     }
 
     @MainActor
@@ -4697,6 +4831,7 @@ final class SleepPredictionEngineTests: XCTestCase {
                 CareRoutineStepInput(title: "Open light", action: .openNightLight)
             ],
             profileID: profile.id,
+            profileType: profile.profileType,
             householdID: nil,
             existingRoutines: [],
             context: context
@@ -4706,6 +4841,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             .filter { $0.routineID == routine.id }
             .sorted { $0.sortOrder < $1.sortOrder }
         XCTAssertEqual(routine.title, "Custom evening")
+        XCTAssertEqual(routine.profileType, .child)
         XCTAssertEqual(routine.iconName, "moon.stars.fill")
         XCTAssertEqual(steps.map(\.action), [.logEvent, .startTimer, .openNightLight])
         XCTAssertEqual(steps[0].eventType, .activity)
@@ -4726,6 +4862,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             scope: .profile,
             steps: [CareRoutineStepInput(title: "Check bag", action: .checklist)],
             profileID: profileID,
+            profileType: .child,
             householdID: nil,
             existingRoutines: [],
             context: context
@@ -4735,6 +4872,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             scope: .profile,
             steps: [CareRoutineStepInput(title: "   ", action: .checklist)],
             profileID: profileID,
+            profileType: .child,
             householdID: nil,
             existingRoutines: [],
             context: context
@@ -4763,6 +4901,7 @@ final class SleepPredictionEngineTests: XCTestCase {
                 CareRoutineStepInput(title: "Start sleep", action: .startTimer, eventType: .sleep, sleepKind: .nap)
             ],
             profileID: profile.id,
+            profileType: profile.profileType,
             householdID: nil,
             existingRoutines: [],
             context: context
@@ -4786,6 +4925,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             routine,
             input: edited,
             profileID: profile.id,
+            profileType: profile.profileType,
             householdID: household.id,
             existingSteps: originalSteps,
             context: context
@@ -4796,6 +4936,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             .sorted { $0.sortOrder < $1.sortOrder }
         XCTAssertEqual(routine.title, "Household evening")
         XCTAssertEqual(routine.scope, .household)
+        XCTAssertEqual(routine.profileType, .child)
         XCTAssertNil(routine.profileID)
         XCTAssertEqual(routine.householdID, household.id)
         XCTAssertTrue(routine.reminderEnabled)
@@ -4823,6 +4964,7 @@ final class SleepPredictionEngineTests: XCTestCase {
                 CareRoutineStepInput(title: "Open guide", action: .openAgeGuide)
             ],
             profileID: profile.id,
+            profileType: profile.profileType,
             householdID: nil,
             existingRoutines: [],
             context: context
@@ -4839,6 +4981,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             .filter { $0.routineID == copy.id }
             .sorted { $0.sortOrder < $1.sortOrder }
         XCTAssertEqual(copy.title, "Morning Copy")
+        XCTAssertEqual(copy.profileType, .child)
         XCTAssertEqual(copy.profileID, profile.id)
         XCTAssertFalse(copy.reminderEnabled)
         XCTAssertNil(copy.reminderTimeMinutesAfterMidnight)
@@ -4875,7 +5018,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testCareRoutinesRoundTripThroughBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let profile = BabyProfile(name: "Test Dog", birthDate: Date(), sex: .unknown)
+        let profile = BabyProfile(profileType: .dog, name: "Test Dog", birthDate: Date(), sex: .unknown)
         let household = Household(name: "Home")
         context.insert(profile)
         context.insert(household)
@@ -4885,6 +5028,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let routine = CareRoutineService.createRoutine(
             from: template,
             profileID: profile.id,
+            profileType: .dog,
             householdID: household.id,
             existingRoutines: [],
             context: context
@@ -4916,6 +5060,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let steps = try context.fetch(FetchDescriptor<CareRoutineStep>())
         let runs = try context.fetch(FetchDescriptor<CareRoutineRun>())
         XCTAssertEqual(routines.map(\.id), [routine.id])
+        XCTAssertEqual(routines.first?.profileType, .dog)
         XCTAssertEqual(routines.first?.profileID, profile.id)
         XCTAssertEqual(steps.filter { $0.routineID == routine.id }.count, template.steps.count)
         XCTAssertEqual(runs.map(\.id), [run.id])

@@ -133,6 +133,7 @@ struct CareRoutineStepResolutionRecord: Codable, Equatable {
 final class CareRoutine {
     var id: UUID = UUID()
     var scopeRawValue: String = CareRoutineScope.profile.rawValue
+    var profileTypeRawValue: String?
     var profileID: UUID?
     var householdID: UUID?
     var title: String = ""
@@ -152,6 +153,7 @@ final class CareRoutine {
     init(
         id: UUID = UUID(),
         scope: CareRoutineScope,
+        profileType: CareProfileType? = nil,
         profileID: UUID? = nil,
         householdID: UUID? = nil,
         title: String,
@@ -170,6 +172,7 @@ final class CareRoutine {
     ) {
         self.id = id
         self.scopeRawValue = scope.rawValue
+        self.profileTypeRawValue = profileType?.rawValue
         self.profileID = profileID
         self.householdID = householdID
         self.title = title
@@ -190,6 +193,11 @@ final class CareRoutine {
     var scope: CareRoutineScope {
         get { CareRoutineScope(rawValue: scopeRawValue) ?? .profile }
         set { scopeRawValue = newValue.rawValue }
+    }
+
+    var profileType: CareProfileType? {
+        get { profileTypeRawValue.flatMap(CareProfileType.init(rawValue:)) }
+        set { profileTypeRawValue = newValue?.rawValue }
     }
 
     var templateKind: CareRoutineTemplateKind? {

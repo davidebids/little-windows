@@ -73,6 +73,12 @@ ruby -c Scripts/convert_legacy_tracker.rb
 
 Start with focused checks for the area changed, then use a build or tests when behavior can compile-break or regress broadly.
 
+Physical-device safety:
+
+- Never run destructive seed, reset, import, or local-validation routes on a real device that may contain personal data.
+- The `littlewindows://debug/reset-empty` and `littlewindows://debug/seed-smoke` routes are simulator-only. Do not bypass that guard for physical-device testing.
+- Before running any physical-device command, verify whether it can modify SwiftData, UserDefaults, CloudKit sync mode, app-group snapshots, or app container files. If it can, get explicit user confirmation and preserve/export current data first.
+
 Useful commands:
 
 ```sh

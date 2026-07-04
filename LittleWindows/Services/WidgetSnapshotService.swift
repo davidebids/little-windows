@@ -3,6 +3,38 @@ import SwiftData
 import WidgetKit
 
 @MainActor
+enum QuickLogActionPreferenceStore {
+    private static let prefix = "quickLog.pinnedActionIDs"
+    private static let maximumPinnedActions = 6
+
+    static func pinnedActionIDs(profileID: UUID?) -> [String] {
+        UserDefaults.standard.stringArray(forKey: key(profileID: profileID)) ?? []
+    }
+
+    @discardableResult
+    static func togglePinnedAction(_ actionID: String, profileID: UUID?) -> Bool {
+        var ids = pinnedActionIDs(profileID: profileID)
+        if let index = ids.firstIndex(of: actionID) {
+            ids.remove(at: index)
+            UserDefaults.standard.set(ids, forKey: key(profileID: profileID))
+            return false
+        }
+
+        ids.removeAll { $0 == actionID }
+        ids.insert(actionID, at: 0)
+        if ids.count > maximumPinnedActions {
+            ids.removeLast(ids.count - maximumPinnedActions)
+        }
+        UserDefaults.standard.set(ids, forKey: key(profileID: profileID))
+        return true
+    }
+
+    private static func key(profileID: UUID?) -> String {
+        "\(prefix).\(profileID?.uuidString ?? "default")"
+    }
+}
+
+@MainActor
 enum WidgetSnapshotService {
     static func refresh(
         profile: BabyProfile?,
@@ -76,8 +108,130 @@ enum WidgetSnapshotService {
                 dogPottyCount: daily.pottyCount,
                 dogWalkSeconds: daily.walkTime
             ),
-            food: read().food
+            food: read().food,
+            quickActions: makeQuickActions(
+                profileID: profileID,
+                profileType: profileType,
+                events: events,
+                activeTimer: activeTimer,
+                pinnedActionIDs: QuickLogActionPreferenceStore.pinnedActionIDs(profileID: profileID),
+                now: now,
+                calendar: calendar
+            )
         )
+    }
+
+    static func makeQuickActions(
+        profileID: UUID? = nil,
+        profileType: CareProfileType,
+        events: [BabyEvent],
+        activeTimer: ActiveTimerSnapshot? = nil,
+        pinnedActionIDs: [String] = [],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [QuickLogActionSnapshot] {
+        let committedEvents = events
+            .filter { !$0.isTimerDraft && $0.matchesProfile(profileID) }
+        let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
+        let recentEvents = committedEvents.filter { $0.startDate >= recentCutoff }
+        let activeTypes = Set(events.filter(\.isTimerDraft).map(\.type))
+        var pinnedOrder: [String: Int] = [:]
+        for (index, actionID) in pinnedActionIDs.enumerated() where pinnedOrder[actionID] == nil {
+            pinnedOrder[actionID] = index
+        }
+
+        func pinAdjusted(
+            _ candidate: QuickLogActionCandidate,
+            score: Double
+        ) -> (candidate: QuickLogActionCandidate, score: Double) {
+            var candidate = candidate
+            var score = score
+            if let pinIndex = pinnedOrder[candidate.action.id] {
+                score += 30 - (Double(pinIndex) * 0.01)
+                candidate.action.isPinned = true
+            }
+            return (candidate, score)
+        }
+
+        var scored = quickActionCandidates(for: profileType).map { candidate in
+            var score = candidate.baseScore
+            let matching = recentEvents.filter(candidate.matches)
+            score += min(Double(matching.count), 8) * 0.28
+
+            if let last = committedEvents.filter(candidate.matches).map(\.startDate).max() {
+                let hours = now.timeIntervalSince(last) / 3_600
+                switch hours {
+                case ..<0.33:
+                    score -= 3.0
+                case 0.33..<1.5:
+                    score -= 0.8
+                case 1.5..<5:
+                    score += 1.2
+                case 5..<18:
+                    score += 0.8
+                default:
+                    score += 0.35
+                }
+            } else {
+                score += 0.45
+            }
+
+            if candidate.startsTimer, activeTypes.contains(candidate.eventType) {
+                score -= 4
+            }
+
+            return pinAdjusted(candidate, score: score)
+        }
+
+        if let repeatSource = EventMutationService.quickRepeatCandidate(
+            in: committedEvents,
+            profileID: profileID
+        ) {
+            let repeatAction = QuickLogActionSnapshot(
+                id: "repeat-last",
+                title: "Repeat",
+                subtitle: repeatSource.displayTitle,
+                systemImage: "arrow.clockwise",
+                tintName: "indigo",
+                destinationPath: "quick-log/repeat-last"
+            )
+            let repeatCandidate = QuickLogActionCandidate(
+                action: repeatAction,
+                eventType: repeatSource.type,
+                startsTimer: false,
+                baseScore: 10.4
+            ) { _ in false }
+            scored.append(pinAdjusted(repeatCandidate, score: 10.4))
+        }
+
+        if let activeTimer {
+            let timerAction = QuickLogActionSnapshot(
+                id: "active-timer",
+                title: activeTimer.resolvedIsRunning ? "Timer" : "Resume",
+                subtitle: activeTimer.eventLabel,
+                systemImage: activeTimer.resolvedIsRunning ? "timer" : "play.fill",
+                tintName: activeTimer.resolvedIsRunning ? "indigo" : "green",
+                destinationPath: "active-timer"
+            )
+            let timerCandidate = QuickLogActionCandidate(
+                action: timerAction,
+                eventType: EventType.normalized(rawValue: activeTimer.typeRawValue),
+                startsTimer: false,
+                baseScore: 12
+            ) { _ in false }
+            scored.append(pinAdjusted(timerCandidate, score: 12))
+        }
+
+        return scored
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.candidate.action.title < rhs.candidate.action.title
+                }
+                return lhs.score > rhs.score
+            }
+            .map { $0.candidate.action }
+            .prefix(6)
+            .map { $0 }
     }
 
     static func refreshFood(context: ModelContext, now: Date = Date()) {
@@ -250,6 +404,98 @@ enum WidgetSnapshotService {
                 )
             }
         )
+    }
+
+    private struct QuickLogActionCandidate {
+        var action: QuickLogActionSnapshot
+        var eventType: EventType
+        var startsTimer: Bool
+        var baseScore: Double
+        var matches: (BabyEvent) -> Bool
+    }
+
+    private static func quickActionCandidates(for profileType: CareProfileType) -> [QuickLogActionCandidate] {
+        switch profileType {
+        case .child:
+            [
+                candidate("sleep", "Start sleep", "Timer", "moon.stars.fill", "indigo", "quick-log/sleep", .sleep, startsTimer: true, baseScore: 8.0),
+                candidate("feed", "Feed", nil, "waterbottle.fill", "orange", "quick-log/feed", .feed, baseScore: 7.5),
+                candidate("nursing-left", "Nurse left", "Timer", "l.circle.fill", "pink", "quick-log/nursing-left", .nursing, startsTimer: true, baseScore: 7.2),
+                candidate("nursing-right", "Nurse right", "Timer", "r.circle.fill", "pink", "quick-log/nursing-right", .nursing, startsTimer: true, baseScore: 7.1),
+                candidate("diaper", "Diaper", nil, "drop.fill", "teal", "quick-log/diaper", .diaper, baseScore: 7.0),
+                candidate("tummy-time", "Tummy", "Timer", "figure.play", "green", "quick-log/tummy-time", .activity, startsTimer: true, baseScore: 5.4) {
+                    $0.type == .activity && $0.activityType == .tummyTime
+                },
+                candidate("medicine", "Medicine", nil, "cross.case.fill", "red", "quick-log/medicine", .medicine, baseScore: 5.2),
+                candidate("temperature", "Temp", nil, "thermometer.medium", "red", "quick-log/temperature", .temperature, baseScore: 4.8)
+            ]
+        case .dog:
+            [
+                candidate("food", "Food", nil, "fork.knife", "orange", "quick-log/food", .food, baseScore: 8.0),
+                candidate("water", "Water", nil, "drop.fill", "cyan", "quick-log/water", .water, baseScore: 7.6),
+                candidate("walk", "Walk", "Timer", "figure.walk", "green", "quick-log/walk", .walk, startsTimer: true, baseScore: 7.0),
+                candidate("pee", "Pee", nil, "pawprint.fill", "teal", "quick-log/pee", .potty, baseScore: 6.8) {
+                    $0.type == .potty && ($0.dogDetails.pottyType == .pee || $0.dogDetails.pottyType == .both)
+                },
+                candidate("poop", "Poop", nil, "pawprint.circle.fill", "teal", "quick-log/poop", .potty, baseScore: 6.4) {
+                    $0.type == .potty && ($0.dogDetails.pottyType == .poop || $0.dogDetails.pottyType == .both)
+                },
+                candidate("medicine", "Medicine", nil, "cross.case.fill", "red", "quick-log/medicine", .medicine, baseScore: 5.8),
+                candidate("training", "Training", "Timer", "graduationcap.fill", "purple", "quick-log/training", .training, startsTimer: true, baseScore: 5.4)
+            ]
+        }
+    }
+
+    private static func candidate(
+        _ id: String,
+        _ title: String,
+        _ subtitle: String?,
+        _ systemImage: String,
+        _ tintName: String,
+        _ destinationPath: String,
+        _ eventType: EventType,
+        startsTimer: Bool = false,
+        baseScore: Double,
+        matches: @escaping (BabyEvent) -> Bool
+    ) -> QuickLogActionCandidate {
+        QuickLogActionCandidate(
+            action: QuickLogActionSnapshot(
+                id: id,
+                title: title,
+                subtitle: subtitle,
+                systemImage: systemImage,
+                tintName: tintName,
+                destinationPath: destinationPath
+            ),
+            eventType: eventType,
+            startsTimer: startsTimer,
+            baseScore: baseScore,
+            matches: matches
+        )
+    }
+
+    private static func candidate(
+        _ id: String,
+        _ title: String,
+        _ subtitle: String?,
+        _ systemImage: String,
+        _ tintName: String,
+        _ destinationPath: String,
+        _ eventType: EventType,
+        startsTimer: Bool = false,
+        baseScore: Double
+    ) -> QuickLogActionCandidate {
+        candidate(
+            id,
+            title,
+            subtitle,
+            systemImage,
+            tintName,
+            destinationPath,
+            eventType,
+            startsTimer: startsTimer,
+            baseScore: baseScore
+        ) { $0.type == eventType }
     }
 
     private static func groupedCareSessions(_ events: [BabyEvent]) -> [Date] {

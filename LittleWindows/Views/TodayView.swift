@@ -37,6 +37,7 @@ private struct TodayRenderState {
     var isSleeping: Bool
     var dogLastEventTitles: [EventType: String]
     var dogPottyTitles: [DogPottyType: String]
+    var smartQuickActions: [QuickLogActionSnapshot]
 }
 
 struct TodayView: View {
@@ -86,6 +87,8 @@ struct TodayView: View {
     @State private var eventPendingDelete: BabyEvent?
     @State private var showingDeleteEventConfirmation = false
     @State private var activeSleepPlan: ActiveSleepPlan?
+    @State private var pinnedQuickActionRevision = 0
+    @State private var repeatFeedback: RepeatFeedback?
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -150,6 +153,7 @@ struct TodayView: View {
         CareRoutineService.visibleRoutines(
             routines: careRoutines,
             profileID: selectedProfileID,
+            profileType: profile?.profileType,
             householdID: currentHouseholdID
         )
     }
@@ -254,6 +258,7 @@ struct TodayView: View {
         let visibleCareRoutines = CareRoutineService.visibleRoutines(
             routines: careRoutines,
             profileID: profileID,
+            profileType: profile?.profileType,
             householdID: currentHouseholdID
         )
         let existingRoutineKinds = Set(visibleCareRoutines.compactMap(\.templateKind))
@@ -336,8 +341,17 @@ struct TodayView: View {
                         && ($0.dogDetails.pottyType == .poop || $0.dogDetails.pottyType == .both)
                 }
                 .max { $0.startDate < $1.startDate }?
-                .displayTitle ?? "Not logged"
+                    .displayTitle ?? "Not logged"
         }
+        _ = pinnedQuickActionRevision
+        let pinnedQuickActionIDs = QuickLogActionPreferenceStore.pinnedActionIDs(profileID: profileID)
+        let smartQuickActions = WidgetSnapshotService.makeQuickActions(
+            profileID: profileID,
+            profileType: profile?.profileType ?? .child,
+            events: scopedEvents,
+            pinnedActionIDs: pinnedQuickActionIDs,
+            now: now
+        )
         return TodayRenderState(
             profile: profile,
             profileID: profileID,
@@ -362,7 +376,8 @@ struct TodayView: View {
             awakeSinceDate: awakeSinceDate,
             isSleeping: runningSleepTimer != nil,
             dogLastEventTitles: dogLastEventTitles,
-            dogPottyTitles: dogPottyTitles
+            dogPottyTitles: dogPottyTitles,
+            smartQuickActions: smartQuickActions
         )
     }
 
@@ -719,6 +734,14 @@ struct TodayView: View {
         } message: {
             Text("You can allow Little Window Alerts in iOS Settings whenever you're ready.")
         }
+        .overlay(alignment: .bottom) {
+            if let repeatFeedback {
+                RepeatFeedbackBanner(feedback: repeatFeedback)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 96)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .onChange(of: deepLinkRouter.pendingAction) { _, _ in
             handlePendingDeepLink()
         }
@@ -755,6 +778,7 @@ struct TodayView: View {
             handlePendingPuppyGuideDeepLink()
             handlePendingRoutineDeepLink()
             await syncActiveSleepPlanWakeAlert()
+            refreshWidgetSnapshot()
         }
     }
 
@@ -892,6 +916,8 @@ struct TodayView: View {
     private func childQuickActionsSection(_ state: TodayRenderState) -> some View {
         Section {
             VStack(spacing: 14) {
+                smartQuickActionsRow(state.smartQuickActions.filter { $0.id != "sleep" })
+
                 Button {
                     showingSleepChooser = true
                 } label: {
@@ -1016,148 +1042,85 @@ struct TodayView: View {
 
     private func dogQuickActionsSection(_ state: TodayRenderState) -> some View {
         Section {
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
-                spacing: 14
-            ) {
-                QuickActionButton(
-                    title: "Food",
-                    subtitle: lastEventSubtitle(.food, state: state),
-                    icon: "fork.knife",
-                    color: .orange
+            VStack(spacing: 14) {
+                smartQuickActionsRow(state.smartQuickActions)
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                    spacing: 14
                 ) {
-                    editorRoute = EventEditorRoute(type: .food)
-                }
-                QuickActionButton(
-                    title: "Water",
-                    subtitle: lastEventSubtitle(.water, state: state),
-                    icon: "drop.fill",
-                    color: .cyan
-                ) {
-                    editorRoute = EventEditorRoute(type: .water)
-                }
-                QuickActionButton(
-                    title: "Treat",
-                    subtitle: lastEventSubtitle(.treat, state: state),
-                    icon: "birthday.cake.fill",
-                    color: .brown
-                ) {
-                    editorRoute = EventEditorRoute(type: .treat)
-                }
-                QuickActionButton(
-                    title: "Start Walk",
-                    subtitle: lastEventSubtitle(.walk, state: state),
-                    icon: "figure.walk",
-                    color: .green
-                ) {
-                    startTimer(.walk)
-                }
-                QuickActionButton(
-                    title: "Pee",
-                    subtitle: dogPottySubtitle(.pee, state: state),
-                    icon: "pawprint.fill",
-                    color: .teal
-                ) {
-                    logDogPotty(.pee, accident: false)
-                }
-                QuickActionButton(
-                    title: "Poop",
-                    subtitle: dogPottySubtitle(.poop, state: state),
-                    icon: "pawprint.circle.fill",
-                    color: .teal
-                ) {
-                    logDogPotty(.poop, accident: false)
-                }
-                QuickActionButton(
-                    title: "Accident",
-                    subtitle: dogPottySubtitle(.pee, state: state, accident: true),
-                    icon: "exclamationmark.triangle.fill",
-                    color: .orange
-                ) {
-                    logDogPotty(.pee, accident: true)
-                }
-                QuickActionButton(
-                    title: "Rest",
-                    subtitle: lastEventSubtitle(.rest, state: state),
-                    icon: "bed.double.fill",
-                    color: .indigo
-                ) {
-                    startTimer(.rest)
-                }
-                QuickActionButton(
-                    title: "Training",
-                    subtitle: lastEventSubtitle(.training, state: state),
-                    icon: "graduationcap.fill",
-                    color: .purple
-                ) {
-                    startTimer(.training)
-                }
-                QuickActionButton(
-                    title: "Medicine",
-                    subtitle: lastEventSubtitle(.medicine, state: state),
-                    icon: "cross.case.fill",
-                    color: .red
-                ) {
-                    editorRoute = EventEditorRoute(type: .medicine)
-                }
-                QuickActionButton(
-                    title: "Symptom",
-                    subtitle: lastEventSubtitle(.symptom, state: state),
-                    icon: "exclamationmark.triangle.fill",
-                    color: .red
-                ) {
-                    editorRoute = EventEditorRoute(type: .symptom)
-                }
-                QuickActionButton(
-                    title: "Grooming",
-                    subtitle: lastEventSubtitle(.grooming, state: state),
-                    icon: "comb.fill",
-                    color: .pink
-                ) {
-                    editorRoute = EventEditorRoute(type: .grooming)
-                }
-                QuickActionButton(
-                    title: "Teeth",
-                    subtitle: dogGroomingSubtitle(.teethBrushing, state: state),
-                    icon: "mouth.fill",
-                    color: .mint
-                ) {
-                    logDogGrooming(.teethBrushing)
-                }
-                QuickActionButton(
-                    title: "Weight",
-                    subtitle: lastEventSubtitle(.growth, state: state),
-                    icon: "scalemass.fill",
-                    color: .mint
-                ) {
-                    editorRoute = EventEditorRoute(type: .growth)
-                }
-                QuickActionButton(
-                    title: "Temp",
-                    subtitle: lastEventSubtitle(.temperature, state: state),
-                    icon: "thermometer.medium",
-                    color: .red
-                ) {
-                    editorRoute = EventEditorRoute(type: .temperature)
-                }
-                QuickActionButton(
-                    title: "Vaccine",
-                    subtitle: lastEventSubtitle(.vaccine, state: state),
-                    icon: "syringe.fill",
-                    color: .mint
-                ) {
-                    editorRoute = EventEditorRoute(type: .vaccine)
-                }
-                QuickActionButton(title: "Vet Visit", icon: "stethoscope", color: .indigo) {
-                    showingAppointments = true
-                }
-                QuickActionButton(
-                    title: "Custom",
-                    subtitle: lastEventSubtitle(.custom, state: state),
-                    icon: "sparkles",
-                    color: .purple
-                ) {
-                    editorRoute = EventEditorRoute(type: .custom)
+                    QuickActionButton(
+                        title: "Food",
+                        subtitle: lastEventSubtitle(.food, state: state),
+                        icon: "fork.knife",
+                        color: .orange
+                    ) {
+                        editorRoute = EventEditorRoute(type: .food)
+                    }
+                    QuickActionButton(
+                        title: "Water",
+                        subtitle: lastEventSubtitle(.water, state: state),
+                        icon: "drop.fill",
+                        color: .cyan
+                    ) {
+                        editorRoute = EventEditorRoute(type: .water)
+                    }
+                    QuickActionButton(
+                        title: "Start Walk",
+                        subtitle: lastEventSubtitle(.walk, state: state),
+                        icon: "figure.walk",
+                        color: .green
+                    ) {
+                        startTimer(.walk)
+                    }
+                    QuickActionButton(
+                        title: "Pee",
+                        subtitle: dogPottySubtitle(.pee, state: state),
+                        icon: "pawprint.fill",
+                        color: .teal
+                    ) {
+                        logDogPotty(.pee, accident: false)
+                    }
+                    QuickActionButton(
+                        title: "Poop",
+                        subtitle: dogPottySubtitle(.poop, state: state),
+                        icon: "pawprint.circle.fill",
+                        color: .teal
+                    ) {
+                        logDogPotty(.poop, accident: false)
+                    }
+                    QuickActionButton(
+                        title: "Accident",
+                        subtitle: dogPottySubtitle(.pee, state: state, accident: true),
+                        icon: "exclamationmark.triangle.fill",
+                        color: .orange
+                    ) {
+                        logDogPotty(.pee, accident: true)
+                    }
+                    QuickActionButton(
+                        title: "Rest",
+                        subtitle: lastEventSubtitle(.rest, state: state),
+                        icon: "bed.double.fill",
+                        color: .indigo
+                    ) {
+                        startTimer(.rest)
+                    }
+                    QuickActionButton(
+                        title: "Training",
+                        subtitle: lastEventSubtitle(.training, state: state),
+                        icon: "graduationcap.fill",
+                        color: .purple
+                    ) {
+                        startTimer(.training)
+                    }
+                    QuickActionButton(
+                        title: "Medicine",
+                        subtitle: lastEventSubtitle(.medicine, state: state),
+                        icon: "cross.case.fill",
+                        color: .red
+                    ) {
+                        editorRoute = EventEditorRoute(type: .medicine)
+                    }
                 }
             }
             .padding(14)
@@ -1166,10 +1129,85 @@ struct TodayView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         } header: {
-            AppSectionHeader(title: "Dog care")
+            AppSectionHeader(title: "Log something")
         } footer: {
             Text("Walk, training, and rest timers use the same Live Activity and widget controls. No GPS route tracking or location permission is used.")
                 .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func smartQuickActionsRow(_ actions: [QuickLogActionSnapshot]) -> some View {
+        let visibleActions = Array(actions.prefix(4))
+        if !visibleActions.isEmpty {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                    Text("Smart picks")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(visibleActions) { action in
+                            let tint = smartQuickActionColor(action.tintName)
+                            ZStack(alignment: .topTrailing) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: action.systemImage)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 30, height: 30)
+                                        .background(tint, in: Circle())
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(action.title)
+                                            .font(.subheadline.weight(.semibold))
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.82)
+                                        if let subtitle = action.subtitle {
+                                            Text(subtitle)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .minimumScaleFactor(0.82)
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.trailing, 12)
+                                .frame(width: 136, height: 48)
+                                .background(
+                                    Color.primary.opacity(0.045),
+                                    in: RoundedRectangle(cornerRadius: 14)
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 14))
+                                .onTapGesture {
+                                    performSmartQuickAction(action)
+                                }
+
+                                Button {
+                                    togglePinnedQuickAction(action)
+                                } label: {
+                                    Image(systemName: action.resolvedIsPinned ? "pin.fill" : "pin")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(action.resolvedIsPinned ? tint : .secondary)
+                                        .frame(width: 28, height: 28)
+                                        .background(.thinMaterial, in: Circle())
+                                        .contentShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(
+                                    Text(action.resolvedIsPinned ? "Unpin \(action.title)" : "Pin \(action.title)")
+                                )
+                                .zIndex(1)
+                            }
+                            .frame(width: 136, height: 48)
+                            .accessibilityElement(children: .contain)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1371,25 +1409,6 @@ struct TodayView: View {
         }
     }
 
-    private func logDogGrooming(_ groomingType: DogGroomingType) {
-        var details = DogEventDetails()
-        details.groomingType = groomingType
-        let now = Date()
-        let event = BabyEvent(
-            profileID: selectedProfileID,
-            type: .grooming,
-            startDate: now,
-            endDate: now,
-            caregiverName: activeCaregiverName
-        )
-        event.profileTypeSnapshot = .dog
-        event.dogDetails = details
-        modelContext.insert(event)
-        Task {
-            await eventChanged(event, refreshPrediction: false, waitForSystemIntegrations: true)
-        }
-    }
-
     private func addRoutineTemplate(_ template: CareRoutineTemplate) {
         let householdID = template.scope == .household
             ? HouseholdService.ensureDefaultHousehold(context: modelContext).id
@@ -1397,6 +1416,7 @@ struct TodayView: View {
         let routine = CareRoutineService.createRoutine(
             from: template,
             profileID: selectedProfileID,
+            profileType: profile?.profileType,
             householdID: householdID,
             existingRoutines: careRoutines,
             context: modelContext
@@ -1419,6 +1439,7 @@ struct TodayView: View {
             reminderTimeMinutesAfterMidnight: input.reminderTimeMinutesAfterMidnight,
             steps: input.steps,
             profileID: selectedProfileID,
+            profileType: profile?.profileType,
             householdID: householdID,
             existingRoutines: careRoutines,
             context: modelContext
@@ -1440,6 +1461,7 @@ struct TodayView: View {
             routine,
             input: input,
             profileID: selectedProfileID,
+            profileType: profile?.profileType,
             householdID: householdID,
             existingSteps: careRoutineSteps,
             context: modelContext
@@ -1739,16 +1761,6 @@ struct TodayView: View {
         }
     }
 
-    private func dogGroomingSubtitle(_ groomingType: DogGroomingType, state: TodayRenderState) -> String {
-        lastLoggedSubtitle(state: state) { event in
-            guard event.type == .grooming,
-                  event.dogDetails.groomingType == groomingType else {
-                return nil
-            }
-            return event.endDate ?? event.startDate
-        }
-    }
-
     private func lastLoggedSubtitle(
         state: TodayRenderState,
         dateForEvent: (BabyEvent) -> Date?
@@ -1786,6 +1798,107 @@ struct TodayView: View {
     private func startNursing(_ side: NursingSide) {
         if let event = startTimer(.nursing, nursingSide: side) {
             activeTimerToEdit = event
+        }
+    }
+
+    private func refreshWidgetSnapshot() {
+        WidgetSnapshotService.refresh(
+            profile: profile,
+            events: scopedEvents,
+            prediction: prediction
+        )
+    }
+
+    private func repeatLastEvent() {
+        guard let source = EventMutationService.quickRepeatCandidate(
+            in: scopedEvents,
+            profileID: selectedProfileID
+        ) else {
+            showRepeatFeedback(
+                title: "Nothing to repeat",
+                subtitle: "Create a quick log first.",
+                systemImage: "arrow.clockwise",
+                tint: .secondary
+            )
+            return
+        }
+
+        guard let event = EventMutationService.repeatEvent(
+                source,
+                caregiverName: activeCaregiverName,
+                profileID: selectedProfileID,
+                profileType: profile?.profileType,
+                context: modelContext
+              ) else {
+            return
+        }
+        showRepeatFeedback(
+            title: "Repeated \(source.type.displayName)",
+            subtitle: source.displayTitle,
+            systemImage: source.activityType?.systemImage ?? source.type.systemImage,
+            tint: source.type.tint
+        )
+        Task {
+            await eventChanged(
+                event,
+                refreshPrediction: event.type.affectsSleepPrediction,
+                waitForSystemIntegrations: true
+            )
+        }
+    }
+
+    private func showRepeatFeedback(
+        title: String,
+        subtitle: String?,
+        systemImage: String,
+        tint: Color
+    ) {
+        let feedback = RepeatFeedback(
+            title: title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            tint: tint
+        )
+        withAnimation(.snappy(duration: 0.22)) {
+            repeatFeedback = feedback
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.2))
+            guard repeatFeedback?.id == feedback.id else { return }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                repeatFeedback = nil
+            }
+        }
+    }
+
+    private func performSmartQuickAction(_ action: QuickLogActionSnapshot) {
+        deepLinkRouter.route(action.destinationURL(profileID: selectedProfileID))
+        handlePendingProfileSwitch()
+        handlePendingDeepLink()
+        handlePendingAppointmentDeepLink()
+        handlePendingPuppyGuideDeepLink()
+        handlePendingRoutineDeepLink()
+    }
+
+    private func togglePinnedQuickAction(_ action: QuickLogActionSnapshot) {
+        let isPinned = QuickLogActionPreferenceStore.togglePinnedAction(action.id, profileID: selectedProfileID)
+        withAnimation(.snappy(duration: 0.18)) {
+            pinnedQuickActionRevision += isPinned ? 1 : -1
+        }
+        refreshWidgetSnapshot()
+    }
+
+    private func smartQuickActionColor(_ tintName: String) -> Color {
+        switch tintName {
+        case "cyan": .cyan
+        case "green": .green
+        case "indigo": .indigo
+        case "orange": .orange
+        case "pink": .pink
+        case "purple": .purple
+        case "red": .red
+        case "teal": .teal
+        default: .accentColor
         }
     }
 
@@ -1915,6 +2028,8 @@ struct TodayView: View {
             editorRoute = EventEditorRoute(type: .diaper)
         case .logEvent(let type):
             editorRoute = EventEditorRoute(type: type)
+        case .repeatLast:
+            repeatLastEvent()
         }
     }
 
@@ -2151,6 +2266,51 @@ struct TodayView: View {
                 }
             }
         }
+    }
+}
+
+private struct RepeatFeedback: Identifiable {
+    let id = UUID()
+    var title: String
+    var subtitle: String?
+    var systemImage: String
+    var tint: Color
+}
+
+private struct RepeatFeedbackBanner: View {
+    let feedback: RepeatFeedback
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: feedback.systemImage)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(feedback.tint.gradient, in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feedback.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let subtitle = feedback.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(.white.opacity(0.26), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+        .accessibilityElement(children: .combine)
     }
 }
 
