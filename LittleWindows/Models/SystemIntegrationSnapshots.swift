@@ -197,6 +197,31 @@ struct FoodWidgetSnapshot: Codable, Hashable {
     )
 }
 
+struct QuickLogActionSnapshot: Codable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var subtitle: String?
+    var systemImage: String
+    var tintName: String
+    var destinationPath: String
+    var isPinned: Bool?
+
+    var resolvedIsPinned: Bool {
+        isPinned ?? false
+    }
+
+    func destination(profileID: UUID?) -> String {
+        if let profileID {
+            return "profile/\(profileID.uuidString)/\(destinationPath)"
+        }
+        return destinationPath
+    }
+
+    func destinationURL(profileID: UUID?) -> URL {
+        URL(string: "littlewindows://\(destination(profileID: profileID))")!
+    }
+}
+
 struct WidgetSnapshot: Codable, Hashable {
     var generatedAt: Date
     var profileID: UUID?
@@ -206,6 +231,7 @@ struct WidgetSnapshot: Codable, Hashable {
     var prediction: PredictionSnapshot?
     var todaySummary: TodaySummarySnapshot
     var food: FoodWidgetSnapshot?
+    var quickActions: [QuickLogActionSnapshot]?
 
     static let empty = WidgetSnapshot(
         generatedAt: Date(),
@@ -227,11 +253,16 @@ struct WidgetSnapshot: Codable, Hashable {
             dogPottyCount: nil,
             dogWalkSeconds: nil
         ),
-        food: .empty
+        food: .empty,
+        quickActions: []
     )
 
     var resolvedFood: FoodWidgetSnapshot {
         food ?? .empty
+    }
+
+    var resolvedQuickActions: [QuickLogActionSnapshot] {
+        quickActions ?? []
     }
 }
 

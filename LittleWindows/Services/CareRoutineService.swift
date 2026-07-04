@@ -83,7 +83,10 @@ enum CareRoutineService {
     static let defaultReminderMinutes = 18 * 60
 
     static func templates(for profileType: CareProfileType?) -> [CareRoutineTemplate] {
-        var values = householdTemplates
+        var values = householdTemplates.filter { template in
+            guard let profileType else { return true }
+            return template.profileType == nil || template.profileType == profileType
+        }
         if let profileType {
             values.append(contentsOf: profileTemplates(for: profileType))
         }
@@ -93,10 +96,15 @@ enum CareRoutineService {
     static func visibleRoutines(
         routines: [CareRoutine],
         profileID: UUID?,
+        profileType: CareProfileType?,
         householdID: UUID?
     ) -> [CareRoutine] {
         routines
             .filter { !$0.isArchived }
+            .filter { routine in
+                guard let routineProfileType = routine.profileType else { return true }
+                return routineProfileType == profileType
+            }
             .filter { routine in
                 switch routine.scope {
                 case .profile:
@@ -148,6 +156,7 @@ enum CareRoutineService {
     static func createRoutine(
         from template: CareRoutineTemplate,
         profileID: UUID?,
+        profileType: CareProfileType?,
         householdID: UUID?,
         existingRoutines: [CareRoutine],
         context: ModelContext
@@ -155,6 +164,7 @@ enum CareRoutineService {
         let nextOrder = (existingRoutines.map(\.sortOrder).max() ?? -1) + 1
         let routine = CareRoutine(
             scope: template.scope,
+            profileType: template.profileType ?? profileType,
             profileID: template.scope == .profile ? profileID : nil,
             householdID: template.scope == .household ? householdID : nil,
             title: template.title,
@@ -192,6 +202,7 @@ enum CareRoutineService {
         reminderTimeMinutesAfterMidnight: Int? = nil,
         steps: [CareRoutineStepInput] = [],
         profileID: UUID?,
+        profileType: CareProfileType?,
         householdID: UUID?,
         existingRoutines: [CareRoutine],
         context: ModelContext
@@ -203,6 +214,7 @@ enum CareRoutineService {
         let nextOrder = (existingRoutines.map(\.sortOrder).max() ?? -1) + 1
         let routine = CareRoutine(
             scope: scope,
+            profileType: profileType,
             profileID: scope == .profile ? profileID : nil,
             householdID: scope == .household ? householdID : nil,
             title: trimmed,
@@ -238,6 +250,7 @@ enum CareRoutineService {
         _ routine: CareRoutine,
         input: CareRoutineInput,
         profileID: UUID?,
+        profileType: CareProfileType?,
         householdID: UUID?,
         existingSteps: [CareRoutineStep],
         context: ModelContext
@@ -248,6 +261,7 @@ enum CareRoutineService {
         guard !validSteps.isEmpty else { return false }
 
         routine.scope = input.scope
+        routine.profileType = profileType
         routine.profileID = input.scope == .profile ? profileID : nil
         routine.householdID = input.scope == .household ? householdID : nil
         routine.title = trimmed
@@ -305,6 +319,7 @@ enum CareRoutineService {
         let nextOrder = (existingRoutines.map(\.sortOrder).max() ?? -1) + 1
         let copy = CareRoutine(
             scope: routine.scope,
+            profileType: routine.profileType,
             profileID: routine.profileID,
             householdID: routine.householdID,
             title: uniqueCopyTitle(for: routine.title, existingRoutines: existingRoutines),
@@ -695,7 +710,7 @@ private extension CareRoutineService {
             CareRoutineTemplate(
                 kind: .householdDaycarePrep,
                 scope: .household,
-                profileType: nil,
+                profileType: .child,
                 title: "Daycare prep",
                 notes: "Pack the usual items before leaving home.",
                 iconName: "backpack.fill",

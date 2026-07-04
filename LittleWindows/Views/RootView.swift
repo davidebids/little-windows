@@ -805,7 +805,11 @@ private struct FirstRunOnboardingView: View {
 #if DEBUG
 enum DebugSimulatorSmokeSeedService {
     static var isEnabled: Bool {
+        #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
+        #else
+        false
+        #endif
     }
 
     static let childProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!

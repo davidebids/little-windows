@@ -27,6 +27,52 @@ enum EventMutationService {
         )
     }
 
+    static func quickRepeatCandidate(
+        in events: [BabyEvent],
+        profileID: UUID?
+    ) -> BabyEvent? {
+        events
+            .filter { $0.matchesProfile(profileID) && canQuickRepeat($0) }
+            .max { $0.startDate < $1.startDate }
+    }
+
+    static func canQuickRepeat(_ event: BabyEvent) -> Bool {
+        guard !event.isTimerDraft else { return false }
+        switch event.type {
+        case .feed, .diaper, .medicine, .temperature, .activity,
+             .food, .water, .treat, .potty, .grooming, .symptom, .glucose:
+            return true
+        case .sleep, .nursing, .growth, .walk, .rest, .training, .vaccine, .custom:
+            return false
+        }
+    }
+
+    static func repeatEvent(
+        _ source: BabyEvent,
+        caregiverName: String?,
+        profileID: UUID?,
+        profileType: CareProfileType?,
+        context: ModelContext,
+        at date: Date = Date()
+    ) -> BabyEvent? {
+        guard canQuickRepeat(source) else { return nil }
+        let duration = source.duration ?? 0
+        let endDate = duration > 0 ? date.addingTimeInterval(duration) : date
+        let event = BabyEvent(
+            profileID: source.profileID ?? profileID,
+            type: source.type,
+            title: source.title,
+            startDate: date,
+            endDate: endDate,
+            caregiverName: caregiverName,
+            notes: source.notes
+        )
+        event.profileTypeSnapshot = source.profileTypeSnapshot ?? profileType
+        copyRepeatableDetails(from: source, to: event)
+        context.insert(event)
+        return event
+    }
+
     static func stopTimer(
         _ event: BabyEvent,
         context: ModelContext,
@@ -187,6 +233,33 @@ enum EventMutationService {
                 settings: settings
             )
         }
+    }
+
+    private static func copyRepeatableDetails(from source: BabyEvent, to event: BabyEvent) {
+        event.sleepKind = source.sleepKind
+        event.feedKind = source.feedKind
+        event.amountOz = source.amountOz
+        event.foodDescription = source.foodDescription
+        event.nursingSide = source.nursingSide
+        event.leftDurationSeconds = source.leftDurationSeconds
+        event.rightDurationSeconds = source.rightDurationSeconds
+        event.diaperKind = source.diaperKind
+        event.peeAmount = source.peeAmount
+        event.pooAmount = source.pooAmount
+        event.pooColor = source.pooColor
+        event.pooTexture = source.pooTexture
+        event.stoolColor = source.stoolColor
+        event.stoolTexture = source.stoolTexture
+        event.bookTitle = source.bookTitle
+        event.medicineName = source.medicineName
+        event.dose = source.dose
+        event.doseUnit = source.doseUnit
+        event.reason = source.reason
+        event.activityType = source.activityType
+        event.temperatureCelsius = source.temperatureCelsius
+        event.temperatureUnit = source.temperatureUnit
+        event.temperatureMethod = source.temperatureMethod
+        event.dogDetails = source.dogDetails
     }
 
     private static func replacePrediction(
