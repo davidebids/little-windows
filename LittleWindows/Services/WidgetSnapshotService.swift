@@ -130,11 +130,33 @@ enum WidgetSnapshotService {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [QuickLogActionSnapshot] {
-        let committedEvents = events
-            .filter { !$0.isTimerDraft && $0.matchesProfile(profileID) }
         let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
-        let recentEvents = committedEvents.filter { $0.startDate >= recentCutoff }
-        let activeTypes = Set(events.filter(\.isTimerDraft).map(\.type))
+        let candidates = quickActionCandidates(for: profileType)
+        var activeTypes: Set<EventType> = []
+        var stats = candidates.map { _ in (recentCount: 0, lastDate: Optional<Date>.none) }
+        var repeatSource: BabyEvent?
+
+        for event in events {
+            if event.isTimerDraft {
+                activeTypes.insert(event.type)
+                continue
+            }
+            guard event.matchesProfile(profileID) else { continue }
+
+            if EventMutationService.canQuickRepeat(event),
+               repeatSource.map({ event.startDate > $0.startDate }) ?? true {
+                repeatSource = event
+            }
+
+            for index in candidates.indices where candidates[index].matches(event) {
+                if event.startDate >= recentCutoff {
+                    stats[index].recentCount += 1
+                }
+                if stats[index].lastDate.map({ event.startDate > $0 }) ?? true {
+                    stats[index].lastDate = event.startDate
+                }
+            }
+        }
         var pinnedOrder: [String: Int] = [:]
         for (index, actionID) in pinnedActionIDs.enumerated() where pinnedOrder[actionID] == nil {
             pinnedOrder[actionID] = index
@@ -153,12 +175,12 @@ enum WidgetSnapshotService {
             return (candidate, score)
         }
 
-        var scored = quickActionCandidates(for: profileType).map { candidate in
+        var scored = candidates.enumerated().map { index, candidate in
             var score = candidate.baseScore
-            let matching = recentEvents.filter(candidate.matches)
-            score += min(Double(matching.count), 8) * 0.28
+            let signal = stats[index]
+            score += min(Double(signal.recentCount), 8) * 0.28
 
-            if let last = committedEvents.filter(candidate.matches).map(\.startDate).max() {
+            if let last = signal.lastDate {
                 let hours = now.timeIntervalSince(last) / 3_600
                 switch hours {
                 case ..<0.33:
@@ -183,10 +205,7 @@ enum WidgetSnapshotService {
             return pinAdjusted(candidate, score: score)
         }
 
-        if let repeatSource = EventMutationService.quickRepeatCandidate(
-            in: committedEvents,
-            profileID: profileID
-        ) {
+        if let repeatSource {
             let repeatAction = QuickLogActionSnapshot(
                 id: "repeat-last",
                 title: "Repeat",

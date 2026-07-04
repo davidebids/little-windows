@@ -126,6 +126,17 @@ struct TodayView: View {
         )
         recordDescriptor.fetchLimit = 120
         _records = Query(recordDescriptor)
+
+        let routineRunCutoff = calendar.date(byAdding: .day, value: -14, to: todayStart) ?? todayStart
+        let activeRoutineRunState = CareRoutineRunState.active.rawValue
+        var routineRunDescriptor = FetchDescriptor<CareRoutineRun>(
+            predicate: #Predicate<CareRoutineRun> { run in
+                run.stateRawValue == activeRoutineRunState || run.startedAt >= routineRunCutoff
+            },
+            sortBy: [SortDescriptor(\CareRoutineRun.startedAt, order: .reverse)]
+        )
+        routineRunDescriptor.fetchLimit = 120
+        _careRoutineRuns = Query(routineRunDescriptor)
     }
     private var profile: BabyProfile? {
         profileService.selectedProfile(in: profiles)
@@ -249,6 +260,9 @@ struct TodayView: View {
     private var renderState: TodayRenderState {
         let profile = profile
         let profileID = profile?.id
+        let now = Date()
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: now)
         let scopedEvents = allEvents.filter { $0.matchesProfile(profileID) }
         let scopedRecords = records.filter { $0.matchesProfile(profileID) }
         let scopedAppointments = appointments.filter { $0.matchesProfile(profileID) }
@@ -287,61 +301,79 @@ struct TodayView: View {
         } else {
             shouldShowPuppyGuideCard = false
         }
-        let todayEvents = scopedEvents.filter {
-            !$0.isTimerDraft && Calendar.current.isDateInToday($0.startDate)
+        var todayEvents: [BabyEvent] = []
+        var activeEvents: [BabyEvent] = []
+        var latestCompletedSleepEnd: Date?
+        var latestStoppedDraftSleepEnd: Date?
+        var dogLatestEvents: [EventType: BabyEvent] = [:]
+        var latestPeeEvent: BabyEvent?
+        var latestPoopEvent: BabyEvent?
+
+        for event in scopedEvents {
+            if event.isTimerDraft {
+                activeEvents.append(event)
+                if !event.isTimerRunning, event.updatedAt <= now, latestStoppedDraftSleepEnd.map({ event.updatedAt > $0 }) ?? true {
+                    latestStoppedDraftSleepEnd = event.updatedAt
+                }
+                continue
+            }
+
+            if event.startDate >= todayStart, calendar.isDate(event.startDate, inSameDayAs: now) {
+                todayEvents.append(event)
+            }
+
+            if event.type == .sleep,
+               let endDate = event.endDate,
+               endDate <= now,
+               latestCompletedSleepEnd.map({ endDate > $0 }) ?? true {
+                latestCompletedSleepEnd = endDate
+            }
+
+            if profile?.profileType == .dog {
+                switch event.type {
+                case .food, .water, .walk, .medicine:
+                    if dogLatestEvents[event.type].map({ event.startDate > $0.startDate }) ?? true {
+                        dogLatestEvents[event.type] = event
+                    }
+                case .potty:
+                    if event.dogDetails.pottyType == .pee || event.dogDetails.pottyType == .both,
+                       latestPeeEvent.map({ event.startDate > $0.startDate }) ?? true {
+                        latestPeeEvent = event
+                    }
+                    if event.dogDetails.pottyType == .poop || event.dogDetails.pottyType == .both,
+                       latestPoopEvent.map({ event.startDate > $0.startDate }) ?? true {
+                        latestPoopEvent = event
+                    }
+                default:
+                    break
+                }
+            }
         }
-        let activeEvents = scopedEvents.filter(\.isTimerDraft).sorted { $0.startDate < $1.startDate }
+        activeEvents.sort { $0.startDate < $1.startDate }
         let prediction = PredictionTuningService.currentPrediction(
             profile: profile,
             events: scopedEvents,
             records: scopedRecords,
             settings: predictionSettings
         )
-        let now = Date()
         let soon = now.addingTimeInterval(3 * 24 * 60 * 60)
         let relevantAppointments = scopedAppointments
-            .filter { !$0.isCompleted && $0.startDate >= Calendar.current.startOfDay(for: now) && $0.startDate <= soon }
+            .filter { !$0.isCompleted && $0.startDate >= todayStart && $0.startDate <= soon }
             .sorted { $0.startDate < $1.startDate }
         let runningSleepTimer = activeEvents.first {
             $0.type == .sleep && $0.isTimerRunning
         }
-        let completedSleepEnd = scopedEvents
-            .filter { $0.type == .sleep && !$0.isTimerDraft }
-            .compactMap(\.endDate)
-            .filter { $0 <= now }
-            .max()
-        let stoppedDraftSleepEnd = activeEvents
-            .filter { $0.type == .sleep && !$0.isTimerRunning }
-            .map(\.updatedAt)
-            .filter { $0 <= now }
-            .max()
         let awakeSinceDate = runningSleepTimer == nil
-            ? [completedSleepEnd, stoppedDraftSleepEnd].compactMap { $0 }.max()
+            ? [latestCompletedSleepEnd, latestStoppedDraftSleepEnd].compactMap { $0 }.max()
             : nil
         var dogLastEventTitles: [EventType: String] = [:]
         var dogPottyTitles: [DogPottyType: String] = [:]
         if profile?.profileType == .dog {
-            let committedEvents = scopedEvents.filter { !$0.isTimerDraft }
             for type in [EventType.food, .water, .walk, .medicine] {
-                dogLastEventTitles[type] = committedEvents
-                    .filter { $0.type == type }
-                    .max { $0.startDate < $1.startDate }?
-                    .displayTitle ?? "Not logged"
+                dogLastEventTitles[type] = dogLatestEvents[type]?.displayTitle ?? "Not logged"
             }
-            dogPottyTitles[.pee] = committedEvents
-                .filter {
-                    $0.type == .potty
-                        && ($0.dogDetails.pottyType == .pee || $0.dogDetails.pottyType == .both)
-                }
-                .max { $0.startDate < $1.startDate }?
-                .displayTitle ?? "Not logged"
-            dogPottyTitles[.poop] = committedEvents
-                .filter {
-                    $0.type == .potty
-                        && ($0.dogDetails.pottyType == .poop || $0.dogDetails.pottyType == .both)
-                }
-                .max { $0.startDate < $1.startDate }?
-                    .displayTitle ?? "Not logged"
+            dogPottyTitles[.pee] = latestPeeEvent?.displayTitle ?? "Not logged"
+            dogPottyTitles[.poop] = latestPoopEvent?.displayTitle ?? "Not logged"
         }
         _ = pinnedQuickActionRevision
         let pinnedQuickActionIDs = QuickLogActionPreferenceStore.pinnedActionIDs(profileID: profileID)
@@ -768,7 +800,6 @@ struct TodayView: View {
             }
         }
         .task {
-            await notificationManager.configure()
             _ = HouseholdService.ensureDefaultHousehold(context: modelContext)
             _ = profileService.ensureSelection(in: profiles)
             refreshActiveSleepPlan()
@@ -778,7 +809,7 @@ struct TodayView: View {
             handlePendingPuppyGuideDeepLink()
             handlePendingRoutineDeepLink()
             await syncActiveSleepPlanWakeAlert()
-            refreshWidgetSnapshot()
+            scheduleWidgetSnapshotRefresh()
         }
     }
 
@@ -1807,6 +1838,13 @@ struct TodayView: View {
             events: scopedEvents,
             prediction: prediction
         )
+    }
+
+    private func scheduleWidgetSnapshotRefresh() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            refreshWidgetSnapshot()
+        }
     }
 
     private func repeatLastEvent() {

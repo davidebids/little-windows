@@ -2,14 +2,27 @@ import Foundation
 import SwiftData
 
 enum SampleData {
+    private static let legacyGrowthMigrationCompletedKey = "startup.legacyGrowthMigrationCompleted"
+    private static let profileScopedMigrationCompletedKey = "startup.profileScopedMigrationCompleted"
+
     static let defaultBirthDate = Calendar.current.date(
         from: DateComponents(year: 2026, month: 1, day: 31)
     ) ?? Date()
 
     @MainActor
     static func seedIfNeeded(in context: ModelContext) async {
-        _ = try? LegacyTrackerGrowthMigration.migrate(in: context)
-        ProfileMigrationService.ensureProfilesAndAssignments(context: context)
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: legacyGrowthMigrationCompletedKey) {
+            _ = try? LegacyTrackerGrowthMigration.migrate(in: context)
+            defaults.set(true, forKey: legacyGrowthMigrationCompletedKey)
+        }
+        if !defaults.bool(forKey: profileScopedMigrationCompletedKey) {
+            ProfileMigrationService.ensureProfilesAndAssignments(context: context)
+            defaults.set(true, forKey: profileScopedMigrationCompletedKey)
+        } else {
+            let profiles = (try? context.fetch(FetchDescriptor<CareProfile>())) ?? []
+            _ = ProfileService.shared.ensureSelection(in: profiles)
+        }
         FoodHomeBootstrapService.seedIfNeeded(context: context)
     }
 

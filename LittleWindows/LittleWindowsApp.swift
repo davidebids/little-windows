@@ -28,26 +28,31 @@ struct LittleWindowsApp: App {
         WindowGroup {
             RootView()
                 .task {
-                    await NotificationManager.shared.configure()
                     await SampleData.seedIfNeeded(in: modelContainer.mainContext)
-                    ProfileMigrationService.ensureProfilesAndAssignments(
-                        context: modelContainer.mainContext
-                    )
                     if PersistenceService.isICloudSyncEnabled() {
                         CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)
                     }
-                    CloudKitSharingService.processPendingAcceptedShareIfNeeded()
-                    if PersistenceService.familySyncMode() == .sharedFamilySync {
-                        _ = try? await CloudKitSharingService.shared.syncNow(
-                            context: modelContainer.mainContext,
-                            reason: .launch
-                        )
-                    }
-                    await restoreSystemIntegrations()
                     DeepLinkRouter.shared.isDataReady = true
+                    scheduleLaunchMaintenance()
                 }
         }
         .modelContainer(modelContainer)
+    }
+
+    @MainActor
+    private func scheduleLaunchMaintenance() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(650))
+            await NotificationManager.shared.configure()
+            CloudKitSharingService.processPendingAcceptedShareIfNeeded()
+            if PersistenceService.familySyncMode() == .sharedFamilySync {
+                _ = try? await CloudKitSharingService.shared.syncNow(
+                    context: modelContainer.mainContext,
+                    reason: .launch
+                )
+            }
+            await restoreSystemIntegrations()
+        }
     }
 
     @MainActor
