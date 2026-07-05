@@ -6,17 +6,17 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 
 - Active Timer widget: small, medium, Lock Screen rectangular, and Lock Screen inline.
 - Next Sleep Window widget: small, medium, and Lock Screen rectangular.
-- Today Summary widget: medium.
-- Quick Log widget: medium, backed by ranked smart actions and user-pinned actions from Today.
+- Today Summary widget: medium, including unified child care summary metrics for sleep, feeding, nursing, pumping, diapers, potty, medicine, temperature, growth, and activities when present.
+- Quick Log widget: medium, backed by profile-scoped ranked smart actions, hidden-category preferences, and user-pinned actions from Today.
 - Shopping List widget: small and medium, backed by the Food & Home shopping snapshot.
 - Food Quick Add widget: medium, opens quick add and usual shopping lists in the app.
 - Live Activity with Lock Screen, Dynamic Island compact, Dynamic Island minimal, and Dynamic Island expanded presentations.
 - App Intents for timer control, quick logging, app navigation, and night-light presets.
 - App Shortcuts for repeat-last logging, high-frequency quick logging, timer control, and dog care.
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
-- Local notifications for sleep windows, appointment reminders, monthly guide reminders, and user-created Food & Home reminders.
+- Local notifications for sleep windows, routine reminders, appointment reminders, monthly guide reminders, and user-created Food & Home reminders.
 
-The primary Live Activity priority is Sleep, Nursing, Feed, Tummy Time, Reading, then Bath. When another timer is active, the surface displays a `+1 more active` count.
+The primary Live Activity priority is Sleep, Nursing, Pumping, Feed, Tummy Time, Reading, then Bath. When another timer is active, the surface displays a `+1 more active` count.
 
 ## Xcode capability setup
 
@@ -66,9 +66,11 @@ The extension target includes:
 
 ## Action behavior
 
-Timer data, event history, appointments, profiles, predictions, and settings remain in the app's SwiftData store. Widgets and Live Activities receive lightweight snapshots through the App Group.
+Timer data, event history, appointments, profiles, predictions, routines, category preferences, and settings remain in the app's SwiftData store. Widgets and Live Activities receive lightweight snapshots through the App Group.
 
 When Family Sync is enabled, SwiftData uses a local cache and `CloudKitSharingService` moves the shared family dataset through a CloudKit shared record. Accepted caregivers read and write the same shared data, while widgets and Live Activities continue to refresh from each device's local cache.
+
+Today action customization is stored per profile. Hidden care categories are excluded from Today quick actions and the Quick Log widget, but existing events remain in history, reports, backup/import, and summary snapshots.
 
 System action buttons:
 
@@ -139,6 +141,8 @@ Quick-log routes:
 ```text
 littlewindows://quick-log/sleep
 littlewindows://quick-log/feed
+littlewindows://quick-log/pumping
+littlewindows://quick-log/child-potty
 littlewindows://quick-log/repeat-last
 littlewindows://quick-log/nursing-left
 littlewindows://quick-log/nursing-right
@@ -155,6 +159,8 @@ littlewindows://quick-log/walk
 littlewindows://quick-log/training
 littlewindows://quick-log/medicine
 ```
+
+Child quick-log routes use the active child profile when possible. `quick-log/pumping` starts a pumping timer, `quick-log/child-potty` creates a child potty log, and `quick-log/repeat-last` ignores hidden categories for the active profile.
 
 Night-light routes:
 
@@ -207,12 +213,13 @@ The `LittleWindowsShortcuts` provider exposes the iOS maximum of 10 promoted sho
 Little Windows uses local notifications for:
 
 - Sleep-window alerts, gated by notification permission, lead time, nap/bedtime toggles, and minimum confidence.
+- Routine reminders for household or profile routines shown on Today.
 - Appointment reminders with selectable lead times.
 - Monthly guide reminders that fire at most once per monthly age guide.
 - Food & Home reminders created by the user for shopping, meal prep, or custom food tasks.
 - Family Sync shared activity alerts after CloudKit silent pushes wake the app, download the shared dataset, and detect another caregiver's care, appointment, milestone, shopping, inventory, meal-prep, or food-reminder change.
 
-Notification scheduling is refreshed after relevant event mutations, prediction updates, appointment changes, guide-read-state changes, and Food & Home reminder changes. Food & Home shopping-list widgets refresh from lightweight App Group snapshots; the widget extension opens the app for edits rather than writing SwiftData directly.
+Notification scheduling is refreshed after relevant event mutations, prediction updates, routine changes, appointment changes, guide-read-state changes, and Food & Home reminder changes. Food & Home shopping-list widgets refresh from lightweight App Group snapshots; the widget extension opens the app for edits rather than writing SwiftData directly.
 
 Family Sync creates a CloudKit record-zone subscription for the shared family zone when a share is created or accepted, and refreshes it during shared sync. The CloudKit push itself is silent; Little Windows posts a local shared-activity notification only after the remote dataset imports and the local diff identifies a user-facing change. These alerts can be disabled from **Settings -> Family Sync -> Shared activity alerts**.
 
@@ -227,15 +234,18 @@ Family Sync creates a CloudKit record-zone subscription for the shared family zo
 7. On a Dynamic Island device, verify compact, minimal, and expanded presentations.
 8. Tap **Stop**. The app should open and immediately stop the selected timer. The Live Activity should switch to a stopped state and offer **Resume**.
 9. For nursing, tap **Switch** and confirm the active side changes while elapsed time is retained.
-10. Long-press a Today smart pick, pin it, refresh the Quick Log widget, and confirm the pinned action appears first with a pin indicator.
-11. Run the Repeat Last Log shortcut or widget action after a repeatable log and confirm the app creates a new completed log at the current time.
-12. Add a Control Center control and verify it opens the app and applies the intended action.
-13. Start diaper-change and soothing night-light presets from shortcuts or controls.
-14. Create an appointment and verify selected reminder lead times.
-15. Enable monthly guide reminders and verify scheduling after guide state changes.
-14. Create a Food & Home reminder and verify it opens the relevant Food screen or item.
-15. With two signed devices in the same Family Sync share, allow notifications, background one device, make a shared care or shopping-list change on the other device, and verify the backgrounded device receives a shared-activity alert that opens the relevant Little Windows screen.
-16. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
+10. Log or start child feed, pumping, child potty, diaper, temperature, and activity actions from Today, then confirm the same details appear in History and the Today Summary widget where applicable.
+11. Customize Today actions for a child profile, hide one category, refresh the Quick Log widget, and confirm hidden categories and hidden-category repeat sources are omitted only for that profile.
+12. Long-press a Today smart pick, pin it, refresh the Quick Log widget, and confirm the pinned action appears first with a pin indicator.
+13. Run the Repeat Last Log shortcut or widget action after a repeatable visible log and confirm the app creates a new completed log at the current time.
+14. Open Routines from Today or `littlewindows://routines`, create or edit a routine, verify the explicit **Done** button dismisses the manager, and confirm routine reminders schedule when enabled.
+15. Add a Control Center control and verify it opens the app and applies the intended action.
+16. Start diaper-change and soothing night-light presets from shortcuts or controls.
+17. Create an appointment and verify selected reminder lead times.
+18. Enable monthly guide reminders and verify scheduling after guide state changes.
+19. Create a Food & Home reminder and verify it opens the relevant Food screen or item.
+20. With two signed devices in the same Family Sync share, allow notifications, background one device, make a shared care or shopping-list change on the other device, and verify the backgrounded device receives a shared-activity alert that opens the relevant Little Windows screen.
+21. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
 
 Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit sync, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
 

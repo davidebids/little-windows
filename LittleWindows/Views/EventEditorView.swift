@@ -21,11 +21,19 @@ struct EventEditorView: View {
     @State private var notes: String
     @State private var sleepKind: SleepKind
     @State private var feedKind: FeedKind
-    @State private var amountOz: Double
+    @State private var amountOzText: String
     @State private var foodDescription: String
+    @State private var solidReaction: SolidReaction
+    @State private var solidTexture: SolidTexture
+    @State private var solidFeedingStyle: SolidFeedingStyle
+    @State private var solidAllergenExposure: Bool
+    @State private var solidSensitivityObserved: Bool
     @State private var nursingSide: NursingSide
     @State private var nursingMinutes: Double
     @State private var diaperKind: DiaperKind
+    @State private var childPottyKind: ChildPottyKind
+    @State private var childPottyLocation: ChildPottyLocation
+    @State private var childPottyAccident: Bool
     @State private var peeAmount: DiaperAmount
     @State private var pooAmount: DiaperAmount
     @State private var pooColor: PooColor
@@ -104,11 +112,19 @@ struct EventEditorView: View {
         _notes = State(initialValue: event?.notes ?? "")
         _sleepKind = State(initialValue: event?.sleepKind ?? .nap)
         _feedKind = State(initialValue: event?.feedKind ?? .bottle)
-        _amountOz = State(initialValue: event?.amountOz ?? 0)
+        _amountOzText = State(initialValue: Self.amountText(for: event?.amountOz))
         _foodDescription = State(initialValue: event?.foodDescription ?? "")
+        _solidReaction = State(initialValue: event?.solidReaction ?? .unknown)
+        _solidTexture = State(initialValue: event?.solidTexture ?? .unknown)
+        _solidFeedingStyle = State(initialValue: event?.solidFeedingStyle ?? .unknown)
+        _solidAllergenExposure = State(initialValue: event?.solidAllergenExposure ?? false)
+        _solidSensitivityObserved = State(initialValue: event?.solidSensitivityObserved ?? false)
         _nursingSide = State(initialValue: event?.nursingSide ?? .left)
         _nursingMinutes = State(initialValue: (event?.totalNursingDurationSeconds ?? 0) / 60)
         _diaperKind = State(initialValue: event?.diaperKind ?? .wet)
+        _childPottyKind = State(initialValue: event?.childPottyKind ?? .pee)
+        _childPottyLocation = State(initialValue: event?.childPottyLocation ?? .pottyChair)
+        _childPottyAccident = State(initialValue: event?.childPottyAccident ?? false)
         _peeAmount = State(initialValue: event?.peeAmount ?? .unknown)
         _pooAmount = State(initialValue: event?.pooAmount ?? .unknown)
         _pooColor = State(initialValue: event?.pooColor ?? .unknown)
@@ -213,12 +229,37 @@ struct EventEditorView: View {
         )
     }
 
+    private var positiveAmountOz: Double? {
+        Self.positiveAmount(from: amountOzText)
+    }
+
+    private static func amountText(for amount: Double?) -> String {
+        guard let amount, amount > 0 else { return "" }
+        return amount.formatted(.number.precision(.fractionLength(0...2)))
+    }
+
+    private static func positiveAmount(from text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = .current
+        if let amount = formatter.number(from: trimmed)?.doubleValue, amount > 0 {
+            return amount
+        }
+
+        let normalized = trimmed.replacingOccurrences(of: ",", with: ".")
+        guard let amount = Double(normalized), amount > 0 else { return nil }
+        return amount
+    }
+
     var body: some View {
         Form {
             Section {
                 Picker("Type", selection: $type) {
                     ForEach(EventType.cases(for: activeProfileType)) { type in
-                        Label(type.displayName, systemImage: type.systemImage).tag(type)
+                        Label(type.displayName, systemImage: type.systemImage(for: activeProfileType)).tag(type)
                     }
                 }
                 if type == .custom || (type == .activity && activityType == .custom) {
@@ -327,10 +368,38 @@ struct EventEditorView: View {
                     ForEach(FeedKind.allCases) { Text($0.displayName).tag($0) }
                 }
                 if feedKind == .bottle {
-                    TextField("Amount (oz)", value: $amountOz, format: .number)
-                        .keyboardType(.decimalPad)
+                    LabeledContent("Amount") {
+                        TextField("Optional", text: $amountOzText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
                 TextField("Food or details", text: $foodDescription)
+                if feedKind == .solid {
+                    Picker("Style", selection: $solidFeedingStyle) {
+                        ForEach(SolidFeedingStyle.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Picker("Texture", selection: $solidTexture) {
+                        ForEach(SolidTexture.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Picker("Reaction", selection: $solidReaction) {
+                        ForEach(SolidReaction.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Toggle("Common allergen exposure", isOn: $solidAllergenExposure)
+                    Toggle("Sensitivity observed", isOn: $solidSensitivityObserved)
+                    Text("Food reactions are notes for care conversations only. Contact your pediatrician for allergy or medical concerns.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .pumping:
+            Section("Pumping") {
+                LabeledContent("Amount pumped") {
+                    TextField("Optional", text: $amountOzText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                TextField("Details", text: $foodDescription)
             }
         case .nursing:
             Section("Nursing") {
@@ -540,32 +609,61 @@ struct EventEditorView: View {
                 }
             }
         case .potty:
-            Section("Potty") {
-                Picker("Type", selection: $dogPottyType) {
-                    ForEach(DogPottyType.allCases) { Text($0.displayName).tag($0) }
+            if isDogProfile {
+                Section("Potty") {
+                    Picker("Type", selection: $dogPottyType) {
+                        ForEach(DogPottyType.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Location", selection: $dogPottyLocation) {
+                        ForEach(DogPottyLocation.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Toggle("Accident", isOn: $dogPottyAccident)
+                    if dogPottyType.hasPee {
+                        Picker("Pee amount", selection: $dogPeeAmount) {
+                            ForEach(DiaperAmount.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        Picker("Pee color", selection: $dogPeeColor) {
+                            ForEach(DogPeeColor.allCases) { Text($0.displayName).tag($0) }
+                        }
+                    }
+                    if dogPottyType.hasPoop {
+                        Picker("Poop amount", selection: $dogPoopAmount) {
+                            ForEach(DiaperAmount.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        Picker("Stool quality", selection: $dogStoolQuality) {
+                            ForEach(DogStoolQuality.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        Picker("Poop color", selection: $dogPoopColor) {
+                            ForEach(DogPoopColor.allCases) { Text($0.displayName).tag($0) }
+                        }
+                    }
                 }
-                .pickerStyle(.segmented)
-                Picker("Location", selection: $dogPottyLocation) {
-                    ForEach(DogPottyLocation.allCases) { Text($0.displayName).tag($0) }
-                }
-                Toggle("Accident", isOn: $dogPottyAccident)
-                if dogPottyType.hasPee {
-                    Picker("Pee amount", selection: $dogPeeAmount) {
-                        ForEach(DiaperAmount.allCases) { Text($0.displayName).tag($0) }
+            } else {
+                Section("Potty") {
+                    Picker("Type", selection: $childPottyKind) {
+                        ForEach(ChildPottyKind.allCases) { Text($0.displayName).tag($0) }
                     }
-                    Picker("Pee color", selection: $dogPeeColor) {
-                        ForEach(DogPeeColor.allCases) { Text($0.displayName).tag($0) }
+                    .pickerStyle(.segmented)
+                    Picker("Location", selection: $childPottyLocation) {
+                        ForEach(ChildPottyLocation.allCases) { Text($0.displayName).tag($0) }
                     }
-                }
-                if dogPottyType.hasPoop {
-                    Picker("Poop amount", selection: $dogPoopAmount) {
-                        ForEach(DiaperAmount.allCases) { Text($0.displayName).tag($0) }
+                    Toggle("Accident", isOn: $childPottyAccident)
+                    if childPottyKind.hasPee {
+                        Picker("Pee amount", selection: $peeAmount) {
+                            ForEach(DiaperAmount.allCases) { Text($0.displayName).tag($0) }
+                        }
                     }
-                    Picker("Stool quality", selection: $dogStoolQuality) {
-                        ForEach(DogStoolQuality.allCases) { Text($0.displayName).tag($0) }
-                    }
-                    Picker("Poop color", selection: $dogPoopColor) {
-                        ForEach(DogPoopColor.allCases) { Text($0.displayName).tag($0) }
+                    if childPottyKind.hasPoo {
+                        Picker("Poo amount", selection: $pooAmount) {
+                            ForEach(DiaperAmount.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        Picker("Color", selection: $pooColor) {
+                            ForEach(PooColor.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        Picker("Texture", selection: $pooTexture) {
+                            ForEach(PooTexture.allCases) { Text($0.displayName).tag($0) }
+                        }
                     }
                 }
             }
@@ -780,8 +878,19 @@ struct EventEditorView: View {
         event.notes = notes.nilIfBlank
         event.sleepKind = type == .sleep ? sleepKind : nil
         event.feedKind = type == .feed ? feedKind : nil
-        event.amountOz = type == .feed && feedKind == .bottle && amountOz > 0 ? amountOz : nil
+        event.amountOz = type == .feed && feedKind == .bottle ? positiveAmountOz : nil
+        if type == .pumping {
+            event.amountOz = positiveAmountOz
+        }
         event.foodDescription = type == .feed ? foodDescription.nilIfBlank : nil
+        if type == .pumping {
+            event.foodDescription = foodDescription.nilIfBlank
+        }
+        event.solidReaction = type == .feed && feedKind == .solid ? solidReaction : nil
+        event.solidTexture = type == .feed && feedKind == .solid ? solidTexture : nil
+        event.solidFeedingStyle = type == .feed && feedKind == .solid ? solidFeedingStyle : nil
+        event.solidAllergenExposure = type == .feed && feedKind == .solid ? solidAllergenExposure : nil
+        event.solidSensitivityObserved = type == .feed && feedKind == .solid ? solidSensitivityObserved : nil
         if !wasActiveTimer {
             event.nursingSide = type == .nursing ? nursingSide : nil
             event.leftDurationSeconds = type == .nursing && nursingSide == .left && nursingMinutes > 0
@@ -792,10 +901,13 @@ struct EventEditorView: View {
                 : nil
         }
         event.diaperKind = type == .diaper ? diaperKind : nil
-        event.peeAmount = type == .diaper && diaperKind.hasPee ? peeAmount : nil
-        event.pooAmount = type == .diaper && diaperKind.hasPoo ? pooAmount : nil
-        event.pooColor = type == .diaper && diaperKind.hasPoo ? pooColor : nil
-        event.pooTexture = type == .diaper && diaperKind.hasPoo ? pooTexture : nil
+        event.childPottyKind = type == .potty && !isDogProfile ? childPottyKind : nil
+        event.childPottyLocation = type == .potty && !isDogProfile ? childPottyLocation : nil
+        event.childPottyAccident = type == .potty && !isDogProfile ? childPottyAccident : nil
+        event.peeAmount = (type == .diaper && diaperKind.hasPee) || (type == .potty && !isDogProfile && childPottyKind.hasPee) ? peeAmount : nil
+        event.pooAmount = (type == .diaper && diaperKind.hasPoo) || (type == .potty && !isDogProfile && childPottyKind.hasPoo) ? pooAmount : nil
+        event.pooColor = (type == .diaper && diaperKind.hasPoo) || (type == .potty && !isDogProfile && childPottyKind.hasPoo) ? pooColor : nil
+        event.pooTexture = (type == .diaper && diaperKind.hasPoo) || (type == .potty && !isDogProfile && childPottyKind.hasPoo) ? pooTexture : nil
         event.stoolColor = nil
         event.stoolTexture = nil
         event.bookTitle = nil

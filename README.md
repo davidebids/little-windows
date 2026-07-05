@@ -2,7 +2,7 @@
 
 Little Windows is a local-first SwiftUI care tracker for children and dogs. It targets iOS 17+, stores the main history with SwiftData, uses App Group snapshots for widgets and Live Activities, and can sync signed builds through Apple-native CloudKit.
 
-The app is built around dense daily care workflows: quick logging, active timers, sleep planning, reports, guides, appointments, Food & Home lists, and private or shared iCloud-backed data modes.
+The app is built around dense daily care workflows: quick logging, active timers, customizable Today actions, sleep planning, routines, reports, guides, appointments, Food & Home lists, and private or shared iCloud-backed data modes.
 
 ## Run
 
@@ -14,7 +14,7 @@ First launch presents onboarding for a new empty store. It does not create defau
 
 ## App Areas
 
-- Today: profile-scoped care logging, household and profile routines, active timers, quick actions, current prediction, and system integration refresh.
+- Today: profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep mini-plans, and system integration refresh.
 - Profiles: child and dog profiles with switching, colors, archival support, dog-specific details, and optional profile photos.
 - History and Reports: day and list history, event editing, filtering, summaries, charts, and prediction accuracy review.
 - Milestones and Memories: profile-scoped entries, age prompts, categories, photo attachments, and backup support.
@@ -26,11 +26,31 @@ First launch presents onboarding for a new empty store. It does not create defau
 
 ## Care Logging
 
-Child logs cover sleep, feed, nursing, diaper, medicine, growth, temperature, activity, and custom events.
+Child logs cover sleep, feed, nursing, pumping, diaper, potty, medicine, growth, temperature, activity, and custom events. Feed logs distinguish bottle, solids, and other feeds; bottle and pumping entries support optional ounce amounts; and solid-food feed logs can include feeding style, texture, reaction, common-allergen exposure, and sensitivity notes.
+
+The child care form keeps pumping, solids, potty, and the rest of the child activity set in the same event editing surface. Structured details include:
+
+- Sleep kind, feed kind, nursing side, diaper kind, child potty kind/location, medicine dose/unit, temperature/unit/method, growth measurements, and activity type.
+- Solid-food style options for puree/spoon-fed, baby-led weaning, combination, other, and unknown.
+- Solid texture, reaction, allergen exposure, sensitivity notes, and general notes.
+- Child potty pee/poo/both details with location, amount, color, texture, and notes where relevant.
 
 Dog logs cover food, water, treat, potty, walk, rest, training, grooming, medicine, symptoms, growth, temperature, vaccines, glucose, and custom events.
 
-Sleep, feed, nursing, activity, walk, rest, training, grooming, and custom logs can run as active timers. Stopped timer drafts can be reviewed, resumed, saved, or discarded before they enter the permanent history.
+Sleep, feed, nursing, pumping, activity, walk, rest, training, grooming, and custom logs can run as active timers. Stopped timer drafts can be reviewed, resumed, saved, or discarded before they enter the permanent history.
+
+Quick repeat and backup/import preserve the production care details above, including pumping amounts, solid feeding style, diaper/potty details, medicine details, growth values, temperature readings, and activity metadata.
+
+## Today And Routines
+
+Today is the main operational screen for care. It includes:
+
+- A profile-aware Log Something section with child and dog actions appropriate to the active profile.
+- Smart quick actions ranked from recent history, active timers, prediction context, and user-pinned actions.
+- Per-profile Today action customization so caregivers can hide categories they do not use without affecting history, reports, backup/import, widgets, or other profiles.
+- Active timer cards and saved timer drafts for review before logging.
+- Household and profile-scoped routines, routine templates, custom routine steps, start/skip/complete flows, reminders, duplication, reordering, archiving, and an explicit Done button in the routines manager.
+- A child sleep mini-plan below Log Something, generated from recent sleep history and confidence-aware planning windows.
 
 SwiftData mutations are centralized through services such as `EventMutationService`, `EventTimerService`, `ProfileService`, `DataExportImportService`, and Food & Home services.
 

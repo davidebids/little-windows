@@ -221,7 +221,7 @@ struct AppointmentEditorView: View {
     @State private var address: String
     @State private var phoneNumber: String
     @State private var notes: String
-    @State private var questionsToAsk: String
+    @State private var questionDrafts: [AppointmentQuestionDraft]
     @State private var remindersEnabled: Bool
     @State private var selectedLeadTimes: Set<AppointmentReminderLeadTime>
     @State private var validationMessage: String?
@@ -253,7 +253,7 @@ struct AppointmentEditorView: View {
         _address = State(initialValue: appointment?.address ?? "")
         _phoneNumber = State(initialValue: appointment?.phoneNumber ?? "")
         _notes = State(initialValue: appointment?.notes ?? "")
-        _questionsToAsk = State(initialValue: appointment?.questionsToAsk ?? "")
+        _questionDrafts = State(initialValue: AppointmentQuestionDraft.drafts(from: appointment?.questionsToAsk))
         _remindersEnabled = State(initialValue: appointment?.remindersEnabled ?? true)
         _selectedLeadTimes = State(
             initialValue: Set(
@@ -314,9 +314,9 @@ struct AppointmentEditorView: View {
             Section("Visit prep") {
                 TextField("Notes", text: $notes, axis: .vertical)
                     .lineLimit(3...6)
-                TextField("Questions to ask", text: $questionsToAsk, axis: .vertical)
-                    .lineLimit(3...8)
             }
+
+            AppointmentQuestionsEditor(questionDrafts: $questionDrafts)
 
             Section("Reminders") {
                 AppointmentReminderPicker(
@@ -392,7 +392,7 @@ struct AppointmentEditorView: View {
         value.address = clean(address)
         value.phoneNumber = clean(phoneNumber)
         value.notes = clean(notes)
-        value.questionsToAsk = clean(questionsToAsk)
+        value.questionsToAsk = AppointmentQuestionList.storageString(from: questionDrafts.map(\.text))
         value.remindersEnabled = remindersEnabled
         value.reminderLeadTimes = Array(selectedLeadTimes)
         value.caregiverName = activeCaregiverName
@@ -417,6 +417,95 @@ struct AppointmentEditorView: View {
     private func clean(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct AppointmentQuestionDraft: Identifiable, Equatable {
+    var id = UUID()
+    var text: String
+
+    static func drafts(from value: String?) -> [AppointmentQuestionDraft] {
+        AppointmentQuestionList.parse(value).map { AppointmentQuestionDraft(text: $0) }
+    }
+}
+
+private struct AppointmentQuestionsEditor: View {
+    @Binding var questionDrafts: [AppointmentQuestionDraft]
+    @State private var newQuestionText = ""
+    @State private var newQuestionInputID = UUID()
+    @FocusState private var isAddingQuestionFocused: Bool
+
+    private var hasQuestionText: Bool {
+        !newQuestionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        Section {
+            if questionDrafts.isEmpty {
+                Label("No questions yet", systemImage: "questionmark.bubble")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach($questionDrafts) { draft in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        TextField("Question", text: draft.text, axis: .vertical)
+                            .lineLimit(1...3)
+
+                        Button(role: .destructive) {
+                            removeQuestion(withID: draft.wrappedValue.id)
+                        } label: {
+                            Image(systemName: "trash")
+                                .imageScale(.medium)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Delete question")
+                    }
+                }
+                .onDelete { offsets in
+                    questionDrafts.remove(atOffsets: offsets)
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                TextField("Add a question", text: $newQuestionText, axis: .vertical)
+                    .id(newQuestionInputID)
+                    .lineLimit(1...3)
+                    .focused($isAddingQuestionFocused)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        addQuestion()
+                    }
+
+                Button {
+                    addQuestion()
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .imageScale(.large)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!hasQuestionText)
+                .foregroundStyle(hasQuestionText ? Color.accentColor : Color.secondary)
+                .accessibilityLabel("Add question")
+            }
+        } header: {
+            Text("Questions to ask")
+        } footer: {
+            Text("Pasted lists are split automatically.")
+        }
+    }
+
+    private func addQuestion() {
+        let additions = AppointmentQuestionList.parse(newQuestionText)
+        guard !additions.isEmpty else { return }
+        newQuestionText = ""
+        newQuestionInputID = UUID()
+        questionDrafts.append(contentsOf: additions.map { AppointmentQuestionDraft(text: $0) })
+        Task { @MainActor in
+            isAddingQuestionFocused = true
+        }
+    }
+
+    private func removeQuestion(withID id: UUID) {
+        questionDrafts.removeAll { $0.id == id }
     }
 }
 

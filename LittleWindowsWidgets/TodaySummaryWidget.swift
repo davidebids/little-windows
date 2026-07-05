@@ -55,30 +55,55 @@ private struct TodaySummaryWidgetView: View {
                         .foregroundStyle(.white.opacity(0.48))
                 }
                 HStack(spacing: 10) {
-                    if snapshot.todaySummary.isDog {
-                        metric("\(snapshot.todaySummary.dogFoodCount ?? 0)", "Food", "fork.knife", .orange)
-                        metric("\(snapshot.todaySummary.dogWaterCount ?? 0)", "Water", "drop.fill", .cyan)
-                        metric("\(snapshot.todaySummary.dogPottyCount ?? 0)", "Potty", "pawprint.fill", .teal)
-                        metric(
-                            DurationFormatting.string(seconds: snapshot.todaySummary.dogWalkSeconds ?? 0),
-                            "Walks",
-                            "figure.walk",
-                            .green
-                        )
-                    } else {
-                        metric(
-                            DurationFormatting.string(seconds: snapshot.todaySummary.totalSleepSeconds),
-                            "Sleep",
-                            "moon.fill",
-                            LittleWindowsWidgetStyle.lavender
-                        )
-                        metric("\(snapshot.todaySummary.napCount)", "Naps", "bed.double.fill", .purple)
-                        metric("\(snapshot.todaySummary.careSessionCount)", "Care", "waterbottle.fill", .orange)
-                        metric("\(snapshot.todaySummary.diaperCount)", "Diapers", "drop.fill", .cyan)
+                    ForEach(widgetMetrics) { item in
+                        metric(item.value, item.title, item.systemImage, tint(named: item.tintName))
                     }
                 }
             }
             .foregroundStyle(.white)
+        }
+    }
+
+    private var widgetMetrics: [CareSummaryMetricSnapshot] {
+        if let metrics = snapshot.todaySummary.summaryMetrics, !metrics.isEmpty {
+            let preferredIDs = snapshot.todaySummary.isDog
+                ? ["food", "water", "potty", "walks"]
+                : ["sleep-total", "sleep-naps", "feed-total", "diapers"]
+            return preferredIDs.compactMap { id in
+                metrics.first { $0.id == id }
+            }
+        }
+
+        if snapshot.todaySummary.isDog {
+            return [
+                CareSummaryMetricSnapshot(id: "food", title: "Food", value: "\(snapshot.todaySummary.dogFoodCount ?? 0)", systemImage: "fork.knife", tintName: "orange", eventTypeRawValue: "food"),
+                CareSummaryMetricSnapshot(id: "water", title: "Water", value: "\(snapshot.todaySummary.dogWaterCount ?? 0)", systemImage: "drop.fill", tintName: "cyan", eventTypeRawValue: "water"),
+                CareSummaryMetricSnapshot(id: "potty", title: "Potty", value: "\(snapshot.todaySummary.dogPottyCount ?? 0)", systemImage: "pawprint.fill", tintName: "teal", eventTypeRawValue: "potty"),
+                CareSummaryMetricSnapshot(id: "walks", title: "Walks", value: DurationFormatting.string(seconds: snapshot.todaySummary.dogWalkSeconds ?? 0), systemImage: "figure.walk", tintName: "green", eventTypeRawValue: "walk")
+            ]
+        }
+
+        return [
+            CareSummaryMetricSnapshot(id: "sleep-total", title: "Sleep", value: DurationFormatting.string(seconds: snapshot.todaySummary.totalSleepSeconds), systemImage: "moon.fill", tintName: "indigo", eventTypeRawValue: "sleep"),
+            CareSummaryMetricSnapshot(id: "sleep-naps", title: "Naps", value: "\(snapshot.todaySummary.napCount)", systemImage: "bed.double.fill", tintName: "purple", eventTypeRawValue: "sleep"),
+            CareSummaryMetricSnapshot(id: "feed-total", title: "Care", value: "\(snapshot.todaySummary.careSessionCount)", systemImage: "waterbottle.fill", tintName: "orange", eventTypeRawValue: "feed"),
+            CareSummaryMetricSnapshot(id: "diapers", title: "Diapers", value: "\(snapshot.todaySummary.diaperCount)", systemImage: "drop.fill", tintName: "cyan", eventTypeRawValue: "diaper")
+        ]
+    }
+
+    private func tint(named name: String) -> Color {
+        switch name {
+        case "blue": .blue
+        case "cyan": .cyan
+        case "green": .green
+        case "indigo": LittleWindowsWidgetStyle.lavender
+        case "mint": .mint
+        case "orange": .orange
+        case "pink": .pink
+        case "purple": .purple
+        case "red": .red
+        case "teal": .teal
+        default: .white.opacity(0.8)
         }
     }
 

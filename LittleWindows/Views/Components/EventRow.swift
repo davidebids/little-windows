@@ -5,7 +5,7 @@ struct EventRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: event.type.systemImage)
+            Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
                 .font(.body.weight(.semibold))
                 .foregroundStyle(event.type.tint)
                 .frame(width: 42, height: 42)
@@ -49,7 +49,7 @@ struct EventRow: View {
         if let duration = event.timelineDurationDescription {
             pieces.append(duration)
         }
-        if event.type == .feed, let amount = event.amountOz {
+        if (event.type == .feed || event.type == .pumping), let amount = event.amountOz {
             pieces.append(String(format: "%.1f oz", amount))
         }
         if let caregiver = event.caregiverName, !caregiver.isEmpty {

@@ -39,7 +39,7 @@ enum EventMutationService {
     static func canQuickRepeat(_ event: BabyEvent) -> Bool {
         guard !event.isTimerDraft else { return false }
         switch event.type {
-        case .feed, .diaper, .medicine, .temperature, .activity,
+        case .feed, .pumping, .diaper, .medicine, .temperature, .activity,
              .food, .water, .treat, .potty, .grooming, .symptom, .glucose:
             return true
         case .sleep, .nursing, .growth, .walk, .rest, .training, .vaccine, .custom:
@@ -240,10 +240,18 @@ enum EventMutationService {
         event.feedKind = source.feedKind
         event.amountOz = source.amountOz
         event.foodDescription = source.foodDescription
+        event.solidReaction = source.solidReaction
+        event.solidTexture = source.solidTexture
+        event.solidFeedingStyle = source.solidFeedingStyle
+        event.solidAllergenExposure = source.solidAllergenExposure
+        event.solidSensitivityObserved = source.solidSensitivityObserved
         event.nursingSide = source.nursingSide
         event.leftDurationSeconds = source.leftDurationSeconds
         event.rightDurationSeconds = source.rightDurationSeconds
         event.diaperKind = source.diaperKind
+        event.childPottyKind = source.childPottyKind
+        event.childPottyLocation = source.childPottyLocation
+        event.childPottyAccident = source.childPottyAccident
         event.peeAmount = source.peeAmount
         event.pooAmount = source.pooAmount
         event.pooColor = source.pooColor

@@ -15,7 +15,7 @@ struct ActiveTimerCard: View {
                 Button(action: edit) {
                     HStack {
                         HStack(spacing: 11) {
-                            Image(systemName: event.type.systemImage)
+                            Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
                                 .font(.headline)
                                 .foregroundStyle(.white)
                                 .frame(width: 38, height: 38)
@@ -152,7 +152,7 @@ struct ActiveTimerEditorView: View {
             VStack(spacing: 18) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     VStack(spacing: 12) {
-                        Image(systemName: event.type.systemImage)
+                        Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
                             .font(.title2.bold())
                             .foregroundStyle(.white)
                             .frame(width: 58, height: 58)

@@ -105,6 +105,11 @@ private struct EventDTO: Codable {
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
+    var solidReactionRawValue: String?
+    var solidTextureRawValue: String?
+    var solidFeedingStyleRawValue: String?
+    var solidAllergenExposure: Bool?
+    var solidSensitivityObserved: Bool?
     var nursingSideRawValue: String?
     var activeNursingSideRawValue: String?
     var timerStateRawValue: String?
@@ -113,6 +118,9 @@ private struct EventDTO: Codable {
     var leftDurationSeconds: Double?
     var rightDurationSeconds: Double?
     var diaperKindRawValue: String?
+    var childPottyKindRawValue: String?
+    var childPottyLocationRawValue: String?
+    var childPottyAccident: Bool?
     var peeAmountRawValue: String?
     var pooAmountRawValue: String?
     var pooColorRawValue: String?
@@ -494,6 +502,11 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt, caregiverName: $0.caregiverName, notes: $0.notes,
                 sleepKindRawValue: $0.sleepKindRawValue, feedKindRawValue: $0.feedKindRawValue,
                 amountOz: $0.amountOz, foodDescription: $0.foodDescription,
+                solidReactionRawValue: $0.solidReactionRawValue,
+                solidTextureRawValue: $0.solidTextureRawValue,
+                solidFeedingStyleRawValue: $0.solidFeedingStyleRawValue,
+                solidAllergenExposure: $0.solidAllergenExposure,
+                solidSensitivityObserved: $0.solidSensitivityObserved,
                 nursingSideRawValue: $0.nursingSideRawValue,
                 activeNursingSideRawValue: $0.activeNursingSideRawValue,
                 timerStateRawValue: $0.timerStateRawValue,
@@ -502,6 +515,9 @@ enum DataExportImportService {
                 leftDurationSeconds: $0.leftDurationSeconds,
                 rightDurationSeconds: $0.rightDurationSeconds,
                 diaperKindRawValue: $0.diaperKindRawValue,
+                childPottyKindRawValue: $0.childPottyKindRawValue,
+                childPottyLocationRawValue: $0.childPottyLocationRawValue,
+                childPottyAccident: $0.childPottyAccident,
                 peeAmountRawValue: $0.peeAmountRawValue,
                 pooAmountRawValue: $0.pooAmountRawValue,
                 pooColorRawValue: $0.pooColorRawValue,
@@ -932,6 +948,11 @@ enum DataExportImportService {
             event.feedKindRawValue = value.feedKindRawValue
             event.amountOz = value.amountOz
             event.foodDescription = value.foodDescription
+            event.solidReactionRawValue = value.solidReactionRawValue
+            event.solidTextureRawValue = value.solidTextureRawValue
+            event.solidFeedingStyleRawValue = value.solidFeedingStyleRawValue
+            event.solidAllergenExposure = value.solidAllergenExposure
+            event.solidSensitivityObserved = value.solidSensitivityObserved
             event.nursingSideRawValue = value.nursingSideRawValue
             event.activeNursingSideRawValue = value.activeNursingSideRawValue
             event.timerStateRawValue = value.timerStateRawValue
@@ -940,6 +961,9 @@ enum DataExportImportService {
             event.leftDurationSeconds = value.leftDurationSeconds
             event.rightDurationSeconds = value.rightDurationSeconds
             event.diaperKindRawValue = value.diaperKindRawValue
+            event.childPottyKindRawValue = value.childPottyKindRawValue
+            event.childPottyLocationRawValue = value.childPottyLocationRawValue
+            event.childPottyAccident = value.childPottyAccident
             event.peeAmountRawValue = value.peeAmountRawValue
             event.pooAmountRawValue = value.pooAmountRawValue
             event.pooColorRawValue = value.pooColorRawValue

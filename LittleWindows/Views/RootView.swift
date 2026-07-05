@@ -14,6 +14,7 @@ extension EventType {
         case .sleep: .indigo
         case .feed: .orange
         case .nursing: .pink
+        case .pumping: .cyan
         case .diaper: .teal
         case .medicine: .red
         case .growth: .mint

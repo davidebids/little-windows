@@ -12,6 +12,157 @@ struct SleepPrediction: Hashable {
     var napIndex: Int
 }
 
+struct SleepMiniPlan: Hashable, Identifiable {
+    var id: String
+    var title: String
+    var horizon: String
+    var summary: String
+    var steps: [String]
+    var systemImage: String
+    var tintName: String
+}
+
+enum SleepMiniPlanService {
+    static func plan(
+        profile: BabyProfile,
+        events: [BabyEvent],
+        records: [SleepPredictionRecord],
+        prediction: SleepPrediction?,
+        now: Date,
+        calendar: Calendar
+    ) -> SleepMiniPlan? {
+        guard profile.profileType == .child else { return nil }
+        let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
+        var hasCompletedSleep = false
+        var recentSleeps: [BabyEvent] = []
+        for event in events where event.type == .sleep && !event.isTimerDraft && event.endDate != nil && event.startDate <= now {
+            hasCompletedSleep = true
+            if event.startDate >= recentCutoff {
+                recentSleeps.append(event)
+            }
+        }
+        guard hasCompletedSleep else {
+            return SleepMiniPlan(
+                id: "baseline",
+                title: "Build a sleep baseline",
+                horizon: "Next 3 days",
+                summary: "Log start and end times for each sleep so predictions have a clean rhythm to learn from.",
+                steps: [
+                    "Start sleep timers when rest begins.",
+                    "Save the timer when sleep ends.",
+                    "Add feed or nursing logs near sleep when they matter."
+                ],
+                systemImage: "sparkle.magnifyingglass",
+                tintName: "indigo"
+            )
+        }
+
+        let recentNaps = recentSleeps.filter { $0.sleepKind == .nap }
+        let recentPredictionErrors = records
+            .filter { ($0.actualSleepStart ?? $0.generatedAt) >= recentCutoff }
+            .compactMap(\.errorMinutes)
+        let averagePredictionError = average(recentPredictionErrors.map { abs($0) })
+        let bedtimeSpread = circularSpreadMinutes(
+            recentSleeps.filter { $0.sleepKind == .nightSleep }.map(\.startDate),
+            calendar: calendar
+        )
+
+        if let prediction, prediction.confidenceLabel == .low || averagePredictionError > 35 {
+            return SleepMiniPlan(
+                id: "tighten-window",
+                title: "Tighten the next window",
+                horizon: "Next 2 naps",
+                summary: "The forecast is still learning. A couple of complete nap logs should help narrow the next recommendation.",
+                steps: [
+                    "Use the sleep timer for the next nap.",
+                    "Keep the wake-up time precise.",
+                    "Check the Why view after the next saved sleep."
+                ],
+                systemImage: "scope",
+                tintName: "cyan"
+            )
+        }
+
+        if bedtimeSpread > 75 {
+            return SleepMiniPlan(
+                id: "bedtime-anchor",
+                title: "Anchor bedtime gently",
+                horizon: "This week",
+                summary: "Recent bedtimes are moving around. A planned evening can make tomorrow's first window easier to read.",
+                steps: [
+                    "Pick a realistic target bedtime.",
+                    "Open Plan and compare the last nap against that target.",
+                    "Review whether mornings feel steadier after three nights."
+                ],
+                systemImage: "calendar.badge.clock",
+                tintName: "purple"
+            )
+        }
+
+        if recentNaps.count >= 4 {
+            let napDurations = recentNaps.compactMap(\.duration).map { $0 / 60 }
+            if standardDeviation(napDurations) > 28 {
+                return SleepMiniPlan(
+                    id: "nap-shape",
+                    title: "Watch nap shape",
+                    horizon: "Next 4 naps",
+                    summary: "Nap lengths vary quite a bit. Track the setup around each nap to see what helps.",
+                    steps: [
+                        "Log the nap start and end.",
+                        "Use notes for anything unusual.",
+                        "Compare short naps in Reports after a few entries."
+                    ],
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    tintName: "green"
+                )
+            }
+        }
+
+        return SleepMiniPlan(
+            id: "steady-rhythm",
+            title: "Keep the rhythm visible",
+            horizon: "Today",
+            summary: "Recent sleep data is usable. Keep logging the next sleep and use the planner if the day starts drifting.",
+            steps: [
+                "Follow the next window as a planning cue.",
+                "Adjust for real tired cues and family constraints.",
+                "Use Plan if bedtime needs a reset."
+            ],
+            systemImage: "checkmark.seal.fill",
+            tintName: "mint"
+        )
+    }
+
+    private static func average(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private static func standardDeviation(_ values: [Double]) -> Double {
+        guard values.count > 1 else { return 0 }
+        let mean = average(values)
+        let variance = values.map { pow($0 - mean, 2) }.reduce(0, +) / Double(values.count)
+        return sqrt(variance)
+    }
+
+    private static func circularSpreadMinutes(_ dates: [Date], calendar: Calendar) -> Double {
+        let minutes = dates.map {
+            let components = calendar.dateComponents([.hour, .minute], from: $0)
+            return Double((components.hour ?? 0) * 60 + (components.minute ?? 0))
+        }.sorted()
+        guard minutes.count > 1 else { return 0 }
+
+        var largestGap = 0.0
+        for index in minutes.indices {
+            let nextIndex = minutes.index(after: index)
+            let current = minutes[index]
+            let next = nextIndex == minutes.endIndex ? minutes[0] + 1_440 : minutes[nextIndex]
+            largestGap = max(largestGap, next - current)
+        }
+        return 1_440 - largestGap
+    }
+}
+
 enum SleepPressureBand: String, Hashable, CaseIterable {
     case learning
     case low

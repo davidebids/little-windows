@@ -15,6 +15,66 @@ enum FeedKind: String, Codable, CaseIterable, Identifiable {
     var displayName: String { rawValue.capitalized }
 }
 
+enum SolidReaction: String, Codable, CaseIterable, Identifiable {
+    case loved
+    case liked
+    case neutral
+    case disliked
+    case sensitivity
+    case unknown
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .loved: "Loved"
+        case .liked: "Liked"
+        case .neutral: "Neutral"
+        case .disliked: "Disliked"
+        case .sensitivity: "Sensitivity"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
+enum SolidTexture: String, Codable, CaseIterable, Identifiable {
+    case puree
+    case mashed
+    case fingerFood
+    case mixed
+    case other
+    case unknown
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fingerFood: "Finger food"
+        default: rawValue.capitalized
+        }
+    }
+}
+
+enum SolidFeedingStyle: String, Codable, CaseIterable, Identifiable {
+    case pureeSpoonFed
+    case babyLedWeaning
+    case combination
+    case other
+    case unknown
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .pureeSpoonFed: "Puree / spoon-fed"
+        case .babyLedWeaning: "Baby-led weaning"
+        case .combination: "Combination"
+        case .other: "Other"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
 enum NursingSide: String, Codable, CaseIterable, Identifiable {
     case left
     case right
@@ -36,6 +96,44 @@ enum DiaperKind: String, Codable, CaseIterable, Identifiable {
     }
     var hasPee: Bool { self == .wet || self == .both }
     var hasPoo: Bool { self == .dirty || self == .both }
+}
+
+enum ChildPottyKind: String, Codable, CaseIterable, Identifiable {
+    case pee
+    case poo
+    case both
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .pee: "Pee"
+        case .poo: "Poo"
+        case .both: "Both"
+        }
+    }
+
+    var hasPee: Bool { self == .pee || self == .both }
+    var hasPoo: Bool { self == .poo || self == .both }
+}
+
+enum ChildPottyLocation: String, Codable, CaseIterable, Identifiable {
+    case toilet
+    case pottyChair
+    case trainingPants
+    case diaper
+    case accident
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .pottyChair: "Potty chair"
+        case .trainingPants: "Training pants"
+        default: rawValue.capitalized
+        }
+    }
 }
 
 enum DiaperAmount: String, Codable, CaseIterable, Identifiable {

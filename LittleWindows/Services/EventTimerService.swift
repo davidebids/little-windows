@@ -6,6 +6,7 @@ enum EventTimerService {
     static let priority: [EventType] = [
         .sleep,
         .nursing,
+        .pumping,
         .feed,
         .activity,
         .walk,
@@ -177,15 +178,17 @@ enum EventTimerService {
     }
 
     static func primaryActiveEvent(in events: [BabyEvent]) -> BabyEvent? {
-        events
-            .filter { $0.isTimerRunning && priority.contains($0.type) }
-            .sorted { left, right in
-                let leftPriority = priority.firstIndex(of: left.type) ?? priority.count
-                let rightPriority = priority.firstIndex(of: right.type) ?? priority.count
-                if leftPriority != rightPriority { return leftPriority < rightPriority }
-                return left.startDate < right.startDate
+        var bestEvent: BabyEvent?
+        var bestPriority = priority.count
+        for event in events where event.isTimerRunning {
+            guard let eventPriority = priority.firstIndex(of: event.type) else { continue }
+            if eventPriority < bestPriority ||
+                (eventPriority == bestPriority && bestEvent.map({ event.startDate < $0.startDate }) ?? true) {
+                bestEvent = event
+                bestPriority = eventPriority
             }
-            .first
+        }
+        return bestEvent
     }
 
     private static func accrueCurrentSegment(_ event: BabyEvent, until date: Date) {

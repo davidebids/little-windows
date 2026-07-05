@@ -234,6 +234,12 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["quick-log", "feed"] {
             selectedTab = .today
             pendingAction = .logEvent(.feed)
+        } else if components == ["quick-log", "pumping"] {
+            selectedTab = .today
+            pendingAction = .startTimer(.pumping, nil)
+        } else if components == ["quick-log", "child-potty"] {
+            selectedTab = .today
+            pendingAction = .logEvent(.potty)
         } else if components == ["quick-log", "repeat-last"] {
             selectedTab = .today
             pendingAction = .repeatLast

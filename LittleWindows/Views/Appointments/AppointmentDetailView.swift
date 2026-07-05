@@ -68,8 +68,9 @@ struct AppointmentDetailView: View {
             if let notes = appointment.notes {
                 notesSection("Notes", notes, icon: "note.text")
             }
-            if let questions = appointment.questionsToAsk {
-                notesSection("Questions to ask", questions, icon: "questionmark.bubble.fill")
+            let questions = AppointmentQuestionList.parse(appointment.questionsToAsk)
+            if !questions.isEmpty {
+                questionsSection(questions)
             }
 
             Section("Visit journal") {
@@ -327,6 +328,20 @@ struct AppointmentDetailView: View {
                 .font(.headline)
             Text(text)
                 .font(.body)
+        }
+    }
+
+    @ViewBuilder
+    private func questionsSection(_ questions: [String]) -> some View {
+        Section {
+            Label("Questions to ask", systemImage: "questionmark.bubble.fill")
+                .font(.headline)
+            ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
+                LabeledContent("Question \(index + 1)") {
+                    Text(question)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
         }
     }
 

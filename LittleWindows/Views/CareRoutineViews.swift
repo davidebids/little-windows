@@ -491,6 +491,8 @@ private struct CareRoutineCompactRow: View {
 }
 
 struct CareRoutineManagerView: View {
+    @Environment(\.dismiss) private var dismiss
+
     var profileType: CareProfileType?
     var routines: [CareRoutine]
     var steps: [CareRoutineStep]
@@ -644,6 +646,11 @@ struct CareRoutineManagerView: View {
                     Label("New Routine", systemImage: "plus")
                 }
             }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
         }
         .appActionSheet(
             isPresented: Binding(
@@ -793,7 +800,7 @@ private struct CareRoutineBuilderView: View {
 
             Section {
                 ForEach($input.steps) { $step in
-                    RoutineStepBuilderRow(step: $step, eventTypes: eventTypes)
+                    RoutineStepBuilderRow(step: $step, eventTypes: eventTypes, profileType: profileType)
                 }
                 .onDelete { offsets in
                     input.steps.remove(atOffsets: offsets)
@@ -848,6 +855,7 @@ private struct CareRoutineBuilderView: View {
 private struct RoutineStepBuilderRow: View {
     @Binding var step: CareRoutineStepInput
     var eventTypes: [EventType]
+    var profileType: CareProfileType?
 
     private var actionSections: [RoutineActionSection] {
         var navigationActions: [CareRoutineStepAction] = [
@@ -924,7 +932,7 @@ private struct RoutineStepBuilderRow: View {
             if step.action == .logEvent || step.action == .startTimer {
                 Picker(step.action == .startTimer ? "Timer" : "Event", selection: $step.eventType) {
                     ForEach(selectedEventTypes) { type in
-                        Label(type.displayName, systemImage: type.systemImage).tag(type)
+                        Label(type.displayName, systemImage: systemImage(for: type)).tag(type)
                     }
                 }
                 .onAppear(perform: normalizeEventType)
@@ -961,6 +969,10 @@ private struct RoutineStepBuilderRow: View {
                 .lineLimit(1...3)
         }
         .padding(.vertical, 4)
+    }
+
+    private func systemImage(for type: EventType) -> String {
+        profileType.map { type.systemImage(for: $0) } ?? type.systemImage
     }
 
     private func normalizeEventType() {

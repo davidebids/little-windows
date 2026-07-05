@@ -35,6 +35,46 @@ enum QuickLogActionPreferenceStore {
 }
 
 @MainActor
+enum CareCategoryPreferenceStore {
+    private static let prefix = "careCategory.hiddenTypeRawValues"
+
+    static func hiddenTypes(profileID: UUID?) -> Set<EventType> {
+        Set((UserDefaults.standard.stringArray(forKey: key(profileID: profileID)) ?? []).compactMap(EventType.init(rawValue:)))
+    }
+
+    static func isHidden(_ type: EventType, profileID: UUID?) -> Bool {
+        hiddenTypes(profileID: profileID).contains(type)
+    }
+
+    static func setHidden(_ isHidden: Bool, type: EventType, profileID: UUID?) {
+        var hidden = hiddenTypes(profileID: profileID)
+        if isHidden {
+            hidden.insert(type)
+        } else {
+            hidden.remove(type)
+        }
+        setHiddenTypes(hidden, profileID: profileID)
+    }
+
+    static func setHiddenTypes(_ hidden: Set<EventType>, profileID: UUID?) {
+        UserDefaults.standard.set(hidden.map(\.rawValue).sorted(), forKey: key(profileID: profileID))
+    }
+
+    static func reset(profileID: UUID?) {
+        UserDefaults.standard.removeObject(forKey: key(profileID: profileID))
+    }
+
+    static func visibleTypes(for profileType: CareProfileType, profileID: UUID?) -> [EventType] {
+        let hidden = hiddenTypes(profileID: profileID)
+        return EventType.cases(for: profileType).filter { !hidden.contains($0) }
+    }
+
+    private static func key(profileID: UUID?) -> String {
+        "\(prefix).\(profileID?.uuidString ?? "default")"
+    }
+}
+
+@MainActor
 enum WidgetSnapshotService {
     static func refresh(
         profile: BabyProfile?,
@@ -62,7 +102,7 @@ enum WidgetSnapshotService {
     ) -> WidgetSnapshot {
         let timerDrafts = events.filter(\.isTimerDraft)
         let primary = EventTimerService.primaryActiveEvent(in: timerDrafts)
-            ?? timerDrafts.sorted { $0.updatedAt > $1.updatedAt }.first
+            ?? timerDrafts.max { $0.updatedAt < $1.updatedAt }
         let activeTimer = primary.map {
             activeSnapshot(
                 event: $0,
@@ -103,10 +143,17 @@ enum WidgetSnapshotService {
                 napCount: daily.napCount,
                 careSessionCount: careSessions,
                 diaperCount: daily.wetDiapers + daily.dirtyDiapers + daily.bothDiapers,
+                pumpingSessionCount: daily.pumpingSessions,
+                pumpingSeconds: daily.pumpingTotal,
+                solidFeedCount: daily.solidFeedCount,
+                solidSensitivityCount: daily.solidSensitivityObservations,
+                childPottyCount: daily.childPottyCount,
+                childPottyAccidentCount: daily.childPottyAccidents,
                 dogFoodCount: daily.dogFoodCount,
                 dogWaterCount: daily.waterCount,
                 dogPottyCount: daily.pottyCount,
-                dogWalkSeconds: daily.walkTime
+                dogWalkSeconds: daily.walkTime,
+                summaryMetrics: summaryMetrics(for: profileType, daily: daily)
             ),
             food: read().food,
             quickActions: makeQuickActions(
@@ -121,6 +168,65 @@ enum WidgetSnapshotService {
         )
     }
 
+    private static func summaryMetrics(
+        for profileType: CareProfileType,
+        daily: DailySummary
+    ) -> [CareSummaryMetricSnapshot] {
+        switch profileType {
+        case .child:
+            return [
+                metric("sleep-total", "Sleep", DurationFormatting.string(seconds: daily.totalSleep), "moon.fill", "indigo", .sleep),
+                metric("sleep-naps", "Naps", "\(daily.napCount)", "bed.double.fill", "purple", .sleep),
+                metric("feed-total", "Feeds", "\(daily.feedCount)", "waterbottle.fill", "orange", .feed),
+                metric("feed-bottle", "Bottle", String(format: "%.1f oz", daily.bottleOunces), "drop.fill", "cyan", .feed),
+                metric("feed-solids", "Solids", "\(daily.solidFeedCount)", "carrot.fill", "orange", .feed),
+                metric("nursing", "Nursing", DurationFormatting.string(seconds: daily.nursingTotal), "figure.and.child.holdinghands", "pink", .nursing),
+                metric("pumping", "Pumping", "\(daily.pumpingSessions)", "drop.circle.fill", "cyan", .pumping),
+                metric("diapers", "Diapers", "\(daily.wetDiapers + daily.dirtyDiapers + daily.bothDiapers)", "humidity.fill", "teal", .diaper),
+                metric("potty", "Potty", "\(daily.childPottyCount)", "figure.child", "teal", .potty),
+                metric("medicine", "Medicine", "\(daily.medicineNames.count)", "cross.case.fill", "red", .medicine),
+                metric("growth", "Growth", "\(daily.growthCount)", "ruler.fill", "green", .growth),
+                metric("temperature", "Temp", "\(daily.temperatureCount)", "thermometer.medium", "red", .temperature),
+                metric("activity", "Activity", "\(daily.activityCount)", "figure.play", "green", .activity),
+                metric("custom", "Custom", "\(daily.customCount)", "sparkles", "gray", .custom)
+            ]
+        case .dog:
+            return [
+                metric("food", "Food", "\(daily.dogFoodCount)", "fork.knife", "orange", .food),
+                metric("water", "Water", "\(daily.waterCount)", "drop.fill", "cyan", .water),
+                metric("treats", "Treats", "\(daily.treatCount)", "birthday.cake.fill", "pink", .treat),
+                metric("potty", "Potty", "\(daily.pottyCount)", "pawprint.fill", "teal", .potty),
+                metric("walks", "Walks", DurationFormatting.string(seconds: daily.walkTime), "figure.walk", "green", .walk),
+                metric("rest", "Rest", DurationFormatting.string(seconds: daily.restTime), "bed.double.fill", "indigo", .rest),
+                metric("training", "Training", DurationFormatting.string(seconds: daily.trainingTime), "graduationcap.fill", "purple", .training),
+                metric("grooming", "Grooming", DurationFormatting.string(seconds: daily.groomingTime), "comb.fill", "mint", .grooming),
+                metric("medicine", "Medicine", "\(daily.medicineNames.count)", "cross.case.fill", "red", .medicine),
+                metric("symptoms", "Symptoms", "\(daily.symptomCount)", "exclamationmark.triangle.fill", "orange", .symptom),
+                metric("vaccines", "Vaccines", "\(daily.vaccineCount)", "syringe.fill", "blue", .vaccine),
+                metric("glucose", "Glucose", "\(daily.glucoseCount)", "drop.triangle.fill", "pink", .glucose),
+                metric("custom", "Custom", "\(daily.customCount)", "sparkles", "gray", .custom)
+            ]
+        }
+    }
+
+    private static func metric(
+        _ id: String,
+        _ title: String,
+        _ value: String,
+        _ systemImage: String,
+        _ tintName: String,
+        _ eventType: EventType
+    ) -> CareSummaryMetricSnapshot {
+        CareSummaryMetricSnapshot(
+            id: id,
+            title: title,
+            value: value,
+            systemImage: systemImage,
+            tintName: tintName,
+            eventTypeRawValue: eventType.rawValue
+        )
+    }
+
     static func makeQuickActions(
         profileID: UUID? = nil,
         profileType: CareProfileType,
@@ -131,25 +237,35 @@ enum WidgetSnapshotService {
         calendar: Calendar = .current
     ) -> [QuickLogActionSnapshot] {
         let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
-        let candidates = quickActionCandidates(for: profileType)
+        let hiddenTypes = CareCategoryPreferenceStore.hiddenTypes(profileID: profileID)
+        let candidates = quickActionCandidates(for: profileType).filter {
+            !hiddenTypes.contains($0.eventType)
+        }
+        var candidateIndicesByType: [EventType: [Int]] = [:]
+        for index in candidates.indices {
+            candidateIndicesByType[candidates[index].eventType, default: []].append(index)
+        }
         var activeTypes: Set<EventType> = []
         var stats = candidates.map { _ in (recentCount: 0, lastDate: Optional<Date>.none) }
         var repeatSource: BabyEvent?
 
         for event in events {
+            guard event.matchesProfile(profileID) else { continue }
             if event.isTimerDraft {
                 activeTypes.insert(event.type)
                 continue
             }
-            guard event.matchesProfile(profileID) else { continue }
 
-            if EventMutationService.canQuickRepeat(event),
+            if !hiddenTypes.contains(event.type),
+               EventMutationService.canQuickRepeat(event),
                repeatSource.map({ event.startDate > $0.startDate }) ?? true {
                 repeatSource = event
             }
 
-            for index in candidates.indices where candidates[index].matches(event) {
-                if event.startDate >= recentCutoff {
+            guard let matchingCandidateIndices = candidateIndicesByType[event.type] else { continue }
+            let isRecent = event.startDate >= recentCutoff
+            for index in matchingCandidateIndices where candidates[index].matches(event) {
+                if isRecent {
                     stats[index].recentCount += 1
                 }
                 if stats[index].lastDate.map({ event.startDate > $0 }) ?? true {
@@ -364,7 +480,7 @@ enum WidgetSnapshotService {
             babyName: babyName,
             typeRawValue: event.type.rawValue,
             eventLabel: runningLabel(for: event),
-            systemImage: event.activityType?.systemImage ?? event.type.systemImage,
+            systemImage: event.activityType?.systemImage ?? event.type.systemImage(for: event.profileTypeSnapshot),
             startDate: event.timerDisplayStartDate(at: now),
             isRunning: event.isTimerRunning,
             elapsedSeconds: event.timerElapsed(at: now),
@@ -441,7 +557,9 @@ enum WidgetSnapshotService {
                 candidate("feed", "Feed", nil, "waterbottle.fill", "orange", "quick-log/feed", .feed, baseScore: 7.5),
                 candidate("nursing-left", "Nurse left", "Timer", "l.circle.fill", "pink", "quick-log/nursing-left", .nursing, startsTimer: true, baseScore: 7.2),
                 candidate("nursing-right", "Nurse right", "Timer", "r.circle.fill", "pink", "quick-log/nursing-right", .nursing, startsTimer: true, baseScore: 7.1),
+                candidate("pumping", "Pump", "Timer", "drop.circle.fill", "cyan", "quick-log/pumping", .pumping, startsTimer: true, baseScore: 6.6),
                 candidate("diaper", "Diaper", nil, "drop.fill", "teal", "quick-log/diaper", .diaper, baseScore: 7.0),
+                candidate("potty", "Potty", nil, "figure.child", "teal", "quick-log/child-potty", .potty, baseScore: 5.7),
                 candidate("tummy-time", "Tummy", "Timer", "figure.play", "green", "quick-log/tummy-time", .activity, startsTimer: true, baseScore: 5.4) {
                     $0.type == .activity && $0.activityType == .tummyTime
                 },
@@ -535,6 +653,7 @@ enum WidgetSnapshotService {
         switch event.type {
         case .sleep: "Sleeping"
         case .nursing: "Nursing"
+        case .pumping: "Pumping"
         case .feed: "Feeding"
         case .activity: event.activityType?.displayName ?? "Activity"
         default: event.type.displayName

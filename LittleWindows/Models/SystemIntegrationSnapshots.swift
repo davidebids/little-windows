@@ -151,14 +151,30 @@ struct TodaySummarySnapshot: Codable, Hashable {
     var napCount: Int
     var careSessionCount: Int
     var diaperCount: Int
+    var pumpingSessionCount: Int?
+    var pumpingSeconds: TimeInterval?
+    var solidFeedCount: Int?
+    var solidSensitivityCount: Int?
+    var childPottyCount: Int?
+    var childPottyAccidentCount: Int?
     var dogFoodCount: Int?
     var dogWaterCount: Int?
     var dogPottyCount: Int?
     var dogWalkSeconds: TimeInterval?
+    var summaryMetrics: [CareSummaryMetricSnapshot]?
 
     var isDog: Bool {
         profileTypeRawValue == "dog"
     }
+}
+
+struct CareSummaryMetricSnapshot: Codable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var value: String
+    var systemImage: String
+    var tintName: String
+    var eventTypeRawValue: String?
 }
 
 struct FoodShoppingListItemSnapshot: Codable, Hashable, Identifiable {
@@ -248,10 +264,17 @@ struct WidgetSnapshot: Codable, Hashable {
             napCount: 0,
             careSessionCount: 0,
             diaperCount: 0,
+            pumpingSessionCount: nil,
+            pumpingSeconds: nil,
+            solidFeedCount: nil,
+            solidSensitivityCount: nil,
+            childPottyCount: nil,
+            childPottyAccidentCount: nil,
             dogFoodCount: nil,
             dogWaterCount: nil,
             dogPottyCount: nil,
-            dogWalkSeconds: nil
+            dogWalkSeconds: nil,
+            summaryMetrics: []
         ),
         food: .empty,
         quickActions: []

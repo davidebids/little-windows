@@ -339,6 +339,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertFalse(EventType.custom.affectsSleepPrediction)
     }
 
+    func testPottyIconUsesProfileContext() {
+        XCTAssertEqual(EventType.potty.systemImage(for: .child), "figure.child")
+        XCTAssertEqual(EventType.potty.systemImage(for: nil), "figure.child")
+        XCTAssertEqual(EventType.potty.systemImage(for: .dog), "pawprint.fill")
+        XCTAssertEqual(EventType.feed.systemImage(for: .child), EventType.feed.systemImage)
+    }
+
     @MainActor
     func testLittleWindowAlertFireTimeUsesWindowStartAndLead() {
         let prediction = makeLittleWindowPrediction()
@@ -770,6 +777,31 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(plainWalk.displayTitle, "Walk")
     }
 
+    func testChildProductionEventDetailsDriveTimelineSummaries() {
+        let solid = BabyEvent(type: .feed, startDate: Date())
+        solid.profileTypeSnapshot = .child
+        solid.feedKind = .solid
+        solid.foodDescription = "Avocado"
+        solid.solidFeedingStyle = .babyLedWeaning
+        solid.solidTexture = .mashed
+        solid.solidReaction = .liked
+        solid.solidAllergenExposure = true
+
+        let pumping = BabyEvent(type: .pumping, startDate: Date())
+        pumping.profileTypeSnapshot = .child
+        pumping.amountOz = 3.2
+
+        let potty = BabyEvent(type: .potty, startDate: Date())
+        potty.profileTypeSnapshot = .child
+        potty.childPottyKind = .both
+        potty.childPottyLocation = .pottyChair
+        potty.childPottyAccident = true
+
+        XCTAssertEqual(solid.displayTitle, "Solid: Avocado · mashed · baby-led weaning · liked · allergen")
+        XCTAssertEqual(pumping.displayTitle, "Pumping: 3.2 oz")
+        XCTAssertEqual(potty.displayTitle, "Potty: both · potty chair · accident")
+    }
+
     @MainActor
     func testPuppyStageGuideMatchesDogAgeAndPersistsReadState() throws {
         let container = try makeInMemoryContainer()
@@ -844,6 +876,65 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(importedEvent.dogDetails.eatenAmount, .most)
     }
 
+    @MainActor
+    func testChildProductionDetailsRoundTripThroughJSONBackup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        context.insert(testChild)
+
+        let solid = BabyEvent(
+            profileID: testChild.id,
+            type: .feed,
+            startDate: Date(timeIntervalSinceReferenceDate: 3_000)
+        )
+        solid.profileTypeSnapshot = .child
+        solid.feedKind = .solid
+        solid.foodDescription = "Banana"
+        solid.solidFeedingStyle = .pureeSpoonFed
+        solid.solidTexture = .fingerFood
+        solid.solidReaction = .sensitivity
+        solid.solidAllergenExposure = true
+        solid.solidSensitivityObserved = true
+        context.insert(solid)
+
+        let potty = BabyEvent(
+            profileID: testChild.id,
+            type: .potty,
+            startDate: Date(timeIntervalSinceReferenceDate: 3_600)
+        )
+        potty.profileTypeSnapshot = .child
+        potty.childPottyKind = .both
+        potty.childPottyLocation = .toilet
+        potty.childPottyAccident = false
+        potty.peeAmount = .medium
+        potty.pooAmount = .little
+        potty.pooColor = .brown
+        potty.pooTexture = .formed
+        context.insert(potty)
+        try context.save()
+
+        let backup = try DataExportImportService.exportData(context: context)
+        try DataExportImportService.importData(backup, context: context)
+
+        let importedEvents = try context.fetch(FetchDescriptor<BabyEvent>())
+        let importedSolid = try XCTUnwrap(importedEvents.first { $0.feedKind == .solid })
+        XCTAssertEqual(importedSolid.solidFeedingStyle, .pureeSpoonFed)
+        XCTAssertEqual(importedSolid.solidTexture, .fingerFood)
+        XCTAssertEqual(importedSolid.solidReaction, .sensitivity)
+        XCTAssertEqual(importedSolid.solidAllergenExposure, true)
+        XCTAssertEqual(importedSolid.solidSensitivityObserved, true)
+
+        let importedPotty = try XCTUnwrap(importedEvents.first { $0.type == .potty })
+        XCTAssertEqual(importedPotty.childPottyKind, .both)
+        XCTAssertEqual(importedPotty.childPottyLocation, .toilet)
+        XCTAssertEqual(importedPotty.childPottyAccident, false)
+        XCTAssertEqual(importedPotty.peeAmount, .medium)
+        XCTAssertEqual(importedPotty.pooAmount, .little)
+        XCTAssertEqual(importedPotty.pooColor, .brown)
+        XCTAssertEqual(importedPotty.pooTexture, .formed)
+    }
+
     func testPredictionRecordRestoresDisplayPrediction() {
         let original = SleepPrediction(
             predictedStart: Date(timeIntervalSinceReferenceDate: 1_000),
@@ -887,6 +978,100 @@ final class SleepPredictionEngineTests: XCTestCase {
             contributingFactors: [],
             napIndex: 2
         )
+    }
+
+    func testSleepMiniPlanBuildsBaselineAndTightensLowConfidenceWindows() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSinceReferenceDate: 500_000)
+        let profile = BabyProfile(name: "Test Child", birthDate: now.addingTimeInterval(-120 * 24 * 60 * 60), sex: .unknown)
+
+        let baseline = SleepMiniPlanService.plan(
+            profile: profile,
+            events: [],
+            records: [],
+            prediction: nil,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(baseline?.id, "baseline")
+
+        let nap = BabyEvent(
+            type: .sleep,
+            startDate: now.addingTimeInterval(-4 * 60 * 60),
+            endDate: now.addingTimeInterval(-3 * 60 * 60)
+        )
+        nap.sleepKind = .nap
+        var lowConfidencePrediction = makeLittleWindowPrediction()
+        lowConfidencePrediction.confidenceLabel = .low
+
+        let tighten = SleepMiniPlanService.plan(
+            profile: profile,
+            events: [nap],
+            records: [],
+            prediction: lowConfidencePrediction,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(tighten?.id, "tighten-window")
+    }
+
+    func testSleepMiniPlanUsesCircularBedtimeSpreadAcrossMidnight() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let profile = BabyProfile(name: "Test Child", birthDate: Date(timeIntervalSinceReferenceDate: 0), sex: .unknown)
+
+        func date(day: Int, hour: Int, minute: Int = 0) throws -> Date {
+            try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: day, hour: hour, minute: minute)))
+        }
+
+        let nearMidnightOne = BabyEvent(
+            type: .sleep,
+            startDate: try date(day: 12, hour: 23, minute: 45),
+            endDate: try date(day: 13, hour: 6)
+        )
+        nearMidnightOne.sleepKind = .nightSleep
+        let nearMidnightTwo = BabyEvent(
+            type: .sleep,
+            startDate: try date(day: 14, hour: 0, minute: 15),
+            endDate: try date(day: 14, hour: 7)
+        )
+        nearMidnightTwo.sleepKind = .nightSleep
+        var prediction = makeLittleWindowPrediction(kind: .bedtime)
+        prediction.confidenceLabel = .high
+
+        let steady = SleepMiniPlanService.plan(
+            profile: profile,
+            events: [nearMidnightOne, nearMidnightTwo],
+            records: [],
+            prediction: prediction,
+            now: try date(day: 15, hour: 12),
+            calendar: calendar
+        )
+        XCTAssertEqual(steady?.id, "steady-rhythm")
+
+        let early = BabyEvent(
+            type: .sleep,
+            startDate: try date(day: 12, hour: 20),
+            endDate: try date(day: 13, hour: 5)
+        )
+        early.sleepKind = .nightSleep
+        let late = BabyEvent(
+            type: .sleep,
+            startDate: try date(day: 13, hour: 23),
+            endDate: try date(day: 14, hour: 7)
+        )
+        late.sleepKind = .nightSleep
+
+        let anchor = SleepMiniPlanService.plan(
+            profile: profile,
+            events: [early, late],
+            records: [],
+            prediction: prediction,
+            now: try date(day: 15, hour: 12),
+            calendar: calendar
+        )
+        XCTAssertEqual(anchor?.id, "bedtime-anchor")
     }
 
     func testDayTimelinePlacesOverlappingEventsInSeparateColumns() {
@@ -2884,6 +3069,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         let nursing = BabyEvent(type: .nursing, startDate: Date())
         nursing.nursingSide = .left
         nursing.activeNursingSide = .left
+        let pumping = BabyEvent(type: .pumping, startDate: Date())
+        let feed = BabyEvent(type: .feed, startDate: Date())
         let sleep = BabyEvent(type: .sleep, startDate: Date())
         sleep.sleepKind = .nap
 
@@ -2894,6 +3081,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(
             EventTimerService.primaryActiveEvent(in: [bath, nursing])?.id,
             nursing.id
+        )
+        XCTAssertEqual(
+            EventTimerService.primaryActiveEvent(in: [feed, pumping])?.id,
+            pumping.id
         )
     }
 
@@ -2986,6 +3177,82 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testChildQuickActionsRespectCategoryVisibilityAndIncludeProductionActions() {
+        let profileID = UUID()
+        CareCategoryPreferenceStore.reset(profileID: profileID)
+        let now = Date(timeIntervalSinceReferenceDate: 346_500)
+
+        var actions = WidgetSnapshotService.makeQuickActions(
+            profileID: profileID,
+            profileType: .child,
+            events: [],
+            pinnedActionIDs: ["pumping", "potty"],
+            now: now
+        )
+        XCTAssertTrue(actions.map(\.id).contains("pumping"))
+        XCTAssertTrue(actions.map(\.id).contains("potty"))
+
+        CareCategoryPreferenceStore.setHidden(true, type: .pumping, profileID: profileID)
+        CareCategoryPreferenceStore.setHidden(true, type: .potty, profileID: profileID)
+
+        actions = WidgetSnapshotService.makeQuickActions(
+            profileID: profileID,
+            profileType: .child,
+            events: [],
+            pinnedActionIDs: ["pumping"],
+            now: now
+        )
+        XCTAssertFalse(actions.map(\.id).contains("pumping"))
+        XCTAssertFalse(actions.map(\.id).contains("potty"))
+
+        CareCategoryPreferenceStore.reset(profileID: profileID)
+        XCTAssertTrue(CareCategoryPreferenceStore.hiddenTypes(profileID: profileID).isEmpty)
+    }
+
+    @MainActor
+    func testQuickActionsRespectProfileScopeAndHiddenRepeatSources() {
+        let profileID = UUID()
+        let otherProfileID = UUID()
+        CareCategoryPreferenceStore.reset(profileID: profileID)
+        let now = Date(timeIntervalSinceReferenceDate: 346_800)
+
+        let hiddenPump = BabyEvent(
+            profileID: profileID,
+            type: .pumping,
+            startDate: now.addingTimeInterval(-1_200),
+            endDate: now.addingTimeInterval(-900)
+        )
+        hiddenPump.amountOz = 2
+        let ownFeed = BabyEvent(
+            profileID: profileID,
+            type: .feed,
+            startDate: now.addingTimeInterval(-2_400),
+            endDate: now.addingTimeInterval(-2_400)
+        )
+        ownFeed.feedKind = .bottle
+        let otherActiveSleep = BabyEvent(
+            profileID: otherProfileID,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-600)
+        )
+
+        CareCategoryPreferenceStore.setHidden(true, type: .pumping, profileID: profileID)
+        let actions = WidgetSnapshotService.makeQuickActions(
+            profileID: profileID,
+            profileType: .child,
+            events: [hiddenPump, ownFeed, otherActiveSleep],
+            pinnedActionIDs: ["sleep"],
+            now: now
+        )
+
+        XCTAssertFalse(actions.map(\.id).contains("pumping"))
+        XCTAssertEqual(actions.first?.id, "sleep")
+        XCTAssertEqual(actions.first(where: { $0.id == "repeat-last" })?.subtitle, "Bottle")
+
+        CareCategoryPreferenceStore.reset(profileID: profileID)
+    }
+
+    @MainActor
     func testRepeatEventClonesStructuredDetailsAtCurrentTime() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -3027,6 +3294,73 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(repeated.pooAmount, .little)
         XCTAssertEqual(repeated.pooColor, .brown)
         XCTAssertEqual(repeated.pooTexture, .soft)
+    }
+
+    @MainActor
+    func testRepeatEventClonesProductionChildCareDetails() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profileID = UUID()
+        let oldStart = Date(timeIntervalSinceReferenceDate: 305_000)
+        let now = Date(timeIntervalSinceReferenceDate: 355_000)
+        let solid = BabyEvent(
+            profileID: profileID,
+            type: .feed,
+            startDate: oldStart,
+            endDate: oldStart,
+            notes: "First try"
+        )
+        solid.profileTypeSnapshot = .child
+        solid.feedKind = .solid
+        solid.foodDescription = "Pear"
+        solid.solidFeedingStyle = .combination
+        solid.solidTexture = .puree
+        solid.solidReaction = .loved
+        solid.solidAllergenExposure = false
+        solid.solidSensitivityObserved = false
+
+        let repeatedSolid = try XCTUnwrap(EventMutationService.repeatEvent(
+            solid,
+            caregiverName: nil,
+            profileID: profileID,
+            profileType: .child,
+            context: context,
+            at: now
+        ))
+
+        XCTAssertEqual(repeatedSolid.feedKind, FeedKind.solid)
+        XCTAssertEqual(repeatedSolid.foodDescription, "Pear")
+        XCTAssertEqual(repeatedSolid.solidFeedingStyle, SolidFeedingStyle.combination)
+        XCTAssertEqual(repeatedSolid.solidTexture, SolidTexture.puree)
+        XCTAssertEqual(repeatedSolid.solidReaction, SolidReaction.loved)
+        XCTAssertEqual(repeatedSolid.solidAllergenExposure, false)
+        XCTAssertEqual(repeatedSolid.solidSensitivityObserved, false)
+
+        let potty = BabyEvent(
+            profileID: profileID,
+            type: .potty,
+            startDate: oldStart,
+            endDate: oldStart
+        )
+        potty.profileTypeSnapshot = .child
+        potty.childPottyKind = .pee
+        potty.childPottyLocation = .trainingPants
+        potty.childPottyAccident = true
+        potty.peeAmount = .little
+
+        let repeatedPotty = try XCTUnwrap(EventMutationService.repeatEvent(
+            potty,
+            caregiverName: nil,
+            profileID: profileID,
+            profileType: .child,
+            context: context,
+            at: now
+        ))
+
+        XCTAssertEqual(repeatedPotty.childPottyKind, ChildPottyKind.pee)
+        XCTAssertEqual(repeatedPotty.childPottyLocation, ChildPottyLocation.trainingPants)
+        XCTAssertEqual(repeatedPotty.childPottyAccident, true)
+        XCTAssertEqual(repeatedPotty.peeAmount, DiaperAmount.little)
     }
 
     @MainActor
@@ -3157,6 +3491,63 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(summary.wetDiapers, 1)
     }
 
+    func testDailySummaryTracksUnifiedChildCareMetrics() {
+        let now = Date(timeIntervalSinceReferenceDate: 361_000)
+        let bottle = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-600))
+        bottle.feedKind = .bottle
+        bottle.amountOz = 3
+        let solid = BabyEvent(type: .feed, startDate: now)
+        solid.feedKind = .solid
+        solid.solidReaction = .sensitivity
+        solid.solidAllergenExposure = true
+        solid.solidSensitivityObserved = true
+
+        let pump = BabyEvent(
+            type: .pumping,
+            startDate: now.addingTimeInterval(600),
+            endDate: now.addingTimeInterval(1_500)
+        )
+        pump.amountOz = 4
+
+        let potty = BabyEvent(type: .potty, startDate: now.addingTimeInterval(1_800))
+        potty.profileTypeSnapshot = .child
+        potty.childPottyKind = .both
+        potty.childPottyAccident = true
+        let activity = BabyEvent(
+            type: .activity,
+            startDate: now.addingTimeInterval(2_400),
+            endDate: now.addingTimeInterval(3_000)
+        )
+        activity.activityType = .tummyTime
+        let growth = BabyEvent(type: .growth, startDate: now.addingTimeInterval(3_600))
+        let temperature = BabyEvent(type: .temperature, startDate: now.addingTimeInterval(4_200))
+        let custom = BabyEvent(type: .custom, startDate: now.addingTimeInterval(4_800))
+
+        let summary = DailySummaryService.summary(for: [
+            bottle, solid, pump, potty, activity, growth, temperature, custom
+        ])
+
+        XCTAssertEqual(summary.feedCount, 2)
+        XCTAssertEqual(summary.bottleFeedCount, 1)
+        XCTAssertEqual(summary.bottleOunces, 3)
+        XCTAssertEqual(summary.solidFeedCount, 1)
+        XCTAssertEqual(summary.solidAllergenExposures, 1)
+        XCTAssertEqual(summary.solidSensitivityObservations, 1)
+        XCTAssertEqual(summary.pumpingSessions, 1)
+        XCTAssertEqual(summary.pumpingOunces, 4)
+        XCTAssertEqual(summary.pumpingTotal, 900)
+        XCTAssertEqual(summary.childPottyCount, 1)
+        XCTAssertEqual(summary.childPottyPeeCount, 1)
+        XCTAssertEqual(summary.childPottyPooCount, 1)
+        XCTAssertEqual(summary.childPottyAccidents, 1)
+        XCTAssertEqual(summary.pottyAccidents, 1)
+        XCTAssertEqual(summary.activityCount, 1)
+        XCTAssertEqual(summary.tummyTime, 600)
+        XCTAssertEqual(summary.growthCount, 1)
+        XCTAssertEqual(summary.temperatureCount, 1)
+        XCTAssertEqual(summary.customCount, 1)
+    }
+
     @MainActor
     func testWidgetSnapshotUsesDogSummaryMetricsForDogProfiles() {
         let now = Date(timeIntervalSinceReferenceDate: 370_000)
@@ -3183,6 +3574,71 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.todaySummary.dogPottyCount, 1)
         XCTAssertEqual(snapshot.todaySummary.dogWalkSeconds, 1_200)
         XCTAssertEqual(snapshot.todaySummary.diaperCount, 0)
+    }
+
+    @MainActor
+    func testWidgetSnapshotCarriesUnifiedChildSummaryMetrics() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 15, hour: 12))!
+        let pump = BabyEvent(
+            type: .pumping,
+            startDate: now.addingTimeInterval(-900)
+        )
+        pump.endDate = pump.startDate.addingTimeInterval(600)
+        pump.profileTypeSnapshot = .child
+        pump.amountOz = 2.5
+
+        let solid = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-600))
+        solid.endDate = solid.startDate
+        solid.profileTypeSnapshot = .child
+        solid.feedKind = .solid
+        solid.solidSensitivityObserved = true
+
+        let potty = BabyEvent(type: .potty, startDate: now.addingTimeInterval(-120))
+        potty.profileTypeSnapshot = .child
+        potty.childPottyKind = .pee
+        potty.childPottyAccident = true
+        let growth = BabyEvent(type: .growth, startDate: now.addingTimeInterval(-60))
+        let temperature = BabyEvent(type: .temperature, startDate: now.addingTimeInterval(-45))
+        let custom = BabyEvent(type: .custom, startDate: now.addingTimeInterval(-30))
+        custom.endDate = custom.startDate
+
+        let snapshot = WidgetSnapshotService.makeSnapshot(
+            profileType: .child,
+            babyName: "Test Child",
+            events: [pump, solid, potty, growth, temperature, custom],
+            prediction: nil,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(snapshot.todaySummary.pumpingSessionCount, 1)
+        XCTAssertEqual(snapshot.todaySummary.pumpingSeconds, 600)
+        XCTAssertEqual(snapshot.todaySummary.solidFeedCount, 1)
+        XCTAssertEqual(snapshot.todaySummary.solidSensitivityCount, 1)
+        XCTAssertEqual(snapshot.todaySummary.childPottyCount, 1)
+        XCTAssertEqual(snapshot.todaySummary.childPottyAccidentCount, 1)
+        XCTAssertEqual(
+            Set(snapshot.todaySummary.summaryMetrics?.map(\.id) ?? []),
+            Set([
+                "sleep-total", "sleep-naps", "feed-total", "feed-bottle",
+                "feed-solids", "nursing", "pumping", "diapers", "potty",
+                "medicine", "growth", "temperature", "activity", "custom"
+            ])
+        )
+        XCTAssertEqual(
+            snapshot.todaySummary.summaryMetrics?.first { $0.id == "growth" }?.value,
+            "1"
+        )
+        XCTAssertEqual(
+            snapshot.todaySummary.summaryMetrics?.first { $0.id == "temperature" }?.value,
+            "1"
+        )
+        XCTAssertEqual(
+            snapshot.todaySummary.summaryMetrics?.first { $0.id == "custom" }?.value,
+            "1"
+        )
     }
 
     func testMilestoneCategoriesAreProfileSpecific() {
@@ -4138,6 +4594,28 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(imported.remindersEnabled)
         XCTAssertTrue(imported.isCompleted)
         XCTAssertEqual(imported.caregiverName, "Caregiver 2")
+    }
+
+    func testAppointmentQuestionListParsesAndStoresStructuredRows() {
+        let questions = AppointmentQuestionList.parse("""
+        - Ask about sleep stretches.
+        2. Review solid foods.
+        * Confirm next vaccine timing.
+        """)
+
+        XCTAssertEqual(questions, [
+            "Ask about sleep stretches.",
+            "Review solid foods.",
+            "Confirm next vaccine timing."
+        ])
+        XCTAssertEqual(
+            AppointmentQuestionList.storageString(from: questions + ["  "]),
+            """
+            Ask about sleep stretches.
+            Review solid foods.
+            Confirm next vaccine timing.
+            """
+        )
     }
 
     @MainActor

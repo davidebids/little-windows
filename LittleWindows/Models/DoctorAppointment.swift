@@ -97,6 +97,49 @@ enum AppointmentReminderLeadTime: Int, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum AppointmentQuestionList {
+    static func parse(_ value: String?) -> [String] {
+        guard let value else { return [] }
+        return value
+            .components(separatedBy: .newlines)
+            .map(cleanedQuestion)
+            .filter { !$0.isEmpty }
+    }
+
+    static func storageString(from questions: [String]) -> String? {
+        let cleaned = questions
+            .map(cleanedQuestion)
+            .filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else { return nil }
+        return cleaned.joined(separator: "\n")
+    }
+
+    private static func cleanedQuestion(_ value: String) -> String {
+        var trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let first = trimmed.first, first == "-" || first == "*" || first == "\u{2022}" {
+            trimmed.removeFirst()
+            trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let markerEnd = numberedPrefixEndIndex(in: trimmed) {
+            trimmed = String(trimmed[markerEnd...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
+    private static func numberedPrefixEndIndex(in value: String) -> String.Index? {
+        var index = value.startIndex
+        var sawDigit = false
+        while index < value.endIndex, value[index].isNumber {
+            sawDigit = true
+            index = value.index(after: index)
+        }
+        guard sawDigit, index < value.endIndex, value[index] == "." || value[index] == ")" else {
+            return nil
+        }
+        return value.index(after: index)
+    }
+}
+
 @Model
 final class DoctorAppointment {
     var id: UUID = UUID()

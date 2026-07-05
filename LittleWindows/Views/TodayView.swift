@@ -40,11 +40,17 @@ private struct TodayRenderState {
     var runningSleepTimer: BabyEvent?
     var awakeSinceDate: Date?
     var isSleeping: Bool
+    var sleepMiniPlan: SleepMiniPlan?
     var dogLastEventTitles: [EventType: String]
     var dogPottyTitles: [DogPottyType: String]
     var lastLoggedDates: [EventType: Date]
     var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date]
     var smartQuickActions: [QuickLogActionSnapshot]
+    var visibleCareTypes: Set<EventType>
+
+    func shows(_ type: EventType) -> Bool {
+        visibleCareTypes.contains(type)
+    }
 }
 
 struct TodayView: View {
@@ -95,7 +101,9 @@ struct TodayView: View {
     @State private var showingDeleteEventConfirmation = false
     @State private var activeSleepPlan: ActiveSleepPlan?
     @State private var pinnedQuickActionRevision = 0
+    @State private var categoryPreferenceRevision = 0
     @State private var repeatFeedback: RepeatFeedback?
+    @State private var showingCareCustomization = false
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -411,6 +419,16 @@ struct TodayView: View {
         let awakeSinceDate = runningSleepTimer == nil
             ? [latestCompletedSleepEnd, latestStoppedDraftSleepEnd].compactMap { $0 }.max()
             : nil
+        let sleepMiniPlan = profile.flatMap {
+            SleepMiniPlanService.plan(
+                profile: $0,
+                events: scopedEvents,
+                records: scopedRecords,
+                prediction: prediction,
+                now: now,
+                calendar: calendar
+            )
+        }
         var dogLastEventTitles: [EventType: String] = [:]
         var dogPottyTitles: [DogPottyType: String] = [:]
         if profile?.profileType == .dog {
@@ -421,6 +439,11 @@ struct TodayView: View {
             dogPottyTitles[.poop] = latestPoopEvent?.displayTitle ?? "Not logged"
         }
         _ = pinnedQuickActionRevision
+        _ = categoryPreferenceRevision
+        let visibleCareTypes = Set(CareCategoryPreferenceStore.visibleTypes(
+            for: profile?.profileType ?? .child,
+            profileID: profileID
+        ))
         let pinnedQuickActionIDs = QuickLogActionPreferenceStore.pinnedActionIDs(profileID: profileID)
         let smartQuickActions = WidgetSnapshotService.makeQuickActions(
             profileID: profileID,
@@ -452,11 +475,13 @@ struct TodayView: View {
             runningSleepTimer: runningSleepTimer,
             awakeSinceDate: awakeSinceDate,
             isSleeping: runningSleepTimer != nil,
+            sleepMiniPlan: profile?.profileType == .child ? sleepMiniPlan : nil,
             dogLastEventTitles: dogLastEventTitles,
             dogPottyTitles: dogPottyTitles,
             lastLoggedDates: lastLoggedDates,
             dogPottyLastLoggedDates: dogPottyLastLoggedDates,
-            smartQuickActions: smartQuickActions
+            smartQuickActions: smartQuickActions,
+            visibleCareTypes: visibleCareTypes
         )
     }
 
@@ -566,6 +591,8 @@ struct TodayView: View {
                     } else {
                         childQuickActionsSection(state)
                     }
+
+                    sleepMiniPlanSection(state)
 
                     careRoutinesSection(state)
 
@@ -710,6 +737,17 @@ struct TodayView: View {
         .sheet(isPresented: $showingProfileEditor) {
             NavigationStack {
                 ProfileEditorView()
+            }
+        }
+        .sheet(isPresented: $showingCareCustomization) {
+            NavigationStack {
+                CareCategoryCustomizationView(
+                    profileID: selectedProfileID,
+                    profileType: profile?.profileType ?? .child
+                ) {
+                    categoryPreferenceRevision += 1
+                    refreshWidgetSnapshot()
+                }
             }
         }
         .sheet(isPresented: $showingExplanation) {
@@ -920,6 +958,22 @@ struct TodayView: View {
     }
 
     @ViewBuilder
+    private func sleepMiniPlanSection(_ state: TodayRenderState) -> some View {
+        if !state.isDogProfile, let plan = state.sleepMiniPlan {
+            Section {
+                SleepMiniPlanCard(plan: plan) {
+                    showingBackwardsPlanner = true
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } header: {
+                AppSectionHeader(title: "Sleep Mini-Plan", subtitle: plan.horizon)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func monthlyAgeGuideSection(_ state: TodayRenderState) -> some View {
         if state.shouldShowAgeGuideCard, let profile = state.profile, let guide = state.currentAgeGuide {
             Section {
@@ -1008,114 +1062,160 @@ struct TodayView: View {
             VStack(spacing: 14) {
                 smartQuickActionsRow(state.smartQuickActions.filter { $0.id != "sleep" })
 
-                Button {
-                    showingSleepChooser = true
-                } label: {
-                    HStack(spacing: 13) {
-                        Image(systemName: "moon.stars.fill")
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .frame(width: 42, height: 42)
-                            .background(.white.opacity(0.14), in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Start sleep")
-                                .font(.headline)
-                            Text(lastEventSubtitle(.sleep, state: state))
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.72))
+                if state.shows(.sleep) {
+                    Button {
+                        showingSleepChooser = true
+                    } label: {
+                        HStack(spacing: 13) {
+                            Image(systemName: "moon.stars.fill")
+                                .font(.title3)
+                                .foregroundStyle(.white)
+                                .frame(width: 42, height: 42)
+                                .background(.white.opacity(0.14), in: Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Start sleep")
+                                    .font(.headline)
+                                Text(lastEventSubtitle(.sleep, state: state))
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.72))
+                            }
+                            Spacer()
+                            Image(systemName: "play.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(.white.opacity(0.14), in: Circle())
                         }
-                        Spacer()
-                        Image(systemName: "play.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(.white.opacity(0.14), in: Circle())
+                        .foregroundStyle(.white)
+                        .padding(14)
+                        .background(
+                            LinearGradient(
+                                colors: [.indigo, Color(red: 0.43, green: 0.34, blue: 0.84)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            in: RoundedRectangle(cornerRadius: 19)
+                        )
                     }
-                    .foregroundStyle(.white)
-                    .padding(14)
-                    .background(
-                        LinearGradient(
-                            colors: [.indigo, Color(red: 0.43, green: 0.34, blue: 0.84)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: RoundedRectangle(cornerRadius: 19)
-                    )
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 LazyVGrid(
                     columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                     spacing: 14
                 ) {
-                    QuickActionButton(
-                        title: "Feed",
-                        subtitle: lastEventSubtitle(.feed, state: state),
-                        icon: "waterbottle.fill",
-                        color: .orange
-                    ) {
-                        editorRoute = EventEditorRoute(type: .feed)
+                    if state.shows(.feed) {
+                        QuickActionButton(
+                            title: "Feed",
+                            subtitle: lastEventSubtitle(.feed, state: state),
+                            icon: "waterbottle.fill",
+                            color: .orange
+                        ) {
+                            editorRoute = EventEditorRoute(type: .feed)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Nursing",
-                        subtitle: lastEventSubtitle(.nursing, state: state),
-                        icon: "figure.and.child.holdinghands",
-                        color: .pink
-                    ) {
-                        showingNursingChooser = true
+                    if state.shows(.nursing) {
+                        QuickActionButton(
+                            title: "Nursing",
+                            subtitle: lastEventSubtitle(.nursing, state: state),
+                            icon: "figure.and.child.holdinghands",
+                            color: .pink
+                        ) {
+                            showingNursingChooser = true
+                        }
                     }
-                    QuickActionButton(
-                        title: "Diaper",
-                        subtitle: lastEventSubtitle(.diaper, state: state),
-                        icon: "drop.fill",
-                        color: .teal
-                    ) {
-                        editorRoute = EventEditorRoute(type: .diaper)
+                    if state.shows(.pumping) {
+                        QuickActionButton(
+                            title: "Pumping",
+                            subtitle: lastEventSubtitle(.pumping, state: state),
+                            icon: "drop.circle.fill",
+                            color: .cyan
+                        ) {
+                            startTimer(.pumping)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Activity",
-                        subtitle: lastEventSubtitle(.activity, state: state),
-                        icon: "figure.play",
-                        color: .green
-                    ) {
-                        showingActivityChooser = true
+                    if state.shows(.diaper) {
+                        QuickActionButton(
+                            title: "Diaper",
+                            subtitle: lastEventSubtitle(.diaper, state: state),
+                            icon: "drop.fill",
+                            color: .teal
+                        ) {
+                            editorRoute = EventEditorRoute(type: .diaper)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Medicine",
-                        subtitle: lastEventSubtitle(.medicine, state: state),
-                        icon: "cross.case.fill",
-                        color: .red
-                    ) {
-                        editorRoute = EventEditorRoute(type: .medicine)
+                    if state.shows(.potty) {
+                        QuickActionButton(
+                            title: "Potty",
+                            subtitle: lastEventSubtitle(.potty, state: state),
+                            icon: "figure.child",
+                            color: .teal
+                        ) {
+                            editorRoute = EventEditorRoute(type: .potty)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Temperature",
-                        subtitle: lastEventSubtitle(.temperature, state: state),
-                        icon: "thermometer.medium",
-                        color: .red
-                    ) {
-                        editorRoute = EventEditorRoute(type: .temperature)
+                    if state.shows(.activity) {
+                        QuickActionButton(
+                            title: "Activity",
+                            subtitle: lastEventSubtitle(.activity, state: state),
+                            icon: "figure.play",
+                            color: .green
+                        ) {
+                            showingActivityChooser = true
+                        }
                     }
-                    QuickActionButton(
-                        title: "Growth",
-                        subtitle: lastEventSubtitle(.growth, state: state),
-                        icon: "ruler.fill",
-                        color: .mint
-                    ) {
-                        editorRoute = EventEditorRoute(type: .growth)
+                    if state.shows(.medicine) {
+                        QuickActionButton(
+                            title: "Medicine",
+                            subtitle: lastEventSubtitle(.medicine, state: state),
+                            icon: "cross.case.fill",
+                            color: .red
+                        ) {
+                            editorRoute = EventEditorRoute(type: .medicine)
+                        }
+                    }
+                    if state.shows(.temperature) {
+                        QuickActionButton(
+                            title: "Temperature",
+                            subtitle: lastEventSubtitle(.temperature, state: state),
+                            icon: "thermometer.medium",
+                            color: .red
+                        ) {
+                            editorRoute = EventEditorRoute(type: .temperature)
+                        }
+                    }
+                    if state.shows(.growth) {
+                        QuickActionButton(
+                            title: "Growth",
+                            subtitle: lastEventSubtitle(.growth, state: state),
+                            icon: "ruler.fill",
+                            color: .mint
+                        ) {
+                            editorRoute = EventEditorRoute(type: .growth)
+                        }
                     }
                     QuickActionButton(title: "Visits", icon: "stethoscope", color: .indigo) {
                         showingAppointments = true
                     }
-                    QuickActionButton(
-                        title: "Custom",
-                        subtitle: lastEventSubtitle(.custom, state: state),
-                        icon: "sparkles",
-                        color: .purple
-                    ) {
-                        editorRoute = EventEditorRoute(type: .custom)
+                    if state.shows(.custom) {
+                        QuickActionButton(
+                            title: "Custom",
+                            subtitle: lastEventSubtitle(.custom, state: state),
+                            icon: "sparkles",
+                            color: .purple
+                        ) {
+                            editorRoute = EventEditorRoute(type: .custom)
+                        }
                     }
                 }
+                Button {
+                    showingCareCustomization = true
+                } label: {
+                    Label("Customize", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
             .padding(14)
             .appSurface()
@@ -1139,79 +1239,105 @@ struct TodayView: View {
                     columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                     spacing: 14
                 ) {
-                    QuickActionButton(
-                        title: "Food",
-                        subtitle: lastEventSubtitle(.food, state: state),
-                        icon: "fork.knife",
-                        color: .orange
-                    ) {
-                        editorRoute = EventEditorRoute(type: .food)
+                    if state.shows(.food) {
+                        QuickActionButton(
+                            title: "Food",
+                            subtitle: lastEventSubtitle(.food, state: state),
+                            icon: "fork.knife",
+                            color: .orange
+                        ) {
+                            editorRoute = EventEditorRoute(type: .food)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Water",
-                        subtitle: lastEventSubtitle(.water, state: state),
-                        icon: "drop.fill",
-                        color: .cyan
-                    ) {
-                        editorRoute = EventEditorRoute(type: .water)
+                    if state.shows(.water) {
+                        QuickActionButton(
+                            title: "Water",
+                            subtitle: lastEventSubtitle(.water, state: state),
+                            icon: "drop.fill",
+                            color: .cyan
+                        ) {
+                            editorRoute = EventEditorRoute(type: .water)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Start Walk",
-                        subtitle: lastEventSubtitle(.walk, state: state),
-                        icon: "figure.walk",
-                        color: .green
-                    ) {
-                        startTimer(.walk)
+                    if state.shows(.walk) {
+                        QuickActionButton(
+                            title: "Start Walk",
+                            subtitle: lastEventSubtitle(.walk, state: state),
+                            icon: "figure.walk",
+                            color: .green
+                        ) {
+                            startTimer(.walk)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Pee",
-                        subtitle: dogPottySubtitle(.pee, state: state),
-                        icon: "pawprint.fill",
-                        color: .teal
-                    ) {
-                        logDogPotty(.pee, accident: false)
+                    if state.shows(.potty) {
+                        QuickActionButton(
+                            title: "Pee",
+                            subtitle: dogPottySubtitle(.pee, state: state),
+                            icon: "pawprint.fill",
+                            color: .teal
+                        ) {
+                            logDogPotty(.pee, accident: false)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Poop",
-                        subtitle: dogPottySubtitle(.poop, state: state),
-                        icon: "pawprint.circle.fill",
-                        color: .teal
-                    ) {
-                        logDogPotty(.poop, accident: false)
+                    if state.shows(.potty) {
+                        QuickActionButton(
+                            title: "Poop",
+                            subtitle: dogPottySubtitle(.poop, state: state),
+                            icon: "pawprint.circle.fill",
+                            color: .teal
+                        ) {
+                            logDogPotty(.poop, accident: false)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Accident",
-                        subtitle: dogPottySubtitle(.pee, state: state, accident: true),
-                        icon: "exclamationmark.triangle.fill",
-                        color: .orange
-                    ) {
-                        logDogPotty(.pee, accident: true)
+                    if state.shows(.potty) {
+                        QuickActionButton(
+                            title: "Accident",
+                            subtitle: dogPottySubtitle(.pee, state: state, accident: true),
+                            icon: "exclamationmark.triangle.fill",
+                            color: .orange
+                        ) {
+                            logDogPotty(.pee, accident: true)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Rest",
-                        subtitle: lastEventSubtitle(.rest, state: state),
-                        icon: "bed.double.fill",
-                        color: .indigo
-                    ) {
-                        startTimer(.rest)
+                    if state.shows(.rest) {
+                        QuickActionButton(
+                            title: "Rest",
+                            subtitle: lastEventSubtitle(.rest, state: state),
+                            icon: "bed.double.fill",
+                            color: .indigo
+                        ) {
+                            startTimer(.rest)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Training",
-                        subtitle: lastEventSubtitle(.training, state: state),
-                        icon: "graduationcap.fill",
-                        color: .purple
-                    ) {
-                        startTimer(.training)
+                    if state.shows(.training) {
+                        QuickActionButton(
+                            title: "Training",
+                            subtitle: lastEventSubtitle(.training, state: state),
+                            icon: "graduationcap.fill",
+                            color: .purple
+                        ) {
+                            startTimer(.training)
+                        }
                     }
-                    QuickActionButton(
-                        title: "Medicine",
-                        subtitle: lastEventSubtitle(.medicine, state: state),
-                        icon: "cross.case.fill",
-                        color: .red
-                    ) {
-                        editorRoute = EventEditorRoute(type: .medicine)
+                    if state.shows(.medicine) {
+                        QuickActionButton(
+                            title: "Medicine",
+                            subtitle: lastEventSubtitle(.medicine, state: state),
+                            icon: "cross.case.fill",
+                            color: .red
+                        ) {
+                            editorRoute = EventEditorRoute(type: .medicine)
+                        }
                     }
                 }
+                Button {
+                    showingCareCustomization = true
+                } label: {
+                    Label("Customize", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
             .padding(14)
             .appSurface()
@@ -1917,7 +2043,7 @@ struct TodayView: View {
         showRepeatFeedback(
             title: "Repeated \(source.type.displayName)",
             subtitle: source.displayTitle,
-            systemImage: source.activityType?.systemImage ?? source.type.systemImage,
+            systemImage: source.activityType?.systemImage ?? source.type.systemImage(for: source.profileTypeSnapshot),
             tint: source.type.tint
         )
         Task {
@@ -2436,6 +2562,58 @@ private struct QuickActionButton: View {
     }
 }
 
+private struct SleepMiniPlanCard: View {
+    var plan: SleepMiniPlan
+    var openPlanner: () -> Void
+    private var tint: Color {
+        switch plan.tintName {
+        case "cyan": .cyan
+        case "green": .green
+        case "mint": .mint
+        case "purple": .purple
+        default: .indigo
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: plan.systemImage)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 42, height: 42)
+                    .background(tint.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(plan.title)
+                        .font(.headline)
+                    Text(plan.summary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(plan.steps, id: \.self) { step in
+                    Label(step, systemImage: "checkmark.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+            }
+
+            Button(action: openPlanner) {
+                Label("Open Plan", systemImage: "calendar.badge.clock")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(tint)
+        }
+        .padding(16)
+        .appSurface(cornerRadius: 18)
+    }
+}
+
 private struct QuickActionButtonLabel: View {
     var title: String
     var subtitle: String? = nil
@@ -2465,6 +2643,84 @@ private struct QuickActionButtonLabel: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 84, alignment: .top)
         .contentShape(Rectangle())
+    }
+}
+
+private struct CareCategoryCustomizationView: View {
+    @Environment(\.dismiss) private var dismiss
+    let profileID: UUID?
+    let profileType: CareProfileType
+    let onChange: () -> Void
+
+    @State private var hiddenTypes: Set<EventType>
+
+    init(
+        profileID: UUID?,
+        profileType: CareProfileType,
+        onChange: @escaping () -> Void
+    ) {
+        self.profileID = profileID
+        self.profileType = profileType
+        self.onChange = onChange
+        _hiddenTypes = State(initialValue: CareCategoryPreferenceStore.hiddenTypes(profileID: profileID))
+    }
+
+    var body: some View {
+        let eventTypes = EventType.cases(for: profileType)
+        let visibleTypeCount = eventTypes.filter { !hiddenTypes.contains($0) }.count
+
+        List {
+            Section {
+                ForEach(eventTypes) { type in
+                    Toggle(isOn: binding(for: type)) {
+                        Label(type.displayName, systemImage: type.systemImage(for: profileType))
+                    }
+                    .disabled(!canChangeVisibility(for: type, visibleTypeCount: visibleTypeCount))
+                }
+            } header: {
+                Text("Today Actions")
+            } footer: {
+                Text("Hidden categories stay available in history and existing logs.")
+            }
+            Section {
+                Button("Reset to Defaults") {
+                    hiddenTypes.removeAll()
+                    CareCategoryPreferenceStore.reset(profileID: profileID)
+                    onChange()
+                }
+            }
+        }
+        .navigationTitle("Customize")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+    }
+
+    private func binding(for type: EventType) -> Binding<Bool> {
+        Binding(
+            get: { !hiddenTypes.contains(type) },
+            set: { isVisible in
+                guard isVisible || canHide(type) else { return }
+                if isVisible {
+                    hiddenTypes.remove(type)
+                } else {
+                    hiddenTypes.insert(type)
+                }
+                CareCategoryPreferenceStore.setHiddenTypes(hiddenTypes, profileID: profileID)
+                onChange()
+            }
+        )
+    }
+
+    private func canChangeVisibility(for type: EventType, visibleTypeCount: Int) -> Bool {
+        hiddenTypes.contains(type) || visibleTypeCount > 1
+    }
+
+    private func canHide(_ type: EventType) -> Bool {
+        hiddenTypes.contains(type) || EventType.cases(for: profileType).filter { !hiddenTypes.contains($0) }.count > 1
     }
 }
 

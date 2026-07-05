@@ -1133,7 +1133,7 @@ private struct CalendarEventBlock: View {
                 .frame(width: 4)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Image(systemName: event.type.systemImage)
+                    Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
                         .font(.caption2.weight(.bold))
                     Text(event.displayTitle)
                         .font(.caption.weight(.semibold))
@@ -1226,18 +1226,45 @@ private struct SummaryGrid: View {
                 SummaryCell("Naps", "\(summary.napCount)", icon: "bed.double.fill", color: .purple)
                 SummaryCell("Average nap", DurationFormatting.string(seconds: summary.averageNap), icon: "clock.fill", color: .blue)
                 SummaryCell("Feeds", "\(summary.feedCount)", icon: "waterbottle.fill", color: .orange)
-                SummaryCell("Bottle", String(format: "%.1f oz", summary.bottleOunces), icon: "drop.fill", color: .cyan)
+                SummaryCell(
+                    "Bottle",
+                    "\(summary.bottleFeedCount) logs, \(String(format: "%.1f oz", summary.bottleOunces))",
+                    icon: "drop.fill",
+                    color: .cyan
+                )
                 SummaryCell("Nursing", DurationFormatting.string(seconds: summary.nursingTotal), icon: "figure.and.child.holdinghands", color: .pink)
+                SummaryCell(
+                    "Pumping",
+                    "\(summary.pumpingSessions) sessions, \(String(format: "%.1f oz", summary.pumpingOunces))",
+                    icon: "drop.circle.fill",
+                    color: .cyan
+                )
+                SummaryCell(
+                    "Solids",
+                    "\(summary.solidFeedCount) tastes, \(summary.solidSensitivityObservations) notes",
+                    icon: "carrot.fill",
+                    color: .orange
+                )
                 SummaryCell(
                     "Diapers",
                     "\(summary.wetDiapers) pee, \(summary.dirtyDiapers) poo, \(summary.bothDiapers) mixed",
                     icon: "humidity.fill",
                     color: .teal
                 )
+                SummaryCell(
+                    "Potty",
+                    "\(summary.childPottyCount) logs, \(summary.childPottyAccidents) accidents",
+                    icon: "figure.child",
+                    color: .teal
+                )
                 SummaryCell("Tummy time", DurationFormatting.string(seconds: summary.tummyTime), icon: "figure.play", color: .green)
                 SummaryCell("Reading", DurationFormatting.string(seconds: summary.readingTime), icon: "book.fill", color: .blue)
+                SummaryCell("Activities", "\(summary.activityCount)", icon: "figure.play", color: .green)
                 SummaryCell("Medicine", "\(summary.medicineNames.count)", icon: "cross.case.fill", color: .red)
                 SummaryCell("Baths", "\(summary.bathCount)", icon: "bathtub.fill", color: .cyan)
+                SummaryCell("Growth", "\(summary.growthCount)", icon: "ruler.fill", color: .green)
+                SummaryCell("Temperature", "\(summary.temperatureCount)", icon: "thermometer.medium", color: .red)
+                SummaryCell("Custom", "\(summary.customCount)", icon: "sparkles", color: .gray)
             }
         }
     }

@@ -24,6 +24,11 @@ final class BabyEvent {
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
+    var solidReactionRawValue: String?
+    var solidTextureRawValue: String?
+    var solidFeedingStyleRawValue: String?
+    var solidAllergenExposure: Bool?
+    var solidSensitivityObserved: Bool?
     var nursingSideRawValue: String?
     var activeNursingSideRawValue: String?
     var timerStateRawValue: String?
@@ -32,6 +37,9 @@ final class BabyEvent {
     var leftDurationSeconds: Double?
     var rightDurationSeconds: Double?
     var diaperKindRawValue: String?
+    var childPottyKindRawValue: String?
+    var childPottyLocationRawValue: String?
+    var childPottyAccident: Bool?
     var peeAmountRawValue: String?
     var pooAmountRawValue: String?
     var pooColorRawValue: String?
@@ -114,6 +122,21 @@ final class BabyEvent {
         set { feedKindRawValue = newValue?.rawValue }
     }
 
+    var solidReaction: SolidReaction? {
+        get { solidReactionRawValue.flatMap(SolidReaction.init(rawValue:)) }
+        set { solidReactionRawValue = newValue?.rawValue }
+    }
+
+    var solidTexture: SolidTexture? {
+        get { solidTextureRawValue.flatMap(SolidTexture.init(rawValue:)) }
+        set { solidTextureRawValue = newValue?.rawValue }
+    }
+
+    var solidFeedingStyle: SolidFeedingStyle? {
+        get { solidFeedingStyleRawValue.flatMap(SolidFeedingStyle.init(rawValue:)) }
+        set { solidFeedingStyleRawValue = newValue?.rawValue }
+    }
+
     var nursingSide: NursingSide? {
         get {
             if let side = nursingSideRawValue.flatMap(NursingSide.init(rawValue:)) {
@@ -136,6 +159,16 @@ final class BabyEvent {
     var diaperKind: DiaperKind? {
         get { diaperKindRawValue.flatMap(DiaperKind.init(rawValue:)) }
         set { diaperKindRawValue = newValue?.rawValue }
+    }
+
+    var childPottyKind: ChildPottyKind? {
+        get { childPottyKindRawValue.flatMap(ChildPottyKind.init(rawValue:)) }
+        set { childPottyKindRawValue = newValue?.rawValue }
+    }
+
+    var childPottyLocation: ChildPottyLocation? {
+        get { childPottyLocationRawValue.flatMap(ChildPottyLocation.init(rawValue:)) }
+        set { childPottyLocationRawValue = newValue?.rawValue }
     }
 
     var peeAmount: DiaperAmount? {
@@ -304,9 +337,12 @@ final class BabyEvent {
     var displayTitle: String {
         return switch type {
         case .sleep: sleepKind?.displayName ?? type.displayName
-        case .feed: feedKind?.displayName ?? type.displayName
+        case .feed:
+            if feedKind == .solid { "Solid: \(solidSummary)" } else { feedKind?.displayName ?? type.displayName }
         case .nursing:
             nursingSide.map { "\($0.displayName) nursing" } ?? type.displayName
+        case .pumping:
+            "Pumping\(pumpingSummary)"
         case .diaper:
             diaperSummary
         case .medicine:
@@ -328,7 +364,7 @@ final class BabyEvent {
         case .treat:
             "Treat\(dogTreatSummary)"
         case .potty:
-            dogPottySummary
+            profileTypeSnapshot == .dog ? dogPottySummary : childPottySummary
         case .walk:
             dogWalkSummary
         case .rest:
@@ -363,6 +399,35 @@ final class BabyEvent {
             .trimmingCharacters(in: .whitespaces)
     }
 
+    private var pumpingSummary: String {
+        guard let amountOz, amountOz > 0 else { return "" }
+        let amount = amountOz.formatted(.number.precision(.fractionLength(0...1)))
+        return ": \(amount) oz"
+    }
+
+    private var solidSummary: String {
+        var values: [String] = []
+        if let food = foodDescription?.trimmingCharacters(in: .whitespacesAndNewlines), !food.isEmpty {
+            values.append(food)
+        }
+        if let solidTexture, solidTexture != .unknown {
+            values.append(solidTexture.displayName.lowercased())
+        }
+        if let solidFeedingStyle, solidFeedingStyle != .unknown {
+            values.append(solidFeedingStyle.displayName.lowercased())
+        }
+        if let solidReaction, solidReaction != .unknown {
+            values.append(solidReaction.displayName.lowercased())
+        }
+        if solidAllergenExposure == true {
+            values.append("allergen")
+        }
+        if solidSensitivityObserved == true {
+            values.append("sensitivity noted")
+        }
+        return values.isEmpty ? "Solid" : values.joined(separator: " · ")
+    }
+
     private var diaperSummary: String {
         guard let diaperKind else { return type.displayName }
         switch diaperKind {
@@ -376,6 +441,18 @@ final class BabyEvent {
             let poo = "poo" + (pooDetailWords.isEmpty ? "" : " \(pooDetailWords.joined(separator: " "))")
             return "Diaper: mixed — \(pee), \(poo)"
         }
+    }
+
+    private var childPottySummary: String {
+        guard let childPottyKind else { return "Potty" }
+        var details = [childPottyKind.displayName.lowercased()]
+        if let childPottyLocation {
+            details.append(childPottyLocation.displayName.lowercased())
+        }
+        if childPottyAccident == true {
+            details.append("accident")
+        }
+        return "Potty: \(details.joined(separator: " · "))"
     }
 
     private func optionalDiaperAmount(_ amount: DiaperAmount?) -> String {

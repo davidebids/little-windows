@@ -4,6 +4,7 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
     case sleep
     case feed
     case nursing
+    case pumping
     case diaper
     case medicine
     case growth
@@ -29,6 +30,7 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
         case .sleep: "Sleep"
         case .feed: "Feed"
         case .nursing: "Nursing"
+        case .pumping: "Pumping"
         case .diaper: "Diaper"
         case .medicine: "Medicine"
         case .growth: "Growth"
@@ -54,6 +56,7 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
         case .sleep: "moon.stars.fill"
         case .feed: "waterbottle.fill"
         case .nursing: "figure.and.child.holdinghands"
+        case .pumping: "drop.circle.fill"
         case .diaper: "drop.fill"
         case .medicine: "cross.case.fill"
         case .growth: "ruler.fill"
@@ -74,8 +77,15 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    func systemImage(for profileType: CareProfileType?) -> String {
+        if self == .potty, profileType != .dog {
+            return "figure.child"
+        }
+        return systemImage
+    }
+
     var supportsTimer: Bool {
-        [.sleep, .feed, .nursing, .activity, .walk, .rest, .training, .grooming, .custom].contains(self)
+        [.sleep, .feed, .nursing, .pumping, .activity, .walk, .rest, .training, .grooming, .custom].contains(self)
     }
 
     var affectsSleepPrediction: Bool {
@@ -94,7 +104,7 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
     static func cases(for profileType: CareProfileType) -> [EventType] {
         switch profileType {
         case .child:
-            return [.sleep, .feed, .nursing, .diaper, .medicine, .growth, .temperature, .activity, .custom]
+            return [.sleep, .feed, .nursing, .pumping, .diaper, .potty, .medicine, .growth, .temperature, .activity, .custom]
         case .dog:
             return [.food, .water, .treat, .potty, .walk, .rest, .training, .grooming, .medicine, .symptom, .growth, .temperature, .vaccine, .glucose, .custom]
         }
