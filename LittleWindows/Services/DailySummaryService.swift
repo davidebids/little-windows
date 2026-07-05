@@ -54,6 +54,7 @@ enum DailySummaryService {
         for event in events {
             switch event.type {
             case .sleep:
+                guard event.sleepKind != .nightWaking else { continue }
                 let duration = event.duration ?? 0
                 result.totalSleep += duration
                 if event.sleepKind == .nap {

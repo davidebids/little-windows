@@ -1016,6 +1016,52 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(tighten?.id, "tighten-window")
     }
 
+    func testSleepMiniPlanIncludesDayAheadTimeline() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 13))!
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
+        )
+        let nap = BabyEvent(
+            type: .sleep,
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 9))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
+        )
+        nap.sleepKind = .nap
+        let bedtime = BabyEvent(
+            type: .sleep,
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 19, hour: 20))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 6))!
+        )
+        bedtime.sleepKind = .nightSleep
+        let nightWaking = BabyEvent(
+            type: .sleep,
+            startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 2))!,
+            endDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 2, minute: 15))!
+        )
+        nightWaking.sleepKind = .nightWaking
+        var prediction = makeLittleWindowPrediction()
+        prediction.predictedStart = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 14, minute: 15))!
+        prediction.predictedWindowStart = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 14))!
+        prediction.predictedWindowEnd = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 14, minute: 30))!
+
+        let plan = SleepMiniPlanService.plan(
+            profile: profile,
+            events: [bedtime, nightWaking, nap],
+            records: [],
+            prediction: prediction,
+            now: now,
+            calendar: calendar
+        )
+
+        let items = try XCTUnwrap(plan?.timelineItems)
+        XCTAssertEqual(items.map(\.id), ["awake-since", "next-window", "usual-bedtime"])
+        XCTAssertEqual(items.first?.detail, "Nap ended")
+        XCTAssertEqual(items.first?.timeText, DateFormatting.time.string(from: nap.endDate!))
+    }
+
     func testSleepMiniPlanUsesCircularBedtimeSpreadAcrossMidnight() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -2687,6 +2733,34 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(samples.first?.napIndex, 1)
     }
 
+    func testWakeWindowSamplesIgnoreNightWakingLogs() {
+        let day = Calendar.current.startOfDay(for: Date())
+        let first = BabyEvent(
+            type: .sleep,
+            startDate: day.addingTimeInterval(7 * 3600),
+            endDate: day.addingTimeInterval(8 * 3600)
+        )
+        first.sleepKind = .nightSleep
+        let waking = BabyEvent(
+            type: .sleep,
+            startDate: day.addingTimeInterval(9 * 3600),
+            endDate: day.addingTimeInterval(9 * 3600 + 10 * 60)
+        )
+        waking.sleepKind = .nightWaking
+        let second = BabyEvent(
+            type: .sleep,
+            startDate: day.addingTimeInterval(11 * 3600),
+            endDate: day.addingTimeInterval(12 * 3600)
+        )
+        second.sleepKind = .nap
+
+        let samples = SleepPredictionEngine.wakeWindowSamples(from: [first, waking, second])
+
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples.first?.minutes, 180)
+        XCTAssertEqual(samples.first?.napIndex, 1)
+    }
+
     func testConfidenceRisesWithStableSamples() {
         let sparse = SleepPredictionEngine.confidenceScore(sampleCount: 2, variability: 30)
         let mature = SleepPredictionEngine.confidenceScore(sampleCount: 18, variability: 10)
@@ -2760,6 +2834,44 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(totals[0].napCount, 1)
     }
 
+    func testNightWakingLogsAreTrackedSeparatelyFromSleepTotals() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: day)!
+
+        let nightSleep = BabyEvent(
+            type: .sleep,
+            startDate: day.addingTimeInterval(20 * 3600),
+            endDate: day.addingTimeInterval(23 * 3600)
+        )
+        nightSleep.sleepKind = .nightSleep
+        let nightWaking = BabyEvent(
+            type: .sleep,
+            startDate: nextDay.addingTimeInterval(1 * 3600),
+            endDate: nextDay.addingTimeInterval(1 * 3600 + 20 * 60)
+        )
+        nightWaking.sleepKind = .nightWaking
+        let nap = BabyEvent(
+            type: .sleep,
+            startDate: day.addingTimeInterval(10 * 3600),
+            endDate: day.addingTimeInterval(11 * 3600)
+        )
+        nap.sleepKind = .nap
+
+        let totals = InsightsAnalyticsService.dailySleepTotals(
+            events: [nightSleep, nightWaking, nap],
+            range: day..<nextDay,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(totals.count, 1)
+        XCTAssertEqual(totals[0].nightMinutes, 180, accuracy: 0.001)
+        XCTAssertEqual(totals[0].daytimeMinutes, 60, accuracy: 0.001)
+        XCTAssertEqual(totals[0].nightWakingCount, 1)
+        XCTAssertEqual(totals[0].nightWakingMinutes, 20, accuracy: 0.001)
+    }
+
     func testNightSleepScoreUsesNightSleepSegmentsAndWakeGaps() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -2798,6 +2910,43 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(scores[0].wakeDurationsMinutes, [30])
         XCTAssertEqual(scores[0].longestStretchMinutes, 240, accuracy: 0.001)
         XCTAssertEqual(scores[0].score, 76)
+    }
+
+    func testNightSleepScoreUsesExplicitNightWakingLogsWhenPresent() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: day)!
+
+        let firstSegment = BabyEvent(
+            type: .sleep,
+            startDate: day.addingTimeInterval(20 * 3600),
+            endDate: nextDay
+        )
+        firstSegment.sleepKind = .nightSleep
+        let explicitWaking = BabyEvent(
+            type: .sleep,
+            startDate: nextDay.addingTimeInterval(5 * 60),
+            endDate: nextDay.addingTimeInterval(20 * 60)
+        )
+        explicitWaking.sleepKind = .nightWaking
+        let secondSegment = BabyEvent(
+            type: .sleep,
+            startDate: nextDay.addingTimeInterval(30 * 60),
+            endDate: nextDay.addingTimeInterval(4 * 3600)
+        )
+        secondSegment.sleepKind = .nightSleep
+
+        let scores = InsightsAnalyticsService.nightSleepScores(
+            events: [firstSegment, explicitWaking, secondSegment],
+            range: day..<nextDay,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(scores.count, 1)
+        XCTAssertEqual(scores[0].wakeEventCount, 1)
+        XCTAssertEqual(scores[0].totalWakeMinutes, 15, accuracy: 0.001)
+        XCTAssertEqual(scores[0].wakeDurationsMinutes, [15])
     }
 
     func testInsightsCustomDateRangeIncludesBothSelectedDaysOnly() {
@@ -4374,6 +4523,12 @@ final class SleepPredictionEngineTests: XCTestCase {
             type: .sleep,
             startDate: try date(day: 7, hour: 9)
         )
+        let nightWaking = BabyEvent(
+            type: .sleep,
+            startDate: try date(day: 7, hour: 2),
+            endDate: try date(day: 7, hour: 2, minute: 20)
+        )
+        nightWaking.sleepKind = .nightWaking
 
         let nursingOne = BabyEvent(
             type: .nursing,
@@ -4430,7 +4585,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             AutomaticMilestoneSummaryService.summaries(
                 profile: profile,
                 events: [
-                    sleepOne, sleepTwo, draftSleep,
+                    sleepOne, sleepTwo, draftSleep, nightWaking,
                     nursingOne, nursingTwo, nursingThree,
                     pump, diaperOne, diaperTwo, growth,
                     tummyOne, tummyTwo, bath
@@ -4635,6 +4790,22 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(service.allAgeGuides().map(\.ageMonth), Array(2...12))
         XCTAssertTrue(try XCTUnwrap(service.ageGuide(for: 9)).isCheckpointAge)
         XCTAssertTrue(try XCTUnwrap(service.ageGuide(for: 12)).isCheckpointAge)
+    }
+
+    func testSleepGuideServiceProvidesReviewedCredibleSources() {
+        let lessons = SleepGuideService.shared.lessons
+        let sourceNames = Set(lessons.flatMap { lesson in
+            lesson.sourceReferences.map(\.sourceName)
+        })
+
+        XCTAssertEqual(lessons.count, 5)
+        XCTAssertTrue(lessons.allSatisfy { !$0.bullets.isEmpty })
+        XCTAssertTrue(sourceNames.contains { $0.contains("HealthyChildren") })
+        XCTAssertTrue(sourceNames.contains { $0.contains("NICHD") })
+        XCTAssertTrue(sourceNames.contains { $0.contains("Sleep Medicine") })
+        XCTAssertTrue(sourceNames.contains { $0.contains("MedlinePlus") })
+        XCTAssertTrue(lessons.flatMap(\.sourceReferences).allSatisfy { $0.sourceURL != nil })
+        XCTAssertTrue(lessons.flatMap(\.sourceReferences).allSatisfy { $0.retrievedOrReviewedDate != nil })
     }
 
     @MainActor

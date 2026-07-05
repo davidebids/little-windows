@@ -125,6 +125,15 @@ struct AgeGuide: Codable, Identifiable, Hashable {
     }
 }
 
+struct SleepGuideLesson: Identifiable, Hashable {
+    var id: String
+    var title: String
+    var subtitle: String
+    var body: String
+    var bullets: [String]
+    var sourceReferences: [ContentSourceReference]
+}
+
 @Model
 final class AgeGuideReadState {
     var id: UUID = UUID()

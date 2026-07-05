@@ -89,7 +89,7 @@ enum PredictionTuningService {
         with sleepEvent: BabyEvent,
         records: [SleepPredictionRecord]
     ) {
-        guard sleepEvent.type == .sleep else { return }
+        guard sleepEvent.isSleepBlock else { return }
         let linkedRecord = records.first { $0.actualSleepEventID == sleepEvent.id }
         let candidate = linkedRecord ?? records
             .filter {
@@ -174,7 +174,7 @@ enum PredictionTuningService {
 
     private static func latestCompletedSleepID(in events: [BabyEvent]) -> UUID? {
         events
-            .filter { $0.type == .sleep && $0.endDate != nil }
+            .filter { $0.isSleepBlock && $0.endDate != nil }
             .max { $0.startDate < $1.startDate }?
             .id
     }

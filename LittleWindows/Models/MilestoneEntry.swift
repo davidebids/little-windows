@@ -363,7 +363,7 @@ enum AutomaticMilestoneSummaryService {
                 && $0.startDate >= birthDay
                 && $0.startDate < cutoff
         }
-        let sleep = completed.filter { $0.type == .sleep }
+        let sleep = completed.filter(\.isSleepBlock)
         let nursing = completed.filter { $0.type == .nursing }
         let pumps = completed.filter(isPumpingEvent)
         let diapers = completed.filter { $0.type == .diaper }

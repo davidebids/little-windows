@@ -252,19 +252,19 @@ struct TodayView: View {
     }
     private var runningSleepTimer: BabyEvent? {
         activeEvents.first {
-            $0.type == .sleep && $0.isTimerRunning
+            $0.isSleepBlock && $0.isTimerRunning
         }
     }
     private var awakeSinceDate: Date? {
         guard runningSleepTimer == nil else { return nil }
         let now = Date()
         let completedSleepEnd = scopedEvents
-            .filter { $0.type == .sleep && !$0.isTimerDraft }
+            .filter { $0.isSleepBlock && !$0.isTimerDraft }
             .compactMap(\.endDate)
             .filter { $0 <= now }
             .max()
         let stoppedDraftSleepEnd = activeEvents
-            .filter { $0.type == .sleep && !$0.isTimerRunning }
+            .filter { $0.isSleepBlock && !$0.isTimerRunning }
             .map(\.updatedAt)
             .filter { $0 <= now }
             .max()
@@ -344,7 +344,7 @@ struct TodayView: View {
                 todayEvents.append(event)
             }
 
-            if event.type == .sleep,
+            if event.isSleepBlock,
                let endDate = event.endDate,
                endDate <= now,
                latestCompletedSleepEnd.map({ endDate > $0 }) ?? true {
@@ -414,7 +414,7 @@ struct TodayView: View {
             .filter { !$0.isCompleted && $0.startDate >= todayStart && $0.startDate <= soon }
             .sorted { $0.startDate < $1.startDate }
         let runningSleepTimer = activeEvents.first {
-            $0.type == .sleep && $0.isTimerRunning
+            $0.isSleepBlock && $0.isTimerRunning
         }
         let awakeSinceDate = runningSleepTimer == nil
             ? [latestCompletedSleepEnd, latestStoppedDraftSleepEnd].compactMap { $0 }.max()
@@ -968,7 +968,7 @@ struct TodayView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } header: {
-                AppSectionHeader(title: "Sleep Mini-Plan", subtitle: plan.horizon)
+                AppSectionHeader(title: "Sleep day ahead", subtitle: plan.horizon)
             }
         }
     }
@@ -1594,7 +1594,7 @@ struct TodayView: View {
                     waitForSystemIntegrations: true
                 )
                 await syncActiveSleepPlanWakeAlert(
-                    for: created.type == .sleep ? created : nil
+                    for: created.isSleepBlock ? created : nil
                 )
             }
             return created
@@ -2432,7 +2432,7 @@ struct TodayView: View {
             profileID: selectedProfileID,
             settings: .current,
             isSleeping: activeEvents.contains {
-                $0.type == .sleep && $0.isTimerRunning
+                $0.isSleepBlock && $0.isTimerRunning
             }
         )
     }
@@ -2536,14 +2536,30 @@ private struct SleepKindChooser: ViewModifier {
             options: SleepKind.allCases.map { kind in
                 AppActionSheetOption(
                     title: kind.displayName,
-                    subtitle: kind == .nap ? "Track a daytime sleep." : "Track overnight sleep.",
-                    systemImage: kind == .nap ? "sun.max.fill" : "moon.stars.fill",
-                    tint: .indigo
+                    subtitle: sleepKindSubtitle(kind),
+                    systemImage: kind.systemImage,
+                    tint: sleepKindTint(kind)
                 ) {
                     startSleep(kind)
                 }
             }
         )
+    }
+
+    private func sleepKindSubtitle(_ kind: SleepKind) -> String {
+        switch kind {
+        case .nap: "Track a daytime sleep."
+        case .nightSleep: "Track overnight sleep."
+        case .nightWaking: "Track awake time during the night."
+        }
+    }
+
+    private func sleepKindTint(_ kind: SleepKind) -> Color {
+        switch kind {
+        case .nap: .orange
+        case .nightSleep: .indigo
+        case .nightWaking: .pink
+        }
     }
 }
 
@@ -2593,6 +2609,20 @@ private struct SleepMiniPlanCard: View {
                 }
             }
 
+            if !plan.timelineItems.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(plan.timelineItems) { item in
+                        SleepMiniPlanTimelineRow(item: item)
+                        if item.id != plan.timelineItems.last?.id {
+                            Divider()
+                                .padding(.leading, 42)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(plan.steps, id: \.self) { step in
                     Label(step, systemImage: "checkmark.circle")
@@ -2611,6 +2641,59 @@ private struct SleepMiniPlanCard: View {
         }
         .padding(16)
         .appSurface(cornerRadius: 18)
+    }
+}
+
+private struct SleepMiniPlanTimelineRow: View {
+    var item: SleepMiniPlanTimelineItem
+
+    private var tint: Color {
+        switch item.tintName {
+        case "cyan": .cyan
+        case "green": .green
+        case "mint": .mint
+        case "orange": .orange
+        case "pink": .pink
+        case "purple": .purple
+        default: .indigo
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: item.systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                    if item.isCurrent {
+                        Text("NOW")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(tint, in: Capsule())
+                    }
+                }
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(item.timeText)
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.vertical, 8)
     }
 }
 

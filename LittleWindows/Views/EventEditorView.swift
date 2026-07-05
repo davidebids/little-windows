@@ -361,6 +361,11 @@ struct EventEditorView: View {
                 Picker("Kind", selection: $sleepKind) {
                     ForEach(SleepKind.allCases) { Text($0.displayName).tag($0) }
                 }
+                if sleepKind == .nightWaking {
+                    Text("Night waking tracks awake time during the overnight period and is used in sleep insights, not as sleep duration.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         case .feed:
             Section("Feed") {

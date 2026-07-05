@@ -5,6 +5,8 @@ struct DailySleepSummary: Identifiable, Hashable {
     var date: Date
     var daytimeMinutes: Double
     var nightMinutes: Double
+    var nightWakingCount: Int = 0
+    var nightWakingMinutes: Double = 0
     var napCount: Int
     var averageNapMinutes: Double
     var totalMinutes: Double { daytimeMinutes + nightMinutes }
@@ -288,10 +290,10 @@ enum InsightsAnalyticsService {
         let previousPredictions = predictionAccuracy(records: records, range: previousRange)
 
         let currentNaps = completed.filter {
-            $0.type == .sleep && $0.sleepKind == .nap && currentRange.contains($0.startDate)
+            $0.isSleepBlock && $0.sleepKind == .nap && currentRange.contains($0.startDate)
         }
         let previousNaps = completed.filter {
-            $0.type == .sleep && $0.sleepKind == .nap && previousRange.contains($0.startDate)
+            $0.isSleepBlock && $0.sleepKind == .nap && previousRange.contains($0.startDate)
         }
         let bedtimes = bedtimeExtraction(events: completed, range: currentRange, calendar: calendar)
         let previousBedtimes = bedtimeExtraction(events: completed, range: previousRange, calendar: calendar)
@@ -369,7 +371,7 @@ enum InsightsAnalyticsService {
         let longestNap = currentNaps.compactMap(\.duration).max().map { $0 / 60 }
         let shortestNap = currentNaps.compactMap(\.duration).min().map { $0 / 60 }
         let longestNight = completed.filter {
-            $0.type == .sleep && $0.sleepKind == .nightSleep && currentRange.contains($0.startDate)
+            $0.isSleepBlock && $0.sleepKind == .nightSleep && currentRange.contains($0.startDate)
         }.compactMap(\.duration).max().map { $0 / 60 }
         let napCountAverage = average(dailySleep.map { Double($0.napCount) })
         let morningAverage = circularTimeAverage(morningWakes.map(\.value), rollsAfterMidnight: false)
@@ -802,10 +804,13 @@ enum InsightsAnalyticsService {
             let naps = values.filter { $0.sleepKind == .nap }
             let daytime = naps.compactMap(\.duration).reduce(0, +) / 60
             let night = values.filter { $0.sleepKind == .nightSleep }.compactMap(\.duration).reduce(0, +) / 60
+            let nightWakings = values.filter { $0.sleepKind == .nightWaking }
             return DailySleepSummary(
                 date: day,
                 daytimeMinutes: daytime,
                 nightMinutes: night,
+                nightWakingCount: nightWakings.count,
+                nightWakingMinutes: nightWakings.compactMap(\.duration).reduce(0, +) / 60,
                 napCount: naps.count,
                 averageNapMinutes: average(naps.compactMap(\.duration).map { $0 / 60 }) ?? 0
             )
@@ -817,7 +822,7 @@ enum InsightsAnalyticsService {
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [WakeWindowSummary] {
-        let sleeps = events.filter { $0.type == .sleep && $0.endDate != nil }
+        let sleeps = events.filter { $0.isSleepBlock && $0.endDate != nil }
         return SleepPredictionEngine.wakeWindowSamples(from: sleeps, now: range.upperBound, calendar: calendar)
             .filter { range.contains($0.date) }
             .map {
@@ -840,7 +845,7 @@ enum InsightsAnalyticsService {
         let sortedEvents = events.sorted { $0.startDate < $1.startDate }
         let sortedRecords = records.sorted { $0.generatedAt < $1.generatedAt }
         let sleeps = events
-            .filter { $0.type == .sleep && $0.endDate != nil }
+            .filter { $0.isSleepBlock && $0.endDate != nil }
             .sorted { $0.startDate < $1.startDate }
         let candidateSleeps = sleeps.filter { range.contains($0.startDate) }
 
@@ -907,7 +912,7 @@ enum InsightsAnalyticsService {
         calendar: Calendar = .current
     ) -> [ChartDataPoint] {
         let night = events.filter {
-            guard $0.type == .sleep, $0.sleepKind == .nightSleep, let end = $0.endDate else { return false }
+            guard $0.isSleepBlock, $0.sleepKind == .nightSleep, let end = $0.endDate else { return false }
             return range.contains(calendar.startOfDay(for: end)) && calendar.component(.hour, from: end) < 12
         }
         return Dictionary(grouping: night) { event in
@@ -925,12 +930,19 @@ enum InsightsAnalyticsService {
         calendar: Calendar = .current
     ) -> [NightSleepScoreSummary] {
         let nightEvents = events.filter {
-            $0.type == .sleep &&
+            $0.isSleepBlock &&
             $0.sleepKind == .nightSleep &&
             $0.endDate != nil &&
             range.contains(sleepBucketDate(for: $0, calendar: calendar))
         }
         let grouped = Dictionary(grouping: nightEvents) {
+            sleepBucketDate(for: $0, calendar: calendar)
+        }
+        let explicitWakings = Dictionary(grouping: events.filter {
+            $0.isNightWaking &&
+            $0.endDate != nil &&
+            range.contains(sleepBucketDate(for: $0, calendar: calendar))
+        }) {
             sleepBucketDate(for: $0, calendar: calendar)
         }
 
@@ -945,11 +957,18 @@ enum InsightsAnalyticsService {
 
             let durations = segments.compactMap(\.duration).map { $0 / 60 }
             let totalSleep = durations.reduce(0, +)
-            let wakeDurations = zip(segments, segments.dropFirst()).compactMap { previous, next -> Double? in
+            let inferredWakeDurations = zip(segments, segments.dropFirst()).compactMap { previous, next -> Double? in
                 guard let previousEnd = previous.endDate else { return nil }
                 let gap = next.startDate.timeIntervalSince(previousEnd) / 60
                 return gap >= 3 ? gap : nil
             }
+            let explicitWakeDurations = (explicitWakings[day] ?? [])
+                .filter { ($0.duration ?? 0) >= 60 }
+                .compactMap(\.duration)
+                .map { $0 / 60 }
+            let wakeDurations = explicitWakeDurations.isEmpty
+                ? inferredWakeDurations
+                : explicitWakeDurations
             let totalWake = wakeDurations.reduce(0, +)
             let sleepWindow = max(1, lastEnd.timeIntervalSince(first.startDate) / 60)
             let longestStretch = durations.max() ?? totalSleep
@@ -1095,7 +1114,7 @@ enum InsightsAnalyticsService {
     ) -> [Double] {
         let sessions = careSessions(events: events, range: range)
         let sleeps = events.filter {
-            $0.type == .sleep && range.contains($0.startDate)
+            $0.isSleepBlock && range.contains($0.startDate)
         }.sorted { $0.startDate < $1.startDate }
         return sleeps.compactMap { sleep in
             guard let care = sessions.last(where: { $0 <= sleep.startDate }) else { return nil }
@@ -1154,7 +1173,9 @@ enum InsightsAnalyticsService {
     }
 
     private static func sleepBucketDate(for event: BabyEvent, calendar: Calendar) -> Date {
-        guard event.sleepKind == .nightSleep else { return calendar.startOfDay(for: event.startDate) }
+        guard event.sleepKind == .nightSleep || event.sleepKind == .nightWaking else {
+            return calendar.startOfDay(for: event.startDate)
+        }
         let hour = calendar.component(.hour, from: event.startDate)
         let date = hour < 12
             ? calendar.date(byAdding: .day, value: -1, to: event.startDate) ?? event.startDate

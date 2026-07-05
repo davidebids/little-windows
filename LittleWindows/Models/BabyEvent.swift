@@ -287,6 +287,14 @@ final class BabyEvent {
         return max(0, endDate.timeIntervalSince(startDate))
     }
 
+    var isSleepBlock: Bool {
+        type == .sleep && sleepKind != .nightWaking
+    }
+
+    var isNightWaking: Bool {
+        type == .sleep && sleepKind == .nightWaking
+    }
+
     var totalNursingDurationSeconds: Double {
         (leftDurationSeconds ?? 0) + (rightDurationSeconds ?? 0)
     }

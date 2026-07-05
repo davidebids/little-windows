@@ -305,3 +305,117 @@ struct AgeGuideService {
         ]
     }
 }
+
+struct SleepGuideService {
+    static let shared = SleepGuideService()
+
+    let lessons: [SleepGuideLesson]
+
+    private init() {
+        let reviewed = ISO8601DateFormatter().date(from: "2026-07-05T00:00:00Z")
+        let sources = Self.sources(reviewed: reviewed)
+        lessons = [
+            SleepGuideLesson(
+                id: "safe-sleep",
+                title: "Safe sleep comes first",
+                subtitle: "Set up each sleep before optimizing schedules.",
+                body: "Before comparing wake windows or night patterns, keep the sleep setup simple and safe. Little Windows should support routines, but it should never override safe-sleep guidance or a pediatrician's advice.",
+                bullets: [
+                    "Use a firm, flat sleep surface designed for infant sleep.",
+                    "Place babies on their back for naps and night sleep unless your pediatrician gives different guidance.",
+                    "Keep pillows, loose blankets, bumpers, and soft objects out of the sleep space.",
+                    "Move a baby who falls asleep in a car seat, swing, carrier, or stroller to a firm sleep surface as soon as practical."
+                ],
+                sourceReferences: sources.filter { ["healthychildren-safe-sleep", "nichd-safe-to-sleep"].contains($0.id) }
+            ),
+            SleepGuideLesson(
+                id: "normal-sleep",
+                title: "Normal sleep is variable",
+                subtitle: "Night waking is common, especially early on.",
+                body: "Baby sleep changes quickly. Newborn sleep is often fragmented, and many babies still wake at night as their day-night rhythm develops. Use logs to spot patterns across several days, not to judge one hard night.",
+                bullets: [
+                    "HealthyChildren notes that regular sleep cycles are not expected until around 6 months.",
+                    "AASM gives broad sleep-duration ranges starting at 4 months because younger infant sleep varies widely.",
+                    "A single short nap or difficult night is less useful than a pattern across several days."
+                ],
+                sourceReferences: sources.filter { ["healthychildren-sleep", "aasm-duration"].contains($0.id) }
+            ),
+            SleepGuideLesson(
+                id: "routines",
+                title: "Routines make patterns easier to read",
+                subtitle: "Consistent cues can help the whole household.",
+                body: "A calm, repeatable routine can make sleep transitions more predictable. The goal is not perfection; it is giving caregivers and the baby familiar signals around naps, bedtime, and overnight care.",
+                bullets: [
+                    "Keep the routine short enough to repeat on ordinary nights.",
+                    "Use low light and quiet care during overnight wakings when possible.",
+                    "Log meaningful changes such as travel, illness, new skills, or schedule disruptions in notes."
+                ],
+                sourceReferences: sources.filter { ["medlineplus-bedtime", "healthychildren-sleep"].contains($0.id) }
+            ),
+            SleepGuideLesson(
+                id: "use-logs",
+                title: "Use logs as planning cues",
+                subtitle: "Predictions are aids, not instructions.",
+                body: "Little Windows can estimate windows from completed sleep logs, but babies are not clocks. Treat predictions, sleep pressure, and the day-ahead plan as a way to prepare, then adjust for real tired cues and family constraints.",
+                bullets: [
+                    "Night-waking logs help separate awake time from actual night sleep.",
+                    "Complete start and end times improve wake-window and sleep-score calculations.",
+                    "Prediction confidence matters; lower confidence should feel like a wider planning cue."
+                ],
+                sourceReferences: sources.filter { ["aasm-duration", "healthychildren-sleep"].contains($0.id) }
+            ),
+            SleepGuideLesson(
+                id: "when-to-ask",
+                title: "Know when to ask for help",
+                subtitle: "Bring concerns and patterns to a clinician.",
+                body: "This course is general education. If sleep changes feel unusual, intense, or connected with breathing, feeding, illness, development, or caregiver safety, check with your pediatrician.",
+                bullets: [
+                    "Ask about persistent concerns, breathing worries, feeding concerns, or extreme fussiness.",
+                    "Share logs as context, not as proof of a diagnosis.",
+                    "If a caregiver is too tired to safely stay awake, prioritize safe handoff and safe sleep setup."
+                ],
+                sourceReferences: sources.filter { ["healthychildren-safe-sleep", "medlineplus-bedtime"].contains($0.id) }
+            )
+        ]
+    }
+
+    private static func sources(reviewed: Date?) -> [ContentSourceReference] {
+        [
+            ContentSourceReference(
+                id: "healthychildren-sleep",
+                sourceName: "HealthyChildren.org by the American Academy of Pediatrics - Sleep",
+                sourceURL: URL(string: "https://www.healthychildren.org/English/ages-stages/baby/sleep/Pages/default.aspx"),
+                retrievedOrReviewedDate: reviewed,
+                notes: "Used for normal infant sleep variability and parent-facing sleep framing."
+            ),
+            ContentSourceReference(
+                id: "healthychildren-safe-sleep",
+                sourceName: "HealthyChildren.org by the American Academy of Pediatrics - Safe Sleep",
+                sourceURL: URL(string: "https://www.healthychildren.org/English/ages-stages/baby/sleep/Pages/A-Parents-Guide-to-Safe-Sleep.aspx"),
+                retrievedOrReviewedDate: reviewed,
+                notes: "Used for safe sleep setup and caregiver safety reminders."
+            ),
+            ContentSourceReference(
+                id: "nichd-safe-to-sleep",
+                sourceName: "NIH/NICHD Safe to Sleep",
+                sourceURL: URL(string: "https://safetosleep.nichd.nih.gov/reduce-risk/reduce"),
+                retrievedOrReviewedDate: reviewed,
+                notes: "Used for sleep-related infant death risk-reduction framing."
+            ),
+            ContentSourceReference(
+                id: "aasm-duration",
+                sourceName: "American Academy of Sleep Medicine pediatric sleep duration consensus",
+                sourceURL: URL(string: "https://aasm.org/resources/pdf/pediatricsleepdurationconsensus.pdf"),
+                retrievedOrReviewedDate: reviewed,
+                notes: "Used for broad sleep-duration ranges and variability cautions."
+            ),
+            ContentSourceReference(
+                id: "medlineplus-bedtime",
+                sourceName: "MedlinePlus Medical Encyclopedia - Bedtime habits for infants and children",
+                sourceURL: URL(string: "https://medlineplus.gov/ency/article/002392.htm"),
+                retrievedOrReviewedDate: reviewed,
+                notes: "Used for routine and bedtime-habit framing."
+            )
+        ]
+    }
+}

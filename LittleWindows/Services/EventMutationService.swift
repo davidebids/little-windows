@@ -116,7 +116,7 @@ enum EventMutationService {
         notificationsEnabled: Bool,
         notificationLeadMinutes: Int
     ) async {
-        if event.type == .sleep {
+        if event.isSleepBlock {
             for record in records where record.actualSleepEventID == event.id {
                 record.actualSleepEventID = nil
                 record.actualSleepStart = nil
@@ -127,7 +127,7 @@ enum EventMutationService {
         }
         context.delete(event)
         let remainingEvents = events.filter { $0.id != event.id }
-        let prediction = event.type.affectsSleepPrediction
+        let prediction = affectsSleepPredictionRefresh(event)
             ? replacePrediction(
                 profile: profile,
                 events: remainingEvents,
@@ -143,7 +143,7 @@ enum EventMutationService {
                 profile: profile,
                 events: remainingEvents,
                 prediction: prediction,
-                scheduleNotification: event.type.affectsSleepPrediction,
+                scheduleNotification: affectsSleepPredictionRefresh(event),
                 notificationsEnabled: notificationsEnabled,
                 notificationLeadMinutes: notificationLeadMinutes,
                 settings: settings
@@ -164,10 +164,10 @@ enum EventMutationService {
         waitForSystemIntegrations: Bool = false
     ) async {
         event.updatedAt = Date()
-        if event.type == .sleep, !event.isTimerDraft {
+        if event.isSleepBlock, !event.isTimerDraft {
             PredictionTuningService.resolveLatestPrediction(with: event, records: records)
         }
-        let shouldRefreshPrediction = refreshPrediction && event.type.affectsSleepPrediction
+        let shouldRefreshPrediction = refreshPrediction && affectsSleepPredictionRefresh(event)
         let prediction = shouldRefreshPrediction
             ? replacePrediction(
                 profile: profile,
@@ -292,7 +292,7 @@ enum EventMutationService {
         }
         if let prediction {
             let lastSleepID = committedEvents
-                .filter { $0.type == .sleep && $0.endDate != nil }
+                .filter { $0.isSleepBlock && $0.endDate != nil }
                 .max { $0.startDate < $1.startDate }?
                 .id
             context.insert(SleepPredictionRecord(
@@ -333,7 +333,7 @@ enum EventMutationService {
                 enabled: notificationsEnabled
             )
             let isSleeping = events.contains {
-                $0.type == .sleep && $0.isTimerRunning
+                $0.isSleepBlock && $0.isTimerRunning
             }
             let pressure = SleepPredictionEngine.sleepPressure(
                 profile: profile,
@@ -350,5 +350,9 @@ enum EventMutationService {
             )
         }
         await LiveActivityManager.shared.synchronize(profile: profile, events: events)
+    }
+
+    private static func affectsSleepPredictionRefresh(_ event: BabyEvent) -> Bool {
+        event.isSleepBlock || (event.type.affectsSleepPrediction && event.type != .sleep)
     }
 }

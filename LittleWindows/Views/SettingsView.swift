@@ -564,7 +564,7 @@ private struct ChildSleepSettingsSections: View {
             $0.actualSleepEventID == nil
         })?.prediction
         let selectedProfileIsSleeping = scopedEvents.contains {
-            $0.type == .sleep && $0.isTimerRunning
+            $0.isSleepBlock && $0.isTimerRunning
         }
         let currentPressure = SleepPredictionEngine.sleepPressure(
             profile: profile,

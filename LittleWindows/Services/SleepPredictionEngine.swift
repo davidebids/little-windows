@@ -17,9 +17,20 @@ struct SleepMiniPlan: Hashable, Identifiable {
     var title: String
     var horizon: String
     var summary: String
+    var timelineItems: [SleepMiniPlanTimelineItem] = []
     var steps: [String]
     var systemImage: String
     var tintName: String
+}
+
+struct SleepMiniPlanTimelineItem: Hashable, Identifiable {
+    var id: String
+    var title: String
+    var timeText: String
+    var detail: String
+    var systemImage: String
+    var tintName: String
+    var isCurrent: Bool = false
 }
 
 enum SleepMiniPlanService {
@@ -35,7 +46,7 @@ enum SleepMiniPlanService {
         let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
         var hasCompletedSleep = false
         var recentSleeps: [BabyEvent] = []
-        for event in events where event.type == .sleep && !event.isTimerDraft && event.endDate != nil && event.startDate <= now {
+        for event in events where event.isSleepBlock && !event.isTimerDraft && event.endDate != nil && event.startDate <= now {
             hasCompletedSleep = true
             if event.startDate >= recentCutoff {
                 recentSleeps.append(event)
@@ -47,6 +58,25 @@ enum SleepMiniPlanService {
                 title: "Build a sleep baseline",
                 horizon: "Next 3 days",
                 summary: "Log start and end times for each sleep so predictions have a clean rhythm to learn from.",
+                timelineItems: [
+                    SleepMiniPlanTimelineItem(
+                        id: "start",
+                        title: "Start with the next sleep",
+                        timeText: "Next sleep",
+                        detail: "Use a timer for naps and night sleep; log night wakings separately.",
+                        systemImage: "timer",
+                        tintName: "indigo",
+                        isCurrent: true
+                    ),
+                    SleepMiniPlanTimelineItem(
+                        id: "save",
+                        title: "Save the wake time",
+                        timeText: "When it ends",
+                        detail: "Complete sleep blocks are what unlock the day-ahead plan.",
+                        systemImage: "checkmark.circle.fill",
+                        tintName: "mint"
+                    )
+                ],
                 steps: [
                     "Start sleep timers when rest begins.",
                     "Save the timer when sleep ends.",
@@ -66,6 +96,12 @@ enum SleepMiniPlanService {
             recentSleeps.filter { $0.sleepKind == .nightSleep }.map(\.startDate),
             calendar: calendar
         )
+        let timelineItems = dayAheadItems(
+            recentSleeps: recentSleeps,
+            prediction: prediction,
+            now: now,
+            calendar: calendar
+        )
 
         if let prediction, prediction.confidenceLabel == .low || averagePredictionError > 35 {
             return SleepMiniPlan(
@@ -73,6 +109,7 @@ enum SleepMiniPlanService {
                 title: "Tighten the next window",
                 horizon: "Next 2 naps",
                 summary: "The forecast is still learning. A couple of complete nap logs should help narrow the next recommendation.",
+                timelineItems: timelineItems,
                 steps: [
                     "Use the sleep timer for the next nap.",
                     "Keep the wake-up time precise.",
@@ -89,6 +126,7 @@ enum SleepMiniPlanService {
                 title: "Anchor bedtime gently",
                 horizon: "This week",
                 summary: "Recent bedtimes are moving around. A planned evening can make tomorrow's first window easier to read.",
+                timelineItems: timelineItems,
                 steps: [
                     "Pick a realistic target bedtime.",
                     "Open Plan and compare the last nap against that target.",
@@ -107,6 +145,7 @@ enum SleepMiniPlanService {
                     title: "Watch nap shape",
                     horizon: "Next 4 naps",
                     summary: "Nap lengths vary quite a bit. Track the setup around each nap to see what helps.",
+                    timelineItems: timelineItems,
                     steps: [
                         "Log the nap start and end.",
                         "Use notes for anything unusual.",
@@ -123,6 +162,7 @@ enum SleepMiniPlanService {
             title: "Keep the rhythm visible",
             horizon: "Today",
             summary: "Recent sleep data is usable. Keep logging the next sleep and use the planner if the day starts drifting.",
+            timelineItems: timelineItems,
             steps: [
                 "Follow the next window as a planning cue.",
                 "Adjust for real tired cues and family constraints.",
@@ -160,6 +200,96 @@ enum SleepMiniPlanService {
             largestGap = max(largestGap, next - current)
         }
         return 1_440 - largestGap
+    }
+
+    private static func dayAheadItems(
+        recentSleeps: [BabyEvent],
+        prediction: SleepPrediction?,
+        now: Date,
+        calendar: Calendar
+    ) -> [SleepMiniPlanTimelineItem] {
+        var items = [SleepMiniPlanTimelineItem]()
+
+        if let lastSleep = recentSleeps
+            .filter(\.isSleepBlock)
+            .compactMap({ event -> BabyEvent? in
+                guard let endDate = event.endDate, endDate <= now else { return nil }
+                return event
+            })
+            .max(by: { ($0.endDate ?? $0.startDate) < ($1.endDate ?? $1.startDate) }),
+           let endDate = lastSleep.endDate {
+            items.append(SleepMiniPlanTimelineItem(
+                id: "awake-since",
+                title: "Awake since",
+                timeText: DateFormatting.time.string(from: endDate),
+                detail: "\(lastSleep.sleepKind?.displayName ?? "Sleep") ended",
+                systemImage: "sun.max.fill",
+                tintName: "orange",
+                isCurrent: prediction == nil
+            ))
+        }
+
+        if let prediction {
+            items.append(SleepMiniPlanTimelineItem(
+                id: "next-window",
+                title: prediction.predictionKind == .bedtime ? "Bedtime window" : "Next sleep window",
+                timeText: DateFormatting.window(
+                    start: prediction.predictedWindowStart,
+                    end: prediction.predictedWindowEnd
+                ),
+                detail: "\(prediction.confidenceLabel.displayName) confidence",
+                systemImage: prediction.predictionKind == .bedtime ? "bed.double.fill" : "moon.stars.fill",
+                tintName: prediction.predictionKind == .bedtime ? "purple" : "indigo",
+                isCurrent: true
+            ))
+        }
+
+        if let usualBedtime = circularTimeAverage(
+            recentSleeps.filter { $0.sleepKind == .nightSleep }.map(\.startDate),
+            calendar: calendar
+        ) {
+            items.append(SleepMiniPlanTimelineItem(
+                id: "usual-bedtime",
+                title: "Usual bedtime",
+                timeText: DateFormatting.time.string(from: usualBedtime),
+                detail: "Based on recent night-sleep starts",
+                systemImage: "bed.double.fill",
+                tintName: "purple"
+            ))
+        } else {
+            items.append(SleepMiniPlanTimelineItem(
+                id: "plan-bedtime",
+                title: "Plan bedtime",
+                timeText: "Not set",
+                detail: "Choose a target bedtime to map the rest of today.",
+                systemImage: "calendar.badge.clock",
+                tintName: "purple"
+            ))
+        }
+
+        return Array(items.prefix(3))
+    }
+
+    private static func circularTimeAverage(_ dates: [Date], calendar: Calendar) -> Date? {
+        guard !dates.isEmpty else { return nil }
+        var x = 0.0
+        var y = 0.0
+        for date in dates {
+            let components = calendar.dateComponents([.hour, .minute], from: date)
+            let minutes = Double((components.hour ?? 0) * 60 + (components.minute ?? 0))
+            let angle = minutes / 1_440 * 2 * Double.pi
+            x += cos(angle)
+            y += sin(angle)
+        }
+        let averageAngle = atan2(y / Double(dates.count), x / Double(dates.count))
+        let normalizedAngle = averageAngle < 0 ? averageAngle + 2 * Double.pi : averageAngle
+        let averageMinutes = Int((normalizedAngle / (2 * Double.pi) * 1_440).rounded()) % 1_440
+        return calendar.date(
+            bySettingHour: averageMinutes / 60,
+            minute: averageMinutes % 60,
+            second: 0,
+            of: Date()
+        )
     }
 }
 
@@ -517,7 +647,7 @@ enum ActiveSleepPlanService {
               let profile,
               profile.id == activePlan.profileID,
               let activeSleep,
-              activeSleep.type == .sleep,
+              activeSleep.isSleepBlock,
               activeSleep.isTimerRunning,
               activeSleep.sleepKind != .nightSleep,
               calendar.isDate(activePlan.targetBedtime, inSameDayAs: now) else {
@@ -609,7 +739,7 @@ enum SleepPredictionEngine {
         } ?? .distantPast
         let completedSleeps = events
             .filter {
-                $0.type == .sleep &&
+                $0.isSleepBlock &&
                     !$0.isTimerDraft &&
                     $0.endDate != nil &&
                     $0.startDate >= historyStart &&
@@ -654,7 +784,7 @@ enum SleepPredictionEngine {
         } ?? .distantPast
 
         let completedSleeps = events
-            .filter { $0.type == .sleep && !$0.isTimerDraft && $0.endDate != nil }
+            .filter { $0.isSleepBlock && !$0.isTimerDraft && $0.endDate != nil }
             .sorted { $0.startDate < $1.startDate }
         let historySleeps = completedSleeps.filter {
             $0.startDate >= historyStart && $0.startDate < todayStart
@@ -876,12 +1006,12 @@ enum SleepPredictionEngine {
         calendar: Calendar = .current,
         settings: PredictionSettings = .default
     ) -> SleepPrediction? {
-        if events.contains(where: { $0.type == .sleep && $0.isTimerRunning }) {
+        if events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) {
             return nil
         }
         let events = events.filter { !$0.isTimerDraft }
         let completedSleeps = events
-            .filter { $0.type == .sleep && $0.endDate != nil && $0.startDate <= now }
+            .filter { $0.isSleepBlock && $0.endDate != nil && $0.startDate <= now }
             .sorted { $0.startDate < $1.startDate }
         guard let lastSleep = completedSleeps.last, let lastSleepEnd = lastSleep.endDate else {
             return nil
@@ -889,7 +1019,7 @@ enum SleepPredictionEngine {
 
         let nextSleepIndex = nextNapIndex(events: events, date: now, calendar: calendar)
         let napsToday = events.filter {
-            $0.type == .sleep &&
+            $0.isSleepBlock &&
             $0.sleepKind == .nap &&
             calendar.isDate($0.startDate, inSameDayAs: now)
         }.count
@@ -1110,7 +1240,7 @@ enum SleepPredictionEngine {
         settings: PredictionSettings = .default
     ) -> SleepPressure? {
         guard let profile, profile.profileType == .child else { return nil }
-        guard !events.contains(where: { $0.type == .sleep && $0.isTimerRunning }) else {
+        guard !events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) else {
             return nil
         }
 
@@ -1137,7 +1267,7 @@ enum SleepPredictionEngine {
 
         let committedEvents = events.filter { !$0.isTimerDraft }
         let completedSleeps = committedEvents
-            .filter { $0.type == .sleep && $0.endDate != nil && $0.startDate <= now }
+            .filter { $0.isSleepBlock && $0.endDate != nil && $0.startDate <= now }
             .sorted { $0.startDate < $1.startDate }
         guard let lastSleep = completedSleeps.last,
               let lastSleepEnd = lastSleep.endDate,
@@ -1162,7 +1292,7 @@ enum SleepPredictionEngine {
 
         let awakeMinutes = max(0, now.timeIntervalSince(lastSleepEnd) / 60)
         let napsToday = committedEvents.filter {
-            $0.type == .sleep &&
+            $0.isSleepBlock &&
                 $0.sleepKind == .nap &&
                 calendar.isDate($0.startDate, inSameDayAs: now)
         }.count
@@ -1360,7 +1490,7 @@ enum SleepPredictionEngine {
         calendar: Calendar = .current
     ) -> [WakeWindowSample] {
         let sorted = sleeps
-            .filter { $0.type == .sleep && $0.endDate != nil }
+            .filter { $0.isSleepBlock && $0.endDate != nil }
             .sorted { $0.startDate < $1.startDate }
         guard sorted.count >= 2 else { return [] }
 
@@ -1407,7 +1537,7 @@ enum SleepPredictionEngine {
 
     static func nextNapIndex(events: [BabyEvent], date: Date, calendar: Calendar = .current) -> Int {
         min(4, events.filter {
-            $0.type == .sleep &&
+            $0.isSleepBlock &&
             $0.sleepKind == .nap &&
             $0.startDate < date &&
             calendar.isDate($0.startDate, inSameDayAs: date)
@@ -1736,7 +1866,7 @@ enum SleepPredictionEngine {
         end: Date
     ) -> Double {
         events.reduce(0) { total, event in
-            guard event.type == .sleep, let eventEnd = event.endDate else { return total }
+            guard event.isSleepBlock, let eventEnd = event.endDate else { return total }
             let overlapStart = max(event.startDate, start)
             let overlapEnd = min(eventEnd, end)
             guard overlapEnd > overlapStart else { return total }

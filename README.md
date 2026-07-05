@@ -14,19 +14,19 @@ First launch presents onboarding for a new empty store. It does not create defau
 
 ## App Areas
 
-- Today: profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep mini-plans, and system integration refresh.
+- Today: profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep day-ahead planning, and system integration refresh.
 - Profiles: child and dog profiles with switching, colors, archival support, dog-specific details, and optional profile photos.
 - History and Reports: day and list history, event editing, filtering, summaries, charts, and prediction accuracy review.
 - Milestones and Memories: profile-scoped entries, age prompts, categories, photo attachments, and backup support.
 - Appointments and Visits: questions, notes, summaries, follow-up instructions, medications, vaccines, measurements, and reminders.
-- Guides: monthly child age guides and puppy-stage guide content with read state and reminder support.
+- Guides: monthly child age guides, source-backed Sleep Basics lessons, and puppy-stage guide content with read state and reminder support.
 - Food & Home: household shopping lists, store layouts and sections, shopping mode, recurring staples, inventory locations, meal prep tracking, and food reminders.
 - Night Light: full-screen low-light presets, color and shape controls, animated glow modes, ambient sounds, sleep timer, and keep-awake behavior.
 - Settings: backup/import, iCloud sync, Family Sync, notifications, prediction tuning, diagnostics, and local data reset.
 
 ## Care Logging
 
-Child logs cover sleep, feed, nursing, pumping, diaper, potty, medicine, growth, temperature, activity, and custom events. Feed logs distinguish bottle, solids, and other feeds; bottle and pumping entries support optional ounce amounts; and solid-food feed logs can include feeding style, texture, reaction, common-allergen exposure, and sensitivity notes.
+Child logs cover sleep, night wakings, feed, nursing, pumping, diaper, potty, medicine, growth, temperature, activity, and custom events. Feed logs distinguish bottle, solids, and other feeds; bottle and pumping entries support optional ounce amounts; and solid-food feed logs can include feeding style, texture, reaction, common-allergen exposure, and sensitivity notes.
 
 The child care form keeps pumping, solids, potty, and the rest of the child activity set in the same event editing surface. Structured details include:
 
@@ -50,7 +50,7 @@ Today is the main operational screen for care. It includes:
 - Per-profile Today action customization so caregivers can hide categories they do not use without affecting history, reports, backup/import, widgets, or other profiles.
 - Active timer cards and saved timer drafts for review before logging.
 - Household and profile-scoped routines, routine templates, custom routine steps, start/skip/complete flows, reminders, duplication, reordering, archiving, and an explicit Done button in the routines manager.
-- A child sleep mini-plan below Log Something, generated from recent sleep history and confidence-aware planning windows.
+- A child sleep day-ahead card below Log Something, generated from recent sleep history and confidence-aware planning windows.
 
 SwiftData mutations are centralized through services such as `EventMutationService`, `EventTimerService`, `ProfileService`, `DataExportImportService`, and Food & Home services.
 
@@ -58,7 +58,7 @@ SwiftData mutations are centralized through services such as `EventMutationServi
 
 `LittleWindows/Services/SleepPredictionEngine.swift` implements the explainable `LittleWindowsSleep-v3` predictor. It blends editable age-based wake-window priors with profile-specific sleep history by nap index, prioritizes recent samples, clips outliers, uses weighted robust statistics, accounts for recent trends and previous naps, and returns a confidence-scaled sleep window.
 
-The Plan Bedtime flow lets a caregiver choose a bedtime goal and build a full-day layout from the usual morning wake, typical nap counts, nap durations, and wake windows by nap order. It can still show the planned day after the selected bedtime has already passed, which is useful for comparing today against a goal.
+The Today sleep day-ahead card summarizes the next sleep window, recent awake context, and usual bedtime cues. The Plan Bedtime flow lets a caregiver choose a bedtime goal and build a full-day layout from the usual morning wake, typical nap counts, nap durations, and wake windows by nap order. It can still show the planned day after the selected bedtime has already passed, which is useful for comparing today against a goal.
 
 Feed and nursing logs are optional soft confidence signals. `PredictionTuningService` resolves predictions against actual sleep starts, reports error/window accuracy, and applies conservative per-nap early/late bias correction.
 
@@ -80,7 +80,7 @@ The Reports tab combines Day, List, and Summary modes. Summary analytics are cal
 - Dog Care
 - Prediction Accuracy
 
-Insights support short lookback ranges, previous-period comparison, plain-language observations, and Swift Charts. Sleep is grouped into overnight sessions, sequential Left/Right nursing logs can be combined for care-session counts, and prediction errors use negative values for early predictions and positive values for late predictions.
+Insights support short lookback ranges, previous-period comparison, plain-language observations, and Swift Charts. Sleep is grouped into overnight sessions, explicit night-waking logs feed overnight wake metrics, sequential Left/Right nursing logs can be combined for care-session counts, and prediction errors use negative values for early predictions and positive values for late predictions.
 
 ## Food & Home
 

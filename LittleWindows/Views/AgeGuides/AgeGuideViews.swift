@@ -103,6 +103,28 @@ struct AgeGuidesListView: View {
     var body: some View {
         List {
             Section {
+                NavigationLink {
+                    SleepGuideListView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "moon.stars.circle.fill")
+                            .foregroundStyle(.indigo)
+                            .frame(width: 34, height: 34)
+                            .background(Color.indigo.opacity(0.10), in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Sleep Basics")
+                                .font(.subheadline.weight(.semibold))
+                            Text("5 source-backed lessons")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } footer: {
+                Text("Sleep Basics is general parent education from pediatric and public-health sources.")
+            }
+
+            Section {
                 ForEach(guides) { guide in
                     NavigationLink {
                         AgeGuideDetailView(guide: guide)
@@ -142,6 +164,111 @@ struct AgeGuidesListView: View {
             return "Coming up"
         }
         return guide.isCheckpointAge ? "Checkpoint guide" : "Monthly guide"
+    }
+}
+
+struct SleepGuideListView: View {
+    private let lessons = SleepGuideService.shared.lessons
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Sleep Basics", systemImage: "moon.stars.circle.fill")
+                        .font(.title3.bold())
+                        .foregroundStyle(.indigo)
+                    Text("Short lessons for safe sleep setup, normal infant variability, routines, logging, and when to bring concerns to a pediatrician.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section {
+                ForEach(Array(lessons.enumerated()), id: \.element.id) { index, lesson in
+                    NavigationLink {
+                        SleepGuideLessonView(lesson: lesson, lessonNumber: index + 1)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.caption.bold().monospacedDigit())
+                                .foregroundStyle(.white)
+                                .frame(width: 28, height: 28)
+                                .background(.indigo, in: Circle())
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(lesson.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(lesson.subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Lessons")
+            } footer: {
+                Text("These lessons are not medical advice. Ask your pediatrician about sleep concerns, breathing concerns, feeding concerns, illness, or safety questions.")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(MilestonePalette.background)
+        .navigationTitle("Sleep Basics")
+    }
+}
+
+private struct SleepGuideLessonView: View {
+    let lesson: SleepGuideLesson
+    let lessonNumber: Int
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Lesson \(lessonNumber)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.indigo)
+                    Text(lesson.title)
+                        .font(.title3.bold())
+                    Text(lesson.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section("Overview") {
+                Text(lesson.body)
+            }
+
+            Section("Care cues") {
+                ForEach(lesson.bullets, id: \.self) { value in
+                    Label(value, systemImage: "checkmark.circle.fill")
+                        .symbolRenderingMode(.hierarchical)
+                }
+            }
+
+            Section("Sources") {
+                ForEach(lesson.sourceReferences) { source in
+                    if let url = source.sourceURL {
+                        Link(destination: url) {
+                            ageGuideSourceLabel(source)
+                        }
+                    } else {
+                        ageGuideSourceLabel(source)
+                    }
+                }
+                Text("Little Windows uses these sources for general education only. It does not diagnose sleep problems or replace pediatric guidance.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(MilestonePalette.background)
+        .navigationTitle("Sleep Basics")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -208,10 +335,10 @@ struct AgeGuideDetailView: View {
                 ForEach(guide.sourceReferences) { source in
                     if let url = source.sourceURL {
                         Link(destination: url) {
-                            sourceLabel(source)
+                            ageGuideSourceLabel(source)
                         }
                     } else {
-                        sourceLabel(source)
+                        ageGuideSourceLabel(source)
                     }
                 }
                 Text(guide.disclaimer)
@@ -283,15 +410,16 @@ struct AgeGuideDetailView: View {
         }
     }
 
-    private func sourceLabel(_ source: ContentSourceReference) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(source.sourceName)
-                .font(.subheadline.weight(.semibold))
-            if let notes = source.notes {
-                Text(notes)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+}
+
+private func ageGuideSourceLabel(_ source: ContentSourceReference) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+        Text(source.sourceName)
+            .font(.subheadline.weight(.semibold))
+        if let notes = source.notes {
+            Text(notes)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

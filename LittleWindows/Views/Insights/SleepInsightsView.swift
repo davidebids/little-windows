@@ -77,6 +77,34 @@ struct SleepInsightsView: View {
             }
 
             InsightChartCard(
+                title: "Night wakings",
+                subtitle: "Logged wake events by overnight period",
+                isEmpty: snapshot.dailySleep.allSatisfy { $0.nightWakingCount == 0 }
+            ) {
+                Chart(snapshot.dailySleep) { point in
+                    BarMark(
+                        x: .value("Night", point.date, unit: .day),
+                        y: .value("Wakings", point.nightWakingCount)
+                    )
+                    .foregroundStyle(.orange.gradient)
+                }
+            }
+
+            InsightChartCard(
+                title: "Awake overnight",
+                subtitle: "Minutes logged awake during night wakings",
+                isEmpty: snapshot.dailySleep.allSatisfy { $0.nightWakingMinutes == 0 }
+            ) {
+                Chart(snapshot.dailySleep) { point in
+                    BarMark(
+                        x: .value("Night", point.date, unit: .day),
+                        y: .value("Awake minutes", point.nightWakingMinutes)
+                    )
+                    .foregroundStyle(.pink.gradient)
+                }
+            }
+
+            InsightChartCard(
                 title: "Nap duration distribution",
                 subtitle: "Number of naps in each duration bucket",
                 isEmpty: snapshot.napDurationBuckets.allSatisfy { $0.value == 0 }
@@ -274,8 +302,8 @@ struct SleepInsightsView: View {
             } else {
                 ForEach(Array(snapshot.sleepBlocks.prefix(12))) { event in
                     HStack(spacing: 12) {
-                        Image(systemName: event.sleepKind == .nap ? "sun.haze.fill" : "moon.fill")
-                            .foregroundStyle(event.sleepKind == .nap ? .orange : .indigo)
+                        Image(systemName: event.sleepKind?.systemImage ?? "moon.fill")
+                            .foregroundStyle(sleepKindColor(event.sleepKind))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(event.sleepKind?.displayName ?? "Sleep")
                                 .font(.subheadline.weight(.semibold))
@@ -304,6 +332,15 @@ struct SleepInsightsView: View {
         case 80..<90: .teal
         case 65..<80: .orange
         default: .pink
+        }
+    }
+
+    private func sleepKindColor(_ kind: SleepKind?) -> Color {
+        switch kind {
+        case .nap: .orange
+        case .nightSleep: .indigo
+        case .nightWaking: .pink
+        case .none: .secondary
         }
     }
 }

@@ -3,8 +3,23 @@ import Foundation
 enum SleepKind: String, Codable, CaseIterable, Identifiable {
     case nap
     case nightSleep
+    case nightWaking
     var id: String { rawValue }
-    var displayName: String { self == .nap ? "Nap" : "Night sleep" }
+    var displayName: String {
+        switch self {
+        case .nap: "Nap"
+        case .nightSleep: "Night sleep"
+        case .nightWaking: "Night waking"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .nap: "sun.haze.fill"
+        case .nightSleep: "moon.fill"
+        case .nightWaking: "bell.fill"
+        }
+    }
 }
 
 enum FeedKind: String, Codable, CaseIterable, Identifiable {
