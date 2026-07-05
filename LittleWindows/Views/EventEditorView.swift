@@ -4,7 +4,6 @@ import SwiftUI
 struct EventEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query private var recentEvents: [BabyEvent]
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @StateObject private var profileService = ProfileService.shared
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
@@ -88,18 +87,11 @@ struct EventEditorView: View {
     @State private var dogGlucoseValue: Double
     @State private var dogGlucoseUnit: DogGlucoseUnit
     @State private var dogGlucoseMealRelation: DogMealRelation
+    @State private var recentMedicineNames: [String]
+    @State private var growthMeasurementEditor: GrowthMeasurementEditorKind?
     @State private var validationMessage: String?
 
     init(type: EventType, event: BabyEvent? = nil, onSave: @escaping (BabyEvent) -> Void) {
-        var descriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { value in
-                value.typeRawValue == "medicine"
-            },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
-        )
-        descriptor.fetchLimit = 50
-        _recentEvents = Query(descriptor)
-
         existingEvent = event
         self.onSave = onSave
         let selectedType = event?.type ?? type
@@ -194,6 +186,8 @@ struct EventEditorView: View {
         _dogGlucoseValue = State(initialValue: dog.glucoseValue ?? 0)
         _dogGlucoseUnit = State(initialValue: dog.glucoseUnit ?? .mgdl)
         _dogGlucoseMealRelation = State(initialValue: dog.glucoseMealRelation ?? .unknown)
+        _recentMedicineNames = State(initialValue: [])
+        _growthMeasurementEditor = State(initialValue: nil)
     }
 
     private var selectedProfile: CareProfile? {
@@ -262,10 +256,26 @@ struct EventEditorView: View {
                   caregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             caregiverName = activeCaregiverName
         }
+        .onAppear(perform: refreshRecentMedicineNamesIfNeeded)
         .onAppear(perform: normalizeDogTemperatureMethod)
         .onChange(of: type) { _, newType in
-            guard newType == .temperature else { return }
-            normalizeDogTemperatureMethod()
+            if newType == .temperature {
+                normalizeDogTemperatureMethod()
+            }
+            refreshRecentMedicineNamesIfNeeded()
+        }
+        .onChange(of: activeProfileID) {
+            refreshRecentMedicineNamesIfNeeded()
+        }
+        .sheet(item: $growthMeasurementEditor) { editor in
+            GrowthMeasurementInputSheet(
+                kind: editor,
+                initialImperialValue: growthMeasurementImperialValue(for: editor)
+            ) { value in
+                saveGrowthMeasurement(editor, imperialValue: value)
+            }
+            .presentationDetents([.height(600), .large])
+            .presentationDragIndicator(.visible)
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -408,42 +418,36 @@ struct EventEditorView: View {
             }
         case .growth:
             Section("Growth") {
-                LabeledContent("Weight") {
-                    HStack {
-                        TextField("lb", value: $weightPounds, format: .number)
-                            .keyboardType(.numberPad)
-                        Text("lb")
-                        TextField("oz", value: $weightOunces, format: .number)
-                            .keyboardType(.decimalPad)
-                        Text("oz")
-                    }
-                    .multilineTextAlignment(.trailing)
+                Button {
+                    growthMeasurementEditor = .weight
+                } label: {
+                    GrowthMeasurementRow(
+                        title: "Weight",
+                        value: weightDisplayText
+                    )
                 }
-                LabeledContent(isDogProfile ? "Length/height" : "Height") {
-                    HStack {
-                        TextField("ft", value: $heightFeet, format: .number)
-                            .keyboardType(.numberPad)
-                        Text("ft")
-                        TextField("in", value: $heightInches, format: .number)
-                            .keyboardType(.decimalPad)
-                        Text("in")
-                    }
-                    .multilineTextAlignment(.trailing)
+                .buttonStyle(.plain)
+
+                Button {
+                    growthMeasurementEditor = .height
+                } label: {
+                    GrowthMeasurementRow(
+                        title: isDogProfile ? "Length/height" : "Height",
+                        value: heightDisplayText
+                    )
                 }
+                .buttonStyle(.plain)
+
                 if !isDogProfile {
-                    LabeledContent("Head circumference") {
-                        HStack {
-                            TextField(
-                                "Optional",
-                                value: $headCircumferenceInches,
-                                format: .number.precision(.fractionLength(0...2))
-                            )
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            Text("in")
-                                .foregroundStyle(.secondary)
-                        }
+                    Button {
+                        growthMeasurementEditor = .headCircumference
+                    } label: {
+                        GrowthMeasurementRow(
+                            title: "Head circumference",
+                            value: headCircumferenceDisplayText
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
                 Picker(isDogProfile ? "Measured by" : "Measured at", selection: $growthSource) {
                     ForEach(GrowthMeasurementSource.allCases) {
@@ -654,6 +658,83 @@ struct EventEditorView: View {
         }
     }
 
+    private var weightDisplayText: String {
+        guard weightPounds > 0 || weightOunces > 0 else { return "Add" }
+        let ounces = weightOunces.formatted(.number.precision(.fractionLength(0...1)))
+        return "\(weightPounds) lb \(ounces) oz"
+    }
+
+    private var heightDisplayText: String {
+        guard heightFeet > 0 || heightInches > 0 else { return "Add" }
+        let inches = heightInches.formatted(.number.precision(.fractionLength(0...1)))
+        return "\(heightFeet) ft \(inches) in"
+    }
+
+    private var headCircumferenceDisplayText: String {
+        guard let headCircumferenceInches, headCircumferenceInches > 0 else { return "Add" }
+        return "\(headCircumferenceInches.formatted(.number.precision(.fractionLength(0...1)))) in"
+    }
+
+    private func growthMeasurementImperialValue(
+        for kind: GrowthMeasurementEditorKind
+    ) -> Double? {
+        switch kind {
+        case .height:
+            let total = Double(heightFeet) * 12 + heightInches
+            return total > 0 ? total : nil
+        case .weight:
+            let total = Double(weightPounds) + weightOunces / 16
+            return total > 0 ? total : nil
+        case .headCircumference:
+            return headCircumferenceInches.flatMap { $0 > 0 ? $0 : nil }
+        }
+    }
+
+    private func saveGrowthMeasurement(
+        _ kind: GrowthMeasurementEditorKind,
+        imperialValue: Double?
+    ) {
+        let value = max(0, imperialValue ?? 0)
+        switch kind {
+        case .height:
+            guard value > 0 else {
+                heightFeet = 0
+                heightInches = 0
+                return
+            }
+            heightFeet = Int(value / 12)
+            heightInches = roundedTenths(value.truncatingRemainder(dividingBy: 12))
+            normalizeHeightParts()
+        case .weight:
+            guard value > 0 else {
+                weightPounds = 0
+                weightOunces = 0
+                return
+            }
+            weightPounds = Int(value)
+            weightOunces = roundedTenths((value - Double(weightPounds)) * 16)
+            normalizeWeightParts()
+        case .headCircumference:
+            headCircumferenceInches = value > 0 ? roundedTenths(value) : nil
+        }
+    }
+
+    private func roundedTenths(_ value: Double) -> Double {
+        (value * 10).rounded() / 10
+    }
+
+    private func normalizeHeightParts() {
+        guard heightInches >= 12 else { return }
+        heightFeet += Int(heightInches / 12)
+        heightInches = roundedTenths(heightInches.truncatingRemainder(dividingBy: 12))
+    }
+
+    private func normalizeWeightParts() {
+        guard weightOunces >= 16 else { return }
+        weightPounds += Int(weightOunces / 16)
+        weightOunces = roundedTenths(weightOunces.truncatingRemainder(dividingBy: 16))
+    }
+
     private func save() {
         if type.supportsTimer, hasEndDate, endDate < startDate {
             validationMessage = "End time must be after the start time."
@@ -819,9 +900,22 @@ struct EventEditorView: View {
         return details
     }
 
-    private var recentMedicineNames: [String] {
+    private func refreshRecentMedicineNamesIfNeeded() {
+        guard type == .medicine else {
+            recentMedicineNames = []
+            return
+        }
+
+        var descriptor = FetchDescriptor<BabyEvent>(
+            predicate: #Predicate<BabyEvent> { value in
+                value.typeRawValue == "medicine"
+            },
+            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+        )
+        descriptor.fetchLimit = 50
+        let events = (try? modelContext.fetch(descriptor)) ?? []
         var seen = Set<String>()
-        return recentEvents
+        recentMedicineNames = events
             .filter {
                 $0.type == .medicine &&
                     $0.matchesProfile(activeProfileID) &&
@@ -831,6 +925,290 @@ struct EventEditorView: View {
             .filter { seen.insert($0.lowercased()).inserted }
             .prefix(5)
             .map { $0 }
+    }
+}
+
+private enum GrowthMeasurementEditorKind: String, Identifiable {
+    case height
+    case weight
+    case headCircumference
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .height: "Height"
+        case .weight: "Weight"
+        case .headCircumference: "Head circumference"
+        }
+    }
+
+    var imperialUnitTitle: String {
+        switch self {
+        case .height, .headCircumference: "in"
+        case .weight: "lb"
+        }
+    }
+
+    var metricUnitTitle: String {
+        switch self {
+        case .height, .headCircumference: "cm"
+        case .weight: "kg"
+        }
+    }
+
+    func metricValue(fromImperial value: Double) -> Double {
+        switch self {
+        case .height, .headCircumference:
+            return value * GrowthUnitConversion.centimetersPerInch
+        case .weight:
+            return value * GrowthUnitConversion.kilogramsPerPound
+        }
+    }
+
+    func imperialValue(fromMetric value: Double) -> Double {
+        switch self {
+        case .height, .headCircumference:
+            return value / GrowthUnitConversion.centimetersPerInch
+        case .weight:
+            return value / GrowthUnitConversion.kilogramsPerPound
+        }
+    }
+}
+
+private enum GrowthMeasurementInputUnit: String, CaseIterable, Identifiable {
+    case imperial
+    case metric
+
+    var id: String { rawValue }
+}
+
+private struct GrowthMeasurementRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.body.monospacedDigit())
+                .foregroundStyle(AppTheme.accent)
+                .underline(value != "Add", color: AppTheme.accent.opacity(0.55))
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
+    }
+}
+
+private struct GrowthMeasurementInputSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let kind: GrowthMeasurementEditorKind
+    let onSave: (Double?) -> Void
+
+    @State private var selectedUnit: GrowthMeasurementInputUnit
+    @State private var draftText: String
+
+    init(
+        kind: GrowthMeasurementEditorKind,
+        initialImperialValue: Double?,
+        onSave: @escaping (Double?) -> Void
+    ) {
+        self.kind = kind
+        self.onSave = onSave
+        _selectedUnit = State(initialValue: .imperial)
+        _draftText = State(initialValue: Self.inputText(for: initialImperialValue))
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            HStack {
+                Text(kind.title)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Spacer()
+            }
+
+            Picker("Unit", selection: $selectedUnit) {
+                Text(kind.imperialUnitTitle).tag(GrowthMeasurementInputUnit.imperial)
+                Text(kind.metricUnitTitle).tag(GrowthMeasurementInputUnit.metric)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: selectedUnit) { oldValue, newValue in
+                convertDraft(from: oldValue, to: newValue)
+            }
+
+            Text(displayText)
+                .font(.system(size: 56, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundColor(draftText.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
+                .frame(maxWidth: .infinity, minHeight: 72)
+
+            VStack(spacing: 14) {
+                ForEach(keyRows, id: \.self) { row in
+                    HStack(spacing: 34) {
+                        ForEach(row, id: \.self) { key in
+                            keypadButton(key)
+                        }
+                    }
+                }
+            }
+
+            actionBar
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 34)
+        .padding(.bottom, 18)
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 0) {
+            Button {
+                dismiss()
+            } label: {
+                Text("Cancel")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                onSave(imperialValue)
+                dismiss()
+            } label: {
+                Text("Save")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            }
+            .buttonStyle(.plain)
+            .background(AppTheme.accent)
+        }
+        .background {
+            GeometryReader { proxy in
+                HStack(spacing: 0) {
+                    Color.primary.opacity(0.045)
+                        .frame(width: proxy.size.width / 2)
+                    AppTheme.accent
+                }
+            }
+        }
+        .overlay(alignment: .center) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.12))
+                .frame(width: 0.5)
+                .padding(.vertical, 8)
+        }
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+        }
+    }
+
+    private var displayText: String {
+        draftText.isEmpty ? "0.00" : draftText
+    }
+
+    private var imperialValue: Double? {
+        guard let value = Double(draftText), value > 0 else { return nil }
+        switch selectedUnit {
+        case .imperial:
+            return value
+        case .metric:
+            return kind.imperialValue(fromMetric: value)
+        }
+    }
+
+    private var keyRows: [[String]] {
+        [
+            ["1", "2", "3"],
+            ["4", "5", "6"],
+            ["7", "8", "9"],
+            [".", "0", "delete.left"]
+        ]
+    }
+
+    private func keypadButton(_ key: String) -> some View {
+        Button {
+            handleKey(key)
+        } label: {
+            Group {
+                if key == "delete.left" {
+                    Image(systemName: "delete.left")
+                        .font(.system(size: 28, weight: .medium))
+                } else {
+                    Text(key)
+                        .font(.system(size: 38, weight: .regular, design: .rounded).monospacedDigit())
+                }
+            }
+            .foregroundStyle(.primary)
+            .frame(width: 74, height: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel(for: key))
+    }
+
+    private func handleKey(_ key: String) {
+        switch key {
+        case "delete.left":
+            if !draftText.isEmpty {
+                draftText.removeLast()
+            }
+        case ".":
+            guard !draftText.contains(".") else { return }
+            draftText = draftText.isEmpty ? "0." : draftText + "."
+        default:
+            if draftText == "0" {
+                draftText = key
+            } else if fractionalDigitCount < 2 {
+                draftText.append(key)
+            }
+        }
+    }
+
+    private var fractionalDigitCount: Int {
+        guard let decimalIndex = draftText.firstIndex(of: ".") else { return 0 }
+        return draftText.distance(from: draftText.index(after: decimalIndex), to: draftText.endIndex)
+    }
+
+    private func convertDraft(
+        from oldUnit: GrowthMeasurementInputUnit,
+        to newUnit: GrowthMeasurementInputUnit
+    ) {
+        guard oldUnit != newUnit,
+              let value = Double(draftText),
+              value > 0 else { return }
+
+        let converted: Double
+        switch (oldUnit, newUnit) {
+        case (.imperial, .metric):
+            converted = kind.metricValue(fromImperial: value)
+        case (.metric, .imperial):
+            converted = kind.imperialValue(fromMetric: value)
+        case (.imperial, .imperial), (.metric, .metric):
+            return
+        }
+        draftText = Self.inputText(for: converted)
+    }
+
+    private func accessibilityLabel(for key: String) -> String {
+        key == "delete.left" ? "Delete" : key
+    }
+
+    private static func inputText(for value: Double?) -> String {
+        guard let value, value > 0 else { return "" }
+        return value.formatted(.number.precision(.fractionLength(0...2)))
     }
 }
 

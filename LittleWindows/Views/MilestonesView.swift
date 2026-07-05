@@ -153,6 +153,7 @@ struct MilestonesView: View {
     }
 
     var body: some View {
+        let timelineItems = self.timelineItems
         List {
             Section {
                 memoryHeader
@@ -172,7 +173,7 @@ struct MilestonesView: View {
 
             ageGuidesLinkSection
 
-            timelineSection
+            timelineSection(timelineItems)
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -298,7 +299,7 @@ struct MilestonesView: View {
         }
     }
 
-    private var timelineSection: some View {
+    private func timelineSection(_ timelineItems: [MilestoneTimelineItem]) -> some View {
         Section {
             if timelineItems.isEmpty {
                 emptyTimelineView
@@ -308,11 +309,11 @@ struct MilestonesView: View {
                 }
             }
         } header: {
-            AppSectionHeader(title: "Memory timeline", subtitle: timelineSubtitle)
+            AppSectionHeader(title: "Memory timeline", subtitle: timelineSubtitle(timelineItems))
         }
     }
 
-    private var timelineSubtitle: String? {
+    private func timelineSubtitle(_ timelineItems: [MilestoneTimelineItem]) -> String? {
         guard !timelineItems.isEmpty else { return nil }
         return timelineItems.count == 1 ? "1 memory" : "\(timelineItems.count) memories"
     }

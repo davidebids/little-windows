@@ -309,49 +309,57 @@ struct InsightsDashboardView: View {
                 events = try modelContext.fetch(descriptor)
             }
 
-            let appointmentStart = calendar.date(byAdding: .month, value: -6, to: now) ?? range.lowerBound
-            let appointmentEnd = calendar.date(byAdding: .year, value: 1, to: now) ?? rangeEnd
-            if let selectedProfileID {
-                let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
-                    predicate: #Predicate<DoctorAppointment> { appointment in
-                        appointment.profileID == selectedProfileID &&
-                            appointment.startDate >= appointmentStart &&
-                            appointment.startDate < appointmentEnd
-                    },
-                    sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
-                )
-                appointments = try modelContext.fetch(appointmentDescriptor)
+            if viewModel.selectedSection == .appointments {
+                let appointmentStart = calendar.date(byAdding: .month, value: -6, to: now) ?? range.lowerBound
+                let appointmentEnd = calendar.date(byAdding: .year, value: 1, to: now) ?? rangeEnd
+                if let selectedProfileID {
+                    let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
+                        predicate: #Predicate<DoctorAppointment> { appointment in
+                            appointment.profileID == selectedProfileID &&
+                                appointment.startDate >= appointmentStart &&
+                                appointment.startDate < appointmentEnd
+                        },
+                        sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
+                    )
+                    appointments = try modelContext.fetch(appointmentDescriptor)
+                } else {
+                    let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
+                        predicate: #Predicate<DoctorAppointment> { appointment in
+                            appointment.startDate >= appointmentStart && appointment.startDate < appointmentEnd
+                        },
+                        sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
+                    )
+                    appointments = try modelContext.fetch(appointmentDescriptor)
+                }
             } else {
-                let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
-                    predicate: #Predicate<DoctorAppointment> { appointment in
-                        appointment.startDate >= appointmentStart && appointment.startDate < appointmentEnd
-                    },
-                    sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
-                )
-                appointments = try modelContext.fetch(appointmentDescriptor)
+                appointments = []
             }
 
-            let recordStart = calendar.date(byAdding: .day, value: -45, to: range.lowerBound) ?? range.lowerBound
-            if let selectedProfileID {
-                let recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
-                    predicate: #Predicate<SleepPredictionRecord> { record in
-                        record.profileID == selectedProfileID &&
-                            (
-                                record.actualSleepEventID == nil ||
-                                record.generatedAt >= recordStart
-                            )
-                    },
-                    sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
-                )
-                records = try modelContext.fetch(recordDescriptor)
+            if viewModel.selectedSection.needsPredictionRecords {
+                let recordStart = calendar.date(byAdding: .day, value: -45, to: range.lowerBound) ?? range.lowerBound
+                if let selectedProfileID {
+                    let recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
+                        predicate: #Predicate<SleepPredictionRecord> { record in
+                            record.profileID == selectedProfileID &&
+                                (
+                                    record.actualSleepEventID == nil ||
+                                    record.generatedAt >= recordStart
+                                )
+                        },
+                        sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
+                    )
+                    records = try modelContext.fetch(recordDescriptor)
+                } else {
+                    let recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
+                        predicate: #Predicate<SleepPredictionRecord> { record in
+                            record.actualSleepEventID == nil || record.generatedAt >= recordStart
+                        },
+                        sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
+                    )
+                    records = try modelContext.fetch(recordDescriptor)
+                }
             } else {
-                let recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
-                    predicate: #Predicate<SleepPredictionRecord> { record in
-                        record.actualSleepEventID == nil || record.generatedAt >= recordStart
-                    },
-                    sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
-                )
-                records = try modelContext.fetch(recordDescriptor)
+                records = []
             }
         } catch {
             events = []

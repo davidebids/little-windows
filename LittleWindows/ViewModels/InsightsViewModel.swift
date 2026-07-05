@@ -49,6 +49,16 @@ enum InsightsSection: String, CaseIterable, Identifiable {
     var supportsPreviousPeriodComparison: Bool {
         self != .growth
     }
+
+    var needsPredictionRecords: Bool {
+        switch self {
+        case .overview, .wakeWindows, .predictionAccuracy:
+            return true
+        case .sleep, .feeding, .diapers, .activities, .medicine,
+             .appointments, .growth, .temperature:
+            return false
+        }
+    }
 }
 
 @MainActor
@@ -106,12 +116,10 @@ final class InsightsViewModel: ObservableObject {
 
     func updateCustomStart(_ date: Date) {
         customStartDate = Calendar.current.startOfDay(for: min(date, customEndDate))
-        rebuild()
     }
 
     func updateCustomEnd(_ date: Date) {
         customEndDate = Calendar.current.startOfDay(for: max(date, customStartDate))
-        rebuild()
     }
 
     var periodLabel: String {

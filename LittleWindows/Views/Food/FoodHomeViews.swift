@@ -447,6 +447,7 @@ private struct ShoppingListsView: View {
     @State private var showingDeleteConfirmation = false
 
     var body: some View {
+        let itemsByListID = Dictionary(grouping: shoppingItems, by: \.shoppingListID)
         List {
             Section {
                 if shoppingLists.isEmpty {
@@ -463,7 +464,7 @@ private struct ShoppingListsView: View {
                             ShoppingListSummaryRow(
                                 list: list,
                                 store: stores.first { $0.id == list.storeID },
-                                items: shoppingItems.filter { $0.shoppingListID == list.id }
+                                items: itemsByListID[list.id] ?? []
                             )
                         }
                         .buttonStyle(.plain)
@@ -617,6 +618,12 @@ private struct ShoppingListDetailView: View {
     }
 
     var body: some View {
+        let visibleItems = self.visibleItems
+        let activeItemsBySectionID = Dictionary(
+            grouping: visibleItems.filter { !$0.isChecked },
+            by: \.storeSectionID
+        )
+        let checkedItems = visibleItems.filter(\.isChecked)
         List {
             Section {
                 HStack {
@@ -642,7 +649,7 @@ private struct ShoppingListDetailView: View {
             suggestionsSection
 
             ForEach(sections) { section in
-                let sectionItems = activeItems(sectionID: section.id)
+                let sectionItems = sortedItems(activeItemsBySectionID[section.id] ?? [])
                 if !sectionItems.isEmpty {
                     Section(section.name) {
                         ForEach(sectionItems) { item in
@@ -665,7 +672,7 @@ private struct ShoppingListDetailView: View {
                 }
             }
 
-            let otherItems = activeItems(sectionID: nil)
+            let otherItems = sortedItems(activeItemsBySectionID[nil] ?? [])
             if !otherItems.isEmpty {
                 Section("Other") {
                     ForEach(otherItems) { item in
@@ -688,10 +695,9 @@ private struct ShoppingListDetailView: View {
             }
 
             if showingChecked {
-                let checked = visibleItems.filter(\.isChecked)
-                if !checked.isEmpty {
+                if !checkedItems.isEmpty {
                     Section("In Cart") {
-                        ForEach(checked) { item in
+                        ForEach(checkedItems) { item in
                             ShoppingListItemRow(item: item, large: false) {
                                 ShoppingListService.setChecked(
                                     item,
@@ -829,9 +835,8 @@ private struct ShoppingListDetailView: View {
         selectedSectionID.flatMap { id in sections.first { $0.id == id }?.name } ?? "Section"
     }
 
-    private func activeItems(sectionID: UUID?) -> [ShoppingListItem] {
-        visibleItems
-            .filter { !$0.isChecked && $0.storeSectionID == sectionID }
+    private func sortedItems(_ values: [ShoppingListItem]) -> [ShoppingListItem] {
+        values
             .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
     }
 
@@ -910,6 +915,17 @@ private struct ShoppingModeView: View {
     private var checkedItems: [ShoppingListItem] { items.filter(\.isChecked) }
 
     var body: some View {
+        let modeItemsBySectionID = Dictionary(
+            grouping: items.filter { item in
+                filter == .all ||
+                    (filter == .active && !item.isChecked) ||
+                    (filter == .checked && item.isChecked)
+            },
+            by: \.storeSectionID
+        ).mapValues { values in
+            values.sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
+        }
+
         List {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
@@ -930,7 +946,7 @@ private struct ShoppingModeView: View {
             }
 
             ForEach(sections) { section in
-                let sectionItems = modeItems(sectionID: section.id)
+                let sectionItems = modeItemsBySectionID[section.id] ?? []
                 if !sectionItems.isEmpty {
                     Section(section.name) {
                         ForEach(sectionItems) { item in
@@ -946,7 +962,7 @@ private struct ShoppingModeView: View {
                 }
             }
 
-            let otherItems = modeItems(sectionID: nil)
+            let otherItems = modeItemsBySectionID[nil] ?? []
             if !otherItems.isEmpty {
                 Section("Other") {
                     ForEach(otherItems) { item in
@@ -990,17 +1006,6 @@ private struct ShoppingModeView: View {
         } message: {
             Text("Purchased items can be added to Pantry by default. You can edit locations later.")
         }
-    }
-
-    private func modeItems(sectionID: UUID?) -> [ShoppingListItem] {
-        items
-            .filter { item in
-                item.storeSectionID == sectionID
-                    && (filter == .all
-                        || (filter == .active && !item.isChecked)
-                        || (filter == .checked && item.isChecked))
-            }
-            .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
     }
 
     private func finish(addToInventory: Bool) {
@@ -1114,6 +1119,8 @@ private struct InventoryHomeView: View {
     @State private var showingDeleteConfirmation = false
 
     var body: some View {
+        let locationsByID = Dictionary(uniqueKeysWithValues: locations.map { ($0.id, $0) })
+
         List {
             Section {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1148,7 +1155,7 @@ private struct InventoryHomeView: View {
                         Button { openItem(item) } label: {
                             InventoryItemRow(
                                 item: item,
-                                location: locations.first { $0.id == item.locationID }
+                                location: locationsByID[item.locationID]
                             )
                         }
                         .buttonStyle(.plain)
@@ -1312,6 +1319,15 @@ private struct InventoryLocationManagerView: View {
     @State private var showingArchiveConfirmation = false
 
     var body: some View {
+        let inventoryCountByLocationID = inventoryItems.reduce(into: [UUID: Int]()) { counts, item in
+            counts[item.locationID, default: 0] += 1
+        }
+        let mealPrepCountByLocationID = mealPrepItems.reduce(into: [UUID: Int]()) { counts, item in
+            if !item.isArchived {
+                counts[item.locationID, default: 0] += 1
+            }
+        }
+
         NavigationStack {
             List {
                 Section("Locations") {
@@ -1320,7 +1336,11 @@ private struct InventoryLocationManagerView: View {
                             editingLocation = location
                             showingEditor = true
                         } label: {
-                            locationRow(location)
+                            locationRow(
+                                location,
+                                count: inventoryCountByLocationID[location.id, default: 0]
+                                    + mealPrepCountByLocationID[location.id, default: 0]
+                            )
                         }
                         .buttonStyle(.plain)
                         .swipeActions {
@@ -1380,7 +1400,7 @@ private struct InventoryLocationManagerView: View {
         }
     }
 
-    private func locationRow(_ location: InventoryLocation) -> some View {
+    private func locationRow(_ location: InventoryLocation, count: Int) -> some View {
         HStack(spacing: 12) {
             Image(systemName: location.locationType.systemImage)
                 .foregroundStyle(.orange)
@@ -1400,7 +1420,6 @@ private struct InventoryLocationManagerView: View {
                 }
             }
             Spacer()
-            let count = usageCount(for: location)
             if count > 0 {
                 Text("\(count) \(count == 1 ? "item" : "items")")
                     .font(.caption.weight(.semibold))
@@ -1418,11 +1437,6 @@ private struct InventoryLocationManagerView: View {
             context: modelContext
         )
         showingArchiveBlocked = !didArchive
-    }
-
-    private func usageCount(for location: InventoryLocation) -> Int {
-        inventoryItems.filter { $0.locationID == location.id }.count
-            + mealPrepItems.filter { $0.locationID == location.id && !$0.isArchived }.count
     }
 }
 
@@ -1717,8 +1731,13 @@ private struct MealPrepView: View {
     @State private var showingArchiveConfirmation = false
 
     var body: some View {
+        let visibleItems = filteredItems
+        let groupedLocations = self.groupedLocations
+        let groupedLocationIDs = Set(groupedLocations.map(\.id))
+        let itemsByLocationID = Dictionary(grouping: visibleItems, by: \.locationID)
+
         List {
-            if filteredItems.isEmpty {
+            if visibleItems.isEmpty {
                 ContentUnavailableView(
                     "No meal prep yet",
                     systemImage: "takeoutbag.and.cup.and.straw",
@@ -1726,7 +1745,7 @@ private struct MealPrepView: View {
                 )
             } else {
                 ForEach(groupedLocations, id: \.id) { location in
-                    let items = filteredItems.filter { $0.locationID == location.id }
+                    let items = itemsByLocationID[location.id] ?? []
                     if !items.isEmpty {
                         Section(location.name) {
                             ForEach(items) { item in
@@ -1756,8 +1775,8 @@ private struct MealPrepView: View {
                     }
                 }
             }
-            if !filteredItems.isEmpty && filteredItems.allSatisfy({ item in
-                !groupedLocations.contains { $0.id == item.locationID }
+            if !visibleItems.isEmpty && visibleItems.allSatisfy({ item in
+                !groupedLocationIDs.contains(item.locationID)
             }) {
                 Section {
                     ContentUnavailableView(
@@ -2121,6 +2140,8 @@ private struct StoresView: View {
     @State private var showingArchiveConfirmation = false
 
     var body: some View {
+        let sectionCountByStoreID = Dictionary(grouping: sections, by: \.storeID).mapValues(\.count)
+
         List {
             Section("Stores") {
                 if stores.isEmpty {
@@ -2135,7 +2156,7 @@ private struct StoresView: View {
                             openStore(store)
                         } label: {
                             LabeledContent {
-                                Text("\(sections.filter { $0.storeID == store.id }.count) sections")
+                                Text("\(sectionCountByStoreID[store.id, default: 0]) sections")
                                     .foregroundStyle(.secondary)
                             } label: {
                                 Label(store.name, systemImage: "map.fill")
@@ -2214,30 +2235,39 @@ private struct StoreEditorView: View {
     @Bindable var store: FoodStore
     let sections: [FoodStoreSection]
     let shoppingItems: [ShoppingListItem]
+    @State private var nameDraft: String
+    @State private var notesDraft: String
     @State private var newSectionName = ""
     @State private var showingArchiveConfirmation = false
     @State private var pendingSave: Task<Void, Never>?
 
+    init(store: FoodStore, sections: [FoodStoreSection], shoppingItems: [ShoppingListItem]) {
+        self.store = store
+        self.sections = sections
+        self.shoppingItems = shoppingItems
+        _nameDraft = State(initialValue: store.name)
+        _notesDraft = State(initialValue: store.notes ?? "")
+    }
+
     var body: some View {
+        let itemCountBySectionID = shoppingItems.reduce(into: [UUID: Int]()) { counts, item in
+            if let sectionID = item.storeSectionID {
+                counts[sectionID, default: 0] += 1
+            }
+        }
+
         Form {
             Section("Store") {
-                TextField("Name", text: $store.name)
-                    .onChange(of: store.name) { _, _ in
-                        scheduleSave()
-                    }
-                TextField("Notes", text: Binding(
-                    get: { store.notes ?? "" },
-                    set: {
-                        store.notes = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
-                        scheduleSave()
-                    }
-                ), axis: .vertical)
+                TextField("Name", text: $nameDraft)
+                    .onChange(of: nameDraft) { _, _ in scheduleSave() }
+                TextField("Notes", text: $notesDraft, axis: .vertical)
+                    .onChange(of: notesDraft) { _, _ in scheduleSave() }
             }
             Section("Sections") {
                 ForEach(sections) { section in
                     StoreSectionEditorView(
                         section: section,
-                        itemCount: shoppingItems.filter { $0.storeSectionID == section.id }.count
+                        itemCount: itemCountBySectionID[section.id, default: 0]
                     )
                 }
                 HStack {
@@ -2260,11 +2290,12 @@ private struct StoreEditorView: View {
                 }
             }
         }
-        .navigationTitle(store.name)
+        .navigationTitle(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Store" : nameDraft)
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear(perform: saveNow)
+        .onChange(of: store.id) { _, _ in syncDraftsFromStore() }
         .confirmationDialog(
-            "Archive \(store.name)?",
+            "Archive \(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? store.name : nameDraft)?",
             isPresented: $showingArchiveConfirmation,
             titleVisibility: .visible
         ) {
@@ -2278,18 +2309,35 @@ private struct StoreEditorView: View {
         }
     }
 
+    private func syncDraftsFromStore() {
+        pendingSave?.cancel()
+        nameDraft = store.name
+        notesDraft = store.notes ?? ""
+    }
+
     private func scheduleSave() {
-        store.updatedAt = Date()
         pendingSave?.cancel()
         pendingSave = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            save(modelContext)
+            persistDrafts()
         }
     }
 
     private func saveNow() {
         pendingSave?.cancel()
+        persistDrafts()
+    }
+
+    private func persistDrafts() {
+        let name = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNotes = notesDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = trimmedNotes.isEmpty ? nil : trimmedNotes
+        guard !name.isEmpty else { return }
+        guard store.name != name || store.notes != notes else { return }
+        store.name = name
+        store.notes = notes
+        store.updatedAt = Date()
         save(modelContext)
     }
 }
@@ -2298,32 +2346,52 @@ private struct StoreSectionEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var section: FoodStoreSection
     let itemCount: Int
+    @State private var nameDraft: String
     @State private var pendingSave: Task<Void, Never>?
+
+    init(section: FoodStoreSection, itemCount: Int) {
+        self.section = section
+        self.itemCount = itemCount
+        _nameDraft = State(initialValue: section.name)
+    }
 
     var body: some View {
         HStack {
-            TextField("Section", text: $section.name)
+            TextField("Section", text: $nameDraft)
             Spacer()
             Text(itemCount == 1 ? "1 item" : "\(itemCount) items")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-        .onChange(of: section.name) { _, _ in schedulePersist() }
+        .onChange(of: nameDraft) { _, _ in schedulePersist() }
+        .onChange(of: section.id) { _, _ in syncDraftFromSection() }
         .onDisappear(perform: persistNow)
     }
 
+    private func syncDraftFromSection() {
+        pendingSave?.cancel()
+        nameDraft = section.name
+    }
+
     private func schedulePersist() {
-        section.updatedAt = Date()
         pendingSave?.cancel()
         pendingSave = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            save(modelContext)
+            persistDraft()
         }
     }
 
     private func persistNow() {
         pendingSave?.cancel()
+        persistDraft()
+    }
+
+    private func persistDraft() {
+        let name = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, section.name != name else { return }
+        section.name = name
+        section.updatedAt = Date()
         save(modelContext)
     }
 }
@@ -2338,6 +2406,13 @@ private struct FoodInsightsView: View {
     let mealPrepUsages: [MealPrepUsage]
 
     var body: some View {
+        let availableInventoryCountByLocationID = inventoryItems.reduce(into: [UUID: Int]()) { counts, item in
+            if item.status == .available {
+                counts[item.locationID, default: 0] += 1
+            }
+        }
+        let activeMealPrepItems = mealPrepItems.filter { !$0.isArchived }
+
         List {
             Section("Overview") {
                 ForEach(metrics) { metric in
@@ -2362,12 +2437,12 @@ private struct FoodInsightsView: View {
             Section("Inventory by Location") {
                 ForEach(locations) { location in
                     LabeledContent(location.name) {
-                        Text("\(inventoryItems.filter { $0.locationID == location.id && $0.status == .available }.count)")
+                        Text("\(availableInventoryCountByLocationID[location.id, default: 0])")
                     }
                 }
             }
             Section("Meal Prep Servings") {
-                ForEach(mealPrepItems.filter { !$0.isArchived }) { item in
+                ForEach(activeMealPrepItems) { item in
                     LabeledContent(item.name) {
                         Text(item.servingsText)
                     }

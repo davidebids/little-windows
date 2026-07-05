@@ -12,6 +12,11 @@ private enum TodayScrollAnchor {
     case timeline
 }
 
+private struct DogPottySubtitleKey: Hashable {
+    var pottyType: DogPottyType
+    var accident: Bool?
+}
+
 private struct TodayRenderState {
     var profile: BabyProfile?
     var profileID: UUID?
@@ -37,6 +42,8 @@ private struct TodayRenderState {
     var isSleeping: Bool
     var dogLastEventTitles: [EventType: String]
     var dogPottyTitles: [DogPottyType: String]
+    var lastLoggedDates: [EventType: Date]
+    var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date]
     var smartQuickActions: [QuickLogActionSnapshot]
 }
 
@@ -308,6 +315,8 @@ struct TodayView: View {
         var dogLatestEvents: [EventType: BabyEvent] = [:]
         var latestPeeEvent: BabyEvent?
         var latestPoopEvent: BabyEvent?
+        var lastLoggedDates: [EventType: Date] = [:]
+        var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date] = [:]
 
         for event in scopedEvents {
             if event.isTimerDraft {
@@ -316,6 +325,11 @@ struct TodayView: View {
                     latestStoppedDraftSleepEnd = event.updatedAt
                 }
                 continue
+            }
+
+            let logDate = event.endDate ?? event.startDate
+            if logDate <= now, lastLoggedDates[event.type].map({ logDate > $0 }) ?? true {
+                lastLoggedDates[event.type] = logDate
             }
 
             if event.startDate >= todayStart, calendar.isDate(event.startDate, inSameDayAs: now) {
@@ -336,13 +350,44 @@ struct TodayView: View {
                         dogLatestEvents[event.type] = event
                     }
                 case .potty:
-                    if event.dogDetails.pottyType == .pee || event.dogDetails.pottyType == .both,
+                    let details = event.dogDetails
+                    if details.pottyType == .pee || details.pottyType == .both,
                        latestPeeEvent.map({ event.startDate > $0.startDate }) ?? true {
                         latestPeeEvent = event
                     }
-                    if event.dogDetails.pottyType == .poop || event.dogDetails.pottyType == .both,
+                    if details.pottyType == .poop || details.pottyType == .both,
                        latestPoopEvent.map({ event.startDate > $0.startDate }) ?? true {
                         latestPoopEvent = event
+                    }
+                    if logDate <= now {
+                        if details.pottyType == .pee || details.pottyType == .both {
+                            updateDogPottyLastLoggedDate(
+                                logDate,
+                                pottyType: .pee,
+                                accident: nil,
+                                values: &dogPottyLastLoggedDates
+                            )
+                            updateDogPottyLastLoggedDate(
+                                logDate,
+                                pottyType: .pee,
+                                accident: details.accident,
+                                values: &dogPottyLastLoggedDates
+                            )
+                        }
+                        if details.pottyType == .poop || details.pottyType == .both {
+                            updateDogPottyLastLoggedDate(
+                                logDate,
+                                pottyType: .poop,
+                                accident: nil,
+                                values: &dogPottyLastLoggedDates
+                            )
+                            updateDogPottyLastLoggedDate(
+                                logDate,
+                                pottyType: .poop,
+                                accident: details.accident,
+                                values: &dogPottyLastLoggedDates
+                            )
+                        }
                     }
                 default:
                     break
@@ -409,8 +454,22 @@ struct TodayView: View {
             isSleeping: runningSleepTimer != nil,
             dogLastEventTitles: dogLastEventTitles,
             dogPottyTitles: dogPottyTitles,
+            lastLoggedDates: lastLoggedDates,
+            dogPottyLastLoggedDates: dogPottyLastLoggedDates,
             smartQuickActions: smartQuickActions
         )
+    }
+
+    private func updateDogPottyLastLoggedDate(
+        _ date: Date,
+        pottyType: DogPottyType,
+        accident: Bool?,
+        values: inout [DogPottySubtitleKey: Date]
+    ) {
+        let key = DogPottySubtitleKey(pottyType: pottyType, accident: accident)
+        if values[key].map({ date > $0 }) ?? true {
+            values[key] = date
+        }
     }
 
     var body: some View {
@@ -1769,10 +1828,7 @@ struct TodayView: View {
     }
 
     private func lastEventSubtitle(_ type: EventType, state: TodayRenderState) -> String {
-        lastLoggedSubtitle(state: state) { event in
-            guard event.type == type else { return nil }
-            return event.endDate ?? event.startDate
-        }
+        lastLoggedSubtitle(date: state.lastLoggedDates[type])
     }
 
     private func dogPottySubtitle(
@@ -1780,28 +1836,16 @@ struct TodayView: View {
         state: TodayRenderState,
         accident: Bool? = nil
     ) -> String {
-        lastLoggedSubtitle(state: state) { event in
-            guard event.type == .potty,
-                  (event.dogDetails.pottyType == pottyType || event.dogDetails.pottyType == .both) else {
-                return nil
-            }
-            if let accident, event.dogDetails.accident != accident {
-                return nil
-            }
-            return event.endDate ?? event.startDate
-        }
+        lastLoggedSubtitle(
+            date: state.dogPottyLastLoggedDates[
+                DogPottySubtitleKey(pottyType: pottyType, accident: accident)
+            ]
+        )
     }
 
-    private func lastLoggedSubtitle(
-        state: TodayRenderState,
-        dateForEvent: (BabyEvent) -> Date?
-    ) -> String {
+    private func lastLoggedSubtitle(date: Date?) -> String {
         let now = Date()
-        guard let date = state.scopedEvents
-            .filter({ !$0.isTimerDraft })
-            .compactMap(dateForEvent)
-            .filter({ $0 <= now })
-            .max() else {
+        guard let date, date <= now else {
             return "Not logged"
         }
         return "Last \(DurationFormatting.string(seconds: now.timeIntervalSince(date))) ago"

@@ -13,6 +13,12 @@ struct AppointmentDetailView: View {
     @State private var milestoneTemplate: MilestoneTemplate?
     @State private var showingDeleteConfirmation = false
     @State private var events: [BabyEvent] = []
+    @State private var visitSummaryDraft = ""
+    @State private var followUpInstructionsDraft = ""
+    @State private var vaccinesGivenDraft = ""
+    @State private var medicationsDiscussedDraft = ""
+    @State private var hasLoadedVisitJournalDrafts = false
+    @State private var pendingVisitJournalSave: Task<Void, Never>?
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
     private var growthEntryTitle: String {
@@ -78,13 +84,13 @@ struct AppointmentDetailView: View {
                             }
                         }
                     }
-                TextField("Visit summary", text: optional($appointment.visitSummary), axis: .vertical)
+                TextField("Visit summary", text: $visitSummaryDraft, axis: .vertical)
                     .lineLimit(3...8)
-                TextField("Follow-up instructions", text: optional($appointment.followUpInstructions), axis: .vertical)
+                TextField("Follow-up instructions", text: $followUpInstructionsDraft, axis: .vertical)
                     .lineLimit(3...8)
-                TextField("Vaccines given", text: optional($appointment.vaccinesGiven), axis: .vertical)
+                TextField("Vaccines given", text: $vaccinesGivenDraft, axis: .vertical)
                     .lineLimit(2...5)
-                TextField("Medications discussed", text: optional($appointment.medicationsDiscussed), axis: .vertical)
+                TextField("Medications discussed", text: $medicationsDiscussedDraft, axis: .vertical)
                     .lineLimit(2...5)
             }
 
@@ -162,6 +168,12 @@ struct AppointmentDetailView: View {
         .task(id: healthContextRefreshToken) {
             refreshHealthContext()
         }
+        .onAppear(perform: loadVisitJournalDraftsIfNeeded)
+        .onChange(of: visitSummaryDraft) { _, _ in scheduleVisitJournalSave() }
+        .onChange(of: followUpInstructionsDraft) { _, _ in scheduleVisitJournalSave() }
+        .onChange(of: vaccinesGivenDraft) { _, _ in scheduleVisitJournalSave() }
+        .onChange(of: medicationsDiscussedDraft) { _, _ in scheduleVisitJournalSave() }
+        .onDisappear(perform: saveVisitJournalNow)
         .sheet(isPresented: $showingEditor) {
             NavigationStack {
                 AppointmentEditorView(
@@ -229,8 +241,7 @@ struct AppointmentDetailView: View {
     private var healthContextRefreshToken: String {
         [
             appointment.id.uuidString,
-            (appointment.profileID ?? profile?.id)?.uuidString ?? "all",
-            appointment.updatedAt.timeIntervalSinceReferenceDate.description
+            (appointment.profileID ?? profile?.id)?.uuidString ?? "all"
         ].joined(separator: "-")
     }
 
@@ -338,15 +349,55 @@ struct AppointmentDetailView: View {
         return "\(value.formatted(.number.precision(.fractionLength(1))))°F"
     }
 
-    private func optional(_ binding: Binding<String?>) -> Binding<String> {
-        Binding(
-            get: { binding.wrappedValue ?? "" },
-            set: {
-                let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                binding.wrappedValue = trimmed.isEmpty ? nil : trimmed
-                appointment.updatedAt = Date()
-            }
-        )
+    private func loadVisitJournalDraftsIfNeeded() {
+        guard !hasLoadedVisitJournalDrafts else { return }
+        hasLoadedVisitJournalDrafts = true
+        visitSummaryDraft = appointment.visitSummary ?? ""
+        followUpInstructionsDraft = appointment.followUpInstructions ?? ""
+        vaccinesGivenDraft = appointment.vaccinesGiven ?? ""
+        medicationsDiscussedDraft = appointment.medicationsDiscussed ?? ""
+    }
+
+    private func scheduleVisitJournalSave() {
+        guard hasLoadedVisitJournalDrafts else { return }
+        pendingVisitJournalSave?.cancel()
+        pendingVisitJournalSave = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            persistVisitJournalDrafts()
+        }
+    }
+
+    private func saveVisitJournalNow() {
+        pendingVisitJournalSave?.cancel()
+        persistVisitJournalDrafts()
+    }
+
+    private func persistVisitJournalDrafts() {
+        let visitSummary = cleanedOptional(visitSummaryDraft)
+        let followUpInstructions = cleanedOptional(followUpInstructionsDraft)
+        let vaccinesGiven = cleanedOptional(vaccinesGivenDraft)
+        let medicationsDiscussed = cleanedOptional(medicationsDiscussedDraft)
+
+        guard appointment.visitSummary != visitSummary ||
+              appointment.followUpInstructions != followUpInstructions ||
+              appointment.vaccinesGiven != vaccinesGiven ||
+              appointment.medicationsDiscussed != medicationsDiscussed else {
+            return
+        }
+
+        appointment.visitSummary = visitSummary
+        appointment.followUpInstructions = followUpInstructions
+        appointment.vaccinesGiven = vaccinesGiven
+        appointment.medicationsDiscussed = medicationsDiscussed
+        appointment.updatedAt = Date()
+        try? modelContext.save()
+        PersistenceService.recordLocalSave()
+    }
+
+    private func cleanedOptional(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func deleteAppointment() async {
