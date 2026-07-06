@@ -560,6 +560,291 @@ enum MealPrepService {
     }
 }
 
+@MainActor
+enum ReturnTrackingService {
+    @discardableResult
+    static func createReturn(
+        householdID: UUID,
+        sortOrder: Int,
+        context: ModelContext
+    ) -> ReturnRequest? {
+        let request = ReturnRequest(
+            householdID: householdID,
+            sortOrder: sortOrder
+        )
+        context.insert(request)
+        save(context)
+        return request
+    }
+
+    @discardableResult
+    static func addItem(
+        name: String,
+        quantity: Double?,
+        reason: String,
+        returnURLString: String,
+        packageID: UUID?,
+        to request: ReturnRequest,
+        existingItems: [ReturnItem],
+        context: ModelContext
+    ) -> ReturnItem? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let nextOrder = (existingItems.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
+        let item = ReturnItem(
+            householdID: request.householdID,
+            returnRequestID: request.id,
+            packageID: packageID,
+            name: trimmed,
+            quantity: quantity,
+            reason: reason.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            returnURLString: returnURLString.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            sortOrder: nextOrder
+        )
+        context.insert(item)
+        request.updatedAt = Date()
+        save(context)
+        return item
+    }
+
+    static func updateItem(
+        _ item: ReturnItem,
+        name: String,
+        quantity: Double?,
+        reason: String,
+        returnURLString: String,
+        packageID: UUID?,
+        context: ModelContext
+    ) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        item.name = trimmed
+        item.quantity = quantity
+        item.reason = reason.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        item.returnURLString = returnURLString.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        item.packageID = packageID
+        item.updatedAt = Date()
+        save(context)
+    }
+
+    static func deleteItem(
+        _ item: ReturnItem,
+        from request: ReturnRequest,
+        items: [ReturnItem],
+        packages: [ReturnPackage],
+        attachments: [PhotoAttachment],
+        context: ModelContext
+    ) {
+        let remainingItems = items.filter {
+            $0.returnRequestID == request.id && $0.id != item.id
+        }
+        if remainingItems.isEmpty {
+            archive(
+                request,
+                items: items,
+                packages: packages,
+                attachments: attachments,
+                context: context
+            )
+            return
+        }
+        context.delete(item)
+        request.updatedAt = Date()
+        save(context)
+    }
+
+    @discardableResult
+    static func addPackage(
+        name: String,
+        carrier: ReturnPackageCarrier,
+        method: ReturnPackageMethod,
+        trackingNumber: String,
+        returnByDate: Date?,
+        photoAttachmentIDs: [UUID],
+        to request: ReturnRequest,
+        existingPackages: [ReturnPackage],
+        context: ModelContext
+    ) -> ReturnPackage {
+        let nextOrder = (existingPackages.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
+        let package = ReturnPackage(
+            householdID: request.householdID,
+            returnRequestID: request.id,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            carrier: carrier,
+            method: method,
+            trackingNumber: trackingNumber.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            returnByDate: returnByDate,
+            photoAttachmentIDs: photoAttachmentIDs,
+            sortOrder: nextOrder
+        )
+        context.insert(package)
+        request.updatedAt = Date()
+        save(context)
+        return package
+    }
+
+    static func updatePackage(
+        _ package: ReturnPackage,
+        name: String,
+        carrier: ReturnPackageCarrier,
+        method: ReturnPackageMethod,
+        trackingNumber: String,
+        returnByDate: Date?,
+        photoAttachmentIDs: [UUID],
+        context: ModelContext
+    ) {
+        package.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        package.carrier = carrier
+        package.method = method
+        package.trackingNumber = trackingNumber.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        package.returnByDate = returnByDate
+        package.photoAttachmentIDs = photoAttachmentIDs
+        package.updatedAt = Date()
+        save(context)
+    }
+
+    static func deletePackage(
+        _ package: ReturnPackage,
+        items: [ReturnItem],
+        attachments: [PhotoAttachment],
+        context: ModelContext
+    ) {
+        for item in items where item.packageID == package.id {
+            item.packageID = nil
+            item.updatedAt = Date()
+        }
+        PhotoAttachmentStore.deleteAttachments(
+            with: package.photoAttachmentIDs,
+            in: attachments,
+            context: context
+        )
+        context.delete(package)
+        save(context)
+    }
+
+    static func markDroppedOff(_ package: ReturnPackage, at date: Date = Date(), context: ModelContext) {
+        guard package.completedAt == nil else { return }
+        package.droppedOffAt = date
+        package.updatedAt = date
+        save(context)
+    }
+
+    static func markDroppedOff(
+        _ request: ReturnRequest,
+        packages: [ReturnPackage],
+        at date: Date = Date(),
+        context: ModelContext
+    ) {
+        guard request.completedAt == nil else { return }
+        var changed = false
+        for package in packages
+            where package.returnRequestID == request.id
+                && package.completedAt == nil
+                && package.droppedOffAt == nil {
+            package.droppedOffAt = date
+            package.updatedAt = date
+            changed = true
+        }
+        guard changed else { return }
+        request.updatedAt = date
+        save(context)
+    }
+
+    static func markInProgress(_ package: ReturnPackage, at date: Date = Date(), context: ModelContext) {
+        guard package.completedAt == nil else { return }
+        package.droppedOffAt = nil
+        package.updatedAt = date
+        save(context)
+    }
+
+    static func markInProgress(
+        _ request: ReturnRequest,
+        packages: [ReturnPackage],
+        at date: Date = Date(),
+        context: ModelContext
+    ) {
+        guard request.completedAt == nil else { return }
+        var changed = false
+        for package in packages
+            where package.returnRequestID == request.id
+                && package.completedAt == nil
+                && package.droppedOffAt != nil {
+            package.droppedOffAt = nil
+            package.updatedAt = date
+            changed = true
+        }
+        guard changed else { return }
+        request.updatedAt = date
+        save(context)
+    }
+
+    static func markComplete(_ package: ReturnPackage, at date: Date = Date(), context: ModelContext) {
+        if package.droppedOffAt == nil {
+            package.droppedOffAt = date
+        }
+        package.completedAt = date
+        package.updatedAt = date
+        save(context)
+    }
+
+    static func markComplete(
+        _ request: ReturnRequest,
+        packages: [ReturnPackage],
+        at date: Date = Date(),
+        context: ModelContext
+    ) {
+        request.completedAt = date
+        request.updatedAt = date
+        for package in packages where package.returnRequestID == request.id {
+            if package.droppedOffAt == nil {
+                package.droppedOffAt = date
+            }
+            package.completedAt = date
+            package.updatedAt = date
+        }
+        save(context)
+    }
+
+    static func archive(
+        _ request: ReturnRequest,
+        items: [ReturnItem],
+        packages: [ReturnPackage],
+        attachments: [PhotoAttachment],
+        context: ModelContext
+    ) {
+        request.isArchived = true
+        request.updatedAt = Date()
+        let packageIDs = packages
+            .filter { $0.returnRequestID == request.id }
+            .flatMap(\.photoAttachmentIDs)
+        PhotoAttachmentStore.deleteAttachments(with: packageIDs, in: attachments, context: context)
+        for item in items where item.returnRequestID == request.id {
+            context.delete(item)
+        }
+        for package in packages where package.returnRequestID == request.id {
+            context.delete(package)
+        }
+        save(context)
+    }
+
+    static func status(for request: ReturnRequest, packages: [ReturnPackage]) -> ReturnRequestStatus {
+        if request.isArchived { return .archived }
+        let requestPackages = packages.filter { $0.returnRequestID == request.id }
+        if request.completedAt != nil || (!requestPackages.isEmpty && requestPackages.allSatisfy { $0.completedAt != nil }) {
+            return .completed
+        }
+        guard !requestPackages.isEmpty else { return .needsAction }
+        let droppedCount = requestPackages.filter { $0.droppedOffAt != nil }.count
+        if droppedCount == requestPackages.count {
+            return .droppedOff
+        }
+        if droppedCount > 0 {
+            return .partiallyDroppedOff
+        }
+        return .readyToDropOff
+    }
+}
+
 struct FoodSuggestion: Identifiable, Equatable {
     var id: String { title }
     var title: String
@@ -691,6 +976,7 @@ enum FoodReminderService {
         dateTime: Date,
         relatedShoppingListID: UUID?,
         relatedMealPrepItemID: UUID?,
+        relatedReturnRequestID: UUID?,
         context: ModelContext
     ) async {
         let reminder = FoodReminder(
@@ -699,6 +985,7 @@ enum FoodReminderService {
             title: title,
             relatedShoppingListID: relatedShoppingListID,
             relatedMealPrepItemID: relatedMealPrepItemID,
+            relatedReturnRequestID: relatedReturnRequestID,
             dateTime: dateTime
         )
         context.insert(reminder)

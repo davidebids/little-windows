@@ -4,6 +4,7 @@ enum FoodHomeSection: String, CaseIterable, Identifiable {
     case shopping
     case inventory
     case mealPrep
+    case returns
     case stores
     case insights
 
@@ -14,6 +15,7 @@ enum FoodHomeSection: String, CaseIterable, Identifiable {
         case .shopping: "Shopping"
         case .inventory: "Inventory"
         case .mealPrep: "Meal Prep"
+        case .returns: "Returns"
         case .stores: "Stores"
         case .insights: "Insights"
         }
@@ -24,6 +26,7 @@ enum FoodHomeSection: String, CaseIterable, Identifiable {
         case .shopping: "cart.fill"
         case .inventory: "cabinet.fill"
         case .mealPrep: "takeoutbag.and.cup.and.straw.fill"
+        case .returns: "shippingbox.fill"
         case .stores: "map.fill"
         case .insights: "chart.bar.xaxis"
         }
@@ -82,6 +85,7 @@ enum FoodRoute: Hashable {
     case shoppingMode(UUID)
     case inventoryItem(UUID)
     case mealPrepItem(UUID)
+    case returnRequest(UUID)
     case store(UUID)
     case reminders
 }
@@ -95,6 +99,8 @@ enum FoodRouteCommand: Equatable {
     case inventoryItem(UUID)
     case mealPrep
     case mealPrepItem(UUID)
+    case returns
+    case returnRequest(UUID)
     case store(UUID)
     case quickAdd
 }

@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftData
 import SwiftUI
 import UIKit
@@ -14,6 +15,10 @@ struct FoodHomeView: View {
     @Query(sort: \InventoryItem.updatedAt, order: .reverse) private var inventoryItems: [InventoryItem]
     @Query(sort: \MealPrepItem.updatedAt, order: .reverse) private var mealPrepItems: [MealPrepItem]
     @Query(sort: \MealPrepUsage.dateTime, order: .reverse) private var mealPrepUsages: [MealPrepUsage]
+    @Query(sort: \ReturnRequest.updatedAt, order: .reverse) private var returnRequests: [ReturnRequest]
+    @Query(sort: \ReturnItem.sortOrder) private var returnItems: [ReturnItem]
+    @Query(sort: \ReturnPackage.sortOrder) private var returnPackages: [ReturnPackage]
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @Query(sort: \FoodReminder.dateTime) private var reminders: [FoodReminder]
 
     @State private var selectedSection: FoodHomeSection = .shopping
@@ -28,6 +33,9 @@ struct FoodHomeView: View {
         + shoppingLists.count
         + inventoryItems.count
         + mealPrepItems.count
+        + returnRequests.count
+        + returnItems.count
+        + returnPackages.count
         + stores.count
         + storeSections.count
         + locations.count
@@ -83,13 +91,21 @@ struct FoodHomeView: View {
     @ViewBuilder
     private func content(household: Household) -> some View {
         VStack(spacing: 0) {
-            Picker("Food section", selection: $selectedSection) {
-                ForEach(FoodHomeSection.allCases) { section in
-                    Label(section.title, systemImage: section.systemImage).tag(section)
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(FoodHomeSection.allCases) { section in
+                        FoodHomeSectionButton(
+                            section: section,
+                            isSelected: selectedSection == section
+                        ) {
+                            selectedSection = section
+                            path.removeLast(path.count)
+                        }
+                    }
                 }
+                .padding(.horizontal)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
+            .scrollIndicators(.hidden)
             .padding(.top, 8)
             .padding(.bottom, 10)
 
@@ -118,6 +134,15 @@ struct FoodHomeView: View {
                     locations: householdLocations,
                     mealPrepItems: householdMealPrepItems,
                     openItem: { path.append(FoodRoute.mealPrepItem($0.id)) }
+                )
+            case .returns:
+                ReturnsHomeView(
+                    household: household,
+                    requests: householdReturnRequests,
+                    items: householdReturnItems,
+                    packages: householdReturnPackages,
+                    photoAttachments: householdReturnPhotos,
+                    openReturn: { path.append(FoodRoute.returnRequest($0.id)) }
                 )
             case .stores:
                 StoresView(
@@ -190,6 +215,17 @@ struct FoodHomeView: View {
             } else {
                 MissingFoodRouteView()
             }
+        case .returnRequest(let id):
+            if let request = householdReturnRequests.first(where: { $0.id == id }) {
+                ReturnDetailView(
+                    request: request,
+                    items: householdReturnItems.filter { $0.returnRequestID == request.id },
+                    packages: householdReturnPackages.filter { $0.returnRequestID == request.id },
+                    photoAttachments: householdReturnPhotos
+                )
+            } else {
+                MissingFoodRouteView()
+            }
         case .store(let id):
             if let store = householdStores.first(where: { $0.id == id }) {
                 StoreEditorView(
@@ -206,7 +242,8 @@ struct FoodHomeView: View {
                     household: household,
                     reminders: householdReminders,
                     shoppingLists: householdShoppingLists,
-                    mealPrepItems: householdMealPrepItems
+                    mealPrepItems: householdMealPrepItems,
+                    returnRequests: householdReturnRequests
                 )
             }
         }
@@ -255,6 +292,15 @@ struct FoodHomeView: View {
             selectedSection = .mealPrep
             path.removeLast(path.count)
             path.append(FoodRoute.mealPrepItem(id))
+        case .returns:
+            deferredFoodCommand = nil
+            selectedSection = .returns
+            path.removeLast(path.count)
+        case .returnRequest(let id):
+            deferredFoodCommand = nil
+            selectedSection = .returns
+            path.removeLast(path.count)
+            path.append(FoodRoute.returnRequest(id))
         case .store(let id):
             deferredFoodCommand = nil
             selectedSection = .stores
@@ -270,7 +316,7 @@ struct FoodHomeView: View {
     private func shouldDefer(_ command: FoodRouteCommand) -> Bool {
         guard household != nil else { return true }
         switch command {
-        case .food, .shopping, .inventory, .mealPrep, .quickAdd:
+        case .food, .shopping, .inventory, .mealPrep, .returns, .quickAdd:
             return false
         case .shoppingList(let id), .shoppingMode(let id):
             return !householdShoppingLists.contains { $0.id == id }
@@ -278,6 +324,8 @@ struct FoodHomeView: View {
             return !householdInventoryItems.contains { $0.id == id }
         case .mealPrepItem(let id):
             return !householdMealPrepItems.contains { $0.id == id }
+        case .returnRequest(let id):
+            return !householdReturnRequests.contains { $0.id == id }
         case .store(let id):
             return !householdStores.contains { $0.id == id }
         }
@@ -312,6 +360,8 @@ struct FoodHomeView: View {
             return .inventory
         case .mealPrep, .mealPrepItem:
             return .mealPrep
+        case .returns, .returnRequest:
+            return .returns
         case .store:
             return .stores
         }
@@ -365,9 +415,100 @@ struct FoodHomeView: View {
         return mealPrepUsages.filter { $0.householdID == household.id }
     }
 
+    private var householdReturnRequests: [ReturnRequest] {
+        guard let household else { return [] }
+        return returnRequests
+            .filter { $0.householdID == household.id && !$0.isArchived }
+            .sorted { lhs, rhs in
+                let lhsStatus = ReturnTrackingService.status(for: lhs, packages: householdReturnPackages)
+                let rhsStatus = ReturnTrackingService.status(for: rhs, packages: householdReturnPackages)
+                let lhsPackages = householdReturnPackages.filter { $0.returnRequestID == lhs.id }
+                let rhsPackages = householdReturnPackages.filter { $0.returnRequestID == rhs.id }
+                return (
+                    statusSortOrder(lhsStatus),
+                    earliestReturnByDate(in: lhsPackages) ?? .distantFuture,
+                    returnDisplayTitle(
+                        items: householdReturnItems.filter { $0.returnRequestID == lhs.id },
+                        packages: lhsPackages
+                    )
+                ) < (
+                    statusSortOrder(rhsStatus),
+                    earliestReturnByDate(in: rhsPackages) ?? .distantFuture,
+                    returnDisplayTitle(
+                        items: householdReturnItems.filter { $0.returnRequestID == rhs.id },
+                        packages: rhsPackages
+                    )
+                )
+            }
+    }
+
+    private var householdReturnItems: [ReturnItem] {
+        guard let household else { return [] }
+        return returnItems.filter { $0.householdID == household.id }
+    }
+
+    private var householdReturnPackages: [ReturnPackage] {
+        guard let household else { return [] }
+        return returnPackages.filter { $0.householdID == household.id }
+    }
+
+    private var householdReturnPhotos: [PhotoAttachment] {
+        photoAttachments.filter { $0.ownerKind == .returnPhoto }
+    }
+
     private var householdReminders: [FoodReminder] {
         guard let household else { return [] }
         return reminders.filter { $0.householdID == household.id }
+    }
+
+    private func statusSortOrder(_ status: ReturnRequestStatus) -> Int {
+        switch status {
+        case .needsAction: 0
+        case .readyToDropOff: 1
+        case .partiallyDroppedOff: 2
+        case .droppedOff: 3
+        case .completed: 4
+        case .archived: 5
+        }
+    }
+
+    private func earliestReturnByDate(in packages: [ReturnPackage]) -> Date? {
+        packages.compactMap(\.returnByDate).min()
+    }
+
+    private func returnDisplayTitle(items: [ReturnItem], packages: [ReturnPackage]) -> String {
+        if let firstItem = items.sorted(by: { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }).first {
+            return items.count == 1 ? firstItem.name : "\(firstItem.name) + \(items.count - 1)"
+        }
+        if let firstPackage = packages.sorted(by: { ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName) }).first {
+            return "Return at \(firstPackage.displayName)"
+        }
+        return "Return"
+    }
+}
+
+private struct FoodHomeSectionButton: View {
+    let section: FoodHomeSection
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(section.title, systemImage: section.systemImage)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .foregroundStyle(isSelected ? .white : .primary)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(
+                    isSelected
+                        ? AppTheme.accent.gradient
+                        : Color.primary.opacity(0.055).gradient,
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -2480,18 +2621,1339 @@ private struct FoodInsightsView: View {
     }
 }
 
+private struct ReturnsHomeView: View {
+    @Environment(\.modelContext) private var modelContext
+    let household: Household
+    let requests: [ReturnRequest]
+    let items: [ReturnItem]
+    let packages: [ReturnPackage]
+    let photoAttachments: [PhotoAttachment]
+    let openReturn: (ReturnRequest) -> Void
+
+    @State private var showingNewReturn = false
+    @State private var returnPendingRemove: ReturnRequest?
+
+    var body: some View {
+        let itemsByReturnID = Dictionary(grouping: items, by: \.returnRequestID)
+        let packagesByReturnID = Dictionary(grouping: packages, by: \.returnRequestID)
+        let activeRequests = requests.filter {
+            ReturnTrackingService.status(for: $0, packages: packagesByReturnID[$0.id] ?? []) != .completed
+        }
+        let completedRequests = requests.filter {
+            ReturnTrackingService.status(for: $0, packages: packagesByReturnID[$0.id] ?? []) == .completed
+        }
+        let activeGroups = groupedRequests(
+            activeRequests,
+            itemsByReturnID: itemsByReturnID,
+            packagesByReturnID: packagesByReturnID
+        )
+
+        List {
+            if requests.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "No returns",
+                        systemImage: "shippingbox",
+                        description: Text("Create a return request with its items, send-back details, photos, and drop-offs.")
+                    )
+                }
+            } else {
+                ForEach(activeGroups) { group in
+                    Section {
+                        ForEach(group.requests) { request in
+                            Button {
+                                openReturn(request)
+                            } label: {
+                                ReturnSummaryRow(
+                                    request: request,
+                                    items: itemsByReturnID[request.id] ?? [],
+                                    packages: packagesByReturnID[request.id] ?? []
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions {
+                                Button("Remove", role: .destructive) {
+                                    returnPendingRemove = request
+                                }
+                            }
+                        }
+                    } header: {
+                        AppSectionHeader(title: group.title, subtitle: "\(group.requests.count)")
+                    }
+                }
+
+                if !completedRequests.isEmpty {
+                    Section {
+                        ForEach(completedRequests) { request in
+                            Button {
+                                openReturn(request)
+                            } label: {
+                                ReturnSummaryRow(
+                                    request: request,
+                                    items: itemsByReturnID[request.id] ?? [],
+                                    packages: packagesByReturnID[request.id] ?? []
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions {
+                                Button("Remove", role: .destructive) {
+                                    returnPendingRemove = request
+                                }
+                            }
+                        }
+                    } header: {
+                        AppSectionHeader(title: "Completed", subtitle: "\(completedRequests.count)")
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingNewReturn = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Add return")
+            }
+        }
+        .sheet(isPresented: $showingNewReturn) {
+            NavigationStack {
+                ReturnCreateView(
+                    household: household,
+                    sortOrder: nextReturnSortOrder
+                )
+            }
+        }
+        .appActionSheet(
+            isPresented: Binding(
+                get: { returnPendingRemove != nil },
+                set: { if !$0 { returnPendingRemove = nil } }
+            ),
+            title: "Remove return?",
+            message: returnPendingRemove.map { removeMessage(for: $0, itemsByReturnID: itemsByReturnID, packagesByReturnID: packagesByReturnID) },
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: removeOptions
+        )
+    }
+
+    private var nextReturnSortOrder: Int {
+        (requests.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
+    }
+
+    private var removeOptions: [AppActionSheetOption] {
+        guard let request = returnPendingRemove else { return [] }
+        return [
+            AppActionSheetOption(
+                title: "Remove Return",
+                subtitle: "Remove its items, send-back details, and attached photos.",
+                systemImage: "archivebox.fill",
+                tint: .red,
+                role: .destructive
+            ) {
+                remove(request)
+                returnPendingRemove = nil
+            }
+        ]
+    }
+
+    private func remove(_ request: ReturnRequest) {
+        ReturnTrackingService.archive(
+            request,
+            items: items,
+            packages: packages,
+            attachments: photoAttachments,
+            context: modelContext
+        )
+    }
+
+    private func removeMessage(
+        for request: ReturnRequest,
+        itemsByReturnID: [UUID: [ReturnItem]],
+        packagesByReturnID: [UUID: [ReturnPackage]]
+    ) -> String {
+        let itemCount = itemsByReturnID[request.id]?.count ?? 0
+        let packageCount = packagesByReturnID[request.id]?.count ?? 0
+        return "This removes \(itemCount) item\(itemCount == 1 ? "" : "s"), \(packageCount) send-back detail\(packageCount == 1 ? "" : "s"), and any attached return label photos from active tracking."
+    }
+
+    private func groupedRequests(
+        _ requests: [ReturnRequest],
+        itemsByReturnID: [UUID: [ReturnItem]],
+        packagesByReturnID: [UUID: [ReturnPackage]]
+    ) -> [ReturnDropOffGroup] {
+        let grouped = Dictionary(grouping: requests) { request in
+            dropOffGroupKey(for: request, packagesByReturnID: packagesByReturnID)
+        }
+        return grouped.map { key, requests in
+            ReturnDropOffGroup(
+                key: key,
+                title: key.title,
+                requests: requests.sorted {
+                    sortRequests(
+                        $0,
+                        $1,
+                        itemsByReturnID: itemsByReturnID,
+                        packagesByReturnID: packagesByReturnID
+                    )
+                }
+            )
+        }
+        .sorted { lhs, rhs in
+            (lhs.key.sortOrder, lhs.title) < (rhs.key.sortOrder, rhs.title)
+        }
+    }
+
+    private func dropOffGroupKey(
+        for request: ReturnRequest,
+        packagesByReturnID: [UUID: [ReturnPackage]]
+    ) -> ReturnDropOffGroupKey {
+        let requestPackages = packagesByReturnID[request.id] ?? []
+        guard !requestPackages.isEmpty else { return .needsLabel }
+        let carriers = Set(requestPackages.map(\.carrier))
+        guard carriers.count == 1, let carrier = carriers.first else { return .multiple }
+        return .carrier(carrier)
+    }
+
+    private func sortRequests(
+        _ lhs: ReturnRequest,
+        _ rhs: ReturnRequest,
+        itemsByReturnID: [UUID: [ReturnItem]],
+        packagesByReturnID: [UUID: [ReturnPackage]]
+    ) -> Bool {
+        let lhsItems = itemsByReturnID[lhs.id] ?? []
+        let rhsItems = itemsByReturnID[rhs.id] ?? []
+        let lhsPackages = packagesByReturnID[lhs.id] ?? []
+        let rhsPackages = packagesByReturnID[rhs.id] ?? []
+        return (
+            earliestReturnByDate(in: lhsPackages) ?? .distantFuture,
+            returnDisplayTitle(items: lhsItems, packages: lhsPackages)
+        ) < (
+            earliestReturnByDate(in: rhsPackages) ?? .distantFuture,
+            returnDisplayTitle(items: rhsItems, packages: rhsPackages)
+        )
+    }
+
+    private func earliestReturnByDate(in packages: [ReturnPackage]) -> Date? {
+        packages.compactMap(\.returnByDate).min()
+    }
+
+    private func returnDisplayTitle(items: [ReturnItem], packages: [ReturnPackage]) -> String {
+        if let firstItem = items.sorted(by: { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }).first {
+            return items.count == 1 ? firstItem.name : "\(firstItem.name) + \(items.count - 1)"
+        }
+        if let firstPackage = packages.sorted(by: { ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName) }).first {
+            return "Return at \(firstPackage.displayName)"
+        }
+        return "Return"
+    }
+}
+
+private struct ReturnDropOffGroup: Identifiable {
+    let key: ReturnDropOffGroupKey
+    let title: String
+    let requests: [ReturnRequest]
+
+    var id: String { key.id }
+}
+
+private enum ReturnDropOffGroupKey: Hashable {
+    case needsLabel
+    case carrier(ReturnPackageCarrier)
+    case multiple
+
+    var id: String {
+        switch self {
+        case .needsLabel: "needs-label"
+        case .carrier(let carrier): carrier.rawValue
+        case .multiple: "multiple"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .needsLabel: "Needs Details"
+        case .carrier(let carrier): carrier.displayName
+        case .multiple: "Multiple Drop-offs"
+        }
+    }
+
+    var sortOrder: Int {
+        switch self {
+        case .needsLabel:
+            0
+        case .carrier(let carrier):
+            (ReturnPackageCarrier.allCases.firstIndex(of: carrier) ?? 99) + 1
+        case .multiple:
+            100
+        }
+    }
+}
+
+private struct ReturnSummaryRow: View {
+    let request: ReturnRequest
+    let items: [ReturnItem]
+    let packages: [ReturnPackage]
+
+    private var status: ReturnRequestStatus {
+        ReturnTrackingService.status(for: request, packages: packages)
+    }
+
+    private var title: String {
+        if let firstItem = items.sorted(by: { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }).first {
+            return items.count == 1 ? firstItem.name : "\(firstItem.name) + \(items.count - 1)"
+        }
+        if let firstPackage = packages.sorted(by: { ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName) }).first {
+            return "Return at \(firstPackage.displayName)"
+        }
+        return "Return"
+    }
+
+    private var earliestReturnByDate: Date? {
+        packages.compactMap(\.returnByDate).min()
+    }
+
+    private var dropOffSummary: String {
+        guard !packages.isEmpty else { return "No drop-off set" }
+        let carriers = Array(Set(packages.map(\.carrier)))
+            .sorted { lhs, rhs in
+                (ReturnPackageCarrier.allCases.firstIndex(of: lhs) ?? 99)
+                    < (ReturnPackageCarrier.allCases.firstIndex(of: rhs) ?? 99)
+            }
+        if carriers.count == 1, let carrier = carriers.first {
+            return carrier.displayName
+        }
+        return carriers.map(\.displayName).joined(separator: ", ")
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: statusSystemImage(status))
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(statusColor(status).gradient, in: RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                HStack(spacing: 8) {
+                    Text(status.displayName)
+                    Text("\(items.count) item\(items.count == 1 ? "" : "s")")
+                    Text("\(packages.count) send-back detail\(packages.count == 1 ? "" : "s")")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Label(dropOffSummary, systemImage: "mappin.and.ellipse")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let returnByDate = earliestReturnByDate {
+                    Text("Return by \(DateFormatting.day.string(from: returnByDate))")
+                        .font(.caption)
+                        .foregroundStyle(returnByDate < Calendar.current.startOfDay(for: Date()) ? .red : .secondary)
+                }
+            }
+
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct ReturnDetailView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var request: ReturnRequest
+    let items: [ReturnItem]
+    let packages: [ReturnPackage]
+    let photoAttachments: [PhotoAttachment]
+
+    @State private var showingAddItem = false
+    @State private var editingItem: ReturnItem?
+    @State private var itemPendingDelete: ReturnItem?
+    @State private var showingAddPackage = false
+    @State private var editingPackage: ReturnPackage?
+    @State private var packagePendingDelete: ReturnPackage?
+    @State private var showingRemoveReturnConfirmation = false
+    @State private var showingDeleteItemConfirmation = false
+    @State private var showingDeletePackageConfirmation = false
+
+    private var status: ReturnRequestStatus {
+        ReturnTrackingService.status(for: request, packages: packages)
+    }
+
+    private var title: String {
+        if let firstItem = items.sorted(by: { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }).first {
+            return items.count == 1 ? firstItem.name : "\(firstItem.name) + \(items.count - 1)"
+        }
+        if let firstPackage = packages.sorted(by: { ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName) }).first {
+            return "Return at \(firstPackage.displayName)"
+        }
+        return "Return"
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Label {
+                    LabeledContent("Status") {
+                        Text(status.displayName)
+                            .foregroundStyle(statusColor(status))
+                    }
+                } icon: {
+                    Image(systemName: statusSystemImage(status))
+                        .foregroundStyle(statusColor(status))
+                }
+            } header: {
+                AppSectionHeader(title: "Progress")
+            }
+
+            Section {
+                if items.isEmpty {
+                    ContentUnavailableView(
+                        "No items",
+                        systemImage: "list.bullet.rectangle",
+                        description: Text("Add each item that belongs to this return.")
+                    )
+                } else {
+                    ForEach(items.sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button {
+                                editingItem = item
+                            } label: {
+                                ReturnItemRow(
+                                    item: item,
+                                    package: packages.first { $0.id == item.packageID }
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            if let urlString = item.returnURLString,
+                               let url = URL(string: urlString) {
+                                Link(destination: url) {
+                                    Label("Open return link", systemImage: "link")
+                                        .font(.caption.weight(.semibold))
+                                }
+                            }
+                        }
+                        .swipeActions {
+                            Button("Delete", role: .destructive) {
+                                itemPendingDelete = item
+                                showingDeleteItemConfirmation = true
+                            }
+                        }
+                    }
+                }
+            } header: {
+                AppSectionHeader(title: "Items", subtitle: "\(items.count)")
+            }
+
+            Section {
+                if packages.isEmpty {
+                    ContentUnavailableView(
+                        "No send-back details",
+                        systemImage: "shippingbox",
+                        description: Text("Add the drop-off partner, barcode, return label, or tracking details.")
+                    )
+                } else {
+                    ForEach(packages.sorted { ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName) }) { package in
+                        ReturnPackageCard(
+                            package: package,
+                            items: items.filter { $0.packageID == package.id },
+                            photoAttachments: photoAttachments,
+                            edit: { editingPackage = package }
+                        )
+                        .swipeActions {
+                            Button("Delete", role: .destructive) {
+                                packagePendingDelete = package
+                                showingDeletePackageConfirmation = true
+                            }
+                        }
+                    }
+                }
+            } header: {
+                AppSectionHeader(title: "Send-Back Details", subtitle: "\(packages.count)")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Menu {
+                    Button("Add Item", systemImage: "list.bullet.rectangle") {
+                        showingAddItem = true
+                    }
+                    Button("Add Send-Back Details", systemImage: "shippingbox") {
+                        showingAddPackage = true
+                    }
+                    Button("Remove Return", systemImage: "archivebox", role: .destructive) {
+                        showingRemoveReturnConfirmation = true
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddItem) {
+            NavigationStack {
+                ReturnItemEditorView(
+                    request: request,
+                    item: nil,
+                    packages: packages,
+                    existingItems: items
+                )
+            }
+        }
+        .sheet(item: $editingItem) { item in
+            NavigationStack {
+                ReturnItemEditorView(
+                    request: request,
+                    item: item,
+                    packages: packages,
+                    existingItems: items
+                )
+            }
+        }
+        .sheet(isPresented: $showingAddPackage) {
+            NavigationStack {
+                ReturnPackageEditorView(
+                    request: request,
+                    package: nil,
+                    existingPackages: packages,
+                    photoAttachments: photoAttachments
+                )
+            }
+        }
+        .sheet(item: $editingPackage) { package in
+            NavigationStack {
+                ReturnPackageEditorView(
+                    request: request,
+                    package: package,
+                    existingPackages: packages,
+                    photoAttachments: photoAttachments
+                )
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if status != .completed {
+                ReturnDetailActionBar(
+                    canMarkDroppedOff: canMarkDroppedOff,
+                    canMarkInProgress: canMarkInProgress,
+                    markDroppedOff: {
+                        ReturnTrackingService.markDroppedOff(
+                            request,
+                            packages: packages,
+                            context: modelContext
+                        )
+                    },
+                    markInProgress: {
+                        ReturnTrackingService.markInProgress(
+                            request,
+                            packages: packages,
+                            context: modelContext
+                        )
+                    },
+                    markComplete: {
+                        ReturnTrackingService.markComplete(
+                            request,
+                            packages: packages,
+                            context: modelContext
+                        )
+                    }
+                )
+            }
+        }
+        .appActionSheet(
+            isPresented: $showingRemoveReturnConfirmation,
+            title: "Remove return?",
+            message: "This removes the return, its items, send-back details, and attached return label photos from active tracking.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: removeReturnOptions
+        )
+        .confirmationDialog(
+            "Delete return item?",
+            isPresented: $showingDeleteItemConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Item", role: .destructive) {
+                if let itemPendingDelete {
+                    ReturnTrackingService.deleteItem(
+                        itemPendingDelete,
+                        from: request,
+                        items: items,
+                        packages: packages,
+                        attachments: photoAttachments,
+                        context: modelContext
+                    )
+                    if items.filter({ $0.returnRequestID == request.id && $0.id != itemPendingDelete.id }).isEmpty {
+                        dismiss()
+                    }
+                }
+                itemPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                itemPendingDelete = nil
+            }
+        } message: {
+            Text("This removes the item from this return.")
+        }
+        .confirmationDialog(
+            "Delete send-back details?",
+            isPresented: $showingDeletePackageConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Details", role: .destructive) {
+                if let packagePendingDelete {
+                    ReturnTrackingService.deletePackage(
+                        packagePendingDelete,
+                        items: items,
+                        attachments: photoAttachments,
+                        context: modelContext
+                    )
+                }
+                packagePendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                packagePendingDelete = nil
+            }
+        } message: {
+            Text("Items assigned to these send-back details will become unassigned, and attached photos will be removed.")
+        }
+    }
+
+    private var removeReturnOptions: [AppActionSheetOption] {
+        [
+            AppActionSheetOption(
+                title: "Remove Return",
+                subtitle: "Remove its items, send-back details, and attached photos.",
+                systemImage: "archivebox.fill",
+                tint: .red,
+                role: .destructive
+            ) {
+                ReturnTrackingService.archive(
+                    request,
+                    items: items,
+                    packages: packages,
+                    attachments: photoAttachments,
+                    context: modelContext
+                )
+                dismiss()
+            }
+        ]
+    }
+
+    private var canMarkDroppedOff: Bool {
+        packages.contains { $0.completedAt == nil && $0.droppedOffAt == nil }
+    }
+
+    private var canMarkInProgress: Bool {
+        packages.contains { $0.completedAt == nil && $0.droppedOffAt != nil }
+    }
+}
+
+private struct ReturnItemRow: View {
+    let item: ReturnItem
+    let package: ReturnPackage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(item.name)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if !item.quantityText.isEmpty {
+                    Text("Qty \(item.quantityText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 8) {
+                if let reason = item.reason {
+                    Text(reason)
+                }
+                if let package {
+                    Label(package.displayName, systemImage: "shippingbox")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct ReturnDetailActionBar: View {
+    let canMarkDroppedOff: Bool
+    let canMarkInProgress: Bool
+    let markDroppedOff: () -> Void
+    let markInProgress: () -> Void
+    let markComplete: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if canMarkDroppedOff || canMarkInProgress {
+                HStack(spacing: 10) {
+                    if canMarkInProgress {
+                        Button(action: markInProgress) {
+                            Label("In Progress", systemImage: "arrow.uturn.backward.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if canMarkDroppedOff {
+                        Button(action: markDroppedOff) {
+                            Label("Dropped Off", systemImage: "tray.and.arrow.up.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+
+            Button(action: markComplete) {
+                Label("Complete Return", systemImage: "checkmark.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+            .foregroundStyle(.white)
+        }
+        .font(.subheadline.weight(.semibold))
+        .controlSize(.large)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(.bar)
+    }
+}
+
+private struct ReturnPackageCard: View {
+    let package: ReturnPackage
+    let items: [ReturnItem]
+    let photoAttachments: [PhotoAttachment]
+    let edit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: package.completedAt == nil ? "shippingbox.fill" : "checkmark.seal.fill")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(package.completedAt == nil ? Color.orange.gradient : Color.green.gradient, in: RoundedRectangle(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(package.displayName)
+                        .font(.headline)
+                    Text(packageSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: edit) {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Edit package")
+            }
+
+            if let trackingNumber = package.trackingNumber {
+                LabeledContent("Tracking") { Text(trackingNumber) }
+                    .font(.caption)
+            }
+            if let returnByDate = package.returnByDate {
+                LabeledContent("Return by") { Text(DateFormatting.day.string(from: returnByDate)) }
+                    .font(.caption)
+                    .foregroundStyle(returnByDate < Calendar.current.startOfDay(for: Date()) ? .red : .secondary)
+            }
+            if !items.isEmpty {
+                Text(items.map(\.name).joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            let photos = package.photoAttachmentIDs.compactMap { id in
+                photoAttachments.first { $0.id == id }?.previewData
+            }
+            if !photos.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(photos.enumerated()), id: \.offset) { _, data in
+                            if let image = UIImage(data: data) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 74, height: 74)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var packageSubtitle: String {
+        if let completedAt = package.completedAt {
+            return "Completed \(DateFormatting.day.string(from: completedAt))"
+        }
+        if let droppedOffAt = package.droppedOffAt {
+            return "Dropped off \(DateFormatting.day.string(from: droppedOffAt))"
+        }
+        return "\(package.method.displayName) via \(package.carrier.displayName)"
+    }
+}
+
+private struct ReturnCreateView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let household: Household
+    let sortOrder: Int
+
+    @State private var returnURLString = ""
+    @State private var hasReturnByDate = false
+    @State private var returnByDate = Date()
+    @State private var itemName = ""
+    @State private var itemQuantity: Double = 1
+    @State private var hasItemQuantity = false
+    @State private var itemReason = ""
+    @State private var packageName = ""
+    @State private var carrier: ReturnPackageCarrier = .wholeFoods
+    @State private var method: ReturnPackageMethod = .dropOff
+    @State private var trackingNumber = ""
+    @State private var selectedPhotoItems = [PhotosPickerItem]()
+    @State private var photoDrafts = [PhotoAttachmentDraft]()
+    @State private var showingPhotoControls = false
+    @State private var isImportingPhotos = false
+
+    var body: some View {
+        Form {
+            Section("What You're Returning") {
+                TextField("Item name", text: $itemName)
+                Toggle("Quantity", isOn: $hasItemQuantity)
+                if hasItemQuantity {
+                    Stepper(value: $itemQuantity, in: 1...99, step: 1) {
+                        Text("\(Int(itemQuantity))")
+                    }
+                }
+                TextField("Reason", text: $itemReason)
+                TextField("Return link", text: $returnURLString)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+            }
+
+            Section("How You'll Send It Back") {
+                Toggle("Return-by date", isOn: $hasReturnByDate)
+                if hasReturnByDate {
+                    DatePicker("Date", selection: $returnByDate, displayedComponents: .date)
+                }
+                Picker("Method", selection: $method) {
+                    ForEach(ReturnPackageMethod.allCases) { value in
+                        Text(value.displayName).tag(value)
+                    }
+                }
+                Picker("Drop-off partner", selection: $carrier) {
+                    ForEach(ReturnPackageCarrier.allCases) { value in
+                        Text(value.displayName).tag(value)
+                    }
+                }
+                TextField("Reference name", text: $packageName)
+                TextField("Tracking number", text: $trackingNumber)
+                    .textInputAutocapitalization(.never)
+            }
+
+            Section("Barcode or Return Label Photos") {
+                if photoDrafts.isEmpty && !showingPhotoControls {
+                    Button {
+                        showingPhotoControls = true
+                    } label: {
+                        Label("Add Photos", systemImage: "photo.badge.plus")
+                    }
+                }
+                if !photoDrafts.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
+                        ForEach(photoDrafts) { draft in
+                            ZStack(alignment: .topTrailing) {
+                                if let image = UIImage(data: draft.thumbnailData ?? draft.imageData) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(height: 96)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                                Button {
+                                    photoDrafts.removeAll { $0.id == draft.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.white, .black.opacity(0.55))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(5)
+                            }
+                        }
+                    }
+                }
+                if showingPhotoControls || !photoDrafts.isEmpty {
+                    PhotosPicker(
+                        selection: $selectedPhotoItems,
+                        maxSelectionCount: 6,
+                        matching: .images,
+                        photoLibrary: .shared()
+                    ) {
+                        Label(isImportingPhotos ? "Importing" : "Add Photos", systemImage: "photo.badge.plus")
+                    }
+                    .disabled(isImportingPhotos)
+                }
+            }
+        }
+        .navigationTitle("New Return")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(!canSave)
+            }
+        }
+        .onChange(of: selectedPhotoItems) { _, newItems in
+            importPhotoItems(newItems)
+        }
+    }
+
+    private var hasPackageDetails: Bool {
+        !packageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || carrier != .wholeFoods
+            || method != .dropOff
+            || !trackingNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || hasReturnByDate
+            || !photoDrafts.isEmpty
+    }
+
+    private var canSave: Bool {
+        !itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPackageDetails
+    }
+
+    private func importPhotoItems(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            isImportingPhotos = true
+            defer {
+                isImportingPhotos = false
+                selectedPhotoItems = []
+            }
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                      let draft = PhotoAttachmentImageProcessor.draft(from: data)
+                else { continue }
+                photoDrafts.append(draft)
+            }
+        }
+    }
+
+    private func save() {
+        guard let request = ReturnTrackingService.createReturn(
+            householdID: household.id,
+            sortOrder: sortOrder,
+            context: modelContext
+        ) else {
+            return
+        }
+
+        for draft in photoDrafts {
+            insertReturnPhoto(draft, in: modelContext)
+        }
+
+        var packageID: UUID?
+        if hasPackageDetails {
+            let package = ReturnTrackingService.addPackage(
+                name: packageName,
+                carrier: carrier,
+                method: method,
+                trackingNumber: trackingNumber,
+                returnByDate: hasReturnByDate ? returnByDate : nil,
+                photoAttachmentIDs: photoDrafts.map(\.id),
+                to: request,
+                existingPackages: [],
+                context: modelContext
+            )
+            packageID = package.id
+        }
+
+        if !itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            _ = ReturnTrackingService.addItem(
+                name: itemName,
+                quantity: hasItemQuantity ? itemQuantity : nil,
+                reason: itemReason,
+                returnURLString: returnURLString,
+                packageID: packageID,
+                to: request,
+                existingItems: [],
+                context: modelContext
+            )
+        }
+        dismiss()
+    }
+}
+
+private struct ReturnItemEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let request: ReturnRequest
+    let item: ReturnItem?
+    let packages: [ReturnPackage]
+    let existingItems: [ReturnItem]
+
+    @State private var name: String
+    @State private var quantity: Double
+    @State private var hasQuantity: Bool
+    @State private var reason: String
+    @State private var returnURLString: String
+    @State private var packageID: UUID?
+
+    init(request: ReturnRequest, item: ReturnItem?, packages: [ReturnPackage], existingItems: [ReturnItem]) {
+        self.request = request
+        self.item = item
+        self.packages = packages
+        self.existingItems = existingItems
+        _name = State(initialValue: item?.name ?? "")
+        _quantity = State(initialValue: item?.quantity ?? 1)
+        _hasQuantity = State(initialValue: item?.quantity != nil)
+        _reason = State(initialValue: item?.reason ?? "")
+        _returnURLString = State(initialValue: item?.returnURLString ?? "")
+        _packageID = State(initialValue: item?.packageID)
+    }
+
+    var body: some View {
+        Form {
+            Section("Item") {
+                TextField("Name", text: $name)
+                Toggle("Quantity", isOn: $hasQuantity)
+                if hasQuantity {
+                    Stepper(value: $quantity, in: 1...99, step: 1) {
+                        Text("\(Int(quantity))")
+                    }
+                }
+                TextField("Reason", text: $reason)
+                TextField("Return link", text: $returnURLString)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+            }
+            Section("Send-Back Details") {
+                Picker("Assign to", selection: $packageID) {
+                    Text("Unassigned").tag(UUID?.none)
+                    ForEach(packages) { package in
+                        Text(package.displayName).tag(UUID?.some(package.id))
+                    }
+                }
+            }
+        }
+        .navigationTitle(item == nil ? "Add Item" : "Edit Item")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private func save() {
+        if let item {
+            ReturnTrackingService.updateItem(
+                item,
+                name: name,
+                quantity: hasQuantity ? quantity : nil,
+                reason: reason,
+                returnURLString: returnURLString,
+                packageID: packageID,
+                context: modelContext
+            )
+        } else {
+            _ = ReturnTrackingService.addItem(
+                name: name,
+                quantity: hasQuantity ? quantity : nil,
+                reason: reason,
+                returnURLString: returnURLString,
+                packageID: packageID,
+                to: request,
+                existingItems: existingItems,
+                context: modelContext
+            )
+        }
+        dismiss()
+    }
+}
+
+private struct ReturnPackageEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let request: ReturnRequest
+    let package: ReturnPackage?
+    let existingPackages: [ReturnPackage]
+    let photoAttachments: [PhotoAttachment]
+
+    @State private var name: String
+    @State private var carrier: ReturnPackageCarrier
+    @State private var method: ReturnPackageMethod
+    @State private var trackingNumber: String
+    @State private var hasReturnByDate: Bool
+    @State private var returnByDate: Date
+    @State private var selectedPhotoItems = [PhotosPickerItem]()
+    @State private var photoDrafts = [PhotoAttachmentDraft]()
+    @State private var keptAttachmentIDs: [UUID]
+    @State private var removedAttachmentIDs = Set<UUID>()
+    @State private var isImportingPhotos = false
+
+    init(
+        request: ReturnRequest,
+        package: ReturnPackage?,
+        existingPackages: [ReturnPackage],
+        photoAttachments: [PhotoAttachment]
+    ) {
+        self.request = request
+        self.package = package
+        self.existingPackages = existingPackages
+        self.photoAttachments = photoAttachments
+        _name = State(initialValue: package?.name ?? "")
+        _carrier = State(initialValue: package?.carrier ?? .wholeFoods)
+        _method = State(initialValue: package?.method ?? .dropOff)
+        _trackingNumber = State(initialValue: package?.trackingNumber ?? "")
+        _hasReturnByDate = State(initialValue: package?.returnByDate != nil)
+        _returnByDate = State(initialValue: package?.returnByDate ?? Date())
+        _keptAttachmentIDs = State(initialValue: package?.photoAttachmentIDs ?? [])
+    }
+
+    var body: some View {
+        Form {
+            Section("How You'll Send It Back") {
+                Picker("Method", selection: $method) {
+                    ForEach(ReturnPackageMethod.allCases) { value in
+                        Text(value.displayName).tag(value)
+                    }
+                }
+                Picker("Drop-off partner", selection: $carrier) {
+                    ForEach(ReturnPackageCarrier.allCases) { value in
+                        Text(value.displayName).tag(value)
+                    }
+                }
+                Toggle("Return-by date", isOn: $hasReturnByDate)
+                if hasReturnByDate {
+                    DatePicker("Date", selection: $returnByDate, displayedComponents: .date)
+                }
+                TextField("Reference name", text: $name)
+                TextField("Tracking number", text: $trackingNumber)
+                    .textInputAutocapitalization(.never)
+            }
+
+            Section("Barcode or Return Label Photos") {
+                if photoPreviewItems.isEmpty {
+                    ContentUnavailableView(
+                        "No photos",
+                        systemImage: "barcode.viewfinder",
+                        description: Text("Add a QR code, barcode, label, or receipt photo.")
+                    )
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
+                        ForEach(photoPreviewItems) { item in
+                            ZStack(alignment: .topTrailing) {
+                                if let image = UIImage(data: item.data) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(height: 96)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                                Button {
+                                    removePhoto(id: item.id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.white, .black.opacity(0.55))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(5)
+                            }
+                        }
+                    }
+                }
+                PhotosPicker(
+                    selection: $selectedPhotoItems,
+                    maxSelectionCount: 6,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label(isImportingPhotos ? "Importing" : "Add Photos", systemImage: "photo.badge.plus")
+                }
+                .disabled(isImportingPhotos)
+            }
+        }
+        .navigationTitle(package == nil ? "Add Send-Back Details" : "Edit Send-Back Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+            }
+        }
+        .onChange(of: selectedPhotoItems) { _, newItems in
+            importPhotoItems(newItems)
+        }
+    }
+
+    private var photoPreviewItems: [ReturnPhotoPreviewItem] {
+        let existing = keptAttachmentIDs.compactMap { id -> ReturnPhotoPreviewItem? in
+            guard let attachment = photoAttachments.first(where: { $0.id == id }),
+                  let data = attachment.previewData else { return nil }
+            return ReturnPhotoPreviewItem(id: id, data: data)
+        }
+        let drafts = photoDrafts.map {
+            ReturnPhotoPreviewItem(id: $0.id, data: $0.thumbnailData ?? $0.imageData)
+        }
+        return existing + drafts
+    }
+
+    private func importPhotoItems(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            isImportingPhotos = true
+            defer {
+                isImportingPhotos = false
+                selectedPhotoItems = []
+            }
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                      let draft = PhotoAttachmentImageProcessor.draft(from: data)
+                else { continue }
+                photoDrafts.append(draft)
+            }
+        }
+    }
+
+    private func removePhoto(id: UUID) {
+        if photoDrafts.contains(where: { $0.id == id }) {
+            photoDrafts.removeAll { $0.id == id }
+        } else {
+            keptAttachmentIDs.removeAll { $0 == id }
+            removedAttachmentIDs.insert(id)
+        }
+    }
+
+    private func save() {
+        let newAttachmentIDs = photoDrafts.map(\.id)
+        for draft in photoDrafts {
+            contextInsertPhoto(draft)
+        }
+        PhotoAttachmentStore.deleteAttachments(
+            with: Array(removedAttachmentIDs),
+            in: photoAttachments,
+            context: modelContext
+        )
+        let attachmentIDs = keptAttachmentIDs + newAttachmentIDs
+        if let package {
+            ReturnTrackingService.updatePackage(
+                package,
+                name: name,
+                carrier: carrier,
+                method: method,
+                trackingNumber: trackingNumber,
+                returnByDate: hasReturnByDate ? returnByDate : nil,
+                photoAttachmentIDs: attachmentIDs,
+                context: modelContext
+            )
+        } else {
+            _ = ReturnTrackingService.addPackage(
+                name: name,
+                carrier: carrier,
+                method: method,
+                trackingNumber: trackingNumber,
+                returnByDate: hasReturnByDate ? returnByDate : nil,
+                photoAttachmentIDs: attachmentIDs,
+                to: request,
+                existingPackages: existingPackages,
+                context: modelContext
+            )
+        }
+        dismiss()
+    }
+
+    private func contextInsertPhoto(_ draft: PhotoAttachmentDraft) {
+        insertReturnPhoto(draft, in: modelContext)
+    }
+}
+
+private struct ReturnPhotoPreviewItem: Identifiable {
+    var id: UUID
+    var data: Data
+}
+
+private func insertReturnPhoto(_ draft: PhotoAttachmentDraft, in modelContext: ModelContext) {
+    modelContext.insert(PhotoAttachment(
+        id: draft.id,
+        profileID: nil,
+        ownerKind: .returnPhoto,
+        contentType: draft.contentType,
+        filename: draft.filename,
+        imageData: draft.imageData,
+        thumbnailData: draft.thumbnailData,
+        createdAt: draft.createdAt,
+        updatedAt: draft.createdAt
+    ))
+}
+
+private func statusColor(_ status: ReturnRequestStatus) -> Color {
+    switch status {
+    case .needsAction: .red
+    case .readyToDropOff: .orange
+    case .partiallyDroppedOff: .yellow
+    case .droppedOff: .blue
+    case .completed: .green
+    case .archived: .secondary
+    }
+}
+
+private func statusSystemImage(_ status: ReturnRequestStatus) -> String {
+    switch status {
+    case .needsAction: "exclamationmark.triangle.fill"
+    case .readyToDropOff: "barcode.viewfinder"
+    case .partiallyDroppedOff: "shippingbox.and.arrow.backward.fill"
+    case .droppedOff: "tray.and.arrow.up.fill"
+    case .completed: "checkmark.circle.fill"
+    case .archived: "archivebox.fill"
+    }
+}
+
 struct FoodReminderSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     let household: Household
     let reminders: [FoodReminder]
     let shoppingLists: [ShoppingList]
     let mealPrepItems: [MealPrepItem]
+    let returnRequests: [ReturnRequest]
 
     @State private var title = ""
     @State private var type: FoodReminderType = .shopping
     @State private var dateTime = Date().addingTimeInterval(3600)
     @State private var selectedListID: UUID?
     @State private var selectedMealPrepID: UUID?
+    @State private var selectedReturnRequestID: UUID?
 
     var body: some View {
         Form {
@@ -2519,6 +3981,14 @@ struct FoodReminderSettingsView: View {
                         }
                     }
                 }
+                if type == .returns {
+                    Picker("Return", selection: $selectedReturnRequestID) {
+                        Text("None").tag(UUID?.none)
+                        ForEach(returnRequests) { request in
+                            Text("Return").tag(UUID?.some(request.id))
+                        }
+                    }
+                }
                 Button("Schedule", systemImage: "bell.badge") {
                     Task {
                         await FoodReminderService.createReminder(
@@ -2528,6 +3998,7 @@ struct FoodReminderSettingsView: View {
                             dateTime: dateTime,
                             relatedShoppingListID: selectedListID,
                             relatedMealPrepItemID: selectedMealPrepID,
+                            relatedReturnRequestID: selectedReturnRequestID,
                             context: modelContext
                         )
                         title = ""
@@ -2563,8 +4034,13 @@ struct FoodReminderSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Food Reminders")
+        .navigationTitle("Food & Home Reminders")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: type) { _, newType in
+            if newType != .shopping { selectedListID = nil }
+            if newType != .mealPrep { selectedMealPrepID = nil }
+            if newType != .returns { selectedReturnRequestID = nil }
+        }
     }
 
     private var activeReminders: [FoodReminder] {
@@ -2577,6 +4053,7 @@ struct FoodReminderSettingsView: View {
         switch type {
         case .shopping: "Check shopping list"
         case .mealPrep: "Check meal prep"
+        case .returns: "Check return"
         case .custom: "Food & Home reminder"
         }
     }

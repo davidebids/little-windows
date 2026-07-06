@@ -138,6 +138,7 @@ enum MealPrepServingUnit: String, Codable, CaseIterable, Identifiable {
 enum FoodReminderType: String, Codable, CaseIterable, Identifiable {
     case shopping
     case mealPrep
+    case returns
     case custom
 
     var id: String { rawValue }
@@ -146,7 +147,74 @@ enum FoodReminderType: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .shopping: "Shopping"
         case .mealPrep: "Meal Prep"
+        case .returns: "Returns"
         case .custom: "Custom"
+        }
+    }
+}
+
+enum ReturnPackageCarrier: String, Codable, CaseIterable, Identifiable {
+    case wholeFoods
+    case kohls
+    case ups
+    case fedEx
+    case usps
+    case retailer
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .wholeFoods: "Whole Foods"
+        case .kohls: "Kohl's"
+        case .ups: "UPS"
+        case .fedEx: "FedEx"
+        case .usps: "USPS"
+        case .retailer: "Retailer"
+        case .other: "Other"
+        }
+    }
+}
+
+enum ReturnPackageMethod: String, Codable, CaseIterable, Identifiable {
+    case dropOff
+    case pickup
+    case mail
+    case inStore
+    case unknown
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .dropOff: "Drop-off"
+        case .pickup: "Pickup"
+        case .mail: "Mail"
+        case .inStore: "In Store"
+        case .unknown: "Unknown"
+        }
+    }
+}
+
+enum ReturnRequestStatus: String, Codable, CaseIterable, Identifiable {
+    case needsAction
+    case readyToDropOff
+    case partiallyDroppedOff
+    case droppedOff
+    case completed
+    case archived
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .needsAction: "Needs Action"
+        case .readyToDropOff: "Ready"
+        case .partiallyDroppedOff: "Partially Dropped Off"
+        case .droppedOff: "Dropped Off"
+        case .completed: "Completed"
+        case .archived: "Archived"
         }
     }
 }
@@ -613,6 +681,157 @@ final class MealPrepUsage {
 }
 
 @Model
+final class ReturnRequest {
+    var id: UUID = UUID()
+    var householdID: UUID = UUID()
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+    var completedAt: Date?
+    var isArchived: Bool = false
+    var sortOrder: Int?
+
+    init(
+        id: UUID = UUID(),
+        householdID: UUID,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        completedAt: Date? = nil,
+        isArchived: Bool = false,
+        sortOrder: Int? = nil
+    ) {
+        self.id = id
+        self.householdID = householdID
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+        self.isArchived = isArchived
+        self.sortOrder = sortOrder
+    }
+}
+
+@Model
+final class ReturnItem {
+    var id: UUID = UUID()
+    var householdID: UUID = UUID()
+    var returnRequestID: UUID = UUID()
+    var packageID: UUID?
+    var name: String = ""
+    var quantity: Double?
+    var reason: String?
+    var returnURLString: String?
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+    var sortOrder: Int?
+
+    init(
+        id: UUID = UUID(),
+        householdID: UUID,
+        returnRequestID: UUID,
+        packageID: UUID? = nil,
+        name: String,
+        quantity: Double? = nil,
+        reason: String? = nil,
+        returnURLString: String? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        sortOrder: Int? = nil
+    ) {
+        self.id = id
+        self.householdID = householdID
+        self.returnRequestID = returnRequestID
+        self.packageID = packageID
+        self.name = name
+        self.quantity = quantity
+        self.reason = reason
+        self.returnURLString = returnURLString
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sortOrder = sortOrder
+    }
+
+    var quantityText: String {
+        guard let quantity else { return "" }
+        return quantity == quantity.rounded() ? String(Int(quantity)) : String(format: "%.1f", quantity)
+    }
+}
+
+@Model
+final class ReturnPackage {
+    var id: UUID = UUID()
+    var householdID: UUID = UUID()
+    var returnRequestID: UUID = UUID()
+    var name: String = ""
+    var carrierRawValue: String = ReturnPackageCarrier.wholeFoods.rawValue
+    var methodRawValue: String = ReturnPackageMethod.dropOff.rawValue
+    var trackingNumber: String?
+    var returnByDate: Date?
+    var photoAttachmentIDsData: Data?
+    var droppedOffAt: Date?
+    var completedAt: Date?
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+    var sortOrder: Int?
+
+    init(
+        id: UUID = UUID(),
+        householdID: UUID,
+        returnRequestID: UUID,
+        name: String,
+        carrier: ReturnPackageCarrier = .wholeFoods,
+        method: ReturnPackageMethod = .dropOff,
+        trackingNumber: String? = nil,
+        returnByDate: Date? = nil,
+        photoAttachmentIDs: [UUID] = [],
+        droppedOffAt: Date? = nil,
+        completedAt: Date? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        sortOrder: Int? = nil
+    ) {
+        self.id = id
+        self.householdID = householdID
+        self.returnRequestID = returnRequestID
+        self.name = name
+        self.carrierRawValue = carrier.rawValue
+        self.methodRawValue = method.rawValue
+        self.trackingNumber = trackingNumber
+        self.returnByDate = returnByDate
+        self.photoAttachmentIDs = photoAttachmentIDs
+        self.droppedOffAt = droppedOffAt
+        self.completedAt = completedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sortOrder = sortOrder
+    }
+
+    var carrier: ReturnPackageCarrier {
+        get { ReturnPackageCarrier(rawValue: carrierRawValue) ?? .other }
+        set { carrierRawValue = newValue.rawValue }
+    }
+
+    var method: ReturnPackageMethod {
+        get { ReturnPackageMethod(rawValue: methodRawValue) ?? .unknown }
+        set { methodRawValue = newValue.rawValue }
+    }
+
+    var photoAttachmentIDs: [UUID] {
+        get {
+            guard let photoAttachmentIDsData else { return [] }
+            return (try? JSONDecoder().decode([UUID].self, from: photoAttachmentIDsData)) ?? []
+        }
+        set {
+            photoAttachmentIDsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    var displayName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? carrier.displayName
+            : name
+    }
+}
+
+@Model
 final class FoodReminder {
     var id: UUID = UUID()
     var householdID: UUID = UUID()
@@ -620,6 +839,7 @@ final class FoodReminder {
     var title: String = ""
     var relatedShoppingListID: UUID?
     var relatedMealPrepItemID: UUID?
+    var relatedReturnRequestID: UUID?
     var dateTime: Date = Date()
     var isEnabled: Bool = true
     var recurrence: String?
@@ -633,6 +853,7 @@ final class FoodReminder {
         title: String,
         relatedShoppingListID: UUID? = nil,
         relatedMealPrepItemID: UUID? = nil,
+        relatedReturnRequestID: UUID? = nil,
         dateTime: Date,
         isEnabled: Bool = true,
         recurrence: String? = nil,
@@ -645,6 +866,7 @@ final class FoodReminder {
         self.title = title
         self.relatedShoppingListID = relatedShoppingListID
         self.relatedMealPrepItemID = relatedMealPrepItemID
+        self.relatedReturnRequestID = relatedReturnRequestID
         self.dateTime = dateTime
         self.isEnabled = isEnabled
         self.recurrence = recurrence
