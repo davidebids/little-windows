@@ -111,10 +111,16 @@ struct LittleWindowNotificationCopy: Equatable {
     var body: String
 }
 
+enum FamilySyncActivityNotificationCategory: String, Equatable {
+    case general
+    case homeTodo
+}
+
 struct FamilySyncActivityNotification: Equatable {
     var title: String
     var body: String
     var deepLinkPath: String
+    var category: FamilySyncActivityNotificationCategory = .general
 }
 
 @MainActor
@@ -845,6 +851,8 @@ final class NotificationManager: NSObject, ObservableObject {
         let content = UNMutableNotificationContent()
         content.title = reminder.title
         switch reminder.type {
+        case .todos:
+            content.body = "Check your Home to-do list."
         case .shopping:
             content.body = "Open your shopping list before the next trip."
         case .mealPrep:
@@ -857,7 +865,9 @@ final class NotificationManager: NSObject, ObservableObject {
         content.sound = .default
         content.categoryIdentifier = Self.foodReminderCategoryID
         let path: String
-        if let listID = reminder.relatedShoppingListID {
+        if let todoListID = reminder.relatedTodoListID {
+            path = "food/todos/\(todoListID.uuidString)"
+        } else if let listID = reminder.relatedShoppingListID {
             path = "food/shopping/\(listID.uuidString)"
         } else if let mealPrepID = reminder.relatedMealPrepItemID {
             path = "food/meal-prep/\(mealPrepID.uuidString)"
@@ -867,6 +877,8 @@ final class NotificationManager: NSObject, ObservableObject {
             path = "food/meal-prep"
         } else if reminder.type == .shopping {
             path = "food/shopping"
+        } else if reminder.type == .todos {
+            path = "food/todos"
         } else if reminder.type == .returns {
             path = "food/returns"
         } else {
@@ -883,10 +895,7 @@ final class NotificationManager: NSObject, ObservableObject {
     func showFamilySyncActivityNotification(
         _ notification: FamilySyncActivityNotification
     ) async {
-        guard UserDefaults.standard.object(forKey: "familySyncActivityNotificationsEnabled") == nil
-                || UserDefaults.standard.bool(forKey: "familySyncActivityNotificationsEnabled") else {
-            return
-        }
+        guard Self.familySyncActivityNotificationsEnabled(for: notification.category) else { return }
         let status = await getAuthorizationStatus()
         authorizationStatus = status
         guard status == .authorized || status == .provisional || status == .ephemeral else {
@@ -907,6 +916,19 @@ final class NotificationManager: NSObject, ObservableObject {
             trigger: nil
         )
         try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    nonisolated static func familySyncActivityNotificationsEnabled(
+        for category: FamilySyncActivityNotificationCategory,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard defaults.object(forKey: "familySyncActivityNotificationsEnabled") == nil
+                || defaults.bool(forKey: "familySyncActivityNotificationsEnabled") else {
+            return false
+        }
+        guard category == .homeTodo else { return true }
+        return defaults.object(forKey: "familySyncHomeTodoNotificationsEnabled") == nil
+            || defaults.bool(forKey: "familySyncHomeTodoNotificationsEnabled")
     }
 
     func buildNotificationContent(

@@ -39,6 +39,8 @@ private struct BackupEnvelope: Codable {
     var foodStoreSections: [FoodStoreSectionDTO]?
     var shoppingLists: [ShoppingListDTO]?
     var shoppingListItems: [ShoppingListItemDTO]?
+    var homeTodoLists: [HomeTodoListDTO]?
+    var homeTodoItems: [HomeTodoItemDTO]?
     var foodItems: [FoodItemDTO]?
     var inventoryLocations: [InventoryLocationDTO]?
     var inventoryItems: [InventoryItemDTO]?
@@ -312,6 +314,33 @@ private struct ShoppingListItemDTO: Codable {
     var inventoryLinkBehaviorRawValue: String
 }
 
+private struct HomeTodoListDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var name: String
+    var notes: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var isArchived: Bool
+    var sortOrder: Int?
+}
+
+private struct HomeTodoItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var todoListID: UUID
+    var title: String
+    var notes: String?
+    var isCompleted: Bool
+    var addedBy: String?
+    var completedBy: String?
+    var completedAt: Date?
+    var lastReopenedAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int?
+}
+
 private struct FoodItemDTO: Codable {
     var id: UUID
     var householdID: UUID
@@ -428,6 +457,7 @@ private struct FoodReminderDTO: Codable {
     var householdID: UUID
     var typeRawValue: String
     var title: String
+    var relatedTodoListID: UUID?
     var relatedShoppingListID: UUID?
     var relatedMealPrepItemID: UUID?
     var relatedReturnRequestID: UUID?
@@ -742,6 +772,35 @@ enum DataExportImportService {
                 inventoryLinkBehaviorRawValue: $0.inventoryLinkBehaviorRawValue
             )
         }
+        let homeTodoLists = try context.fetch(FetchDescriptor<HomeTodoList>()).map {
+            HomeTodoListDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                name: $0.name,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                isArchived: $0.isArchived,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let homeTodoItems = try context.fetch(FetchDescriptor<HomeTodoItem>()).map {
+            HomeTodoItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                todoListID: $0.todoListID,
+                title: $0.title,
+                notes: $0.notes,
+                isCompleted: $0.isCompleted,
+                addedBy: $0.addedBy,
+                completedBy: $0.completedBy,
+                completedAt: $0.completedAt,
+                lastReopenedAt: $0.lastReopenedAt,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
         let foodItems = try context.fetch(FetchDescriptor<FoodItem>()).map {
             FoodItemDTO(
                 id: $0.id,
@@ -867,6 +926,7 @@ enum DataExportImportService {
                 householdID: $0.householdID,
                 typeRawValue: $0.typeRawValue,
                 title: $0.title,
+                relatedTodoListID: $0.relatedTodoListID,
                 relatedShoppingListID: $0.relatedShoppingListID,
                 relatedMealPrepItemID: $0.relatedMealPrepItemID,
                 relatedReturnRequestID: $0.relatedReturnRequestID,
@@ -936,7 +996,7 @@ enum DataExportImportService {
             )
         }
         let envelope = BackupEnvelope(
-            version: 12,
+            version: 13,
             exportedAt: Date(),
             profiles: profiles,
             photoAttachments: photoAttachments,
@@ -951,6 +1011,8 @@ enum DataExportImportService {
             foodStoreSections: foodStoreSections,
             shoppingLists: shoppingLists,
             shoppingListItems: shoppingListItems,
+            homeTodoLists: homeTodoLists,
+            homeTodoItems: homeTodoItems,
             foodItems: foodItems,
             inventoryLocations: inventoryLocations,
             inventoryItems: inventoryItems,
@@ -979,7 +1041,7 @@ enum DataExportImportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
-        guard (1...12).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
+        guard (1...13).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
         try deleteAll(context: context)
 
         for value in envelope.profiles {
@@ -1278,6 +1340,35 @@ enum DataExportImportService {
                 ) ?? .askWhenChecked
             ))
         }
+        for value in envelope.homeTodoLists ?? [] {
+            context.insert(HomeTodoList(
+                id: value.id,
+                householdID: value.householdID,
+                name: value.name,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                isArchived: value.isArchived,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.homeTodoItems ?? [] {
+            context.insert(HomeTodoItem(
+                id: value.id,
+                householdID: value.householdID,
+                todoListID: value.todoListID,
+                title: value.title,
+                notes: value.notes,
+                isCompleted: value.isCompleted,
+                addedBy: value.addedBy,
+                completedBy: value.completedBy,
+                completedAt: value.completedAt,
+                lastReopenedAt: value.lastReopenedAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
         for value in envelope.foodItems ?? [] {
             context.insert(FoodItem(
                 id: value.id,
@@ -1403,6 +1494,7 @@ enum DataExportImportService {
                 householdID: value.householdID,
                 type: FoodReminderType(rawValue: value.typeRawValue) ?? .custom,
                 title: value.title,
+                relatedTodoListID: value.relatedTodoListID,
                 relatedShoppingListID: value.relatedShoppingListID,
                 relatedMealPrepItemID: value.relatedMealPrepItemID,
                 relatedReturnRequestID: value.relatedReturnRequestID,
@@ -1499,6 +1591,8 @@ enum DataExportImportService {
         try deleteAll(InventoryItem.self, context: context)
         try deleteAll(InventoryLocation.self, context: context)
         try deleteAll(FoodItem.self, context: context)
+        try deleteAll(HomeTodoItem.self, context: context)
+        try deleteAll(HomeTodoList.self, context: context)
         try deleteAll(ShoppingListItem.self, context: context)
         try deleteAll(ShoppingList.self, context: context)
         try deleteAll(FoodStoreSection.self, context: context)

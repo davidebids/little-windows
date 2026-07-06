@@ -11,6 +11,8 @@ struct FoodHomeView: View {
     @Query(sort: \ShoppingListItem.sortOrder) private var shoppingItems: [ShoppingListItem]
     @Query(sort: \FoodStore.sortOrder) private var stores: [FoodStore]
     @Query(sort: \FoodStoreSection.sortOrder) private var storeSections: [FoodStoreSection]
+    @Query(sort: \HomeTodoList.sortOrder) private var todoLists: [HomeTodoList]
+    @Query(sort: \HomeTodoItem.sortOrder) private var todoItems: [HomeTodoItem]
     @Query(sort: \InventoryLocation.sortOrder) private var locations: [InventoryLocation]
     @Query(sort: \InventoryItem.updatedAt, order: .reverse) private var inventoryItems: [InventoryItem]
     @Query(sort: \MealPrepItem.updatedAt, order: .reverse) private var mealPrepItems: [MealPrepItem]
@@ -21,7 +23,7 @@ struct FoodHomeView: View {
     @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @Query(sort: \FoodReminder.dateTime) private var reminders: [FoodReminder]
 
-    @State private var selectedSection: FoodHomeSection = .shopping
+    @State private var selectedSection: FoodHomeSection = .todos
     @State private var path = NavigationPath()
     @State private var showingQuickAdd = false
     @State private var deferredFoodCommand: FoodRouteCommand?
@@ -36,6 +38,8 @@ struct FoodHomeView: View {
         + returnRequests.count
         + returnItems.count
         + returnPackages.count
+        + todoLists.count
+        + todoItems.count
         + stores.count
         + storeSections.count
         + locations.count
@@ -110,6 +114,13 @@ struct FoodHomeView: View {
             .padding(.bottom, 10)
 
             switch selectedSection {
+            case .todos:
+                HomeTodoListsView(
+                    household: household,
+                    lists: householdTodoLists,
+                    items: householdTodoItems,
+                    openList: { path.append(FoodRoute.todoList($0.id)) }
+                )
             case .shopping:
                 ShoppingListsView(
                     household: household,
@@ -154,6 +165,11 @@ struct FoodHomeView: View {
             case .insights:
                 FoodInsightsView(
                     household: household,
+                    todoLists: householdTodoLists,
+                    todoItems: householdTodoItems,
+                    returnRequests: householdReturnRequests,
+                    returnItems: householdReturnItems,
+                    returnPackages: householdReturnPackages,
                     locations: householdLocations,
                     inventoryItems: householdInventoryItems,
                     mealPrepItems: householdMealPrepItems,
@@ -169,6 +185,15 @@ struct FoodHomeView: View {
     @ViewBuilder
     private func destination(for route: FoodRoute) -> some View {
         switch route {
+        case .todoList(let id):
+            if let list = householdTodoLists.first(where: { $0.id == id }) {
+                HomeTodoListDetailView(
+                    list: list,
+                    items: householdTodoItems.filter { $0.todoListID == list.id }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
         case .shoppingList(let id):
             if let list = householdShoppingLists.first(where: { $0.id == id }) {
                 ShoppingListDetailView(
@@ -241,6 +266,7 @@ struct FoodHomeView: View {
                 FoodReminderSettingsView(
                     household: household,
                     reminders: householdReminders,
+                    todoLists: householdTodoLists,
                     shoppingLists: householdShoppingLists,
                     mealPrepItems: householdMealPrepItems,
                     returnRequests: householdReturnRequests
@@ -258,8 +284,17 @@ struct FoodHomeView: View {
         switch command {
         case .food:
             deferredFoodCommand = nil
-            selectedSection = .shopping
+            selectedSection = .todos
             path.removeLast(path.count)
+        case .todos:
+            deferredFoodCommand = nil
+            selectedSection = .todos
+            path.removeLast(path.count)
+        case .todoList(let id):
+            deferredFoodCommand = nil
+            selectedSection = .todos
+            path.removeLast(path.count)
+            path.append(FoodRoute.todoList(id))
         case .shopping:
             deferredFoodCommand = nil
             selectedSection = .shopping
@@ -316,8 +351,10 @@ struct FoodHomeView: View {
     private func shouldDefer(_ command: FoodRouteCommand) -> Bool {
         guard household != nil else { return true }
         switch command {
-        case .food, .shopping, .inventory, .mealPrep, .returns, .quickAdd:
+        case .food, .todos, .shopping, .inventory, .mealPrep, .returns, .quickAdd:
             return false
+        case .todoList(let id):
+            return !householdTodoLists.contains { $0.id == id }
         case .shoppingList(let id), .shoppingMode(let id):
             return !householdShoppingLists.contains { $0.id == id }
         case .inventoryItem(let id):
@@ -354,7 +391,9 @@ struct FoodHomeView: View {
 
     private func section(for command: FoodRouteCommand) -> FoodHomeSection {
         switch command {
-        case .food, .shopping, .shoppingList, .shoppingMode, .quickAdd:
+        case .food, .todos, .todoList:
+            return .todos
+        case .shopping, .shoppingList, .shoppingMode, .quickAdd:
             return .shopping
         case .inventory, .inventoryItem:
             return .inventory
@@ -372,6 +411,18 @@ struct FoodHomeView: View {
         return shoppingLists
             .filter { $0.householdID == household.id && !$0.isArchived }
             .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
+    }
+
+    private var householdTodoLists: [HomeTodoList] {
+        guard let household else { return [] }
+        return todoLists
+            .filter { $0.householdID == household.id && !$0.isArchived }
+            .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
+    }
+
+    private var householdTodoItems: [HomeTodoItem] {
+        guard let household else { return [] }
+        return todoItems.filter { $0.householdID == household.id }
     }
 
     private var householdShoppingItems: [ShoppingListItem] {
@@ -417,25 +468,33 @@ struct FoodHomeView: View {
 
     private var householdReturnRequests: [ReturnRequest] {
         guard let household else { return [] }
-        return returnRequests
-            .filter { $0.householdID == household.id && !$0.isArchived }
+        let householdPackages = returnPackages.filter { $0.householdID == household.id }
+        let householdItems = returnItems.filter { $0.householdID == household.id }
+        let packagesByReturnID = Dictionary(grouping: householdPackages, by: \.returnRequestID)
+        let itemsByReturnID = Dictionary(grouping: householdItems, by: \.returnRequestID)
+        let activeRequests = returnRequests.filter { $0.householdID == household.id && !$0.isArchived }
+        let statusesByReturnID = Dictionary(uniqueKeysWithValues: activeRequests.map { request in
+            (
+                request.id,
+                ReturnTrackingService.status(for: request, packages: packagesByReturnID[request.id] ?? [])
+            )
+        })
+        return activeRequests
             .sorted { lhs, rhs in
-                let lhsStatus = ReturnTrackingService.status(for: lhs, packages: householdReturnPackages)
-                let rhsStatus = ReturnTrackingService.status(for: rhs, packages: householdReturnPackages)
-                let lhsPackages = householdReturnPackages.filter { $0.returnRequestID == lhs.id }
-                let rhsPackages = householdReturnPackages.filter { $0.returnRequestID == rhs.id }
+                let lhsPackages = packagesByReturnID[lhs.id] ?? []
+                let rhsPackages = packagesByReturnID[rhs.id] ?? []
                 return (
-                    statusSortOrder(lhsStatus),
+                    statusSortOrder(statusesByReturnID[lhs.id] ?? .needsAction),
                     earliestReturnByDate(in: lhsPackages) ?? .distantFuture,
                     returnDisplayTitle(
-                        items: householdReturnItems.filter { $0.returnRequestID == lhs.id },
+                        items: itemsByReturnID[lhs.id] ?? [],
                         packages: lhsPackages
                     )
                 ) < (
-                    statusSortOrder(rhsStatus),
+                    statusSortOrder(statusesByReturnID[rhs.id] ?? .needsAction),
                     earliestReturnByDate(in: rhsPackages) ?? .distantFuture,
                     returnDisplayTitle(
-                        items: householdReturnItems.filter { $0.returnRequestID == rhs.id },
+                        items: itemsByReturnID[rhs.id] ?? [],
                         packages: rhsPackages
                     )
                 )
@@ -509,6 +568,556 @@ private struct FoodHomeSectionButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct HomeTodoListsView: View {
+    @Environment(\.modelContext) private var modelContext
+    let household: Household
+    let lists: [HomeTodoList]
+    let items: [HomeTodoItem]
+    let openList: (HomeTodoList) -> Void
+
+    @State private var showingNewList = false
+    @State private var editingList: HomeTodoList?
+    @State private var showingRemoveListConfirmation = false
+    @State private var listPendingRemoval: HomeTodoList?
+
+    var body: some View {
+        let itemsByListID = Dictionary(grouping: items, by: \.todoListID)
+
+        List {
+            if lists.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "No to-do lists",
+                        systemImage: "checklist",
+                        description: Text("Create named lists for home tasks, errands, reminders, and shared follow-ups.")
+                    )
+                }
+            } else {
+                Section {
+                    ForEach(lists) { list in
+                        Button {
+                            openList(list)
+                        } label: {
+                            HomeTodoListRow(
+                                list: list,
+                                items: itemsByListID[list.id] ?? []
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .leading) {
+                            Button("Edit", systemImage: "pencil") {
+                                editingList = list
+                            }
+                            .tint(.blue)
+                        }
+                        .swipeActions {
+                            Button("Remove", role: .destructive) {
+                                listPendingRemoval = list
+                                showingRemoveListConfirmation = true
+                            }
+                        }
+                    }
+                    .onMove { source, destination in
+                        HomeTodoService.reorderLists(
+                            lists,
+                            from: source,
+                            to: destination,
+                            context: modelContext
+                        )
+                    }
+                } header: {
+                    AppSectionHeader(title: "To-Do Lists", subtitle: "\(lists.count)")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if lists.count > 1 {
+                    EditButton()
+                }
+
+                Button {
+                    showingNewList = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Add to-do list")
+            }
+        }
+        .sheet(isPresented: $showingNewList) {
+            NavigationStack {
+                HomeTodoListEditorView(
+                    household: household,
+                    list: nil,
+                    existingLists: lists
+                )
+            }
+        }
+        .sheet(item: $editingList) { list in
+            NavigationStack {
+                HomeTodoListEditorView(
+                    household: household,
+                    list: list,
+                    existingLists: lists
+                )
+            }
+        }
+        .appActionSheet(
+            isPresented: $showingRemoveListConfirmation,
+            title: "Remove to-do list?",
+            message: "This removes the list from active Home tracking. Items in the list will no longer appear.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: removeListOptions
+        )
+    }
+
+    private var removeListOptions: [AppActionSheetOption] {
+        [
+            AppActionSheetOption(
+                title: "Remove List",
+                subtitle: listPendingRemoval?.name,
+                systemImage: "archivebox.fill",
+                tint: .red,
+                role: .destructive
+            ) {
+                if let listPendingRemoval {
+                    _ = HomeTodoService.archiveList(listPendingRemoval, context: modelContext)
+                }
+                listPendingRemoval = nil
+            }
+        ]
+    }
+}
+
+private struct HomeTodoListRow: View {
+    let list: HomeTodoList
+    let items: [HomeTodoItem]
+
+    private var activeCount: Int {
+        items.filter { !$0.isCompleted }.count
+    }
+
+    private var completedCount: Int {
+        items.filter(\.isCompleted).count
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: activeCount == 0 && completedCount > 0 ? "checkmark.circle.fill" : "checklist")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background((activeCount == 0 && completedCount > 0 ? Color.green : AppTheme.accent).gradient, in: RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(list.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                HStack(spacing: 8) {
+                    Text("\(activeCount) to do")
+                    Text("\(completedCount) done")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                if let notes = list.notes {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct HomeTodoListEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let household: Household
+    let list: HomeTodoList?
+    let existingLists: [HomeTodoList]
+
+    @State private var name: String
+    @State private var notes: String
+
+    init(household: Household, list: HomeTodoList?, existingLists: [HomeTodoList]) {
+        self.household = household
+        self.list = list
+        self.existingLists = existingLists
+        _name = State(initialValue: list?.name ?? "")
+        _notes = State(initialValue: list?.notes ?? "")
+    }
+
+    var body: some View {
+        Form {
+            Section("List") {
+                TextField("Name", text: $name)
+                TextField("Notes", text: $notes, axis: .vertical)
+                    .lineLimit(2...4)
+            }
+        }
+        .navigationTitle(list == nil ? "New To-Do List" : "Edit To-Do List")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private func save() {
+        if let list {
+            HomeTodoService.updateList(list, name: name, notes: notes, context: modelContext)
+        } else {
+            _ = HomeTodoService.createList(
+                name: name,
+                householdID: household.id,
+                existingLists: existingLists,
+                context: modelContext
+            )
+        }
+        dismiss()
+    }
+}
+
+private struct HomeTodoListDetailView: View {
+    @Environment(\.modelContext) private var modelContext
+    @AppStorage(CaregiverIdentityService.currentCaregiverNameKey) private var currentCaregiverName = ""
+    @AppStorage(CaregiverIdentityService.primaryCaregiverNameKey) private var primaryCaregiverName = "Caregiver 1"
+
+    @Bindable var list: HomeTodoList
+    let items: [HomeTodoItem]
+
+    @State private var showingAddItem = false
+    @State private var editingItem: HomeTodoItem?
+    @State private var showingCompleted = false
+    @State private var showingDeleteItemConfirmation = false
+    @State private var itemPendingDelete: HomeTodoItem?
+
+    private var actorName: String {
+        CaregiverIdentityService.currentCaregiverName(
+            currentName: currentCaregiverName,
+            primaryName: primaryCaregiverName
+        )
+    }
+
+    private var activeItems: [HomeTodoItem] {
+        items
+            .filter { !$0.isCompleted }
+            .sorted { ($0.sortOrder ?? 0, $0.createdAt) < ($1.sortOrder ?? 0, $1.createdAt) }
+    }
+
+    private var completedItems: [HomeTodoItem] {
+        items
+            .filter(\.isCompleted)
+            .sorted { ($0.sortOrder ?? 0, $0.completedAt ?? $0.updatedAt) < ($1.sortOrder ?? 0, $1.completedAt ?? $1.updatedAt) }
+    }
+
+    private var canReorderVisibleItems: Bool {
+        activeItems.count > 1 || (showingCompleted && completedItems.count > 1)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if activeItems.isEmpty {
+                    ContentUnavailableView(
+                        "Nothing active",
+                        systemImage: "checkmark.circle",
+                        description: Text("Add an item or reopen one from Completed.")
+                    )
+                } else {
+                    ForEach(activeItems) { item in
+                        HomeTodoItemRow(
+                            item: item,
+                            isCompleted: false,
+                            toggle: { setCompleted(item, true) },
+                            edit: { editingItem = item },
+                            delete: { confirmDelete(item) }
+                        )
+                    }
+                    .onMove { source, destination in
+                        reorder(activeItems, from: source, to: destination)
+                    }
+                }
+            } header: {
+                AppSectionHeader(title: "To Do", subtitle: "\(activeItems.count)")
+            }
+
+            Section {
+                if showingCompleted {
+                    if completedItems.isEmpty {
+                        ContentUnavailableView(
+                            "No completed items",
+                            systemImage: "circle",
+                            description: Text("Checked-off items will appear here.")
+                        )
+                    } else {
+                        ForEach(completedItems) { item in
+                            HomeTodoItemRow(
+                                item: item,
+                                isCompleted: true,
+                                toggle: { setCompleted(item, false) },
+                                edit: { editingItem = item },
+                                delete: { confirmDelete(item) }
+                            )
+                        }
+                        .onMove { source, destination in
+                            reorder(completedItems, from: source, to: destination)
+                        }
+                    }
+                }
+            } header: {
+                Button {
+                    showingCompleted.toggle()
+                } label: {
+                    HStack {
+                        AppSectionHeader(title: "Completed", subtitle: "\(completedItems.count)")
+                        Spacer()
+                        Image(systemName: showingCompleted ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle(list.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if canReorderVisibleItems {
+                    EditButton()
+                }
+
+                Button {
+                    showingAddItem = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Add to-do item")
+            }
+        }
+        .sheet(isPresented: $showingAddItem) {
+            NavigationStack {
+                HomeTodoItemEditorView(
+                    list: list,
+                    item: nil,
+                    existingItems: items,
+                    defaultActorName: actorName
+                )
+            }
+        }
+        .sheet(item: $editingItem) { item in
+            NavigationStack {
+                HomeTodoItemEditorView(
+                    list: list,
+                    item: item,
+                    existingItems: items,
+                    defaultActorName: actorName
+                )
+            }
+        }
+        .appActionSheet(
+            isPresented: $showingDeleteItemConfirmation,
+            title: "Delete to-do item?",
+            message: "This permanently removes the item from this list.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: deleteItemOptions
+        )
+    }
+
+    private func setCompleted(_ item: HomeTodoItem, _ isCompleted: Bool) {
+        HomeTodoService.setCompleted(
+            item,
+            isCompleted: isCompleted,
+            completedBy: actorName,
+            siblingItems: items,
+            context: modelContext
+        )
+    }
+
+    private func reorder(_ visibleItems: [HomeTodoItem], from source: IndexSet, to destination: Int) {
+        HomeTodoService.reorderItems(
+            visibleItems,
+            from: source,
+            to: destination,
+            context: modelContext
+        )
+    }
+
+    private func confirmDelete(_ item: HomeTodoItem) {
+        itemPendingDelete = item
+        showingDeleteItemConfirmation = true
+    }
+
+    private var deleteItemOptions: [AppActionSheetOption] {
+        [
+            AppActionSheetOption(
+                title: "Delete Item",
+                subtitle: itemPendingDelete?.title,
+                systemImage: "trash.fill",
+                tint: .red,
+                role: .destructive
+            ) {
+                if let itemPendingDelete {
+                    HomeTodoService.deleteItem(itemPendingDelete, context: modelContext)
+                }
+                itemPendingDelete = nil
+            }
+        ]
+    }
+}
+
+private struct HomeTodoItemRow: View {
+    let item: HomeTodoItem
+    let isCompleted: Bool
+    let toggle: () -> Void
+    let edit: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: toggle) {
+                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isCompleted ? .green : .secondary)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(isCompleted ? "Mark active" : "Mark complete")
+
+            Button(action: edit) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isCompleted ? .secondary : .primary)
+                        .strikethrough(isCompleted)
+                    if let notes = item.notes {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Text(metadata)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 3)
+        .swipeActions {
+            Button("Delete", role: .destructive, action: delete)
+        }
+    }
+
+    private var metadata: String {
+        if isCompleted {
+            let actor = item.completedBy?.nilIfBlank ?? "Someone"
+            if let completedAt = item.completedAt {
+                return "Completed by \(actor) \(DateFormatting.day.string(from: completedAt))"
+            }
+            return "Completed by \(actor)"
+        }
+        let actor = item.addedBy?.nilIfBlank ?? "Someone"
+        return "Added by \(actor) \(DateFormatting.day.string(from: item.createdAt))"
+    }
+}
+
+private struct HomeTodoItemEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let list: HomeTodoList
+    let item: HomeTodoItem?
+    let existingItems: [HomeTodoItem]
+    let defaultActorName: String
+
+    @State private var title: String
+    @State private var notes: String
+    @State private var addedBy: String
+
+    init(
+        list: HomeTodoList,
+        item: HomeTodoItem?,
+        existingItems: [HomeTodoItem],
+        defaultActorName: String
+    ) {
+        self.list = list
+        self.item = item
+        self.existingItems = existingItems
+        self.defaultActorName = defaultActorName
+        _title = State(initialValue: item?.title ?? "")
+        _notes = State(initialValue: item?.notes ?? "")
+        _addedBy = State(initialValue: item?.addedBy ?? defaultActorName)
+    }
+
+    var body: some View {
+        Form {
+            Section("Item") {
+                TextField("Title", text: $title)
+                TextField("Notes", text: $notes, axis: .vertical)
+                    .lineLimit(2...5)
+            }
+            Section("Added By") {
+                TextField("Name", text: $addedBy)
+            }
+        }
+        .navigationTitle(item == nil ? "Add To-Do" : "Edit To-Do")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private func save() {
+        if let item {
+            HomeTodoService.updateItem(
+                item,
+                title: title,
+                notes: notes,
+                addedBy: addedBy,
+                context: modelContext
+            )
+        } else {
+            _ = HomeTodoService.addItem(
+                title: title,
+                notes: notes,
+                addedBy: addedBy,
+                to: list,
+                existingItems: existingItems,
+                context: modelContext
+            )
+        }
+        dismiss()
     }
 }
 
@@ -2539,6 +3148,11 @@ private struct StoreSectionEditorView: View {
 
 private struct FoodInsightsView: View {
     let household: Household
+    let todoLists: [HomeTodoList]
+    let todoItems: [HomeTodoItem]
+    let returnRequests: [ReturnRequest]
+    let returnItems: [ReturnItem]
+    let returnPackages: [ReturnPackage]
     let locations: [InventoryLocation]
     let inventoryItems: [InventoryItem]
     let mealPrepItems: [MealPrepItem]
@@ -2553,6 +3167,35 @@ private struct FoodInsightsView: View {
             }
         }
         let activeMealPrepItems = mealPrepItems.filter { !$0.isArchived }
+        let todoItemsByListID = Dictionary(grouping: todoItems, by: \.todoListID)
+        let returnItemsByRequestID = Dictionary(grouping: returnItems, by: \.returnRequestID)
+        let returnPackagesByRequestID = Dictionary(grouping: returnPackages, by: \.returnRequestID)
+        let returnStatusesByRequestID = Dictionary(uniqueKeysWithValues: returnRequests.map { request in
+            (
+                request.id,
+                ReturnTrackingService.status(for: request, packages: returnPackagesByRequestID[request.id] ?? [])
+            )
+        })
+        let activeReturnRequests = returnRequests.filter {
+            returnStatusesByRequestID[$0.id] != .completed
+        }
+        let visibleTodoLists = Array(todoLists.prefix(12))
+        let hiddenTodoListCount = max(0, todoLists.count - visibleTodoLists.count)
+        let visibleReturnRequests = Array(activeReturnRequests.prefix(12))
+        let hiddenReturnCount = max(0, activeReturnRequests.count - visibleReturnRequests.count)
+        let metrics = FoodInsightsService.metrics(
+            householdID: household.id,
+            locations: locations,
+            inventoryItems: inventoryItems,
+            mealPrepItems: mealPrepItems,
+            shoppingLists: shoppingLists,
+            shoppingItems: shoppingItems,
+            todoLists: todoLists,
+            todoItems: todoItems,
+            returnRequests: returnRequests,
+            returnPackages: returnPackages,
+            returnStatusesByRequestID: returnStatusesByRequestID
+        )
 
         List {
             Section("Overview") {
@@ -2575,31 +3218,91 @@ private struct FoodInsightsView: View {
                     }
                 }
             }
-            Section("Inventory by Location") {
-                ForEach(locations) { location in
-                    LabeledContent(location.name) {
-                        Text("\(availableInventoryCountByLocationID[location.id, default: 0])")
+            Section("To-Do Lists") {
+                if todoLists.isEmpty {
+                    Text("No lists yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(visibleTodoLists) { list in
+                        let listItems = todoItemsByListID[list.id] ?? []
+                        let openCount = listItems.filter { !$0.isCompleted }.count
+                        let completedCount = listItems.filter(\.isCompleted).count
+                        LabeledContent(list.name) {
+                            Text(todoListSummary(openCount: openCount, completedCount: completedCount))
+                        }
+                    }
+                    if hiddenTodoListCount > 0 {
+                        Text(itemCountText(hiddenTodoListCount, singular: "more list", plural: "more lists"))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Section("Returns") {
+                if returnRequests.isEmpty {
+                    Text("No returns yet")
+                        .foregroundStyle(.secondary)
+                } else if activeReturnRequests.isEmpty {
+                    Text("No active returns")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(visibleReturnRequests) { request in
+                        let items = returnItemsByRequestID[request.id] ?? []
+                        let packages = returnPackagesByRequestID[request.id] ?? []
+                        LabeledContent(returnInsightsTitle(for: request, items: items, packages: packages)) {
+                            Text((returnStatusesByRequestID[request.id] ?? .needsAction).displayName)
+                        }
+                    }
+                    if hiddenReturnCount > 0 {
+                        Text(itemCountText(hiddenReturnCount, singular: "more active return", plural: "more active returns"))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Section("Kitchen Inventory by Location") {
+                if locations.isEmpty {
+                    Text("No inventory locations yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(locations) { location in
+                        LabeledContent(location.name) {
+                            Text("\(availableInventoryCountByLocationID[location.id, default: 0])")
+                        }
                     }
                 }
             }
             Section("Meal Prep Servings") {
-                ForEach(activeMealPrepItems) { item in
-                    LabeledContent(item.name) {
-                        Text(item.servingsText)
+                if activeMealPrepItems.isEmpty {
+                    Text("No active meal prep items")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(activeMealPrepItems) { item in
+                        LabeledContent(item.name) {
+                            Text(item.servingsText)
+                        }
                     }
                 }
             }
-            Section("Shopping Trips by Store") {
-                ForEach(shoppingLists) { list in
-                    LabeledContent(list.name) {
-                        Text(list.lastUsedAt == nil ? "No trips" : "Used")
+            Section("Shopping List Usage") {
+                if shoppingLists.isEmpty {
+                    Text("No shopping lists yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(shoppingLists) { list in
+                        LabeledContent(list.name) {
+                            Text(list.lastUsedAt == nil ? "No trips" : "Used")
+                        }
                     }
                 }
             }
             Section("Meal Prep Usage") {
-                ForEach(mealPrepUsages.prefix(12)) { usage in
-                    LabeledContent(DateFormatting.day.string(from: usage.dateTime)) {
-                        Text("\(formatted(usage.servingsUsed)) servings")
+                if mealPrepUsages.isEmpty {
+                    Text("No usage yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(mealPrepUsages.prefix(12)) { usage in
+                        LabeledContent(DateFormatting.day.string(from: usage.dateTime)) {
+                            Text("\(formatted(usage.servingsUsed)) servings")
+                        }
                     }
                 }
             }
@@ -2609,15 +3312,22 @@ private struct FoodInsightsView: View {
         .background(AppTheme.background)
     }
 
-    private var metrics: [FoodInsightMetric] {
-        FoodInsightsService.metrics(
-            householdID: household.id,
-            locations: locations,
-            inventoryItems: inventoryItems,
-            mealPrepItems: mealPrepItems,
-            shoppingLists: shoppingLists,
-            shoppingItems: shoppingItems
-        )
+    private func todoListSummary(openCount: Int, completedCount: Int) -> String {
+        "\(itemCountText(openCount, singular: "open item", plural: "open items")), \(itemCountText(completedCount, singular: "done", plural: "done"))"
+    }
+
+    private func itemCountText(_ count: Int, singular: String, plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
+    }
+
+    private func returnInsightsTitle(for request: ReturnRequest, items: [ReturnItem], packages: [ReturnPackage]) -> String {
+        if let item = items.first {
+            return item.name
+        }
+        if let package = packages.first {
+            return package.displayName
+        }
+        return DateFormatting.day.string(from: request.createdAt)
     }
 }
 
@@ -2636,11 +3346,17 @@ private struct ReturnsHomeView: View {
     var body: some View {
         let itemsByReturnID = Dictionary(grouping: items, by: \.returnRequestID)
         let packagesByReturnID = Dictionary(grouping: packages, by: \.returnRequestID)
+        let statusByReturnID = Dictionary(uniqueKeysWithValues: requests.map { request in
+            (
+                request.id,
+                ReturnTrackingService.status(for: request, packages: packagesByReturnID[request.id] ?? [])
+            )
+        })
         let activeRequests = requests.filter {
-            ReturnTrackingService.status(for: $0, packages: packagesByReturnID[$0.id] ?? []) != .completed
+            statusByReturnID[$0.id] != .completed
         }
         let completedRequests = requests.filter {
-            ReturnTrackingService.status(for: $0, packages: packagesByReturnID[$0.id] ?? []) == .completed
+            statusByReturnID[$0.id] == .completed
         }
         let activeGroups = groupedRequests(
             activeRequests,
@@ -2665,7 +3381,7 @@ private struct ReturnsHomeView: View {
                                 openReturn(request)
                             } label: {
                                 ReturnSummaryRow(
-                                    request: request,
+                                    status: statusByReturnID[request.id] ?? .needsAction,
                                     items: itemsByReturnID[request.id] ?? [],
                                     packages: packagesByReturnID[request.id] ?? []
                                 )
@@ -2689,7 +3405,7 @@ private struct ReturnsHomeView: View {
                                 openReturn(request)
                             } label: {
                                 ReturnSummaryRow(
-                                    request: request,
+                                    status: statusByReturnID[request.id] ?? .completed,
                                     items: itemsByReturnID[request.id] ?? [],
                                     packages: packagesByReturnID[request.id] ?? []
                                 )
@@ -2895,13 +3611,9 @@ private enum ReturnDropOffGroupKey: Hashable {
 }
 
 private struct ReturnSummaryRow: View {
-    let request: ReturnRequest
+    let status: ReturnRequestStatus
     let items: [ReturnItem]
     let packages: [ReturnPackage]
-
-    private var status: ReturnRequestStatus {
-        ReturnTrackingService.status(for: request, packages: packages)
-    }
 
     private var title: String {
         if let firstItem = items.sorted(by: { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }).first {
@@ -3944,13 +4656,15 @@ struct FoodReminderSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     let household: Household
     let reminders: [FoodReminder]
+    let todoLists: [HomeTodoList]
     let shoppingLists: [ShoppingList]
     let mealPrepItems: [MealPrepItem]
     let returnRequests: [ReturnRequest]
 
     @State private var title = ""
-    @State private var type: FoodReminderType = .shopping
+    @State private var type: FoodReminderType = .todos
     @State private var dateTime = Date().addingTimeInterval(3600)
+    @State private var selectedTodoListID: UUID?
     @State private var selectedListID: UUID?
     @State private var selectedMealPrepID: UUID?
     @State private var selectedReturnRequestID: UUID?
@@ -3965,6 +4679,14 @@ struct FoodReminderSettingsView: View {
                 }
                 TextField("Title", text: $title)
                 DatePicker("Time", selection: $dateTime)
+                if type == .todos {
+                    Picker("To-do list", selection: $selectedTodoListID) {
+                        Text("None").tag(UUID?.none)
+                        ForEach(todoLists) { list in
+                            Text(list.name).tag(UUID?.some(list.id))
+                        }
+                    }
+                }
                 if type == .shopping {
                     Picker("List", selection: $selectedListID) {
                         Text("None").tag(UUID?.none)
@@ -3996,6 +4718,7 @@ struct FoodReminderSettingsView: View {
                             type: type,
                             title: title.isEmpty ? defaultTitle : title,
                             dateTime: dateTime,
+                            relatedTodoListID: selectedTodoListID,
                             relatedShoppingListID: selectedListID,
                             relatedMealPrepItemID: selectedMealPrepID,
                             relatedReturnRequestID: selectedReturnRequestID,
@@ -4037,6 +4760,7 @@ struct FoodReminderSettingsView: View {
         .navigationTitle("Food & Home Reminders")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: type) { _, newType in
+            if newType != .todos { selectedTodoListID = nil }
             if newType != .shopping { selectedListID = nil }
             if newType != .mealPrep { selectedMealPrepID = nil }
             if newType != .returns { selectedReturnRequestID = nil }
@@ -4051,6 +4775,7 @@ struct FoodReminderSettingsView: View {
 
     private var defaultTitle: String {
         switch type {
+        case .todos: "Check to-do list"
         case .shopping: "Check shopping list"
         case .mealPrep: "Check meal prep"
         case .returns: "Check return"

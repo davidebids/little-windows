@@ -111,6 +111,15 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["food"] {
             selectedTab = .food
             pendingFoodCommand = .food
+        } else if components == ["food", "todos"] {
+            selectedTab = .food
+            pendingFoodCommand = .todos
+        } else if components.count == 3,
+                  components[0] == "food",
+                  components[1] == "todos",
+                  let uuid = UUID(uuidString: components[2]) {
+            selectedTab = .food
+            pendingFoodCommand = .todoList(uuid)
         } else if components == ["food", "shopping"] {
             selectedTab = .food
             pendingFoodCommand = .shopping

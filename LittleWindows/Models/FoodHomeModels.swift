@@ -136,6 +136,7 @@ enum MealPrepServingUnit: String, Codable, CaseIterable, Identifiable {
 }
 
 enum FoodReminderType: String, Codable, CaseIterable, Identifiable {
+    case todos
     case shopping
     case mealPrep
     case returns
@@ -145,6 +146,7 @@ enum FoodReminderType: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .todos: "To-Do"
         case .shopping: "Shopping"
         case .mealPrep: "Meal Prep"
         case .returns: "Returns"
@@ -441,6 +443,85 @@ final class ShoppingListItem {
             return "\(number) \(unit)"
         }
         return number
+    }
+}
+
+@Model
+final class HomeTodoList {
+    var id: UUID = UUID()
+    var householdID: UUID = UUID()
+    var name: String = ""
+    var notes: String?
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+    var isArchived: Bool = false
+    var sortOrder: Int?
+
+    init(
+        id: UUID = UUID(),
+        householdID: UUID,
+        name: String,
+        notes: String? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        isArchived: Bool = false,
+        sortOrder: Int? = nil
+    ) {
+        self.id = id
+        self.householdID = householdID
+        self.name = name
+        self.notes = notes
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.isArchived = isArchived
+        self.sortOrder = sortOrder
+    }
+}
+
+@Model
+final class HomeTodoItem {
+    var id: UUID = UUID()
+    var householdID: UUID = UUID()
+    var todoListID: UUID = UUID()
+    var title: String = ""
+    var notes: String?
+    var isCompleted: Bool = false
+    var addedBy: String?
+    var completedBy: String?
+    var completedAt: Date?
+    var lastReopenedAt: Date?
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+    var sortOrder: Int?
+
+    init(
+        id: UUID = UUID(),
+        householdID: UUID,
+        todoListID: UUID,
+        title: String,
+        notes: String? = nil,
+        isCompleted: Bool = false,
+        addedBy: String? = nil,
+        completedBy: String? = nil,
+        completedAt: Date? = nil,
+        lastReopenedAt: Date? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        sortOrder: Int? = nil
+    ) {
+        self.id = id
+        self.householdID = householdID
+        self.todoListID = todoListID
+        self.title = title
+        self.notes = notes
+        self.isCompleted = isCompleted
+        self.addedBy = addedBy
+        self.completedBy = completedBy
+        self.completedAt = completedAt
+        self.lastReopenedAt = lastReopenedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sortOrder = sortOrder
     }
 }
 
@@ -837,6 +918,7 @@ final class FoodReminder {
     var householdID: UUID = UUID()
     var typeRawValue: String = FoodReminderType.custom.rawValue
     var title: String = ""
+    var relatedTodoListID: UUID?
     var relatedShoppingListID: UUID?
     var relatedMealPrepItemID: UUID?
     var relatedReturnRequestID: UUID?
@@ -851,6 +933,7 @@ final class FoodReminder {
         householdID: UUID,
         type: FoodReminderType = .custom,
         title: String,
+        relatedTodoListID: UUID? = nil,
         relatedShoppingListID: UUID? = nil,
         relatedMealPrepItemID: UUID? = nil,
         relatedReturnRequestID: UUID? = nil,
@@ -864,6 +947,7 @@ final class FoodReminder {
         self.householdID = householdID
         self.typeRawValue = type.rawValue
         self.title = title
+        self.relatedTodoListID = relatedTodoListID
         self.relatedShoppingListID = relatedShoppingListID
         self.relatedMealPrepItemID = relatedMealPrepItemID
         self.relatedReturnRequestID = relatedReturnRequestID

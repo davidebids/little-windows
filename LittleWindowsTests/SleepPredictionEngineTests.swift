@@ -162,6 +162,161 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(notification.deepLinkPath, "food/shopping/\(listID.uuidString)")
     }
 
+    func testFamilySyncActivityDiffSummarizesHomeTodoCompletion() throws {
+        let listID = UUID()
+        let itemID = UUID()
+        let local = familySyncDatasetJSON(
+            homeTodoLists: """
+            [{
+              "id":"\(listID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "name":"House Tasks",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z",
+              "isArchived":false
+            }]
+            """,
+            homeTodoItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "todoListID":"\(listID.uuidString)",
+              "title":"Replace filter",
+              "isCompleted":false,
+              "addedBy":"Caregiver A",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z"
+            }]
+            """
+        )
+        let remote = familySyncDatasetJSON(
+            homeTodoLists: """
+            [{
+              "id":"\(listID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "name":"House Tasks",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z",
+              "isArchived":false
+            }]
+            """,
+            homeTodoItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "householdID":"\(UUID().uuidString)",
+              "todoListID":"\(listID.uuidString)",
+              "title":"Replace filter",
+              "isCompleted":true,
+              "addedBy":"Caregiver A",
+              "completedBy":"Caregiver B",
+              "completedAt":"2026-01-01T00:05:00Z",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:05:00Z"
+            }]
+            """
+        )
+
+        let notification = try XCTUnwrap(FamilySyncActivityDiff.notification(
+            localData: local,
+            remoteData: remote
+        ))
+
+        XCTAssertEqual(notification.title, "Home to-do updated")
+        XCTAssertEqual(notification.body, "Caregiver B updated House Tasks: completed Replace filter.")
+        XCTAssertEqual(notification.deepLinkPath, "food/todos/\(listID.uuidString)")
+        XCTAssertEqual(notification.category, .homeTodo)
+    }
+
+    func testFamilySyncHomeTodoNotificationToggleCanSuppressOnlyTodoAlerts() throws {
+        let suiteName = "FamilySyncHomeTodoNotificationToggle-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .homeTodo,
+            defaults: defaults
+        ))
+        XCTAssertTrue(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .general,
+            defaults: defaults
+        ))
+
+        defaults.set(false, forKey: "familySyncHomeTodoNotificationsEnabled")
+        XCTAssertFalse(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .homeTodo,
+            defaults: defaults
+        ))
+        XCTAssertTrue(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .general,
+            defaults: defaults
+        ))
+
+        defaults.set(false, forKey: "familySyncActivityNotificationsEnabled")
+        XCTAssertFalse(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .general,
+            defaults: defaults
+        ))
+    }
+
+    func testFamilySyncHomeTodoReorderDoesNotNotifyAsContentUpdate() throws {
+        let listID = UUID()
+        let itemID = UUID()
+        let local = familySyncDatasetJSON(
+            homeTodoLists: """
+            [{
+              "id":"\(listID.uuidString)",
+              "name":"House Tasks",
+              "notes":"Weekend",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z",
+              "isArchived":false,
+              "sortOrder":0
+            }]
+            """,
+            homeTodoItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "todoListID":"\(listID.uuidString)",
+              "title":"Replace filter",
+              "notes":"Hallway",
+              "isCompleted":false,
+              "addedBy":"Caregiver A",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:00:00Z",
+              "sortOrder":0
+            }]
+            """
+        )
+        let remote = familySyncDatasetJSON(
+            homeTodoLists: """
+            [{
+              "id":"\(listID.uuidString)",
+              "name":"House Tasks",
+              "notes":"Weekend",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:05:00Z",
+              "isArchived":false,
+              "sortOrder":1
+            }]
+            """,
+            homeTodoItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "todoListID":"\(listID.uuidString)",
+              "title":"Replace filter",
+              "notes":"Hallway",
+              "isCompleted":false,
+              "addedBy":"Caregiver A",
+              "createdAt":"2026-01-01T00:00:00Z",
+              "updatedAt":"2026-01-01T00:05:00Z",
+              "sortOrder":1
+            }]
+            """
+        )
+
+        XCTAssertNil(FamilySyncActivityDiff.notification(localData: local, remoteData: remote))
+    }
+
     func testFamilySyncActivityDiffSummarizesSharedCareEvents() throws {
         let profileID = UUID()
         let eventID = UUID()
@@ -301,6 +456,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         appointments: String = "[]",
         shoppingLists: String = "[]",
         shoppingListItems: String = "[]",
+        homeTodoLists: String = "[]",
+        homeTodoItems: String = "[]",
         inventoryItems: String = "[]",
         mealPrepItems: String = "[]",
         foodReminders: String = "[]"
@@ -316,6 +473,8 @@ final class SleepPredictionEngineTests: XCTestCase {
           "appointments": \(appointments),
           "shoppingLists": \(shoppingLists),
           "shoppingListItems": \(shoppingListItems),
+          "homeTodoLists": \(homeTodoLists),
+          "homeTodoItems": \(homeTodoItems),
           "inventoryItems": \(inventoryItems),
           "mealPrepItems": \(mealPrepItems),
           "foodReminders": \(foodReminders)
@@ -4896,12 +5055,23 @@ final class SleepPredictionEngineTests: XCTestCase {
             servingsUsed: 1,
             notes: "Dinner"
         )
+        let todoList = HomeTodoList(
+            householdID: household.id,
+            name: "House Tasks"
+        )
         let reminder = FoodReminder(
             householdID: household.id,
             type: .shopping,
             title: "Check shopping list",
             relatedShoppingListID: list.id,
             dateTime: Date(timeIntervalSince1970: 1_780_200_000)
+        )
+        let todoReminder = FoodReminder(
+            householdID: household.id,
+            type: .todos,
+            title: "Check house tasks",
+            relatedTodoListID: todoList.id,
+            dateTime: Date(timeIntervalSince1970: 1_780_210_000)
         )
 
         context.insert(household)
@@ -4913,7 +5083,9 @@ final class SleepPredictionEngineTests: XCTestCase {
         context.insert(inventory)
         context.insert(mealPrep)
         context.insert(usage)
+        context.insert(todoList)
         context.insert(reminder)
+        context.insert(todoReminder)
         try context.save()
 
         let backup = try DataExportImportService.exportData(context: context)
@@ -4939,6 +5111,9 @@ final class SleepPredictionEngineTests: XCTestCase {
         let importedReminder = try XCTUnwrap(
             context.fetch(FetchDescriptor<FoodReminder>()).first { $0.title == "Check shopping list" }
         )
+        let importedTodoReminder = try XCTUnwrap(
+            context.fetch(FetchDescriptor<FoodReminder>()).first { $0.title == "Check house tasks" }
+        )
 
         XCTAssertEqual(importedList.storeID, store.id)
         XCTAssertEqual(importedItem.storeSectionID, section.id)
@@ -4950,6 +5125,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(importedMealPrep.tagsJSON, "freezer,dinner")
         XCTAssertEqual(importedUsage.notes, "Dinner")
         XCTAssertEqual(importedReminder.relatedShoppingListID, list.id)
+        XCTAssertEqual(importedTodoReminder.type, .todos)
+        XCTAssertEqual(importedTodoReminder.relatedTodoListID, todoList.id)
     }
 
     @MainActor
@@ -5215,6 +5392,28 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testFoodTodoReminderNotificationDeepLinksToList() throws {
+        let householdID = UUID()
+        let listID = UUID()
+        let reminder = FoodReminder(
+            householdID: householdID,
+            type: .todos,
+            title: "Check house tasks",
+            relatedTodoListID: listID,
+            dateTime: Date(timeIntervalSince1970: 1_780_210_000)
+        )
+
+        let content = NotificationManager.shared.buildFoodReminderNotificationContent(reminder: reminder)
+
+        XCTAssertEqual(content.title, "Check house tasks")
+        XCTAssertEqual(content.body, "Check your Home to-do list.")
+        XCTAssertEqual(
+            content.userInfo["deepLink"] as? String,
+            "littlewindows://food/todos/\(listID.uuidString)"
+        )
+    }
+
+    @MainActor
     func testInventoryLocationServiceCreatesUpdatesAndArchivesLocations() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -5313,6 +5512,226 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(savedItems.first?.shoppingListID, list.id)
         XCTAssertFalse(ShoppingListService.archiveList(list, context: context, now: Date(timeIntervalSince1970: 300)))
         XCTAssertEqual(list.updatedAt, archivedAt)
+    }
+
+    @MainActor
+    func testHomeTodoServiceTracksActorsAndCompletion() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        context.insert(household)
+        try context.save()
+
+        let list = try XCTUnwrap(HomeTodoService.createList(
+            name: "House Tasks",
+            householdID: household.id,
+            existingLists: [],
+            context: context,
+            now: Date(timeIntervalSince1970: 100)
+        ))
+        let item = try XCTUnwrap(HomeTodoService.addItem(
+            title: "Replace filter",
+            notes: "Hallway closet",
+            addedBy: "Caregiver A",
+            to: list,
+            existingItems: [],
+            context: context,
+            now: Date(timeIntervalSince1970: 110)
+        ))
+        let secondItem = try XCTUnwrap(HomeTodoService.addItem(
+            title: "Clean vent",
+            notes: "",
+            addedBy: "Caregiver A",
+            to: list,
+            existingItems: [item],
+            context: context,
+            now: Date(timeIntervalSince1970: 115)
+        ))
+
+        XCTAssertEqual(item.addedBy, "Caregiver A")
+        XCTAssertFalse(item.isCompleted)
+        XCTAssertNil(item.completedBy)
+
+        HomeTodoService.setCompleted(
+            item,
+            isCompleted: true,
+            completedBy: "Caregiver B",
+            siblingItems: [item, secondItem],
+            context: context,
+            now: Date(timeIntervalSince1970: 120)
+        )
+        XCTAssertTrue(item.isCompleted)
+        XCTAssertEqual(item.completedBy, "Caregiver B")
+        XCTAssertEqual(item.completedAt, Date(timeIntervalSince1970: 120))
+
+        HomeTodoService.setCompleted(
+            item,
+            isCompleted: false,
+            completedBy: "Caregiver A",
+            siblingItems: [item, secondItem],
+            context: context,
+            now: Date(timeIntervalSince1970: 130)
+        )
+        XCTAssertFalse(item.isCompleted)
+        XCTAssertNil(item.completedBy)
+        XCTAssertNil(item.completedAt)
+        XCTAssertEqual(item.lastReopenedAt, Date(timeIntervalSince1970: 130))
+        XCTAssertEqual(item.sortOrder, 2)
+
+        XCTAssertTrue(HomeTodoService.archiveList(
+            list,
+            context: context,
+            now: Date(timeIntervalSince1970: 140)
+        ))
+        XCTAssertTrue(list.isArchived)
+    }
+
+    @MainActor
+    func testFoodHomeInsightsIncludeTodosAndReturns() throws {
+        let household = Household(name: "Home")
+        let list = HomeTodoList(householdID: household.id, name: "House Tasks")
+        let archivedList = HomeTodoList(householdID: household.id, name: "Old Tasks", isArchived: true)
+        let openItem = HomeTodoItem(householdID: household.id, todoListID: list.id, title: "Replace filter")
+        let completedItem = HomeTodoItem(
+            householdID: household.id,
+            todoListID: list.id,
+            title: "Clean vent",
+            isCompleted: true
+        )
+        let ignoredArchivedItem = HomeTodoItem(
+            householdID: household.id,
+            todoListID: archivedList.id,
+            title: "Ignore"
+        )
+        let needsActionReturn = ReturnRequest(householdID: household.id)
+        let readyReturn = ReturnRequest(householdID: household.id)
+        let completedReturn = ReturnRequest(householdID: household.id, completedAt: Date())
+        let readyPackage = ReturnPackage(
+            householdID: household.id,
+            returnRequestID: readyReturn.id,
+            name: "Drop-off",
+            carrier: .wholeFoods
+        )
+
+        let metrics = FoodInsightsService.metrics(
+            householdID: household.id,
+            locations: [],
+            inventoryItems: [],
+            mealPrepItems: [],
+            shoppingLists: [],
+            shoppingItems: [],
+            todoLists: [list, archivedList],
+            todoItems: [openItem, completedItem, ignoredArchivedItem],
+            returnRequests: [needsActionReturn, readyReturn, completedReturn],
+            returnPackages: [readyPackage]
+        )
+
+        XCTAssertEqual(metrics.first(where: { $0.title == "To-Do" })?.value, "1")
+        XCTAssertEqual(metrics.first(where: { $0.title == "To-Do" })?.detail, "Open items across 1 list.")
+        XCTAssertEqual(metrics.first(where: { $0.title == "Completed To-Dos" })?.value, "1")
+        XCTAssertEqual(metrics.first(where: { $0.title == "Returns" })?.value, "2")
+        XCTAssertEqual(metrics.first(where: { $0.title == "Returns" })?.detail, "1 need action, 1 ready.")
+    }
+
+    @MainActor
+    func testHomeTodoServiceReordersItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let list = HomeTodoList(householdID: household.id, name: "House Tasks")
+        let first = HomeTodoItem(householdID: household.id, todoListID: list.id, title: "First", sortOrder: 0)
+        let second = HomeTodoItem(householdID: household.id, todoListID: list.id, title: "Second", sortOrder: 1)
+        let third = HomeTodoItem(householdID: household.id, todoListID: list.id, title: "Third", sortOrder: 2)
+        context.insert(household)
+        context.insert(list)
+        context.insert(first)
+        context.insert(second)
+        context.insert(third)
+        try context.save()
+
+        HomeTodoService.reorderItems(
+            [first, second, third],
+            from: IndexSet(integer: 2),
+            to: 0,
+            context: context,
+            now: Date(timeIntervalSince1970: 300)
+        )
+
+        XCTAssertEqual(third.sortOrder, 0)
+        XCTAssertEqual(first.sortOrder, 1)
+        XCTAssertEqual(second.sortOrder, 2)
+        XCTAssertEqual(first.updatedAt, Date(timeIntervalSince1970: 300))
+    }
+
+    @MainActor
+    func testHomeTodoServiceReordersLists() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let first = HomeTodoList(householdID: household.id, name: "First", sortOrder: 0)
+        let second = HomeTodoList(householdID: household.id, name: "Second", sortOrder: 1)
+        let third = HomeTodoList(householdID: household.id, name: "Third", sortOrder: 2)
+        context.insert(household)
+        context.insert(first)
+        context.insert(second)
+        context.insert(third)
+        try context.save()
+
+        HomeTodoService.reorderLists(
+            [first, second, third],
+            from: IndexSet(integer: 0),
+            to: 3,
+            context: context,
+            now: Date(timeIntervalSince1970: 310)
+        )
+
+        XCTAssertEqual(second.sortOrder, 0)
+        XCTAssertEqual(third.sortOrder, 1)
+        XCTAssertEqual(first.sortOrder, 2)
+        XCTAssertEqual(third.updatedAt, Date(timeIntervalSince1970: 310))
+    }
+
+    @MainActor
+    func testHomeTodosRoundTripThroughBackup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let list = HomeTodoList(
+            householdID: household.id,
+            name: "Weekend",
+            createdAt: Date(timeIntervalSince1970: 200),
+            updatedAt: Date(timeIntervalSince1970: 201)
+        )
+        let item = HomeTodoItem(
+            householdID: household.id,
+            todoListID: list.id,
+            title: "Change sheets",
+            isCompleted: true,
+            addedBy: "Caregiver A",
+            completedBy: "Caregiver B",
+            completedAt: Date(timeIntervalSince1970: 210),
+            createdAt: Date(timeIntervalSince1970: 205),
+            updatedAt: Date(timeIntervalSince1970: 210)
+        )
+        context.insert(household)
+        context.insert(list)
+        context.insert(item)
+        try context.save()
+
+        let data = try DataExportImportService.exportData(context: context)
+        try DataExportImportService.importData(data, context: context, recordLocalSave: false)
+
+        let importedList = try XCTUnwrap(
+            context.fetch(FetchDescriptor<HomeTodoList>()).first { $0.name == "Weekend" }
+        )
+        let importedItem = try XCTUnwrap(
+            context.fetch(FetchDescriptor<HomeTodoItem>()).first { $0.todoListID == importedList.id }
+        )
+        XCTAssertEqual(importedItem.title, "Change sheets")
+        XCTAssertTrue(importedItem.isCompleted)
+        XCTAssertEqual(importedItem.addedBy, "Caregiver A")
+        XCTAssertEqual(importedItem.completedBy, "Caregiver B")
+        XCTAssertEqual(importedItem.completedAt, Date(timeIntervalSince1970: 210))
     }
 
     @MainActor

@@ -779,6 +779,8 @@ private struct FamilySyncDatasetSnapshot {
         var appointments: [Appointment]?
         var shoppingLists: [ShoppingListDigest]?
         var shoppingListItems: [ShoppingListItemDigest]?
+        var homeTodoLists: [HomeTodoListDigest]?
+        var homeTodoItems: [HomeTodoItemDigest]?
         var inventoryItems: [InventoryItemDigest]?
         var mealPrepItems: [MealPrepItemDigest]?
         var returnRequests: [ReturnRequestDigest]?
@@ -846,6 +848,31 @@ private struct FamilySyncDatasetSnapshot {
         var lastPurchasedAt: Date?
     }
 
+    struct HomeTodoListDigest: Decodable {
+        var id: UUID
+        var name: String
+        var notes: String?
+        var createdAt: Date
+        var updatedAt: Date
+        var isArchived: Bool
+        var sortOrder: Int?
+    }
+
+    struct HomeTodoItemDigest: Decodable {
+        var id: UUID
+        var todoListID: UUID
+        var title: String
+        var notes: String?
+        var isCompleted: Bool
+        var addedBy: String?
+        var completedBy: String?
+        var completedAt: Date?
+        var lastReopenedAt: Date?
+        var createdAt: Date
+        var updatedAt: Date
+        var sortOrder: Int?
+    }
+
     struct InventoryItemDigest: Decodable {
         var id: UUID
         var name: String
@@ -899,6 +926,7 @@ private struct FamilySyncDatasetSnapshot {
         var id: UUID
         var typeRawValue: String
         var title: String
+        var relatedTodoListID: UUID?
         var relatedShoppingListID: UUID?
         var relatedMealPrepItemID: UUID?
         var relatedReturnRequestID: UUID?
@@ -919,6 +947,8 @@ private struct FamilySyncDatasetSnapshot {
     var appointmentsByID: [UUID: Appointment]
     var shoppingListsByID: [UUID: ShoppingListDigest]
     var shoppingItemsByID: [UUID: ShoppingListItemDigest]
+    var homeTodoListsByID: [UUID: HomeTodoListDigest]
+    var homeTodoItemsByID: [UUID: HomeTodoItemDigest]
     var inventoryItemsByID: [UUID: InventoryItemDigest]
     var mealPrepItemsByID: [UUID: MealPrepItemDigest]
     var returnRequestsByID: [UUID: ReturnRequestDigest]
@@ -943,6 +973,12 @@ private struct FamilySyncDatasetSnapshot {
         )
         shoppingItemsByID = Dictionary(
             uniqueKeysWithValues: (envelope.shoppingListItems ?? []).map { ($0.id, $0) }
+        )
+        homeTodoListsByID = Dictionary(
+            uniqueKeysWithValues: (envelope.homeTodoLists ?? []).map { ($0.id, $0) }
+        )
+        homeTodoItemsByID = Dictionary(
+            uniqueKeysWithValues: (envelope.homeTodoItems ?? []).map { ($0.id, $0) }
         )
         inventoryItemsByID = Dictionary(
             uniqueKeysWithValues: (envelope.inventoryItems ?? []).map { ($0.id, $0) }
@@ -971,6 +1007,7 @@ private struct FamilySyncDatasetSnapshot {
         candidates.append(contentsOf: appointmentChanges(comparedTo: local))
         candidates.append(contentsOf: shoppingListChanges(comparedTo: local))
         candidates.append(contentsOf: shoppingItemChanges(comparedTo: local))
+        candidates.append(contentsOf: homeTodoChanges(comparedTo: local))
         candidates.append(contentsOf: inventoryChanges(comparedTo: local))
         candidates.append(contentsOf: mealPrepChanges(comparedTo: local))
         candidates.append(contentsOf: returnChanges(comparedTo: local))
@@ -1104,6 +1141,79 @@ private struct FamilySyncDatasetSnapshot {
                 )
             )
         }
+    }
+
+    private func homeTodoChanges(comparedTo local: FamilySyncDatasetSnapshot) -> [ChangeCandidate] {
+        var candidates = homeTodoListsByID.values.compactMap { list -> ChangeCandidate? in
+            let previous = local.homeTodoListsByID[list.id]
+            guard isNewOrUpdated(remoteDate: list.updatedAt, localDate: previous?.updatedAt) else {
+                return nil
+            }
+            if let previous,
+               list.name == previous.name,
+               list.notes == previous.notes,
+               list.isArchived == previous.isArchived {
+                return nil
+            }
+            let action: String
+            if list.isArchived && previous?.isArchived != true {
+                action = "removed"
+            } else {
+                action = previous == nil ? "created" : "updated"
+            }
+            return ChangeCandidate(
+                date: list.updatedAt,
+                priority: 68,
+                notification: FamilySyncActivityNotification(
+                    title: "Home to-do updated",
+                    body: "A caregiver \(action) \(list.name).",
+                    deepLinkPath: "food/todos/\(list.id.uuidString)",
+                    category: .homeTodo
+                )
+            )
+        }
+
+        candidates.append(contentsOf: homeTodoItemsByID.values.compactMap { item in
+            let previous = local.homeTodoItemsByID[item.id]
+            guard isNewOrUpdated(remoteDate: item.updatedAt, localDate: previous?.updatedAt) else {
+                return nil
+            }
+            if let previous,
+               item.title == previous.title,
+               item.notes == previous.notes,
+               item.isCompleted == previous.isCompleted,
+               item.addedBy == previous.addedBy,
+               item.completedBy == previous.completedBy,
+               item.completedAt == previous.completedAt,
+               item.lastReopenedAt == previous.lastReopenedAt {
+                return nil
+            }
+            let listName = homeTodoListsByID[item.todoListID]?.name ?? "a to-do list"
+            let actor: String
+            let action: String
+            if item.isCompleted && previous?.isCompleted != true {
+                actor = actorName(item.completedBy ?? item.addedBy)
+                action = "completed"
+            } else if !item.isCompleted && previous?.isCompleted == true {
+                actor = actorName(item.addedBy)
+                action = "reopened"
+            } else {
+                actor = actorName(item.addedBy)
+                action = previous == nil ? "added" : "updated"
+            }
+            return ChangeCandidate(
+                date: item.updatedAt,
+                priority: 98,
+                notification: FamilySyncActivityNotification(
+                    title: "Home to-do updated",
+                    body: "\(actor) updated \(listName): \(action) \(item.title).",
+                    deepLinkPath: "food/todos/\(item.todoListID.uuidString)",
+                    category: .homeTodo
+                )
+            )
+        })
+
+        return candidates
     }
 
     private func inventoryChanges(comparedTo local: FamilySyncDatasetSnapshot) -> [ChangeCandidate] {
@@ -1246,7 +1356,9 @@ private struct FamilySyncDatasetSnapshot {
             }
             let action = reminder.isEnabled ? (previous == nil ? "added" : "updated") : "turned off"
             let path: String
-            if let listID = reminder.relatedShoppingListID {
+            if let todoListID = reminder.relatedTodoListID {
+                path = "food/todos/\(todoListID.uuidString)"
+            } else if let listID = reminder.relatedShoppingListID {
                 path = "food/shopping/\(listID.uuidString)"
             } else if let mealPrepID = reminder.relatedMealPrepItemID {
                 path = "food/meal-prep/\(mealPrepID.uuidString)"
