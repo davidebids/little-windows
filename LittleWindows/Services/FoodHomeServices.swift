@@ -293,6 +293,190 @@ enum ShoppingListService {
 }
 
 @MainActor
+enum HomeTodoService {
+    @discardableResult
+    static func createList(
+        name: String,
+        householdID: UUID,
+        existingLists: [HomeTodoList],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> HomeTodoList? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let nextOrder = (existingLists.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
+        let list = HomeTodoList(
+            householdID: householdID,
+            name: trimmed,
+            createdAt: now,
+            updatedAt: now,
+            sortOrder: nextOrder
+        )
+        context.insert(list)
+        save(context)
+        return list
+    }
+
+    static func updateList(
+        _ list: HomeTodoList,
+        name: String,
+        notes: String,
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        list.name = trimmed
+        list.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        list.updatedAt = now
+        save(context)
+    }
+
+    @discardableResult
+    static func archiveList(
+        _ list: HomeTodoList,
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        guard !list.isArchived else { return false }
+        list.isArchived = true
+        list.updatedAt = now
+        save(context)
+        return true
+    }
+
+    static func reorderLists(
+        _ lists: [HomeTodoList],
+        from source: IndexSet,
+        to destination: Int,
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        guard let reordered = reorderedValues(lists, from: source, to: destination) else { return }
+        guard reordered.map(\.id) != lists.map(\.id) else { return }
+        for (index, list) in reordered.enumerated() {
+            list.sortOrder = index
+            list.updatedAt = now
+        }
+        save(context)
+    }
+
+    @discardableResult
+    static func addItem(
+        title: String,
+        notes: String,
+        addedBy: String,
+        to list: HomeTodoList,
+        existingItems: [HomeTodoItem],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> HomeTodoItem? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let nextOrder = (existingItems.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
+        let item = HomeTodoItem(
+            householdID: list.householdID,
+            todoListID: list.id,
+            title: trimmed,
+            notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            addedBy: normalizedActorName(addedBy),
+            createdAt: now,
+            updatedAt: now,
+            sortOrder: nextOrder
+        )
+        context.insert(item)
+        list.updatedAt = now
+        save(context)
+        return item
+    }
+
+    static func updateItem(
+        _ item: HomeTodoItem,
+        title: String,
+        notes: String,
+        addedBy: String,
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        item.title = trimmed
+        item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        item.addedBy = normalizedActorName(addedBy)
+        item.updatedAt = now
+        save(context)
+    }
+
+    static func setCompleted(
+        _ item: HomeTodoItem,
+        isCompleted: Bool,
+        completedBy: String,
+        siblingItems: [HomeTodoItem] = [],
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        let targetItems = siblingItems.filter {
+            $0.id != item.id && $0.todoListID == item.todoListID && $0.isCompleted == isCompleted
+        }
+        item.isCompleted = isCompleted
+        item.updatedAt = now
+        item.sortOrder = (targetItems.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
+        if isCompleted {
+            item.completedAt = now
+            item.completedBy = normalizedActorName(completedBy)
+        } else {
+            item.completedAt = nil
+            item.completedBy = nil
+            item.lastReopenedAt = now
+        }
+        save(context)
+    }
+
+    static func deleteItem(_ item: HomeTodoItem, context: ModelContext) {
+        context.delete(item)
+        save(context)
+    }
+
+    static func reorderItems(
+        _ items: [HomeTodoItem],
+        from source: IndexSet,
+        to destination: Int,
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        guard let reordered = reorderedValues(items, from: source, to: destination) else { return }
+        guard reordered.map(\.id) != items.map(\.id) else { return }
+        for (index, item) in reordered.enumerated() {
+            item.sortOrder = index
+            item.updatedAt = now
+        }
+        save(context)
+    }
+
+    private static func reorderedValues<T>(
+        _ values: [T],
+        from source: IndexSet,
+        to destination: Int
+    ) -> [T]? {
+        guard !source.isEmpty else { return nil }
+        let sourceIndexes = source.sorted()
+        guard let lastIndex = sourceIndexes.last, lastIndex < values.count else { return nil }
+        var reordered = values
+        let movedValues = sourceIndexes.map { reordered[$0] }
+        for index in sourceIndexes.reversed() {
+            reordered.remove(at: index)
+        }
+        let adjustedDestination = destination - sourceIndexes.filter { $0 < destination }.count
+        reordered.insert(contentsOf: movedValues, at: max(0, min(adjustedDestination, reordered.count)))
+        return reordered
+    }
+
+    private static func normalizedActorName(_ name: String) -> String? {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+}
+
+@MainActor
 enum InventoryLocationService {
     @discardableResult
     static func addLocation(
@@ -906,6 +1090,7 @@ struct FoodInsightMetric: Identifiable, Equatable {
     var systemImage: String
 }
 
+@MainActor
 enum FoodInsightsService {
     static func metrics(
         householdID: UUID,
@@ -913,7 +1098,12 @@ enum FoodInsightsService {
         inventoryItems: [InventoryItem],
         mealPrepItems: [MealPrepItem],
         shoppingLists: [ShoppingList],
-        shoppingItems: [ShoppingListItem]
+        shoppingItems: [ShoppingListItem],
+        todoLists: [HomeTodoList],
+        todoItems: [HomeTodoItem],
+        returnRequests: [ReturnRequest],
+        returnPackages: [ReturnPackage],
+        returnStatusesByRequestID: [UUID: ReturnRequestStatus] = [:]
     ) -> [FoodInsightMetric] {
         let availableInventory = inventoryItems.filter {
             $0.householdID == householdID && $0.status == .available
@@ -931,8 +1121,53 @@ enum FoodInsightsService {
         let busiestStore = shoppingItems
             .filter { $0.householdID == householdID }
             .max { $0.purchaseCount < $1.purchaseCount }
+        let activeTodoLists = todoLists.filter {
+            $0.householdID == householdID && !$0.isArchived
+        }
+        let activeTodoListIDs = Set(activeTodoLists.map(\.id))
+        let householdTodoItems = todoItems.filter {
+            $0.householdID == householdID && activeTodoListIDs.contains($0.todoListID)
+        }
+        let openTodoItems = householdTodoItems.filter { !$0.isCompleted }
+        let completedTodoItems = householdTodoItems.filter(\.isCompleted)
+        let householdReturnRequests = returnRequests.filter {
+            $0.householdID == householdID && !$0.isArchived
+        }
+        let returnPackagesByRequestID = Dictionary(
+            grouping: returnPackages.filter { $0.householdID == householdID },
+            by: \.returnRequestID
+        )
+        let returnStatuses = householdReturnRequests.map { request in
+            returnStatusesByRequestID[request.id]
+                ?? ReturnTrackingService.status(for: request, packages: returnPackagesByRequestID[request.id] ?? [])
+        }
+        let activeReturnCount = returnStatuses.filter { $0 != .completed }.count
+        let returnStatusCounts = Dictionary(grouping: returnStatuses, by: { $0 }).mapValues(\.count)
+        let activeListText = itemCountText(activeTodoLists.count, singular: "list", plural: "lists")
+        let preparedItemText = itemCountText(activeMealPrep.count, singular: "prepared item", plural: "prepared items")
+        let purchaseText = busiestStore.map {
+            itemCountText($0.purchaseCount, singular: "purchase", plural: "purchases")
+        }
 
         return [
+            FoodInsightMetric(
+                title: "To-Do",
+                value: "\(openTodoItems.count)",
+                detail: "Open items across \(activeListText).",
+                systemImage: "checklist"
+            ),
+            FoodInsightMetric(
+                title: "Completed To-Dos",
+                value: "\(completedTodoItems.count)",
+                detail: "Items checked off in active lists.",
+                systemImage: "checkmark.circle.fill"
+            ),
+            FoodInsightMetric(
+                title: "Returns",
+                value: "\(activeReturnCount)",
+                detail: "\(returnStatusCounts[.needsAction, default: 0]) need action, \(returnStatusCounts[.readyToDropOff, default: 0]) ready.",
+                systemImage: "shippingbox.fill"
+            ),
             FoodInsightMetric(
                 title: "Inventory",
                 value: "\(availableInventory.count)",
@@ -942,7 +1177,7 @@ enum FoodInsightsService {
             FoodInsightMetric(
                 title: "Meal Prep",
                 value: formatted(totalServings),
-                detail: "Servings available in \(activeMealPrep.count) prepared items.",
+                detail: "Servings available in \(preparedItemText).",
                 systemImage: "takeoutbag.and.cup.and.straw.fill"
             ),
             FoodInsightMetric(
@@ -960,10 +1195,14 @@ enum FoodInsightsService {
             FoodInsightMetric(
                 title: "Frequent Buy",
                 value: busiestStore?.name ?? "None yet",
-                detail: busiestStore.map { "\($0.purchaseCount) purchases recorded." } ?? "Finish a trip to build history.",
+                detail: purchaseText.map { "\($0) recorded." } ?? "Finish a trip to build history.",
                 systemImage: "repeat.circle.fill"
             )
         ]
+    }
+
+    private static func itemCountText(_ count: Int, singular: String, plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
     }
 }
 
@@ -974,6 +1213,7 @@ enum FoodReminderService {
         type: FoodReminderType,
         title: String,
         dateTime: Date,
+        relatedTodoListID: UUID?,
         relatedShoppingListID: UUID?,
         relatedMealPrepItemID: UUID?,
         relatedReturnRequestID: UUID?,
@@ -983,6 +1223,7 @@ enum FoodReminderService {
             householdID: householdID,
             type: type,
             title: title,
+            relatedTodoListID: relatedTodoListID,
             relatedShoppingListID: relatedShoppingListID,
             relatedMealPrepItemID: relatedMealPrepItemID,
             relatedReturnRequestID: relatedReturnRequestID,

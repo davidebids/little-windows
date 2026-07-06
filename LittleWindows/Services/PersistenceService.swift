@@ -34,6 +34,8 @@ enum PersistenceService {
             FoodStoreSection.self,
             ShoppingList.self,
             ShoppingListItem.self,
+            HomeTodoList.self,
+            HomeTodoItem.self,
             FoodItem.self,
             InventoryLocation.self,
             InventoryItem.self,

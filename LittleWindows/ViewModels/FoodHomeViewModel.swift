@@ -1,10 +1,11 @@
 import Foundation
 
 enum FoodHomeSection: String, CaseIterable, Identifiable {
+    case todos
+    case returns
     case shopping
     case inventory
     case mealPrep
-    case returns
     case stores
     case insights
 
@@ -12,17 +13,19 @@ enum FoodHomeSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .todos: "To-Do"
         case .shopping: "Shopping"
-        case .inventory: "Inventory"
+        case .inventory: "Kitchen Inventory"
         case .mealPrep: "Meal Prep"
         case .returns: "Returns"
-        case .stores: "Stores"
+        case .stores: "Grocery Stores"
         case .insights: "Insights"
         }
     }
 
     var systemImage: String {
         switch self {
+        case .todos: "checklist"
         case .shopping: "cart.fill"
         case .inventory: "cabinet.fill"
         case .mealPrep: "takeoutbag.and.cup.and.straw.fill"
@@ -81,6 +84,7 @@ enum InventorySort: String, CaseIterable, Identifiable {
 }
 
 enum FoodRoute: Hashable {
+    case todoList(UUID)
     case shoppingList(UUID)
     case shoppingMode(UUID)
     case inventoryItem(UUID)
@@ -92,6 +96,8 @@ enum FoodRoute: Hashable {
 
 enum FoodRouteCommand: Equatable {
     case food
+    case todos
+    case todoList(UUID)
     case shopping
     case shoppingList(UUID)
     case shoppingMode(UUID)

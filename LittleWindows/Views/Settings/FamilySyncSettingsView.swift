@@ -8,6 +8,8 @@ struct FamilySyncSettingsView: View {
     @StateObject private var viewModel = FamilySyncViewModel()
     @AppStorage("familySyncActivityNotificationsEnabled")
     private var activityNotificationsEnabled = true
+    @AppStorage("familySyncHomeTodoNotificationsEnabled")
+    private var homeTodoNotificationsEnabled = true
     @State private var confirmLeave = false
     @State private var deleteLocalDataOnLeave = false
     @State private var isConfirmingLeave = false
@@ -164,6 +166,20 @@ struct FamilySyncSettingsView: View {
                         }
                     }
                     Text("Show alerts when another caregiver's synced changes arrive on this device.")
+                        .foregroundStyle(.secondary)
+
+                    Toggle(
+                        "Home to-do list updates",
+                        isOn: $homeTodoNotificationsEnabled
+                    )
+                    .disabled(!activityNotificationsEnabled)
+                    .onChange(of: homeTodoNotificationsEnabled) { _, enabled in
+                        guard enabled else { return }
+                        Task {
+                            _ = await NotificationManager.shared.requestAuthorization()
+                        }
+                    }
+                    Text("Alert when another caregiver adds, completes, reopens, or edits Home to-do items.")
                         .foregroundStyle(.secondary)
                 }
             }

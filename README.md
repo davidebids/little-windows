@@ -20,7 +20,7 @@ First launch presents onboarding for a new empty store. It does not create defau
 - Milestones and Memories: profile-scoped entries, age prompts, categories, photo attachments, and backup support.
 - Appointments and Visits: questions, notes, summaries, follow-up instructions, medications, vaccines, measurements, and reminders.
 - Guides: monthly child age guides, source-backed Sleep Basics lessons, and puppy-stage guide content with read state and reminder support.
-- Food & Home: household shopping lists, store layouts and sections, shopping mode, recurring staples, inventory locations, meal prep tracking, return tracking, and food reminders.
+- Food & Home: household to-do lists, shopping lists, store layouts and sections, shopping mode, recurring staples, inventory locations, meal prep tracking, return tracking, and food reminders.
 - Night Light: full-screen low-light presets, color and shape controls, animated glow modes, ambient sounds, sleep timer, and keep-awake behavior.
 - Settings: backup/import, iCloud sync, Family Sync, notifications, prediction tuning, diagnostics, and local data reset.
 
@@ -87,11 +87,12 @@ Insights support short lookback ranges, previous-period comparison, plain-langua
 Food & Home tracks household food routines separately from child and dog care events. It includes:
 
 - Shopping lists with store-specific sections, priorities, quantities, notes, recurring staples, checked state, and reactivation helpers.
+- Named home to-do lists with active and completed sections plus added/completed caregiver tracking.
 - Store layouts with default sections such as Produce, Refrigerated, Frozen, Pantry, Household, and Other.
 - Inventory locations and items with quantity, unit, status, expiration, and notes.
 - Meal prep items with servings, tags, storage details, usage history, and remaining counts.
 - Returns with multiple items, send-back details, return links, return-by dates, drop-off partners, return label photos, and drop-off/completion tracking.
-- Food & Home reminders that schedule local notifications and can link back to shopping lists, meal prep items, or returns.
+- Food & Home reminders that schedule local notifications and can link back to to-do lists, shopping lists, meal prep items, or returns.
 - Shopping List and Food Quick Add widgets backed by lightweight App Group snapshots.
 
 Food & Home data is included in JSON backup/import and in the shared Family Sync dataset.
