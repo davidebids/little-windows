@@ -135,6 +135,9 @@
 		B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000092 /* Services/CareRoutineService.swift */; };
 		B00000000000000000000093 /* Views/CareRoutineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000093 /* Views/CareRoutineViews.swift */; };
 		B00000000000000000000094 /* Resources/NightLightAudio in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000094 /* Resources/NightLightAudio */; };
+		B00000000000000000000095 /* Services/CareReportExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000095 /* Services/CareReportExportService.swift */; };
+		B00000000000000000000096 /* Views/Settings/CareReportExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000096 /* Views/Settings/CareReportExportView.swift */; };
+		B00000000000000000000097 /* CareReportExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000097 /* CareReportExportServiceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -303,6 +306,9 @@
 		F00000000000000000000092 /* Services/CareRoutineService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareRoutineService.swift; sourceTree = "<group>"; };
 		F00000000000000000000093 /* Views/CareRoutineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/CareRoutineViews.swift; sourceTree = "<group>"; };
 		F00000000000000000000094 /* Resources/NightLightAudio */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/NightLightAudio; sourceTree = "<group>"; };
+		F00000000000000000000095 /* Services/CareReportExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareReportExportService.swift; sourceTree = "<group>"; };
+		F00000000000000000000096 /* Views/Settings/CareReportExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/CareReportExportView.swift; sourceTree = "<group>"; };
+		F00000000000000000000097 /* CareReportExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareReportExportServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -407,6 +413,7 @@
 				F0000000000000000000008E /* Services/CaregiverIdentityService.swift */,
 				F00000000000000000000089 /* Services/FoodHomeServices.swift */,
 				F00000000000000000000092 /* Services/CareRoutineService.swift */,
+				F00000000000000000000095 /* Services/CareReportExportService.swift */,
 				F00000000000000000000025 /* ViewModels/InsightsViewModel.swift */,
 				F00000000000000000000064 /* ViewModels/NightLightViewModel.swift */,
 				F00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift */,
@@ -425,6 +432,7 @@
 				F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */,
 				F00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift */,
 				F00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift */,
+				F00000000000000000000096 /* Views/Settings/CareReportExportView.swift */,
 				F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */,
 				F00000000000000000000093 /* Views/CareRoutineViews.swift */,
 				F00000000000000000000017 /* Views/PredictionExplanationView.swift */,
@@ -471,6 +479,7 @@
 			isa = PBXGroup;
 			children = (
 				F0000000000000000000001B /* SleepPredictionEngineTests.swift */,
+				F00000000000000000000097 /* CareReportExportServiceTests.swift */,
 			);
 			path = LittleWindowsTests;
 			sourceTree = "<group>";
@@ -736,6 +745,7 @@
 				B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */,
 				B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */,
 				B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */,
+				B00000000000000000000095 /* Services/CareReportExportService.swift in Sources */,
 				B00000000000000000000023 /* ViewModels/InsightsViewModel.swift in Sources */,
 				B00000000000000000000064 /* ViewModels/NightLightViewModel.swift in Sources */,
 				B00000000000000000000083 /* ViewModels/ICloudSyncSettingsViewModel.swift in Sources */,
@@ -754,6 +764,7 @@
 				B00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift in Sources */,
 				B00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift in Sources */,
 				B00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift in Sources */,
+				B00000000000000000000096 /* Views/Settings/CareReportExportView.swift in Sources */,
 				B0000000000000000000008B /* Views/Food/FoodHomeViews.swift in Sources */,
 				B00000000000000000000093 /* Views/CareRoutineViews.swift in Sources */,
 				B00000000000000000000017 /* Views/PredictionExplanationView.swift in Sources */,
@@ -795,6 +806,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */,
+				B00000000000000000000097 /* CareReportExportServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

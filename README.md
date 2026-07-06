@@ -123,9 +123,11 @@ Active timers synchronize to a Live Activity with Lock Screen and Dynamic Island
 
 System surfaces pass commands back to the app and read lightweight App Group snapshots. They do not directly mutate the full SwiftData store. See [SYSTEM_INTEGRATIONS.md](SYSTEM_INTEGRATIONS.md) for signing, entitlements, routes, widgets, Live Activities, notification, and real-device testing details.
 
-## Backup, Import, And Fixtures
+## Backup, Report Export, Import, And Fixtures
 
 Settings supports JSON backup export/import and full local data deletion/reset. Backups include profiles, events, prediction records, appointments, milestones, photo attachments, guide state, Food & Home data, and related local metadata.
+
+Settings also supports profile-scoped CSV and PDF care report export for doctor visits and caregiver handoff. Report export includes selectable 7-day, 30-day, and custom date ranges, optional notes and caregiver names, and care-profile events with appointments and milestones when enabled. CSV/PDF reports are human-readable only; JSON remains the restore/import format.
 
 The repository includes a neutral legacy import fixture for development and test validation:
 

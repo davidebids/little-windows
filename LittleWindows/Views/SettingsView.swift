@@ -84,6 +84,13 @@ struct SettingsView: View {
             }
 
             Section("Data") {
+                NavigationLink {
+                    LazySettingsDestination {
+                        CareReportExportView()
+                    }
+                } label: {
+                    Label("Export care report", systemImage: "doc.text.magnifyingglass")
+                }
                 Button("Export JSON backup", systemImage: "square.and.arrow.up") {
                     export()
                 }
