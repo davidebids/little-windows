@@ -4953,6 +4953,246 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testReturnTrackingStatusFollowsMultiPackageProgress() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let request = ReturnRequest(
+            householdID: household.id
+        )
+        let firstPackage = ReturnPackage(
+            householdID: household.id,
+            returnRequestID: request.id,
+            name: "Coat label",
+            carrier: .ups
+        )
+        let secondPackage = ReturnPackage(
+            householdID: household.id,
+            returnRequestID: request.id,
+            name: "Boot label",
+            carrier: .fedEx
+        )
+
+        context.insert(household)
+        context.insert(request)
+        context.insert(firstPackage)
+        context.insert(secondPackage)
+        try context.save()
+
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .readyToDropOff
+        )
+
+        ReturnTrackingService.markDroppedOff(
+            request,
+            packages: [firstPackage, secondPackage],
+            at: Date(timeIntervalSince1970: 1_800_000_000),
+            context: context
+        )
+        XCTAssertNotNil(firstPackage.droppedOffAt)
+        XCTAssertNotNil(secondPackage.droppedOffAt)
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .droppedOff
+        )
+
+        ReturnTrackingService.markInProgress(
+            request,
+            packages: [firstPackage, secondPackage],
+            at: Date(timeIntervalSince1970: 1_800_005_000),
+            context: context
+        )
+        XCTAssertNil(firstPackage.droppedOffAt)
+        XCTAssertNil(secondPackage.droppedOffAt)
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .readyToDropOff
+        )
+
+        ReturnTrackingService.markDroppedOff(firstPackage, at: Date(timeIntervalSince1970: 1_800_010_000), context: context)
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .partiallyDroppedOff
+        )
+
+        ReturnTrackingService.markInProgress(firstPackage, at: Date(timeIntervalSince1970: 1_800_015_000), context: context)
+        XCTAssertNil(firstPackage.droppedOffAt)
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .readyToDropOff
+        )
+
+        ReturnTrackingService.markDroppedOff(firstPackage, at: Date(timeIntervalSince1970: 1_800_016_000), context: context)
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .partiallyDroppedOff
+        )
+
+        ReturnTrackingService.markDroppedOff(secondPackage, at: Date(timeIntervalSince1970: 1_800_020_000), context: context)
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .droppedOff
+        )
+
+        ReturnTrackingService.markComplete(
+            request,
+            packages: [firstPackage, secondPackage],
+            at: Date(timeIntervalSince1970: 1_800_030_000),
+            context: context
+        )
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .completed
+        )
+        XCTAssertNotNil(firstPackage.completedAt)
+        XCTAssertNotNil(secondPackage.completedAt)
+
+        ReturnTrackingService.markInProgress(
+            request,
+            packages: [firstPackage, secondPackage],
+            at: Date(timeIntervalSince1970: 1_800_040_000),
+            context: context
+        )
+        XCTAssertNotNil(firstPackage.droppedOffAt)
+        XCTAssertNotNil(secondPackage.droppedOffAt)
+        XCTAssertEqual(
+            ReturnTrackingService.status(for: request, packages: [firstPackage, secondPackage]),
+            .completed
+        )
+    }
+
+    @MainActor
+    func testDeletingLastReturnItemArchivesEmptyReturn() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let request = ReturnRequest(householdID: household.id)
+        let photoID = UUID()
+        let package = ReturnPackage(
+            householdID: household.id,
+            returnRequestID: request.id,
+            name: "QR code",
+            carrier: .wholeFoods,
+            photoAttachmentIDs: [photoID]
+        )
+        let item = ReturnItem(
+            householdID: household.id,
+            returnRequestID: request.id,
+            packageID: package.id,
+            name: "Puzzle mat"
+        )
+        let photo = PhotoAttachment(
+            id: photoID,
+            ownerKind: .returnPhoto,
+            imageData: Data([1, 2, 3]),
+            thumbnailData: Data([1])
+        )
+
+        context.insert(household)
+        context.insert(request)
+        context.insert(package)
+        context.insert(item)
+        context.insert(photo)
+        try context.save()
+
+        ReturnTrackingService.deleteItem(
+            item,
+            from: request,
+            items: [item],
+            packages: [package],
+            attachments: [photo],
+            context: context
+        )
+
+        XCTAssertTrue(request.isArchived)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<ReturnItem>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<ReturnPackage>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PhotoAttachment>()).isEmpty)
+    }
+
+    @MainActor
+    func testReturnsRoundTripThroughJSONBackupWithPhotos() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let request = ReturnRequest(
+            householdID: household.id
+        )
+        let photoID = UUID()
+        let package = ReturnPackage(
+            householdID: household.id,
+            returnRequestID: request.id,
+            name: "QR code",
+            carrier: .ups,
+            method: .dropOff,
+            trackingNumber: "1ZTEST",
+            returnByDate: Date(timeIntervalSince1970: 1_801_000_000),
+            photoAttachmentIDs: [photoID],
+            droppedOffAt: Date(timeIntervalSince1970: 1_801_100_000)
+        )
+        let item = ReturnItem(
+            householdID: household.id,
+            returnRequestID: request.id,
+            packageID: package.id,
+            name: "Puzzle mat",
+            quantity: 1,
+            reason: "Duplicate",
+            returnURLString: "https://example.com/return"
+        )
+        let photo = PhotoAttachment(
+            id: photoID,
+            ownerKind: .returnPhoto,
+            imageData: Data([1, 2, 3, 4]),
+            thumbnailData: Data([1, 2])
+        )
+        let reminder = FoodReminder(
+            householdID: household.id,
+            type: .returns,
+            title: "Drop off return",
+            relatedReturnRequestID: request.id,
+            dateTime: Date(timeIntervalSince1970: 1_800_900_000)
+        )
+
+        context.insert(household)
+        context.insert(request)
+        context.insert(package)
+        context.insert(item)
+        context.insert(photo)
+        context.insert(reminder)
+        try context.save()
+
+        let backup = try DataExportImportService.exportData(context: context)
+        try DataExportImportService.importData(backup, context: context)
+
+        let importedRequest = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ReturnRequest>()).first { $0.id == request.id }
+        )
+        let importedPackage = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ReturnPackage>()).first { $0.returnRequestID == importedRequest.id }
+        )
+        let importedItem = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ReturnItem>()).first { $0.returnRequestID == importedRequest.id }
+        )
+        let importedPhoto = try XCTUnwrap(
+            context.fetch(FetchDescriptor<PhotoAttachment>()).first { $0.id == photoID }
+        )
+        let importedReminder = try XCTUnwrap(
+            context.fetch(FetchDescriptor<FoodReminder>()).first { $0.title == "Drop off return" }
+        )
+
+        XCTAssertEqual(importedPackage.trackingNumber, "1ZTEST")
+        XCTAssertEqual(importedPackage.returnByDate, Date(timeIntervalSince1970: 1_801_000_000))
+        XCTAssertEqual(importedPackage.photoAttachmentIDs, [photoID])
+        XCTAssertEqual(importedItem.packageID, importedPackage.id)
+        XCTAssertEqual(importedItem.returnURLString, "https://example.com/return")
+        XCTAssertEqual(importedPhoto.ownerKind, .returnPhoto)
+        XCTAssertEqual(importedPhoto.imageData, Data([1, 2, 3, 4]))
+        XCTAssertEqual(importedReminder.type, .returns)
+        XCTAssertEqual(importedReminder.relatedReturnRequestID, importedRequest.id)
+    }
+
+    @MainActor
     func testFoodReminderCancelRemovesScheduledReminder() async throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext

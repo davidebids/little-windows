@@ -164,6 +164,7 @@ struct AutomaticMilestoneSummary: Identifiable, Hashable {
 enum PhotoAttachmentOwnerKind: String, Codable, CaseIterable, Identifiable {
     case milestone
     case profilePhoto
+    case returnPhoto
 
     var id: String { rawValue }
 }

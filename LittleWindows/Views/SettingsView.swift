@@ -69,7 +69,7 @@ struct SettingsView: View {
                         FoodReminderSettingsLauncher()
                     }
                 } label: {
-                    Label("Food reminders", systemImage: "bell.badge.fill")
+                    Label("Food & Home reminders", systemImage: "bell.badge.fill")
                 }
             } header: {
                 Label("Food & Home", systemImage: "fork.knife")
@@ -1066,6 +1066,7 @@ private struct FoodReminderSettingsLauncher: View {
     @Query(sort: \FoodReminder.dateTime) private var reminders: [FoodReminder]
     @Query(sort: \ShoppingList.sortOrder) private var shoppingLists: [ShoppingList]
     @Query(sort: \MealPrepItem.updatedAt, order: .reverse) private var mealPrepItems: [MealPrepItem]
+    @Query(sort: \ReturnRequest.updatedAt, order: .reverse) private var returnRequests: [ReturnRequest]
 
     var body: some View {
         Group {
@@ -1074,7 +1075,8 @@ private struct FoodReminderSettingsLauncher: View {
                     household: household,
                     reminders: reminders.filter { $0.householdID == household.id },
                     shoppingLists: shoppingLists.filter { $0.householdID == household.id && !$0.isArchived },
-                    mealPrepItems: mealPrepItems.filter { $0.householdID == household.id && !$0.isArchived }
+                    mealPrepItems: mealPrepItems.filter { $0.householdID == household.id && !$0.isArchived },
+                    returnRequests: returnRequests.filter { $0.householdID == household.id && !$0.isArchived }
                 )
             } else {
                 ProgressView("Preparing Food & Home")

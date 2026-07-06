@@ -781,6 +781,9 @@ private struct FamilySyncDatasetSnapshot {
         var shoppingListItems: [ShoppingListItemDigest]?
         var inventoryItems: [InventoryItemDigest]?
         var mealPrepItems: [MealPrepItemDigest]?
+        var returnRequests: [ReturnRequestDigest]?
+        var returnItems: [ReturnItemDigest]?
+        var returnPackages: [ReturnPackageDigest]?
         var foodReminders: [FoodReminderDigest]?
     }
 
@@ -865,12 +868,40 @@ private struct FamilySyncDatasetSnapshot {
         var isArchived: Bool
     }
 
+    struct ReturnRequestDigest: Decodable {
+        var id: UUID
+        var createdAt: Date
+        var updatedAt: Date
+        var completedAt: Date?
+        var isArchived: Bool
+    }
+
+    struct ReturnItemDigest: Decodable {
+        var id: UUID
+        var returnRequestID: UUID
+        var name: String
+        var createdAt: Date
+        var updatedAt: Date
+    }
+
+    struct ReturnPackageDigest: Decodable {
+        var id: UUID
+        var returnRequestID: UUID
+        var name: String
+        var carrierRawValue: String
+        var droppedOffAt: Date?
+        var completedAt: Date?
+        var createdAt: Date
+        var updatedAt: Date
+    }
+
     struct FoodReminderDigest: Decodable {
         var id: UUID
         var typeRawValue: String
         var title: String
         var relatedShoppingListID: UUID?
         var relatedMealPrepItemID: UUID?
+        var relatedReturnRequestID: UUID?
         var createdAt: Date
         var updatedAt: Date
         var isEnabled: Bool
@@ -890,6 +921,9 @@ private struct FamilySyncDatasetSnapshot {
     var shoppingItemsByID: [UUID: ShoppingListItemDigest]
     var inventoryItemsByID: [UUID: InventoryItemDigest]
     var mealPrepItemsByID: [UUID: MealPrepItemDigest]
+    var returnRequestsByID: [UUID: ReturnRequestDigest]
+    var returnItemsByID: [UUID: ReturnItemDigest]
+    var returnPackagesByID: [UUID: ReturnPackageDigest]
     var foodRemindersByID: [UUID: FoodReminderDigest]
 
     init(data: Data) throws {
@@ -916,6 +950,15 @@ private struct FamilySyncDatasetSnapshot {
         mealPrepItemsByID = Dictionary(
             uniqueKeysWithValues: (envelope.mealPrepItems ?? []).map { ($0.id, $0) }
         )
+        returnRequestsByID = Dictionary(
+            uniqueKeysWithValues: (envelope.returnRequests ?? []).map { ($0.id, $0) }
+        )
+        returnItemsByID = Dictionary(
+            uniqueKeysWithValues: (envelope.returnItems ?? []).map { ($0.id, $0) }
+        )
+        returnPackagesByID = Dictionary(
+            uniqueKeysWithValues: (envelope.returnPackages ?? []).map { ($0.id, $0) }
+        )
         foodRemindersByID = Dictionary(
             uniqueKeysWithValues: (envelope.foodReminders ?? []).map { ($0.id, $0) }
         )
@@ -930,6 +973,7 @@ private struct FamilySyncDatasetSnapshot {
         candidates.append(contentsOf: shoppingItemChanges(comparedTo: local))
         candidates.append(contentsOf: inventoryChanges(comparedTo: local))
         candidates.append(contentsOf: mealPrepChanges(comparedTo: local))
+        candidates.append(contentsOf: returnChanges(comparedTo: local))
         candidates.append(contentsOf: foodReminderChanges(comparedTo: local))
         return candidates
     }
@@ -1112,6 +1156,88 @@ private struct FamilySyncDatasetSnapshot {
         }
     }
 
+    private func returnChanges(comparedTo local: FamilySyncDatasetSnapshot) -> [ChangeCandidate] {
+        var candidates = returnRequestsByID.values.compactMap { request -> ChangeCandidate? in
+            let previous = local.returnRequestsByID[request.id]
+            guard isNewOrUpdated(remoteDate: request.updatedAt, localDate: previous?.updatedAt) else {
+                return nil
+            }
+            let action: String
+            if request.isArchived && previous?.isArchived != true {
+                action = "removed"
+            } else if request.completedAt != nil && previous?.completedAt == nil {
+                action = "completed"
+            } else {
+                action = previous == nil ? "added" : "updated"
+            }
+            return ChangeCandidate(
+                date: request.updatedAt,
+                priority: 48,
+                notification: FamilySyncActivityNotification(
+                    title: "Return updated",
+                    body: "A caregiver \(action) \(returnTitle(for: request.id)).",
+                    deepLinkPath: "food/returns/\(request.id.uuidString)"
+                )
+            )
+        }
+
+        candidates.append(contentsOf: returnPackagesByID.values.compactMap { package in
+            let previous = local.returnPackagesByID[package.id]
+            guard isNewOrUpdated(remoteDate: package.updatedAt, localDate: previous?.updatedAt) else {
+                return nil
+            }
+            let requestTitle = returnTitle(for: package.returnRequestID)
+            let packageName = package.name.isEmpty ? package.carrierRawValue : package.name
+            let action: String
+            if package.completedAt != nil && previous?.completedAt == nil {
+                action = "completed"
+            } else if package.droppedOffAt != nil && previous?.droppedOffAt == nil {
+                action = "dropped off"
+            } else {
+                action = previous == nil ? "added" : "updated"
+            }
+            return ChangeCandidate(
+                date: package.updatedAt,
+                priority: 49,
+                notification: FamilySyncActivityNotification(
+                    title: "Return package updated",
+                    body: "A caregiver \(action) \(packageName) for \(requestTitle).",
+                    deepLinkPath: "food/returns/\(package.returnRequestID.uuidString)"
+                )
+            )
+        })
+
+        candidates.append(contentsOf: returnItemsByID.values.compactMap { item in
+            let previous = local.returnItemsByID[item.id]
+            guard isNewOrUpdated(remoteDate: item.updatedAt, localDate: previous?.updatedAt) else {
+                return nil
+            }
+            let requestTitle = returnTitle(for: item.returnRequestID, excluding: item.id)
+            let action = previous == nil ? "added" : "updated"
+            return ChangeCandidate(
+                date: item.updatedAt,
+                priority: 47,
+                notification: FamilySyncActivityNotification(
+                    title: "Return item updated",
+                    body: "A caregiver \(action) \(item.name) for \(requestTitle).",
+                    deepLinkPath: "food/returns/\(item.returnRequestID.uuidString)"
+                )
+            )
+        })
+
+        return candidates
+    }
+
+    private func returnTitle(for requestID: UUID, excluding excludedItemID: UUID? = nil) -> String {
+        if let item = returnItemsByID.values
+            .filter({ $0.returnRequestID == requestID && $0.id != excludedItemID })
+            .sorted(by: { ($0.createdAt, $0.name) < ($1.createdAt, $1.name) })
+            .first {
+            return item.name
+        }
+        return "a return"
+    }
+
     private func foodReminderChanges(comparedTo local: FamilySyncDatasetSnapshot) -> [ChangeCandidate] {
         foodRemindersByID.values.compactMap { reminder in
             let previous = local.foodRemindersByID[reminder.id]
@@ -1124,6 +1250,8 @@ private struct FamilySyncDatasetSnapshot {
                 path = "food/shopping/\(listID.uuidString)"
             } else if let mealPrepID = reminder.relatedMealPrepItemID {
                 path = "food/meal-prep/\(mealPrepID.uuidString)"
+            } else if let returnRequestID = reminder.relatedReturnRequestID {
+                path = "food/returns/\(returnRequestID.uuidString)"
             } else {
                 path = "food"
             }

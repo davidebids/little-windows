@@ -351,7 +351,7 @@ struct RootView: View {
                     Color.clear
                 }
             }
-                .tabItem { Label("Food", systemImage: "cart.fill") }
+                .tabItem { Label("Home", systemImage: "house.fill") }
                 .tag(LittleWindowsTab.food)
 
             Group {

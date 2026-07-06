@@ -849,6 +849,8 @@ final class NotificationManager: NSObject, ObservableObject {
             content.body = "Open your shopping list before the next trip."
         case .mealPrep:
             content.body = "Check prepared meals and servings."
+        case .returns:
+            content.body = "Check return labels, packages, and drop-off timing."
         case .custom:
             content.body = "Food & Home reminder."
         }
@@ -859,10 +861,14 @@ final class NotificationManager: NSObject, ObservableObject {
             path = "food/shopping/\(listID.uuidString)"
         } else if let mealPrepID = reminder.relatedMealPrepItemID {
             path = "food/meal-prep/\(mealPrepID.uuidString)"
+        } else if let returnRequestID = reminder.relatedReturnRequestID {
+            path = "food/returns/\(returnRequestID.uuidString)"
         } else if reminder.type == .mealPrep {
             path = "food/meal-prep"
         } else if reminder.type == .shopping {
             path = "food/shopping"
+        } else if reminder.type == .returns {
+            path = "food/returns"
         } else {
             path = "food"
         }

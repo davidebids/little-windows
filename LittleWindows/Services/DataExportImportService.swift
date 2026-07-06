@@ -44,6 +44,9 @@ private struct BackupEnvelope: Codable {
     var inventoryItems: [InventoryItemDTO]?
     var mealPrepItems: [MealPrepItemDTO]?
     var mealPrepUsages: [MealPrepUsageDTO]?
+    var returnRequests: [ReturnRequestDTO]?
+    var returnItems: [ReturnItemDTO]?
+    var returnPackages: [ReturnPackageDTO]?
     var foodReminders: [FoodReminderDTO]?
     var careRoutines: [CareRoutineDTO]?
     var careRoutineSteps: [CareRoutineStepDTO]?
@@ -379,6 +382,47 @@ private struct MealPrepUsageDTO: Codable {
     var updatedAt: Date
 }
 
+private struct ReturnRequestDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var createdAt: Date
+    var updatedAt: Date
+    var completedAt: Date?
+    var isArchived: Bool
+    var sortOrder: Int?
+}
+
+private struct ReturnItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var returnRequestID: UUID
+    var packageID: UUID?
+    var name: String
+    var quantity: Double?
+    var reason: String?
+    var returnURLString: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int?
+}
+
+private struct ReturnPackageDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var returnRequestID: UUID
+    var name: String
+    var carrierRawValue: String
+    var methodRawValue: String
+    var trackingNumber: String?
+    var returnByDate: Date?
+    var photoAttachmentIDs: [UUID]?
+    var droppedOffAt: Date?
+    var completedAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int?
+}
+
 private struct FoodReminderDTO: Codable {
     var id: UUID
     var householdID: UUID
@@ -386,6 +430,7 @@ private struct FoodReminderDTO: Codable {
     var title: String
     var relatedShoppingListID: UUID?
     var relatedMealPrepItemID: UUID?
+    var relatedReturnRequestID: UUID?
     var dateTime: Date
     var isEnabled: Bool
     var recurrence: String?
@@ -772,6 +817,50 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
+        let returnRequests = try context.fetch(FetchDescriptor<ReturnRequest>()).map {
+            ReturnRequestDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                completedAt: $0.completedAt,
+                isArchived: $0.isArchived,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let returnItems = try context.fetch(FetchDescriptor<ReturnItem>()).map {
+            ReturnItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                returnRequestID: $0.returnRequestID,
+                packageID: $0.packageID,
+                name: $0.name,
+                quantity: $0.quantity,
+                reason: $0.reason,
+                returnURLString: $0.returnURLString,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let returnPackages = try context.fetch(FetchDescriptor<ReturnPackage>()).map {
+            ReturnPackageDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                returnRequestID: $0.returnRequestID,
+                name: $0.name,
+                carrierRawValue: $0.carrierRawValue,
+                methodRawValue: $0.methodRawValue,
+                trackingNumber: $0.trackingNumber,
+                returnByDate: $0.returnByDate,
+                photoAttachmentIDs: $0.photoAttachmentIDs,
+                droppedOffAt: $0.droppedOffAt,
+                completedAt: $0.completedAt,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
         let foodReminders = try context.fetch(FetchDescriptor<FoodReminder>()).map {
             FoodReminderDTO(
                 id: $0.id,
@@ -780,6 +869,7 @@ enum DataExportImportService {
                 title: $0.title,
                 relatedShoppingListID: $0.relatedShoppingListID,
                 relatedMealPrepItemID: $0.relatedMealPrepItemID,
+                relatedReturnRequestID: $0.relatedReturnRequestID,
                 dateTime: $0.dateTime,
                 isEnabled: $0.isEnabled,
                 recurrence: $0.recurrence,
@@ -846,7 +936,7 @@ enum DataExportImportService {
             )
         }
         let envelope = BackupEnvelope(
-            version: 11,
+            version: 12,
             exportedAt: Date(),
             profiles: profiles,
             photoAttachments: photoAttachments,
@@ -866,6 +956,9 @@ enum DataExportImportService {
             inventoryItems: inventoryItems,
             mealPrepItems: mealPrepItems,
             mealPrepUsages: mealPrepUsages,
+            returnRequests: returnRequests,
+            returnItems: returnItems,
+            returnPackages: returnPackages,
             foodReminders: foodReminders,
             careRoutines: careRoutines,
             careRoutineSteps: careRoutineSteps,
@@ -886,7 +979,7 @@ enum DataExportImportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
-        guard (1...11).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
+        guard (1...12).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
         try deleteAll(context: context)
 
         for value in envelope.profiles {
@@ -1260,6 +1353,50 @@ enum DataExportImportService {
                 updatedAt: value.updatedAt
             ))
         }
+        for value in envelope.returnRequests ?? [] {
+            context.insert(ReturnRequest(
+                id: value.id,
+                householdID: value.householdID,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                completedAt: value.completedAt,
+                isArchived: value.isArchived,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.returnItems ?? [] {
+            context.insert(ReturnItem(
+                id: value.id,
+                householdID: value.householdID,
+                returnRequestID: value.returnRequestID,
+                packageID: value.packageID,
+                name: value.name,
+                quantity: value.quantity,
+                reason: value.reason,
+                returnURLString: value.returnURLString,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.returnPackages ?? [] {
+            context.insert(ReturnPackage(
+                id: value.id,
+                householdID: value.householdID,
+                returnRequestID: value.returnRequestID,
+                name: value.name,
+                carrier: ReturnPackageCarrier(rawValue: value.carrierRawValue) ?? .other,
+                method: ReturnPackageMethod(rawValue: value.methodRawValue) ?? .unknown,
+                trackingNumber: value.trackingNumber,
+                returnByDate: value.returnByDate,
+                photoAttachmentIDs: value.photoAttachmentIDs ?? [],
+                droppedOffAt: value.droppedOffAt,
+                completedAt: value.completedAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
         for value in envelope.foodReminders ?? [] {
             context.insert(FoodReminder(
                 id: value.id,
@@ -1268,6 +1405,7 @@ enum DataExportImportService {
                 title: value.title,
                 relatedShoppingListID: value.relatedShoppingListID,
                 relatedMealPrepItemID: value.relatedMealPrepItemID,
+                relatedReturnRequestID: value.relatedReturnRequestID,
                 dateTime: value.dateTime,
                 isEnabled: value.isEnabled,
                 recurrence: value.recurrence,
@@ -1353,6 +1491,9 @@ enum DataExportImportService {
         try deleteAll(CareRoutineStep.self, context: context)
         try deleteAll(CareRoutine.self, context: context)
         try deleteAll(FoodReminder.self, context: context)
+        try deleteAll(ReturnPackage.self, context: context)
+        try deleteAll(ReturnItem.self, context: context)
+        try deleteAll(ReturnRequest.self, context: context)
         try deleteAll(MealPrepUsage.self, context: context)
         try deleteAll(MealPrepItem.self, context: context)
         try deleteAll(InventoryItem.self, context: context)

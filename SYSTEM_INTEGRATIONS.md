@@ -116,6 +116,8 @@ littlewindows://food/inventory
 littlewindows://food/inventory/{UUID}
 littlewindows://food/meal-prep
 littlewindows://food/meal-prep/{UUID}
+littlewindows://food/returns
+littlewindows://food/returns/{UUID}
 littlewindows://food/stores/{UUID}
 ```
 
@@ -216,8 +218,8 @@ Little Windows uses local notifications for:
 - Routine reminders for household or profile routines shown on Today.
 - Appointment reminders with selectable lead times.
 - Monthly guide reminders that fire at most once per monthly age guide.
-- Food & Home reminders created by the user for shopping, meal prep, or custom food tasks.
-- Family Sync shared activity alerts after CloudKit silent pushes wake the app, download the shared dataset, and detect another caregiver's care, appointment, milestone, shopping, inventory, meal-prep, or food-reminder change.
+- Food & Home reminders created by the user for shopping, meal prep, returns, or custom home tasks.
+- Family Sync shared activity alerts after CloudKit silent pushes wake the app, download the shared dataset, and detect another caregiver's care, appointment, milestone, shopping, inventory, meal-prep, return, or food-reminder change.
 
 Notification scheduling is refreshed after relevant event mutations, prediction updates, routine changes, appointment changes, guide-read-state changes, and Food & Home reminder changes. Food & Home shopping-list widgets refresh from lightweight App Group snapshots; the widget extension opens the app for edits rather than writing SwiftData directly.
 
