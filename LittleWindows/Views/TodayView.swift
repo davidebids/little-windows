@@ -27,6 +27,7 @@ private struct TodayRenderState {
     var scopedPuppyGuideReadStates: [PuppyStageGuideReadState]
     var todayEvents: [BabyEvent]
     var activeEvents: [BabyEvent]
+    var sleepPressureEvents: [BabyEvent]
     var prediction: SleepPrediction?
     var isDogProfile: Bool
     var currentHouseholdID: UUID?
@@ -51,6 +52,39 @@ private struct TodayRenderState {
     func shows(_ type: EventType) -> Bool {
         visibleCareTypes.contains(type)
     }
+
+    static let empty = TodayRenderState(
+        profile: nil,
+        profileID: nil,
+        scopedEvents: [],
+        scopedRecords: [],
+        scopedAppointments: [],
+        scopedAgeGuideReadStates: [],
+        scopedPuppyGuideReadStates: [],
+        todayEvents: [],
+        activeEvents: [],
+        sleepPressureEvents: [],
+        prediction: nil,
+        isDogProfile: false,
+        currentHouseholdID: nil,
+        visibleCareRoutines: [],
+        suggestedRoutineTemplates: [],
+        currentAgeGuide: nil,
+        shouldShowAgeGuideCard: false,
+        currentPuppyGuide: nil,
+        shouldShowPuppyGuideCard: false,
+        relevantAppointments: [],
+        runningSleepTimer: nil,
+        awakeSinceDate: nil,
+        isSleeping: false,
+        sleepMiniPlan: nil,
+        dogLastEventTitles: [:],
+        dogPottyTitles: [:],
+        lastLoggedDates: [:],
+        dogPottyLastLoggedDates: [:],
+        smartQuickActions: [],
+        visibleCareTypes: []
+    )
 }
 
 struct TodayView: View {
@@ -104,6 +138,7 @@ struct TodayView: View {
     @State private var categoryPreferenceRevision = 0
     @State private var repeatFeedback: RepeatFeedback?
     @State private var showingCareCustomization = false
+    @State private var cachedRenderState: TodayRenderState?
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -272,7 +307,44 @@ struct TodayView: View {
             .compactMap { $0 }
             .max()
     }
-    private var renderState: TodayRenderState {
+    private var renderRefreshToken: String {
+        [
+            collectionVersion(profiles, updatedAt: \.updatedAt),
+            profileService.selectedProfile(in: profiles)?.id.uuidString ?? "no-profile",
+            collectionVersion(allEvents, updatedAt: \.updatedAt),
+            collectionVersion(records, updatedAt: \.updatedAt),
+            collectionVersion(appointments, updatedAt: \.updatedAt),
+            collectionVersion(ageGuideReadStates, updatedAt: \.updatedAt),
+            collectionVersion(puppyStageGuideReadStates, updatedAt: \.updatedAt),
+            collectionVersion(careRoutines, updatedAt: \.updatedAt),
+            collectionVersion(careRoutineSteps, updatedAt: \.updatedAt),
+            collectionVersion(careRoutineRuns, updatedAt: \.updatedAt),
+            collectionVersion(households, updatedAt: \.updatedAt),
+            caregiverOne,
+            currentCaregiverName,
+            feedAdjustmentEnabled.description,
+            nursingAdjustmentEnabled.description,
+            bedtimePredictionEnabled.description,
+            customWakeMinimum.description,
+            customWakeMaximum.description,
+            pinnedQuickActionRevision.description,
+            categoryPreferenceRevision.description
+        ].joined(separator: "|")
+    }
+
+    private func collectionVersion<Value>(
+        _ values: [Value],
+        updatedAt: KeyPath<Value, Date>
+    ) -> String {
+        let latest = values.lazy.map { $0[keyPath: updatedAt].timeIntervalSinceReferenceDate }.max() ?? 0
+        return "\(values.count):\(latest)"
+    }
+
+    private func refreshCachedRenderState() {
+        cachedRenderState = makeRenderState()
+    }
+
+    private func makeRenderState() -> TodayRenderState {
         let profile = profile
         let profileID = profile?.id
         let now = Date()
@@ -318,6 +390,7 @@ struct TodayView: View {
         }
         var todayEvents: [BabyEvent] = []
         var activeEvents: [BabyEvent] = []
+        var sleepPressureEvents: [BabyEvent] = []
         var latestCompletedSleepEnd: Date?
         var latestStoppedDraftSleepEnd: Date?
         var dogLatestEvents: [EventType: BabyEvent] = [:]
@@ -329,6 +402,9 @@ struct TodayView: View {
         for event in scopedEvents {
             if event.isTimerDraft {
                 activeEvents.append(event)
+                if event.isSleepBlock {
+                    sleepPressureEvents.append(event)
+                }
                 if !event.isTimerRunning, event.updatedAt <= now, latestStoppedDraftSleepEnd.map({ event.updatedAt > $0 }) ?? true {
                     latestStoppedDraftSleepEnd = event.updatedAt
                 }
@@ -349,6 +425,9 @@ struct TodayView: View {
                endDate <= now,
                latestCompletedSleepEnd.map({ endDate > $0 }) ?? true {
                 latestCompletedSleepEnd = endDate
+            }
+            if event.isSleepBlock, event.endDate != nil {
+                sleepPressureEvents.append(event)
             }
 
             if profile?.profileType == .dog {
@@ -403,6 +482,7 @@ struct TodayView: View {
             }
         }
         activeEvents.sort { $0.startDate < $1.startDate }
+        sleepPressureEvents.sort { $0.startDate < $1.startDate }
         let prediction = PredictionTuningService.currentPrediction(
             profile: profile,
             events: scopedEvents,
@@ -462,6 +542,7 @@ struct TodayView: View {
             scopedPuppyGuideReadStates: scopedPuppyGuideReadStates,
             todayEvents: todayEvents,
             activeEvents: activeEvents,
+            sleepPressureEvents: sleepPressureEvents,
             prediction: prediction,
             isDogProfile: profile?.profileType == .dog,
             currentHouseholdID: currentHouseholdID,
@@ -498,7 +579,7 @@ struct TodayView: View {
     }
 
     var body: some View {
-        let state = renderState
+        let state = cachedRenderState ?? makeRenderState()
         let todayEvents = state.todayEvents
         let activeEvents = state.activeEvents
         let prediction = state.prediction
@@ -677,10 +758,10 @@ struct TodayView: View {
             NavigationStack {
                 CareRoutineManagerView(
                     profileType: profile?.profileType,
-                    routines: visibleCareRoutines,
+                    routines: state.visibleCareRoutines,
                     steps: careRoutineSteps,
                     runs: careRoutineRuns,
-                    templates: suggestedRoutineTemplates,
+                    templates: state.suggestedRoutineTemplates,
                     addTemplate: addRoutineTemplate,
                     createRoutine: createCustomRoutine,
                     updateRoutine: updateCustomRoutine,
@@ -874,6 +955,9 @@ struct TodayView: View {
         .onChange(of: deepLinkRouter.pendingAction) { _, _ in
             handlePendingDeepLink()
         }
+        .onChange(of: renderRefreshToken) { _, _ in
+            refreshCachedRenderState()
+        }
         .onChange(of: deepLinkRouter.pendingProfileID) { _, _ in
             handlePendingProfileSwitch()
             refreshActiveSleepPlan()
@@ -897,8 +981,10 @@ struct TodayView: View {
             }
         }
         .task {
+            refreshCachedRenderState()
             _ = HouseholdService.ensureDefaultHousehold(context: modelContext)
             _ = profileService.ensureSelection(in: profiles)
+            refreshCachedRenderState()
             refreshActiveSleepPlan()
             handlePendingProfileSwitch()
             handlePendingDeepLink()
@@ -2450,7 +2536,7 @@ struct TodayView: View {
     private func sleepPressure(at now: Date, state: TodayRenderState) -> SleepPressure? {
         SleepPredictionEngine.sleepPressure(
             profile: state.profile,
-            events: state.scopedEvents,
+            events: state.sleepPressureEvents,
             records: state.scopedRecords,
             now: now,
             settings: predictionSettings

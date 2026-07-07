@@ -4,7 +4,11 @@ import SwiftData
 @MainActor
 enum HouseholdService {
     static func ensureDefaultHousehold(context: ModelContext) -> Household {
-        if let household = try? context.fetch(FetchDescriptor<Household>()).first {
+        var descriptor = FetchDescriptor<Household>(
+            sortBy: [SortDescriptor(\Household.createdAt)]
+        )
+        descriptor.fetchLimit = 1
+        if let household = try? context.fetch(descriptor).first {
             return household
         }
         let household = Household(name: "Home")

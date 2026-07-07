@@ -52,7 +52,6 @@ struct MilestonesView: View {
     @Query(sort: \MilestoneEntry.date, order: .reverse) private var allMilestones: [MilestoneEntry]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
-    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @State private var searchText = ""
     @State private var selectedCategory: MilestoneCategory?
     @State private var favoritesOnly = false
@@ -415,14 +414,13 @@ struct MilestonesView: View {
         await Task.yield()
         do {
             let birthDate = Calendar.current.startOfDay(for: profile.birthDate)
+            let endDate = Calendar.current.startOfNextDay(for: Date())
             let profileID = profile.id
-            let descriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { event in
-                    event.profileID == profileID && event.startDate >= birthDate
-                },
-                sortBy: [SortDescriptor(\BabyEvent.startDate)]
+            let fetchedEvents = try automaticSummaryEvents(
+                profileID: profileID,
+                startDate: birthDate,
+                endDate: endDate
             )
-            let fetchedEvents = try modelContext.fetch(descriptor)
             events = fetchedEvents
             automaticSummaries = AutomaticMilestoneSummaryService.summaries(
                 profile: profile,
@@ -432,6 +430,35 @@ struct MilestonesView: View {
             events = []
             automaticSummaries = []
         }
+    }
+
+    private func automaticSummaryEvents(
+        profileID: UUID,
+        startDate: Date,
+        endDate: Date
+    ) throws -> [BabyEvent] {
+        var values: [BabyEvent] = []
+        for type in [
+            EventType.sleep,
+            .nursing,
+            .diaper,
+            .activity,
+            .growth,
+            .custom
+        ] {
+            let typeRawValue = type.rawValue
+            let descriptor = FetchDescriptor<BabyEvent>(
+                predicate: #Predicate<BabyEvent> { event in
+                    event.profileID == profileID &&
+                        event.startDate >= startDate &&
+                        event.startDate < endDate &&
+                        event.typeRawValue == typeRawValue
+                },
+                sortBy: [SortDescriptor(\BabyEvent.startDate)]
+            )
+            values.append(contentsOf: try modelContext.fetch(descriptor))
+        }
+        return values.sorted { $0.startDate < $1.startDate }
     }
 
     private var memoryHeader: some View {
@@ -690,7 +717,6 @@ struct MilestonesView: View {
     private func delete(_ milestone: MilestoneEntry) {
         PhotoAttachmentStore.deleteAttachments(
             with: milestone.photoAttachmentIDs,
-            in: photoAttachments,
             context: modelContext
         )
         modelContext.delete(milestone)

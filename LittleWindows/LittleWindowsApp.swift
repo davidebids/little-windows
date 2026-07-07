@@ -99,8 +99,13 @@ struct LittleWindowsApp: App {
             )
             if let profile,
                UserDefaults.standard.bool(forKey: "monthlyAgeGuideNotificationsEnabled") {
-                let readStates = ((try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? [])
-                    .filter { $0.matchesProfile(profile.id) }
+                let profileID = profile.id
+                let readStateDescriptor = FetchDescriptor<AgeGuideReadState>(
+                    predicate: #Predicate<AgeGuideReadState> { state in
+                        state.profileID == profileID
+                    }
+                )
+                let readStates = (try? context.fetch(readStateDescriptor)) ?? []
                 let timing = MonthlyAgeGuideNotificationTiming(
                     rawValue: UserDefaults.standard.string(
                         forKey: "monthlyAgeGuideNotificationTiming"

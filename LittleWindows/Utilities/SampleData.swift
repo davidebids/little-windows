@@ -23,7 +23,6 @@ enum SampleData {
             let profiles = (try? context.fetch(FetchDescriptor<CareProfile>())) ?? []
             _ = ProfileService.shared.ensureSelection(in: profiles)
         }
-        FoodHomeBootstrapService.seedIfNeeded(context: context)
     }
 
     @MainActor

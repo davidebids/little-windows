@@ -276,11 +276,31 @@ enum PhotoAttachmentStore {
             .forEach { context.delete($0) }
     }
 
+    static func deleteAttachments(
+        with ids: [UUID],
+        context: ModelContext
+    ) {
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            var descriptor = FetchDescriptor<PhotoAttachment>(
+                predicate: #Predicate<PhotoAttachment> { attachment in
+                    attachment.id == id
+                }
+            )
+            descriptor.fetchLimit = 1
+            if let attachment = try? context.fetch(descriptor).first {
+                context.delete(attachment)
+            }
+        }
+    }
+
     static func deleteAttachments(profileID: UUID, context: ModelContext) {
-        let attachments = (try? context.fetch(FetchDescriptor<PhotoAttachment>())) ?? []
-        attachments
-            .filter { $0.profileID == profileID }
-            .forEach { context.delete($0) }
+        let descriptor = FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate<PhotoAttachment> { attachment in
+                attachment.profileID == profileID
+            }
+        )
+        ((try? context.fetch(descriptor)) ?? []).forEach { context.delete($0) }
     }
 }
 

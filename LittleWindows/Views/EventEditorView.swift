@@ -238,14 +238,18 @@ struct EventEditorView: View {
         return amount.formatted(.number.precision(.fractionLength(0...2)))
     }
 
+    private static let positiveAmountFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = .current
+        return formatter
+    }()
+
     private static func positiveAmount(from text: String) -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = .current
-        if let amount = formatter.number(from: trimmed)?.doubleValue, amount > 0 {
+        if let amount = positiveAmountFormatter.number(from: trimmed)?.doubleValue, amount > 0 {
             return amount
         }
 
@@ -1023,14 +1027,26 @@ struct EventEditorView: View {
             return
         }
 
-        var descriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { value in
-                value.typeRawValue == "medicine"
-            },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
-        )
-        descriptor.fetchLimit = 50
-        let events = (try? modelContext.fetch(descriptor)) ?? []
+        let medicineType = EventType.medicine.rawValue
+        let descriptor: FetchDescriptor<BabyEvent>
+        if let activeProfileID {
+            descriptor = FetchDescriptor<BabyEvent>(
+                predicate: #Predicate<BabyEvent> { value in
+                    value.typeRawValue == medicineType && value.profileID == activeProfileID
+                },
+                sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            )
+        } else {
+            descriptor = FetchDescriptor<BabyEvent>(
+                predicate: #Predicate<BabyEvent> { value in
+                    value.typeRawValue == medicineType
+                },
+                sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            )
+        }
+        var limitedDescriptor = descriptor
+        limitedDescriptor.fetchLimit = 50
+        let events = (try? modelContext.fetch(limitedDescriptor)) ?? []
         var seen = Set<String>()
         recentMedicineNames = events
             .filter {

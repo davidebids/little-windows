@@ -261,12 +261,108 @@ enum ProfileMigrationService {
         context: ModelContext,
         validProfileIDs: Set<UUID>
     ) -> Bool {
-        ((try? context.fetch(FetchDescriptor<BabyEvent>())) ?? []).containsOrphanedProfileID(validProfileIDs)
-            || ((try? context.fetch(FetchDescriptor<SleepPredictionRecord>())) ?? []).containsOrphanedProfileID(validProfileIDs)
-            || ((try? context.fetch(FetchDescriptor<MilestoneEntry>())) ?? []).containsOrphanedProfileID(validProfileIDs)
-            || ((try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? []).containsOrphanedProfileID(validProfileIDs)
-            || ((try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? []).containsOrphanedProfileID(validProfileIDs)
-            || ((try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? []).containsOrphanedProfileID(validProfileIDs)
+        hasOrphanedBabyEvents(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedPredictionRecords(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedMilestones(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedAppointments(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedAgeGuideStates(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedPuppyGuideStates(context: context, validProfileIDs: validProfileIDs)
+    }
+
+    private static func hasOrphanedBabyEvents(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        let total = (try? context.fetchCount(FetchDescriptor<BabyEvent>())) ?? 0
+        guard total > 0 else { return false }
+        guard !validProfileIDs.isEmpty else { return true }
+        let validCount = validProfileIDs.reduce(0) { partial, profileID in
+            let descriptor = FetchDescriptor<BabyEvent>(
+                predicate: #Predicate<BabyEvent> { $0.profileID == profileID }
+            )
+            return partial + ((try? context.fetchCount(descriptor)) ?? 0)
+        }
+        return validCount != total
+    }
+
+    private static func hasOrphanedPredictionRecords(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        let total = (try? context.fetchCount(FetchDescriptor<SleepPredictionRecord>())) ?? 0
+        guard total > 0 else { return false }
+        guard !validProfileIDs.isEmpty else { return true }
+        let validCount = validProfileIDs.reduce(0) { partial, profileID in
+            let descriptor = FetchDescriptor<SleepPredictionRecord>(
+                predicate: #Predicate<SleepPredictionRecord> { $0.profileID == profileID }
+            )
+            return partial + ((try? context.fetchCount(descriptor)) ?? 0)
+        }
+        return validCount != total
+    }
+
+    private static func hasOrphanedMilestones(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        let total = (try? context.fetchCount(FetchDescriptor<MilestoneEntry>())) ?? 0
+        guard total > 0 else { return false }
+        guard !validProfileIDs.isEmpty else { return true }
+        let validCount = validProfileIDs.reduce(0) { partial, profileID in
+            let descriptor = FetchDescriptor<MilestoneEntry>(
+                predicate: #Predicate<MilestoneEntry> { $0.profileID == profileID }
+            )
+            return partial + ((try? context.fetchCount(descriptor)) ?? 0)
+        }
+        return validCount != total
+    }
+
+    private static func hasOrphanedAppointments(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        let total = (try? context.fetchCount(FetchDescriptor<DoctorAppointment>())) ?? 0
+        guard total > 0 else { return false }
+        guard !validProfileIDs.isEmpty else { return true }
+        let validCount = validProfileIDs.reduce(0) { partial, profileID in
+            let descriptor = FetchDescriptor<DoctorAppointment>(
+                predicate: #Predicate<DoctorAppointment> { $0.profileID == profileID }
+            )
+            return partial + ((try? context.fetchCount(descriptor)) ?? 0)
+        }
+        return validCount != total
+    }
+
+    private static func hasOrphanedAgeGuideStates(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        let total = (try? context.fetchCount(FetchDescriptor<AgeGuideReadState>())) ?? 0
+        guard total > 0 else { return false }
+        guard !validProfileIDs.isEmpty else { return true }
+        let validCount = validProfileIDs.reduce(0) { partial, profileID in
+            let descriptor = FetchDescriptor<AgeGuideReadState>(
+                predicate: #Predicate<AgeGuideReadState> { $0.profileID == profileID }
+            )
+            return partial + ((try? context.fetchCount(descriptor)) ?? 0)
+        }
+        return validCount != total
+    }
+
+    private static func hasOrphanedPuppyGuideStates(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        let total = (try? context.fetchCount(FetchDescriptor<PuppyStageGuideReadState>())) ?? 0
+        guard total > 0 else { return false }
+        guard !validProfileIDs.isEmpty else { return true }
+        let validCount = validProfileIDs.reduce(0) { partial, profileID in
+            let descriptor = FetchDescriptor<PuppyStageGuideReadState>(
+                predicate: #Predicate<PuppyStageGuideReadState> { $0.profileID == profileID }
+            )
+            return partial + ((try? context.fetchCount(descriptor)) ?? 0)
+        }
+        return validCount != total
     }
 
     static func assignOrphanedProfileIDs(
@@ -302,11 +398,5 @@ private extension ProfileScopedRecord {
     func hasOrphanedProfileID(_ validProfileIDs: Set<UUID>) -> Bool {
         guard let profileID else { return true }
         return !validProfileIDs.contains(profileID)
-    }
-}
-
-private extension Array where Element: ProfileScopedRecord {
-    func containsOrphanedProfileID(_ validProfileIDs: Set<UUID>) -> Bool {
-        contains { $0.hasOrphanedProfileID(validProfileIDs) }
     }
 }

@@ -403,18 +403,7 @@ enum WidgetSnapshotService {
             listDescriptor.fetchLimit = 12
             lists = (try? context.fetch(listDescriptor)) ?? []
 
-            let listIDs = Set(lists.map(\.id))
-            items = ((try? context.fetch(
-                FetchDescriptor<ShoppingListItem>(
-                    predicate: #Predicate<ShoppingListItem> { item in
-                        item.householdID == householdID
-                    },
-                    sortBy: [
-                        SortDescriptor(\ShoppingListItem.sortOrder),
-                        SortDescriptor(\ShoppingListItem.name)
-                    ]
-                )
-            )) ?? []).filter { listIDs.contains($0.shoppingListID) }
+            items = shoppingItems(for: lists, householdID: householdID, context: context)
 
             sections = (try? context.fetch(
                 FetchDescriptor<FoodStoreSection>(
@@ -436,15 +425,7 @@ enum WidgetSnapshotService {
             listDescriptor.fetchLimit = 12
             lists = (try? context.fetch(listDescriptor)) ?? []
 
-            let listIDs = Set(lists.map(\.id))
-            items = ((try? context.fetch(
-                FetchDescriptor<ShoppingListItem>(
-                    sortBy: [
-                        SortDescriptor(\ShoppingListItem.sortOrder),
-                        SortDescriptor(\ShoppingListItem.name)
-                    ]
-                )
-            )) ?? []).filter { listIDs.contains($0.shoppingListID) }
+            items = shoppingItems(for: lists, context: context)
 
             sections = (try? context.fetch(FetchDescriptor<FoodStoreSection>())) ?? []
         }
@@ -464,6 +445,47 @@ enum WidgetSnapshotService {
             selectedList: selected,
             lists: Array(snapshots.prefix(4))
         )
+    }
+
+    private static func shoppingItems(
+        for lists: [ShoppingList],
+        householdID: UUID,
+        context: ModelContext
+    ) -> [ShoppingListItem] {
+        lists.flatMap { list in
+            let listID = list.id
+            var descriptor = FetchDescriptor<ShoppingListItem>(
+                predicate: #Predicate<ShoppingListItem> { item in
+                    item.householdID == householdID && item.shoppingListID == listID
+                },
+                sortBy: [
+                    SortDescriptor(\ShoppingListItem.sortOrder),
+                    SortDescriptor(\ShoppingListItem.name)
+                ]
+            )
+            descriptor.fetchLimit = 80
+            return (try? context.fetch(descriptor)) ?? []
+        }
+    }
+
+    private static func shoppingItems(
+        for lists: [ShoppingList],
+        context: ModelContext
+    ) -> [ShoppingListItem] {
+        lists.flatMap { list in
+            let listID = list.id
+            var descriptor = FetchDescriptor<ShoppingListItem>(
+                predicate: #Predicate<ShoppingListItem> { item in
+                    item.shoppingListID == listID
+                },
+                sortBy: [
+                    SortDescriptor(\ShoppingListItem.sortOrder),
+                    SortDescriptor(\ShoppingListItem.name)
+                ]
+            )
+            descriptor.fetchLimit = 80
+            return (try? context.fetch(descriptor)) ?? []
+        }
     }
 
     static func activeSnapshot(

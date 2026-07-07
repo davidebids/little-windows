@@ -45,6 +45,17 @@ struct FoodHomeView: View {
         + locations.count
     }
 
+    init() {
+        let returnPhotoKind = PhotoAttachmentOwnerKind.returnPhoto.rawValue
+        let descriptor = FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate<PhotoAttachment> { attachment in
+                attachment.ownerKindRawValue == returnPhotoKind
+            },
+            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
+        )
+        _photoAttachments = Query(descriptor)
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             Group {
