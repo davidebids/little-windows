@@ -2750,11 +2750,20 @@ private struct MealPrepEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
-                TextField("Total", value: $servingsTotal, format: .number)
-                    .keyboardType(.decimalPad)
-                TextField("Remaining", value: $servingsRemaining, format: .number)
-                    .keyboardType(.decimalPad)
+                LabeledContent("Name") {
+                    TextField("Required", text: $name)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Total quantity") {
+                    TextField("Optional", value: $servingsTotal, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Quantity remaining") {
+                    TextField("Required", value: $servingsRemaining, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
                 Picker("Unit", selection: $servingUnit) {
                     ForEach(MealPrepServingUnit.allCases) { unit in
                         Text(unit.singularName.capitalized).tag(unit)
@@ -2831,6 +2840,7 @@ private struct MealPrepEditorView: View {
         } else if let household {
             MealPrepService.createMealPrepItem(
                 name: name,
+                servingsTotal: servingsTotal,
                 servingsRemaining: servingsRemaining,
                 servingUnit: servingUnit,
                 locationID: locationID,

@@ -114,14 +114,14 @@ struct AgeGuidesListView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Sleep Basics")
                                 .font(.subheadline.weight(.semibold))
-                            Text("5 source-backed lessons")
+                            Text("5 source-backed lesson guides")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
             } footer: {
-                Text("Sleep Basics is general parent education from pediatric and public-health sources.")
+                Text("Open Sleep Basics to see the 5 lessons listed first, before the monthly age guides. Lessons are general parent education from pediatric and public-health sources.")
             }
 
             Section {
@@ -177,7 +177,7 @@ struct SleepGuideListView: View {
                     Label("Sleep Basics", systemImage: "moon.stars.circle.fill")
                         .font(.title3.bold())
                         .foregroundStyle(.indigo)
-                    Text("Short lessons for safe sleep setup, normal infant variability, routines, logging, and when to bring concerns to a pediatrician.")
+                    Text("Source-backed lesson guides for safe sleep setup, normal infant variability, routines, logging, and when to bring concerns to a pediatrician.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -242,7 +242,13 @@ private struct SleepGuideLessonView: View {
                 Text(lesson.body)
             }
 
-            Section("Care cues") {
+            ForEach(lesson.sections) { section in
+                Section(section.title) {
+                    Text(section.body)
+                }
+            }
+
+            Section("Try this") {
                 ForEach(lesson.bullets, id: \.self) { value in
                     Label(value, systemImage: "checkmark.circle.fill")
                         .symbolRenderingMode(.hierarchical)

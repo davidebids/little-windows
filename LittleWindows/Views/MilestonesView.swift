@@ -283,9 +283,9 @@ struct MilestonesView: View {
                             .frame(width: 38, height: 38)
                             .background(Color.pink.opacity(0.09), in: Circle())
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Monthly Age Guides")
+                            Text("Age Guides & Sleep Basics")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Development notes, play ideas, and milestone prompts")
+                            Text("Open for Sleep Basics lessons, monthly notes, play ideas, and milestone prompts")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

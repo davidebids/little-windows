@@ -660,6 +660,7 @@ enum MealPrepService {
     @discardableResult
     static func createMealPrepItem(
         name: String,
+        servingsTotal: Double? = nil,
         servingsRemaining: Double,
         servingUnit: MealPrepServingUnit,
         locationID: UUID,
@@ -675,7 +676,7 @@ enum MealPrepService {
             householdID: householdID,
             name: trimmed,
             locationID: locationID,
-            servingsTotal: servingsRemaining,
+            servingsTotal: servingsTotal ?? servingsRemaining,
             servingsRemaining: servingsRemaining,
             servingUnit: servingUnit,
             preparedDate: preparedDate,

@@ -130,8 +130,15 @@ struct SleepGuideLesson: Identifiable, Hashable {
     var title: String
     var subtitle: String
     var body: String
+    var sections: [SleepGuideLessonSection]
     var bullets: [String]
     var sourceReferences: [ContentSourceReference]
+}
+
+struct SleepGuideLessonSection: Identifiable, Hashable {
+    var id: String
+    var title: String
+    var body: String
 }
 
 @Model
