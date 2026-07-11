@@ -1428,6 +1428,9 @@ private struct ShoppingListDetailView: View {
                                     showingDeleteItemConfirmation = true
                                 }
                             }
+                            .swipeActions(edge: .leading) {
+                                favoriteButton(for: item)
+                            }
                         }
                     }
                 }
@@ -1451,6 +1454,9 @@ private struct ShoppingListDetailView: View {
                                 showingDeleteItemConfirmation = true
                             }
                         }
+                        .swipeActions(edge: .leading) {
+                            favoriteButton(for: item)
+                        }
                     }
                 }
             }
@@ -1472,6 +1478,9 @@ private struct ShoppingListDetailView: View {
                                     itemPendingDelete = item
                                     showingDeleteItemConfirmation = true
                                 }
+                            }
+                            .swipeActions(edge: .leading) {
+                                favoriteButton(for: item)
                             }
                         }
                     }
@@ -1598,7 +1607,21 @@ private struct ShoppingListDetailView: View {
 
     private func sortedItems(_ values: [ShoppingListItem]) -> [ShoppingListItem] {
         values
-            .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
+            .sorted {
+                ($0.isFavorite ? 0 : 1, $0.sortOrder ?? 0, $0.name)
+                    < ($1.isFavorite ? 0 : 1, $1.sortOrder ?? 0, $1.name)
+            }
+    }
+
+    private func favoriteButton(for item: ShoppingListItem) -> some View {
+        Button(item.isFavorite ? "Unfavorite" : "Favorite") {
+            ShoppingListService.setFavorite(
+                item,
+                isFavorite: !item.isFavorite,
+                context: modelContext
+            )
+        }
+        .tint(.pink)
     }
 
     private func addFastItem() {
@@ -1632,9 +1655,14 @@ private struct ShoppingListItemRow: View {
                             .strikethrough(item.isChecked)
                             .foregroundStyle(.primary)
                         if item.isRecurringStaple {
-                            Image(systemName: "star.fill")
+                            Image(systemName: "repeat")
                                 .font(.caption)
-                                .foregroundStyle(.yellow)
+                                .foregroundStyle(.secondary)
+                        }
+                        if item.isFavorite {
+                            Image(systemName: "heart.fill")
+                                .font(.caption)
+                                .foregroundStyle(.pink)
                         }
                     }
                     HStack(spacing: 8) {
@@ -1684,7 +1712,10 @@ private struct ShoppingModeView: View {
             },
             by: \.storeSectionID
         ).mapValues { values in
-            values.sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
+            values.sorted {
+                ($0.isFavorite ? 0 : 1, $0.sortOrder ?? 0, $0.name)
+                    < ($1.isFavorite ? 0 : 1, $1.sortOrder ?? 0, $1.name)
+            }
         }
 
         List {
@@ -1793,6 +1824,7 @@ private struct ShoppingListItemEditorView: View {
     @State private var notes = ""
     @State private var sectionID: UUID?
     @State private var isStaple = false
+    @State private var isFavorite = false
     @State private var priority: ShoppingItemPriority = .normal
     @State private var inventoryBehavior: InventoryLinkBehavior = .askWhenChecked
 
@@ -1800,9 +1832,15 @@ private struct ShoppingListItemEditorView: View {
         NavigationStack {
             Form {
                 TextField("Name", text: $name)
-                TextField("Quantity", value: $quantity, format: .number)
-                    .keyboardType(.decimalPad)
-                TextField("Unit", text: $unit)
+                LabeledContent("Quantity") {
+                    TextField("Optional", value: $quantity, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Unit") {
+                    TextField("Optional", text: $unit)
+                        .multilineTextAlignment(.trailing)
+                }
                 Picker("Section", selection: $sectionID) {
                     Text("Other").tag(UUID?.none)
                     ForEach(sections) { section in
@@ -1810,6 +1848,7 @@ private struct ShoppingListItemEditorView: View {
                     }
                 }
                 Toggle("Staple", isOn: $isStaple)
+                Toggle("Favorite", isOn: $isFavorite)
                 Picker("Priority", selection: $priority) {
                     ForEach(ShoppingItemPriority.allCases) { value in
                         Text(value.displayName).tag(value)
@@ -1820,7 +1859,8 @@ private struct ShoppingListItemEditorView: View {
                         Text(value.displayName).tag(value)
                     }
                 }
-                TextField("Notes", text: $notes, axis: .vertical)
+                TextField("Notes (what you liked or disliked)", text: $notes, axis: .vertical)
+                    .lineLimit(3...6)
             }
             .navigationTitle("Item")
             .navigationBarTitleDisplayMode(.inline)
@@ -1838,6 +1878,7 @@ private struct ShoppingListItemEditorView: View {
                             notes: notes,
                             sectionID: sectionID,
                             isRecurringStaple: isStaple,
+                            isFavorite: isFavorite,
                             priority: priority,
                             inventoryLinkBehavior: inventoryBehavior,
                             context: modelContext
@@ -1853,6 +1894,7 @@ private struct ShoppingListItemEditorView: View {
                 notes = item.notes ?? ""
                 sectionID = item.storeSectionID
                 isStaple = item.isRecurringStaple
+                isFavorite = item.isFavorite
                 priority = item.priority
                 inventoryBehavior = item.inventoryLinkBehavior
             }

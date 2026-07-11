@@ -155,6 +155,7 @@ enum ShoppingListService {
         notes: String,
         sectionID: UUID?,
         isRecurringStaple: Bool,
+        isFavorite: Bool,
         priority: ShoppingItemPriority,
         inventoryLinkBehavior: InventoryLinkBehavior,
         context: ModelContext
@@ -167,8 +168,19 @@ enum ShoppingListService {
         item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         item.storeSectionID = sectionID
         item.isRecurringStaple = isRecurringStaple
+        item.isFavorite = isFavorite
         item.priority = priority
         item.inventoryLinkBehavior = inventoryLinkBehavior
+        item.updatedAt = Date()
+        save(context)
+    }
+
+    static func setFavorite(
+        _ item: ShoppingListItem,
+        isFavorite: Bool,
+        context: ModelContext
+    ) {
+        item.isFavorite = isFavorite
         item.updatedAt = Date()
         save(context)
     }

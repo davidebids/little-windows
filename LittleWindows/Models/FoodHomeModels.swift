@@ -367,6 +367,7 @@ final class ShoppingListItem {
     var checkedAt: Date?
     var lastUncheckedAt: Date?
     var isRecurringStaple: Bool = false
+    var isFavorite: Bool = false
     var priorityRawValue: String = ShoppingItemPriority.normal.rawValue
     var addedBy: String?
     var createdAt: Date = Date()
@@ -391,6 +392,7 @@ final class ShoppingListItem {
         checkedAt: Date? = nil,
         lastUncheckedAt: Date? = nil,
         isRecurringStaple: Bool = false,
+        isFavorite: Bool = false,
         priority: ShoppingItemPriority = .normal,
         addedBy: String? = nil,
         createdAt: Date = Date(),
@@ -414,6 +416,7 @@ final class ShoppingListItem {
         self.checkedAt = checkedAt
         self.lastUncheckedAt = lastUncheckedAt
         self.isRecurringStaple = isRecurringStaple
+        self.isFavorite = isFavorite
         self.priorityRawValue = priority.rawValue
         self.addedBy = addedBy
         self.createdAt = createdAt

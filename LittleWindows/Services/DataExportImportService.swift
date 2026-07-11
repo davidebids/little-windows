@@ -304,6 +304,7 @@ private struct ShoppingListItemDTO: Codable {
     var checkedAt: Date?
     var lastUncheckedAt: Date?
     var isRecurringStaple: Bool
+    var isFavorite: Bool?
     var priorityRawValue: String
     var addedBy: String?
     var createdAt: Date
@@ -762,6 +763,7 @@ enum DataExportImportService {
                 checkedAt: $0.checkedAt,
                 lastUncheckedAt: $0.lastUncheckedAt,
                 isRecurringStaple: $0.isRecurringStaple,
+                isFavorite: $0.isFavorite,
                 priorityRawValue: $0.priorityRawValue,
                 addedBy: $0.addedBy,
                 createdAt: $0.createdAt,
@@ -1328,6 +1330,7 @@ enum DataExportImportService {
                 checkedAt: value.checkedAt,
                 lastUncheckedAt: value.lastUncheckedAt,
                 isRecurringStaple: value.isRecurringStaple,
+                isFavorite: value.isFavorite ?? false,
                 priority: ShoppingItemPriority(rawValue: value.priorityRawValue) ?? .normal,
                 addedBy: value.addedBy,
                 createdAt: value.createdAt,
