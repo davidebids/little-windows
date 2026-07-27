@@ -384,6 +384,10 @@ struct FamilySyncSettingsView: View {
                 ? "Turning off Family Sync on this device..."
                 : FamilySyncOperation.leave.statusText
         }
+        if viewModel.activeOperation == .create,
+           let shareCreationProgress = viewModel.shareCreationProgress {
+            return shareCreationProgress.statusText
+        }
         return viewModel.activeOperation?.statusText
     }
 

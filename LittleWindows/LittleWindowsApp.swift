@@ -478,6 +478,20 @@ final class LittleWindowsAppDelegate: NSObject, UIApplicationDelegate {
             completion: completionHandler
         )
     }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        SyncDiagnosticsService.recordRemoteNotificationRegistrationSuccess()
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        SyncDiagnosticsService.recordRemoteNotificationRegistrationFailure(error)
+    }
 }
 
 final class LittleWindowsSceneDelegate: NSObject, UIWindowSceneDelegate {

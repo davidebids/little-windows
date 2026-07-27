@@ -503,6 +503,162 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(subscription.notificationInfo?.shouldSendContentAvailable, true)
     }
 
+    func testFamilySyncEntityParentReferenceUsesCloudKitRequiredAction() {
+        let rootID = CKRecord.ID(
+            recordName: "FamilyRoot",
+            zoneID: CKRecordZone.ID(
+                zoneName: "LittleWindowsFamily",
+                ownerName: CKCurrentUserDefaultName
+            )
+        )
+
+        let reference = CloudKitSharingService.familyEntityParentReference(
+            rootRecordID: rootID
+        )
+
+        XCTAssertEqual(reference.recordID, rootID)
+        XCTAssertEqual(reference.action, .none)
+    }
+
+    func testFamilySyncUsesDistinctZoneForEachNewShare() {
+        let first = CloudKitSharingService.familySyncZoneName(familyID: "first")
+        let second = CloudKitSharingService.familySyncZoneName(familyID: "second")
+
+        XCTAssertEqual(first, "LittleWindowsFamily-first")
+        XCTAssertNotEqual(first, second)
+    }
+
+    func testFamilySyncInitialUploadUsesSmallSizeAwareBatches() {
+        let ranges = CloudKitSharingService.familyEntityUploadBatchRanges(
+            payloadSizes: [4, 4, 4, 20, 1],
+            recordLimit: 2,
+            byteLimit: 10
+        )
+
+        XCTAssertEqual(ranges, [0..<2, 2..<3, 3..<4, 4..<5])
+        XCTAssertEqual(
+            CloudKitSharingService.familyEntityUploadBatchRecordLimit,
+            25
+        )
+        XCTAssertEqual(
+            CloudKitSharingService.familyEntityUploadBatchByteLimit,
+            8 * 1_024 * 1_024
+        )
+        XCTAssertEqual(
+            CloudKitSharingService.familySnapshotAssetByteLimit,
+            40 * 1_024 * 1_024
+        )
+    }
+
+    func testFamilySyncEntityChangesOverlayInitialSnapshot() {
+        let keep = Data("keep".utf8)
+        let old = Data("old".utf8)
+        let updated = Data("updated".utf8)
+        let added = Data("added".utf8)
+
+        let result = CloudKitSharingService.applyingFamilyEntityChanges(
+            base: [
+                "events|keep": keep,
+                "events|update": old,
+                "events|delete": old
+            ],
+            updates: [
+                "events|update": updated,
+                "events|new": added
+            ],
+            deletedKeys: ["events|delete"]
+        )
+
+        XCTAssertEqual(result["events|keep"], keep)
+        XCTAssertEqual(result["events|update"], updated)
+        XCTAssertEqual(result["events|new"], added)
+        XCTAssertNil(result["events|delete"])
+    }
+
+    func testFamilyShareCreationProgressExplainsLongUpload() {
+        XCTAssertEqual(
+            FamilyShareCreationProgress.uploadingData(
+                completed: 25,
+                total: 80
+            ).statusText,
+            "Uploading family data (25 of 80)..."
+        )
+        XCTAssertEqual(
+            FamilyShareCreationProgress.creatingShare.statusText,
+            "Creating the secure iCloud share..."
+        )
+    }
+
+    func testFamilySyncPushSubscriptionValidationRejectsStaleServerConfiguration() {
+        let expectedRootID = CKRecord.ID(
+            recordName: "FamilyRoot",
+            zoneID: CKRecordZone.ID(zoneName: "LittleWindowsFamily", ownerName: "owner")
+        )
+        let matchingOwnerSubscription = CloudKitSharingService.familySyncPushSubscription(
+            rootRecordID: expectedRootID,
+            role: .owner,
+            subscriptionID: "matching-owner"
+        )
+        let wrongZoneRootID = CKRecord.ID(
+            recordName: "FamilyRoot",
+            zoneID: CKRecordZone.ID(zoneName: "OtherFamily", ownerName: "owner")
+        )
+        let wrongZoneSubscription = CloudKitSharingService.familySyncPushSubscription(
+            rootRecordID: wrongZoneRootID,
+            role: .owner,
+            subscriptionID: "wrong-zone"
+        )
+        let missingSilentPush = CKDatabaseSubscription(subscriptionID: "missing-silent-push")
+
+        XCTAssertTrue(CloudKitSharingService.familySyncPushSubscription(
+            matchingOwnerSubscription,
+            matches: expectedRootID,
+            role: .owner
+        ))
+        XCTAssertFalse(CloudKitSharingService.familySyncPushSubscription(
+            wrongZoneSubscription,
+            matches: expectedRootID,
+            role: .owner
+        ))
+        XCTAssertFalse(CloudKitSharingService.familySyncPushSubscription(
+            matchingOwnerSubscription,
+            matches: expectedRootID,
+            role: .participant
+        ))
+        XCTAssertFalse(CloudKitSharingService.familySyncPushSubscription(
+            missingSilentPush,
+            matches: expectedRootID,
+            role: .participant
+        ))
+    }
+
+    func testMainAppConfigurationIncludesCloudKitPushRequirements() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let entitlementsData = try Data(contentsOf: repositoryRoot
+            .appendingPathComponent("LittleWindows/LittleWindows.entitlements"))
+        let entitlements = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: entitlementsData, format: nil)
+                as? [String: Any]
+        )
+        XCTAssertEqual(entitlements["aps-environment"] as? String, "development")
+        XCTAssertEqual(
+            entitlements["com.apple.developer.icloud-container-identifiers"] as? [String],
+            ["iCloud.com.debidia.LittleWindows"]
+        )
+
+        let infoData = try Data(contentsOf: repositoryRoot
+            .appendingPathComponent("LittleWindows/Info.plist"))
+        let info = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: infoData, format: nil)
+                as? [String: Any]
+        )
+        XCTAssertTrue((info["UIBackgroundModes"] as? [String])?.contains(
+            "remote-notification"
+        ) == true)
+    }
+
     func testFamilySyncUsesFastForegroundTimerPollingCadence() {
         XCTAssertEqual(
             CloudKitSharingService.foregroundTimerPollIntervalSeconds,

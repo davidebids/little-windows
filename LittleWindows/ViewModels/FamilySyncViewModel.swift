@@ -59,6 +59,7 @@ final class FamilySyncViewModel: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var syncStatusMessage: String?
     @Published private(set) var activeOperation: FamilySyncOperation?
+    @Published private(set) var shareCreationProgress: FamilyShareCreationProgress?
     @Published var presentedShare: CKShare?
 
     private let statusService = SyncStatusService()
@@ -79,12 +80,22 @@ final class FamilySyncViewModel: ObservableObject {
     func startSharing(context: ModelContext) async {
         guard activeOperation == nil else { return }
         activeOperation = .create
+        shareCreationProgress = .checkingICloud
         clearActionError()
         await Task.yield()
-        defer { activeOperation = nil }
+        defer {
+            shareCreationProgress = nil
+            activeOperation = nil
+        }
         do {
-            presentedShare = try await sharingService.createFamilyShare(context: context)
-            await refresh()
+            presentedShare = try await sharingService.createFamilyShare(
+                context: context
+            ) { [weak self] progress in
+                self?.shareCreationProgress = progress
+            }
+            state = sharingService.currentState(
+                privateSyncAvailable: statusService.isICloudAvailable
+            )
         } catch {
             state.lastErrorMessage = error.localizedDescription
         }

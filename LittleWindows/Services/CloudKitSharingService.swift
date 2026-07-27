@@ -4,12 +4,41 @@ import Foundation
 import SwiftData
 import UIKit
 
+enum FamilyShareCreationProgress: Equatable, Sendable {
+    case checkingICloud
+    case preparingData
+    case creatingShare
+    case uploadingData(completed: Int, total: Int)
+    case finishing
+
+    var statusText: String {
+        switch self {
+        case .checkingICloud:
+            return "Checking iCloud..."
+        case .preparingData:
+            return "Preparing family data..."
+        case .creatingShare:
+            return "Creating the secure iCloud share..."
+        case .uploadingData(let completed, let total):
+            guard total > 0 else { return "Uploading family data..." }
+            return "Uploading family data (\(completed) of \(total))..."
+        case .finishing:
+            return "Finishing Family Sync setup..."
+        }
+    }
+}
+
 @MainActor
 final class CloudKitSharingService {
     static let shared = CloudKitSharingService()
     nonisolated static let foregroundTimerPollIntervalSeconds: TimeInterval = 5
     nonisolated static let foregroundTimerInitialDelaySeconds: TimeInterval = 3
     nonisolated static let foregroundTimerFailureRetrySeconds: TimeInterval = 30
+    nonisolated static let familyEntityUploadBatchRecordLimit = 25
+    nonisolated static let familyEntityUploadBatchByteLimit = 8 * 1_024 * 1_024
+    nonisolated static let familySnapshotAssetByteLimit = 40 * 1_024 * 1_024
+    nonisolated static let cloudKitRequestTimeoutSeconds: TimeInterval = 30
+    nonisolated static let cloudKitResourceTimeoutSeconds: TimeInterval = 180
     nonisolated static let acceptanceStatusDidChangeNotification = Notification.Name(
         "CloudKitSharingService.acceptanceStatusDidChange"
     )
@@ -29,6 +58,7 @@ final class CloudKitSharingService {
     private var localMutationSyncRequested = false
     private var isSynchronizing = false
     private var datasetExporter: FamilySyncDatasetExporter?
+    private var verifiedPushSubscriptionID: String?
 
     private let containerIdentifier: String
     private let defaults: UserDefaults
@@ -216,57 +246,89 @@ final class CloudKitSharingService {
         }
     }
 
-    func createFamilyShare(context: ModelContext) async throws -> CKShare {
+    func createFamilyShare(
+        context: ModelContext,
+        progress: @escaping (FamilyShareCreationProgress) -> Void = { _ in }
+    ) async throws -> CKShare {
+        progress(.checkingICloud)
         try await requireICloudAccount()
+        progress(.preparingData)
+        let payload = try await makeDatasetPayload(fallbackContext: context)
+        defer { payload.removeTemporaryFile() }
+
         let container = CKContainer(identifier: containerIdentifier)
         let database = container.privateCloudDatabase
         let familyID = UUID().uuidString
         let zoneID = CKRecordZone.ID(
-            zoneName: Constant.zoneName,
+            zoneName: Self.familySyncZoneName(familyID: familyID),
             ownerName: CKCurrentUserDefaultName
         )
         let zone = CKRecordZone(zoneID: zoneID)
-        try await save(zone: zone, in: database)
+        var zoneWasCreated = false
+        do {
+            progress(.creatingShare)
+            try await save(zone: zone, in: database)
+            zoneWasCreated = true
 
-        let rootID = CKRecord.ID(recordName: Constant.rootRecordName, zoneID: zoneID)
-        let root = CKRecord(recordType: Constant.rootRecordType, recordID: rootID)
-        root[Constant.familyIDKey] = familyID as CKRecordValue
-        let payload = try await makeDatasetPayload(fallbackContext: context)
-        defer { payload.removeTemporaryFile() }
-        applyDatasetPayload(payload, to: root)
+            let rootID = CKRecord.ID(recordName: Constant.rootRecordName, zoneID: zoneID)
+            let root = CKRecord(recordType: Constant.rootRecordType, recordID: rootID)
+            root[Constant.familyIDKey] = familyID as CKRecordValue
+            let usesSnapshotAsset = payload.data.count <= Self.familySnapshotAssetByteLimit
+            applyDatasetPayload(
+                payload,
+                to: root,
+                includeSnapshotAsset: usesSnapshotAsset
+            )
 
-        let share = CKShare(rootRecord: root)
-        share[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
-        if let iconData = Self.shareIconData {
-            share[CKShare.SystemFieldKey.thumbnailImageData] = iconData as CKRecordValue
+            let share = CKShare(rootRecord: root)
+            share[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
+            if let iconData = Self.shareIconData {
+                share[CKShare.SystemFieldKey.thumbnailImageData] = iconData as CKRecordValue
+            }
+            share.publicPermission = .none
+
+            if usesSnapshotAsset {
+                progress(.uploadingData(completed: 0, total: 1))
+            }
+            try await modifyRecords(
+                saving: [root, share],
+                deleting: [],
+                savePolicy: .changedKeys,
+                atomically: true,
+                in: database
+            )
+            if usesSnapshotAsset {
+                progress(.uploadingData(completed: 1, total: 1))
+            } else {
+                try await uploadEntityChanges(
+                    from: nil,
+                    to: payload.data,
+                    rootRecordID: rootID,
+                    database: database
+                ) { completed, total in
+                    progress(.uploadingData(completed: completed, total: total))
+                }
+            }
+
+            progress(.finishing)
+            try saveBaselineData(payload.data)
+            store(
+                mode: .sharedFamilySync,
+                role: .owner,
+                familyID: familyID,
+                rootRecordID: rootID,
+                shareRecordID: share.recordID
+            )
+            defaults.removeObject(forKey: DefaultsKey.lastError)
+            markSynced(uploaded: true, downloaded: false)
+            schedulePushSubscriptionSetup(rootRecordID: rootID, role: .owner)
+            return share
+        } catch {
+            if zoneWasCreated {
+                scheduleZoneCleanup(zoneID: zoneID, database: database)
+            }
+            throw error
         }
-        share.publicPermission = .none
-
-        _ = try await database.modifyRecords(
-            saving: [root, share],
-            deleting: [],
-            savePolicy: .changedKeys,
-            atomically: true
-        )
-        try await uploadEntityChanges(
-            from: nil,
-            to: payload.data,
-            rootRecordID: rootID,
-            database: database
-        )
-
-        store(
-            mode: .sharedFamilySync,
-            role: .owner,
-            familyID: familyID,
-            rootRecordID: rootID,
-            shareRecordID: share.recordID
-        )
-        try await ensureFamilySyncPushSubscription(rootRecordID: rootID, role: .owner)
-        defaults.removeObject(forKey: DefaultsKey.lastError)
-        try saveBaselineData(payload.data)
-        markSynced(uploaded: true, downloaded: false)
-        return share
     }
 
     func resumeFamilyShare(context: ModelContext) async throws {
@@ -797,6 +859,7 @@ final class CloudKitSharingService {
     }
 
     private func clearStoredShare() {
+        verifiedPushSubscriptionID = nil
         for key in [
             DefaultsKey.familyID,
             DefaultsKey.role,
@@ -836,6 +899,7 @@ final class CloudKitSharingService {
         localMutationSyncTask?.cancel()
         localMutationSyncTask = nil
         localMutationSyncRequested = false
+        verifiedPushSubscriptionID = nil
         defaults.removeObject(forKey: DefaultsKey.pushSubscriptionID)
         defaults.removeObject(forKey: DefaultsKey.pendingUpload)
         defaults.removeObject(forKey: DefaultsKey.lastError)
@@ -912,16 +976,52 @@ final class CloudKitSharingService {
         role: FamilyShareRole
     ) async throws {
         let subscriptionID = Self.subscriptionID(for: rootRecordID, role: role)
-        if defaults.string(forKey: DefaultsKey.pushSubscriptionID) == subscriptionID {
+        if verifiedPushSubscriptionID == subscriptionID {
             return
+        }
+        let database = database(for: role)
+        do {
+            let subscription = try await database.subscription(for: subscriptionID)
+            if Self.familySyncPushSubscription(
+                subscription,
+                matches: rootRecordID,
+                role: role
+            ) {
+                defaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
+                verifiedPushSubscriptionID = subscriptionID
+                return
+            }
+            _ = try await database.deleteSubscription(withID: subscriptionID)
+        } catch {
+            guard Self.isMissingPushSubscriptionError(error) else { throw error }
         }
         let subscription = Self.familySyncPushSubscription(
             rootRecordID: rootRecordID,
             role: role,
             subscriptionID: subscriptionID
         )
-        _ = try await database(for: role).save(subscription)
+        _ = try await database.save(subscription)
         defaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
+        verifiedPushSubscriptionID = subscriptionID
+    }
+
+    private func schedulePushSubscriptionSetup(
+        rootRecordID: CKRecord.ID,
+        role: FamilyShareRole
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.storedRootRecordID == rootRecordID,
+                  self.storedRole == role else { return }
+            do {
+                try await self.ensureFamilySyncPushSubscription(
+                    rootRecordID: rootRecordID,
+                    role: role
+                )
+            } catch {
+                // Foreground polling remains available, and launch/manual sync retries setup.
+            }
+        }
     }
 
     nonisolated static func familySyncPushSubscription(
@@ -944,6 +1044,42 @@ final class CloudKitSharingService {
         return subscription
     }
 
+    nonisolated static func familySyncPushSubscription(
+        _ subscription: CKSubscription,
+        matches rootRecordID: CKRecord.ID,
+        role: FamilyShareRole
+    ) -> Bool {
+        guard subscription.notificationInfo?.shouldSendContentAvailable == true else {
+            return false
+        }
+        switch role {
+        case .participant:
+            return subscription is CKDatabaseSubscription
+        case .owner:
+            guard let zoneSubscription = subscription as? CKRecordZoneSubscription else {
+                return false
+            }
+            return zoneSubscription.zoneID == rootRecordID.zoneID
+        case .none:
+            return false
+        }
+    }
+
+    nonisolated static func isMissingPushSubscriptionError(_ error: Error) -> Bool {
+        guard let cloudError = error as? CKError else { return false }
+        if cloudError.code == .unknownItem {
+            return true
+        }
+        guard cloudError.code == .partialFailure,
+              let errors = cloudError.partialErrorsByItemID?.values,
+              !errors.isEmpty else {
+            return false
+        }
+        return errors.allSatisfy { error in
+            (error as? CKError)?.code == .unknownItem
+        }
+    }
+
     private func deleteFamilySyncPushSubscription(
         rootRecordID: CKRecord.ID,
         role: FamilyShareRole
@@ -951,6 +1087,9 @@ final class CloudKitSharingService {
         let subscriptionID = defaults.string(forKey: DefaultsKey.pushSubscriptionID)
             ?? Self.subscriptionID(for: rootRecordID, role: role)
         _ = try await database(for: role).deleteSubscription(withID: subscriptionID)
+        if verifiedPushSubscriptionID == subscriptionID {
+            verifiedPushSubscriptionID = nil
+        }
     }
 
     private static func subscriptionID(
@@ -1055,9 +1194,12 @@ final class CloudKitSharingService {
 
     private func applyDatasetPayload(
         _ payload: FamilySyncDatasetPayload,
-        to root: CKRecord
+        to root: CKRecord,
+        includeSnapshotAsset: Bool = false
     ) {
-        root[Constant.datasetAssetKey] = nil
+        if includeSnapshotAsset {
+            root[Constant.datasetAssetKey] = CKAsset(fileURL: payload.fileURL)
+        }
         root[Constant.datasetChecksumKey] = payload.checksum as CKRecordValue
         root[Constant.datasetUpdatedAtKey] = Date() as CKRecordValue
         root[Constant.schemaVersionKey] = Constant.syncSchemaVersion as CKRecordValue
@@ -1090,87 +1232,180 @@ final class CloudKitSharingService {
     }
 
     private func datasetData(from root: CKRecord, template: Data) async throws -> Data {
+        let snapshotData: Data?
+        if let asset = root[Constant.datasetAssetKey] as? CKAsset,
+           let fileURL = asset.fileURL {
+            snapshotData = try Data(contentsOf: fileURL)
+        } else {
+            snapshotData = nil
+        }
         let records = try await queryAllEntityRecords(
             database: database(for: storedRole),
             zoneID: root.recordID.zoneID
         )
-        var payloads: [String: Data] = [:]
+        let snapshotPayloads = try snapshotData.map {
+            try DataExportImportService.familySyncEntityPayloads(from: $0)
+        } ?? [:]
+        var updatedPayloads: [String: Data] = [:]
+        var deletedKeys: Set<String> = []
         for record in records {
-            guard (record[Constant.entityDeletedKey] as? NSNumber)?.boolValue != true,
-                  let collection = record[Constant.entityCollectionKey] as? String,
-                  let entityID = record[Constant.entityIDKey] as? String,
-                  let asset = record[Constant.entityPayloadAssetKey] as? CKAsset,
+            guard let collection = record[Constant.entityCollectionKey] as? String,
+                  let entityID = record[Constant.entityIDKey] as? String else {
+                continue
+            }
+            let key = DataExportImportService.familySyncEntityKey(
+                collection: collection,
+                id: entityID
+            )
+            if (record[Constant.entityDeletedKey] as? NSNumber)?.boolValue == true {
+                deletedKeys.insert(key)
+                continue
+            }
+            guard let asset = record[Constant.entityPayloadAssetKey] as? CKAsset,
                   let fileURL = asset.fileURL else {
                 continue
             }
-            payloads[DataExportImportService.familySyncEntityKey(
-                collection: collection,
-                id: entityID
-            )] = try Data(contentsOf: fileURL)
+            updatedPayloads[key] = try Data(contentsOf: fileURL)
         }
+        let payloads = Self.applyingFamilyEntityChanges(
+            base: snapshotPayloads,
+            updates: updatedPayloads,
+            deletedKeys: deletedKeys
+        )
         return try DataExportImportService.familySyncData(
-            template: template,
+            template: snapshotData ?? template,
             entityPayloads: payloads
         )
+    }
+
+    nonisolated static func applyingFamilyEntityChanges(
+        base: [String: Data],
+        updates: [String: Data],
+        deletedKeys: Set<String>
+    ) -> [String: Data] {
+        var result = base
+        for key in deletedKeys {
+            result.removeValue(forKey: key)
+        }
+        for (key, data) in updates where !deletedKeys.contains(key) {
+            result[key] = data
+        }
+        return result
     }
 
     private func uploadEntityChanges(
         from remoteData: Data?,
         to mergedData: Data,
         rootRecordID: CKRecord.ID,
-        database: CKDatabase
+        database: CKDatabase,
+        progress: ((Int, Int) -> Void)? = nil
     ) async throws {
-        let remotePayloads = try remoteData.map {
-            try DataExportImportService.familySyncEntityPayloads(from: $0)
-        } ?? [:]
-        let mergedPayloads = try DataExportImportService.familySyncEntityPayloads(
-            from: mergedData
-        )
-        let changedKeys = Set(remotePayloads.keys)
-            .union(mergedPayloads.keys)
-            .filter { remotePayloads[$0] != mergedPayloads[$0] }
-        guard !changedKeys.isEmpty else { return }
-
-        var temporaryPayloads: [FamilySyncEntityPayload] = []
-        defer { temporaryPayloads.forEach { $0.removeTemporaryFile() } }
-        var records: [CKRecord] = []
-        let now = Date()
-        for key in changedKeys.sorted() {
-            guard let parts = DataExportImportService.familySyncEntityKeyParts(key) else {
-                continue
-            }
-            let recordID = CKRecord.ID(
-                recordName: "\(parts.collection).\(parts.id)",
-                zoneID: rootRecordID.zoneID
+        let changes = try await Task.detached(priority: .utility) {
+            let remotePayloads = try remoteData.map {
+                try DataExportImportService.familySyncEntityPayloads(from: $0)
+            } ?? [:]
+            let mergedPayloads = try DataExportImportService.familySyncEntityPayloads(
+                from: mergedData
             )
-            let record = CKRecord(recordType: Constant.entityRecordType, recordID: recordID)
-            record.parent = CKRecord.Reference(recordID: rootRecordID, action: .deleteSelf)
-            record[Constant.entityCollectionKey] = parts.collection as CKRecordValue
-            record[Constant.entityIDKey] = parts.id as CKRecordValue
-            record[Constant.entityUpdatedAtKey] = now as CKRecordValue
-            if let data = mergedPayloads[key] {
-                let payload = try FamilySyncEntityPayload(data: data)
-                temporaryPayloads.append(payload)
-                record[Constant.entityPayloadAssetKey] = CKAsset(fileURL: payload.fileURL)
-                record[Constant.entityChecksumKey] = payload.checksum as CKRecordValue
-                record[Constant.entityDeletedKey] = NSNumber(value: false)
-            } else {
-                record[Constant.entityPayloadAssetKey] = nil
-                record[Constant.entityChecksumKey] = "deleted" as CKRecordValue
-                record[Constant.entityDeletedKey] = NSNumber(value: true)
-            }
-            records.append(record)
+            return Set(remotePayloads.keys)
+                .union(mergedPayloads.keys)
+                .filter { remotePayloads[$0] != mergedPayloads[$0] }
+                .sorted()
+                .map {
+                    FamilySyncEntityChange(key: $0, data: mergedPayloads[$0])
+                }
+        }.value
+        guard !changes.isEmpty else {
+            progress?(0, 0)
+            return
         }
 
-        for start in stride(from: 0, to: records.count, by: 150) {
-            let end = min(start + 150, records.count)
-            _ = try await database.modifyRecords(
-                saving: Array(records[start..<end]),
+        let batchRanges = Self.familyEntityUploadBatchRanges(
+            payloadSizes: changes.map { $0.data?.count ?? 0 }
+        )
+        let now = Date()
+        var completed = 0
+        progress?(completed, changes.count)
+        for range in batchRanges {
+            var temporaryPayloads: [FamilySyncEntityPayload] = []
+            defer { temporaryPayloads.forEach { $0.removeTemporaryFile() } }
+            var records: [CKRecord] = []
+            records.reserveCapacity(range.count)
+            for change in changes[range] {
+                guard let parts = DataExportImportService.familySyncEntityKeyParts(change.key) else {
+                    continue
+                }
+                let recordID = CKRecord.ID(
+                    recordName: "\(parts.collection).\(parts.id)",
+                    zoneID: rootRecordID.zoneID
+                )
+                let record = CKRecord(
+                    recordType: Constant.entityRecordType,
+                    recordID: recordID
+                )
+                record.parent = Self.familyEntityParentReference(rootRecordID: rootRecordID)
+                record[Constant.entityCollectionKey] = parts.collection as CKRecordValue
+                record[Constant.entityIDKey] = parts.id as CKRecordValue
+                record[Constant.entityUpdatedAtKey] = now as CKRecordValue
+                if let data = change.data {
+                    let payload = try FamilySyncEntityPayload(data: data)
+                    temporaryPayloads.append(payload)
+                    record[Constant.entityPayloadAssetKey] = CKAsset(fileURL: payload.fileURL)
+                    record[Constant.entityChecksumKey] = payload.checksum as CKRecordValue
+                    record[Constant.entityDeletedKey] = NSNumber(value: false)
+                } else {
+                    record[Constant.entityPayloadAssetKey] = nil
+                    record[Constant.entityChecksumKey] = "deleted" as CKRecordValue
+                    record[Constant.entityDeletedKey] = NSNumber(value: true)
+                }
+                records.append(record)
+            }
+            try await modifyRecords(
+                saving: records,
                 deleting: [],
                 savePolicy: .allKeys,
-                atomically: false
+                atomically: false,
+                in: database
             )
+            completed += range.count
+            progress?(completed, changes.count)
         }
+    }
+
+    nonisolated static func familyEntityUploadBatchRanges(
+        payloadSizes: [Int],
+        recordLimit: Int = familyEntityUploadBatchRecordLimit,
+        byteLimit: Int = familyEntityUploadBatchByteLimit
+    ) -> [Range<Int>] {
+        guard !payloadSizes.isEmpty, recordLimit > 0, byteLimit > 0 else { return [] }
+        var ranges: [Range<Int>] = []
+        var start = 0
+        var count = 0
+        var bytes = 0
+        for (index, payloadSize) in payloadSizes.enumerated() {
+            let size = max(payloadSize, 0)
+            if count > 0,
+               count >= recordLimit || bytes + size > byteLimit {
+                ranges.append(start..<index)
+                start = index
+                count = 0
+                bytes = 0
+            }
+            count += 1
+            bytes += size
+        }
+        ranges.append(start..<payloadSizes.count)
+        return ranges
+    }
+
+    nonisolated static func familyEntityParentReference(
+        rootRecordID: CKRecord.ID
+    ) -> CKRecord.Reference {
+        CKRecord.Reference(recordID: rootRecordID, action: .none)
+    }
+
+    nonisolated static func familySyncZoneName(familyID: String) -> String {
+        "\(Constant.zoneName)-\(familyID)"
     }
 
     private func queryAllEntityRecords(
@@ -1237,16 +1472,80 @@ final class CloudKitSharingService {
     }
 
     private func save(zone: CKRecordZone, in database: CKDatabase) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            let operation = CKModifyRecordZonesOperation(
-                recordZonesToSave: [zone],
-                recordZoneIDsToDelete: nil
-            )
-            operation.modifyRecordZonesResultBlock = { result in
-                continuation.resume(with: result.map { _ in () })
+        let operation = CKModifyRecordZonesOperation(
+            recordZonesToSave: [zone],
+            recordZoneIDsToDelete: nil
+        )
+        configure(operation)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                operation.modifyRecordZonesResultBlock = { result in
+                    continuation.resume(with: result.map { _ in () })
+                }
+                database.add(operation)
             }
-            database.add(operation)
+        } onCancel: {
+            operation.cancel()
         }
+    }
+
+    private func delete(zoneID: CKRecordZone.ID, in database: CKDatabase) async throws {
+        let operation = CKModifyRecordZonesOperation(
+            recordZonesToSave: nil,
+            recordZoneIDsToDelete: [zoneID]
+        )
+        configure(operation)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                operation.modifyRecordZonesResultBlock = { result in
+                    continuation.resume(with: result.map { _ in () })
+                }
+                database.add(operation)
+            }
+        } onCancel: {
+            operation.cancel()
+        }
+    }
+
+    private func scheduleZoneCleanup(zoneID: CKRecordZone.ID, database: CKDatabase) {
+        Task { @MainActor [weak self] in
+            try? await self?.delete(zoneID: zoneID, in: database)
+        }
+    }
+
+    private func modifyRecords(
+        saving records: [CKRecord],
+        deleting recordIDs: [CKRecord.ID],
+        savePolicy: CKModifyRecordsOperation.RecordSavePolicy,
+        atomically: Bool,
+        in database: CKDatabase
+    ) async throws {
+        guard !records.isEmpty || !recordIDs.isEmpty else { return }
+        let operation = CKModifyRecordsOperation(
+            recordsToSave: records,
+            recordIDsToDelete: recordIDs
+        )
+        operation.savePolicy = savePolicy
+        operation.isAtomic = atomically
+        configure(operation)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                operation.modifyRecordsResultBlock = { result in
+                    continuation.resume(with: result)
+                }
+                database.add(operation)
+            }
+        } onCancel: {
+            operation.cancel()
+        }
+    }
+
+    private func configure(_ operation: CKOperation) {
+        let configuration = CKOperation.Configuration()
+        configuration.timeoutIntervalForRequest = Self.cloudKitRequestTimeoutSeconds
+        configuration.timeoutIntervalForResource = Self.cloudKitResourceTimeoutSeconds
+        operation.configuration = configuration
+        operation.qualityOfService = .userInitiated
     }
 
     private func markSynced(uploaded: Bool, downloaded: Bool) {
@@ -1361,6 +1660,11 @@ enum FamilySyncReason: Equatable {
     var ensuresPushSubscription: Bool {
         self == .launch || self == .manual
     }
+}
+
+private struct FamilySyncEntityChange: Sendable {
+    let key: String
+    let data: Data?
 }
 
 private struct FamilySyncDatasetPayload: Sendable {

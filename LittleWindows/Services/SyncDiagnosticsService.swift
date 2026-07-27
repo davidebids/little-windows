@@ -1,8 +1,36 @@
 import Foundation
 import SwiftData
+import UIKit
 
 @MainActor
 enum SyncDiagnosticsService {
+    private enum DefaultsKey {
+        static let lastRemoteNotificationRegistrationAt =
+            "syncDiagnostics.lastRemoteNotificationRegistrationAt"
+        static let lastRemoteNotificationRegistrationError =
+            "syncDiagnostics.lastRemoteNotificationRegistrationError"
+    }
+
+    static func recordRemoteNotificationRegistrationSuccess(
+        defaults: UserDefaults = .standard,
+        now: Date = Date()
+    ) {
+        defaults.set(now, forKey: DefaultsKey.lastRemoteNotificationRegistrationAt)
+        defaults.removeObject(forKey: DefaultsKey.lastRemoteNotificationRegistrationError)
+    }
+
+    static func recordRemoteNotificationRegistrationFailure(
+        _ error: Error,
+        defaults: UserDefaults = .standard,
+        now: Date = Date()
+    ) {
+        defaults.set(now, forKey: DefaultsKey.lastRemoteNotificationRegistrationAt)
+        defaults.set(
+            error.localizedDescription,
+            forKey: DefaultsKey.lastRemoteNotificationRegistrationError
+        )
+    }
+
     static func snapshot(context: ModelContext) -> SyncDiagnosticSnapshot {
         let profiles = (try? context.fetch(FetchDescriptor<BabyProfile>())) ?? []
         let profileIDs = Set(profiles.map(\.id))
@@ -67,7 +95,15 @@ enum SyncDiagnosticsService {
             orphanedProfileScopedRecordCount: orphanedCount,
             duplicateChildProfileNameCount: duplicateChildProfiles,
             migrationState: CloudMigrationService.state(),
-            lastLocalSaveAt: PersistenceService.lastLocalSaveAt()
+            lastLocalSaveAt: PersistenceService.lastLocalSaveAt(),
+            isRegisteredForRemoteNotifications:
+                UIApplication.shared.isRegisteredForRemoteNotifications,
+            lastRemoteNotificationRegistrationAt: UserDefaults.standard.object(
+                forKey: DefaultsKey.lastRemoteNotificationRegistrationAt
+            ) as? Date,
+            lastRemoteNotificationRegistrationError: UserDefaults.standard.string(
+                forKey: DefaultsKey.lastRemoteNotificationRegistrationError
+            )
         )
     }
 }

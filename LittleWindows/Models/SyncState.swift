@@ -79,6 +79,9 @@ struct SyncDiagnosticSnapshot: Equatable {
     var duplicateChildProfileNameCount: Int
     var migrationState: CloudMigrationState
     var lastLocalSaveAt: Date?
+    var isRegisteredForRemoteNotifications: Bool
+    var lastRemoteNotificationRegistrationAt: Date?
+    var lastRemoteNotificationRegistrationError: String?
 }
 
 enum FamilyShareMode: String, Equatable {

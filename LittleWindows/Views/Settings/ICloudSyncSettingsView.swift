@@ -65,6 +65,14 @@ struct ICloudSyncSettingsView: View {
             }
 
             Section("Local data") {
+                NavigationLink {
+                    LazySettingsDestination {
+                        SyncDiagnosticsView(snapshot: viewModel.diagnostics)
+                    }
+                } label: {
+                    Label("Sync Diagnostics", systemImage: "stethoscope")
+                }
+
                 if let diagnostics = viewModel.diagnostics {
                     LabeledContent("Profiles", value: "\(diagnostics.profileCount)")
                     LabeledContent("Active profiles", value: "\(diagnostics.activeProfileCount)")
@@ -80,13 +88,6 @@ struct ICloudSyncSettingsView: View {
                     )
                     if let migrationCompletedAt = diagnostics.migrationState.migrationCompletedAt {
                         LabeledContent("Migrated at", value: migrationCompletedAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    NavigationLink {
-                        LazySettingsDestination {
-                            SyncDiagnosticsView(snapshot: diagnostics)
-                        }
-                    } label: {
-                        Label("Sync diagnostics", systemImage: "stethoscope")
                     }
                 } else if viewModel.isLoadingDiagnostics {
                     ProgressView("Checking local data")
