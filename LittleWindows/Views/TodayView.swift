@@ -161,7 +161,6 @@ struct TodayView: View {
     @State private var routineRunRoute: CareRoutineRunRoute?
     @State private var pendingRoutineStepCompletion: PendingRoutineStepCompletion?
     @State private var eventPendingDelete: BabyEvent?
-    @State private var showingDeleteEventConfirmation = false
     @State private var activeSleepPlan: ActiveSleepPlan?
     @State private var pinnedQuickActionRevision = 0
     @State private var categoryPreferenceRevision = 0
@@ -739,7 +738,6 @@ struct TodayView: View {
                                 .swipeActions {
                                     Button(role: .destructive) {
                                         eventPendingDelete = event
-                                        showingDeleteEventConfirmation = true
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -900,23 +898,19 @@ struct TodayView: View {
                 }
             }
         }
-        .confirmationDialog(
-            "Delete event?",
-            isPresented: $showingDeleteEventConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Event", role: .destructive) {
-                if let eventPendingDelete {
-                    delete(eventPendingDelete)
-                }
-                eventPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                eventPendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the event from the timeline.")
-        }
+        .appActionSheet(
+            isPresented: Binding(
+                get: { eventPendingDelete != nil },
+                set: { if !$0 { eventPendingDelete = nil } }
+            ),
+            title: "Delete event?",
+            message: eventPendingDelete.map {
+                "This permanently removes the \($0.type.displayName.lowercased()) event from Today and History."
+            },
+            systemImage: "trash.fill",
+            tint: .red,
+            options: deleteEventOptions
+        )
         .modifier(
             SleepKindChooser(
                 isPresented: $showingSleepChooser,
@@ -2564,6 +2558,22 @@ struct TodayView: View {
                 notificationLeadMinutes: notificationLeadMinutes
             )
         }
+    }
+
+    private var deleteEventOptions: [AppActionSheetOption] {
+        guard let event = eventPendingDelete else { return [] }
+        return [
+            AppActionSheetOption(
+                title: "Delete \(event.type.displayName)",
+                subtitle: "This cannot be undone.",
+                systemImage: "trash.fill",
+                tint: .red,
+                role: .destructive
+            ) {
+                delete(event)
+                eventPendingDelete = nil
+            }
+        ]
     }
 
     private func toggleLittleWindowAlerts() {
