@@ -205,11 +205,17 @@ struct FoodHomeView: View {
                 ShoppingListDetailView(
                     list: list,
                     items: householdShoppingItems.filter { $0.shoppingListID == list.id },
+                    shoppingLists: householdShoppingLists,
+                    allShoppingItems: householdShoppingItems,
                     store: householdStores.first { $0.id == list.storeID },
                     sections: householdStoreSections.filter { $0.storeID == list.storeID },
                     inventoryItems: householdInventoryItems,
                     mealPrepItems: householdMealPrepItems,
-                    openShoppingMode: { path.append(FoodRoute.shoppingMode(list.id)) }
+                    openShoppingMode: { path.append(FoodRoute.shoppingMode(list.id)) },
+                    openMealPrep: {
+                        selectedSection = .mealPrep
+                        path.removeLast(path.count)
+                    }
                 )
             } else {
                 MissingFoodRouteView()
@@ -1319,7 +1325,14 @@ private struct ShoppingListsView: View {
                                 showingDeleteConfirmation = true
                             }
                         }
+                        .swipeActions(edge: .leading) {
+                            Button("Duplicate") {
+                                duplicate(list)
+                            }
+                            .tint(.blue)
+                        }
                     }
+                    .onMove(perform: moveLists)
                 }
             } header: {
                 AppSectionHeader(title: "Reusable Lists", subtitle: "\(shoppingLists.count)")
@@ -1328,7 +1341,8 @@ private struct ShoppingListsView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                EditButton()
                 Button {
                     showingNewList = true
                 } label: {
@@ -1357,6 +1371,21 @@ private struct ShoppingListsView: View {
         } message: {
             Text("This removes the list from active shopping lists.")
         }
+    }
+
+    private func duplicate(_ list: ShoppingList) {
+        ShoppingListService.duplicateList(
+            list,
+            items: shoppingItems,
+            existingLists: shoppingLists,
+            context: modelContext
+        )
+    }
+
+    private func moveLists(from source: IndexSet, to destination: Int) {
+        var ordered = shoppingLists
+        ordered.move(fromOffsets: source, toOffset: destination)
+        ShoppingListService.reorderLists(ordered, context: modelContext)
     }
 }
 
@@ -1472,6 +1501,12 @@ private struct ShoppingListSummaryRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                if let notes = list.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             if store != nil {
@@ -1491,11 +1526,14 @@ private struct ShoppingListDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var list: ShoppingList
     let items: [ShoppingListItem]
+    let shoppingLists: [ShoppingList]
+    let allShoppingItems: [ShoppingListItem]
     let store: FoodStore?
     let sections: [FoodStoreSection]
     let inventoryItems: [InventoryItem]
     let mealPrepItems: [MealPrepItem]
     let openShoppingMode: () -> Void
+    let openMealPrep: () -> Void
 
     @State private var fastAddText = ""
     @State private var selectedSectionID: UUID?
@@ -1505,6 +1543,9 @@ private struct ShoppingListDetailView: View {
     @State private var showingDeleteConfirmation = false
     @State private var itemPendingDelete: ShoppingListItem?
     @State private var showingDeleteItemConfirmation = false
+    @State private var showingListEditor = false
+    @State private var showingBulkAdd = false
+    @State private var showingDuplicatedConfirmation = false
 
     private var visibleItems: [ShoppingListItem] {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1514,6 +1555,23 @@ private struct ShoppingListDetailView: View {
             $0.name.localizedCaseInsensitiveContains(searchText)
                 || ($0.notes?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
+    }
+
+    private var fastAddSuggestions: [ShoppingListItem] {
+        let query = fastAddText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return items
+            .filter {
+                $0.isChecked
+                    && ($0.name.localizedCaseInsensitiveContains(query)
+                        || ($0.notes?.localizedCaseInsensitiveContains(query) ?? false))
+            }
+            .sorted {
+                ($0.isFavorite ? 0 : 1, $0.isRecurringStaple ? 0 : 1, -$0.purchaseCount, $0.name)
+                    < ($1.isFavorite ? 0 : 1, $1.isRecurringStaple ? 0 : 1, -$1.purchaseCount, $1.name)
+            }
+            .prefix(5)
+            .map { $0 }
     }
 
     var body: some View {
@@ -1542,6 +1600,33 @@ private struct ShoppingListDetailView: View {
                         Image(systemName: "plus.circle.fill")
                     }
                     .disabled(fastAddText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                if let notes = list.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !fastAddSuggestions.isEmpty {
+                    ForEach(fastAddSuggestions) { item in
+                        Button {
+                            reactivate(item)
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.name)
+                                    Text("Previously purchased\(item.quantityText.isEmpty ? "" : " · \(item.quantityText)")")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 
@@ -1668,6 +1753,22 @@ private struct ShoppingListDetailView: View {
                 }
                 .accessibilityLabel("Reactivate items")
                 Menu {
+                    Button("Edit List") {
+                        showingListEditor = true
+                    }
+                    Button("Add Multiple Items") {
+                        showingBulkAdd = true
+                    }
+                    Button("Duplicate List") {
+                        ShoppingListService.duplicateList(
+                            list,
+                            items: items,
+                            existingLists: shoppingLists,
+                            context: modelContext
+                        )
+                        showingDuplicatedConfirmation = true
+                    }
+                    Divider()
                     Button("Delete List", role: .destructive) {
                         showingDeleteConfirmation = true
                     }
@@ -1678,7 +1779,24 @@ private struct ShoppingListDetailView: View {
             }
         }
         .sheet(item: $editingItem) { item in
-            ShoppingListItemEditorView(item: item, sections: sections)
+            ShoppingListItemEditorView(
+                item: item,
+                sourceList: list,
+                shoppingLists: shoppingLists,
+                shoppingItems: allShoppingItems,
+                sections: sections
+            )
+        }
+        .sheet(isPresented: $showingListEditor) {
+            ShoppingListEditorView(list: list)
+        }
+        .sheet(isPresented: $showingBulkAdd) {
+            BulkShoppingItemAddView(
+                list: list,
+                items: items,
+                sections: sections,
+                initialSectionID: selectedSectionID
+            )
         }
         .confirmationDialog(
             "Delete \(list.name)?",
@@ -1710,6 +1828,11 @@ private struct ShoppingListDetailView: View {
         } message: {
             Text("This permanently removes the item from this shopping list.")
         }
+        .alert("List duplicated", isPresented: $showingDuplicatedConfirmation) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("A reusable copy was added with every item reset for a new trip.")
+        }
     }
 
     @ViewBuilder
@@ -1723,17 +1846,28 @@ private struct ShoppingListDetailView: View {
         if !suggestions.isEmpty {
             Section("Suggestions") {
                 ForEach(suggestions) { suggestion in
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(suggestion.title)
-                            Text(suggestion.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    Button {
+                        apply(suggestion)
+                    } label: {
+                        HStack {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(suggestion.title)
+                                    Text(suggestion.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: suggestion.systemImage)
+                                    .foregroundStyle(.orange)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
-                    } icon: {
-                        Image(systemName: suggestion.systemImage)
-                            .foregroundStyle(.orange)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1771,6 +1905,43 @@ private struct ShoppingListDetailView: View {
             context: modelContext
         )
         fastAddText = ""
+    }
+
+    private func reactivate(_ item: ShoppingListItem) {
+        ShoppingListService.addItem(
+            named: item.name,
+            to: list,
+            sectionID: item.storeSectionID,
+            existingItems: items,
+            context: modelContext
+        )
+        fastAddText = ""
+    }
+
+    private func apply(_ suggestion: FoodSuggestion) {
+        switch suggestion.action {
+        case .reactivateStaples:
+            ShoppingListService.reactivateStaples(
+                in: list,
+                items: items,
+                context: modelContext
+            )
+        case .reactivateFrequent:
+            ShoppingListService.reactivateFrequentItems(
+                in: list,
+                items: items,
+                context: modelContext
+            )
+        case .addUsedUpInventory:
+            ShoppingListService.addUsedUpInventoryItems(
+                inventoryItems,
+                to: list,
+                existingItems: items,
+                context: modelContext
+            )
+        case .reviewMealPrep:
+            openMealPrep()
+        }
     }
 }
 
@@ -1950,10 +2121,125 @@ private struct ShoppingModeView: View {
     }
 }
 
+private struct ShoppingListEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Bindable var list: ShoppingList
+
+    @State private var name = ""
+    @State private var notes = ""
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("List") {
+                    TextField("Name", text: $name)
+                    TextField("Notes", text: $notes, axis: .vertical)
+                        .lineLimit(2...5)
+                }
+            }
+            .navigationTitle("Edit Shopping List")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        ShoppingListService.updateList(
+                            list,
+                            name: name,
+                            notes: notes,
+                            context: modelContext
+                        )
+                        dismiss()
+                    }
+                    .disabled(!canSave)
+                }
+            }
+            .onAppear {
+                name = list.name
+                notes = list.notes ?? ""
+            }
+        }
+    }
+}
+
+private struct BulkShoppingItemAddView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let list: ShoppingList
+    let items: [ShoppingListItem]
+    let sections: [FoodStoreSection]
+    let initialSectionID: UUID?
+
+    @State private var text = ""
+    @State private var sectionID: UUID?
+
+    private var canAdd: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextEditor(text: $text)
+                        .frame(minHeight: 180)
+                        .accessibilityLabel("Items to add")
+                } header: {
+                    Text("Items")
+                } footer: {
+                    Text("Enter one item per line. Comma-separated items also work. Existing checked items are reactivated instead of duplicated.")
+                }
+
+                if !sections.isEmpty {
+                    Picker("Section", selection: $sectionID) {
+                        Text("Other").tag(UUID?.none)
+                        ForEach(sections) { section in
+                            Text(section.name).tag(UUID?.some(section.id))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add Multiple Items")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        ShoppingListService.addItems(
+                            from: text,
+                            to: list,
+                            sectionID: sectionID,
+                            existingItems: items,
+                            context: modelContext
+                        )
+                        dismiss()
+                    }
+                    .disabled(!canAdd)
+                }
+            }
+            .onAppear {
+                sectionID = initialSectionID
+            }
+        }
+    }
+}
+
 private struct ShoppingListItemEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Bindable var item: ShoppingListItem
+    let sourceList: ShoppingList
+    let shoppingLists: [ShoppingList]
+    let shoppingItems: [ShoppingListItem]
     let sections: [FoodStoreSection]
 
     @State private var name = ""
@@ -1965,6 +2251,7 @@ private struct ShoppingListItemEditorView: View {
     @State private var isFavorite = false
     @State private var priority: ShoppingItemPriority = .normal
     @State private var inventoryBehavior: InventoryLinkBehavior = .askWhenChecked
+    @State private var destinationListID: UUID?
 
     var body: some View {
         NavigationStack {
@@ -1999,6 +2286,14 @@ private struct ShoppingListItemEditorView: View {
                 }
                 TextField("Notes (what you liked or disliked)", text: $notes, axis: .vertical)
                     .lineLimit(3...6)
+
+                if shoppingLists.count > 1 {
+                    Picker("List", selection: $destinationListID) {
+                        ForEach(shoppingLists) { list in
+                            Text(list.name).tag(UUID?.some(list.id))
+                        }
+                    }
+                }
             }
             .navigationTitle("Item")
             .navigationBarTitleDisplayMode(.inline)
@@ -2021,6 +2316,19 @@ private struct ShoppingListItemEditorView: View {
                             inventoryLinkBehavior: inventoryBehavior,
                             context: modelContext
                         )
+                        if let destinationListID,
+                           destinationListID != sourceList.id,
+                           let destination = shoppingLists.first(where: { $0.id == destinationListID }) {
+                            ShoppingListService.moveItem(
+                                item,
+                                from: sourceList,
+                                to: destination,
+                                existingDestinationItems: shoppingItems.filter {
+                                    $0.shoppingListID == destination.id
+                                },
+                                context: modelContext
+                            )
+                        }
                         dismiss()
                     }
                 }
@@ -2035,6 +2343,7 @@ private struct ShoppingListItemEditorView: View {
                 isFavorite = item.isFavorite
                 priority = item.priority
                 inventoryBehavior = item.inventoryLinkBehavior
+                destinationListID = sourceList.id
             }
         }
     }

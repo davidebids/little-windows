@@ -2299,6 +2299,33 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testLiveActivityStopSurvivesNewerNonTimerMetadataUpdate() async throws {
+        let container = try makeInMemoryContainer()
+        let startedAt = Date().addingTimeInterval(-300)
+        let requestedAt = Date().addingTimeInterval(-2)
+        let event = BabyEvent(type: .sleep, startDate: startedAt)
+        event.activeTimerSegmentStartDate = startedAt
+        // Startup sync or bookkeeping can touch the event after the widget
+        // tap without representing a newer timer action.
+        event.updatedAt = requestedAt.addingTimeInterval(1)
+        container.mainContext.insert(event)
+        try container.mainContext.save()
+
+        let processed = await IntegrationCommandProcessor.process(
+            URL(string: "littlewindows://action/stop/\(event.id.uuidString)?requestedAt=\(requestedAt.timeIntervalSince1970)")!,
+            container: container
+        )
+
+        XCTAssertTrue(processed)
+        XCTAssertFalse(event.isTimerRunning)
+        XCTAssertEqual(
+            event.timerAccumulatedSeconds ?? 0,
+            requestedAt.timeIntervalSince(startedAt),
+            accuracy: 0.01
+        )
+    }
+
+    @MainActor
     func testDelayedWidgetStopDoesNotOverrideNewerTimerAction() async throws {
         let container = try makeInMemoryContainer()
         let requestedAt = Date().addingTimeInterval(-2)
@@ -2306,6 +2333,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             type: .sleep,
             startDate: Date().addingTimeInterval(-300)
         )
+        event.activeTimerSegmentStartDate = requestedAt.addingTimeInterval(1)
         event.updatedAt = requestedAt.addingTimeInterval(1)
         container.mainContext.insert(event)
         try container.mainContext.save()
@@ -6406,6 +6434,185 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(savedItems.first?.shoppingListID, list.id)
         XCTAssertFalse(ShoppingListService.archiveList(list, context: context, now: Date(timeIntervalSince1970: 300)))
         XCTAssertEqual(list.updatedAt, archivedAt)
+    }
+
+    @MainActor
+    func testShoppingListSmartAddReactivatesMatchesAndBulkAddsUniqueItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let list = ShoppingList(householdID: household.id, name: "Test Market")
+        let milk = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Milk",
+            isChecked: true,
+            checkedAt: Date(timeIntervalSince1970: 100),
+            purchaseCount: 3
+        )
+        context.insert(household)
+        context.insert(list)
+        context.insert(milk)
+        try context.save()
+
+        let reactivatedAt = Date(timeIntervalSince1970: 200)
+        let reactivated = ShoppingListService.addItem(
+            named: "  MILK  ",
+            to: list,
+            sectionID: nil,
+            existingItems: [milk],
+            context: context,
+            now: reactivatedAt
+        )
+
+        XCTAssertEqual(reactivated?.id, milk.id)
+        XCTAssertFalse(milk.isChecked)
+        XCTAssertNil(milk.checkedAt)
+        XCTAssertEqual(milk.lastUncheckedAt, reactivatedAt)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ShoppingListItem>()).count, 1)
+
+        ShoppingListService.setChecked(
+            milk,
+            isChecked: true,
+            context: context,
+            now: Date(timeIntervalSince1970: 250)
+        )
+        let addedCount = ShoppingListService.addItems(
+            from: "Milk\nBananas, Bread\n  bananas  ",
+            to: list,
+            sectionID: nil,
+            existingItems: [milk],
+            context: context,
+            now: Date(timeIntervalSince1970: 300)
+        )
+        let savedItems = try context.fetch(FetchDescriptor<ShoppingListItem>())
+
+        XCTAssertEqual(addedCount, 3)
+        XCTAssertEqual(savedItems.count, 3)
+        XCTAssertEqual(Set(savedItems.map { $0.name.lowercased() }), ["milk", "bananas", "bread"])
+        XCTAssertFalse(milk.isChecked)
+    }
+
+    @MainActor
+    func testShoppingListDuplicateCreatesReusableTemplateAndUniqueName() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let store = FoodStore(householdID: household.id, name: "Test Store")
+        let list = ShoppingList(
+            householdID: household.id,
+            name: "Weekly",
+            storeID: store.id,
+            listType: .store,
+            notes: "Main trip"
+        )
+        let existingCopy = ShoppingList(householdID: household.id, name: "Weekly Copy")
+        let item = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Oats",
+            quantity: 2,
+            unit: "bags",
+            notes: "Old fashioned",
+            isChecked: true,
+            checkedAt: Date(timeIntervalSince1970: 90),
+            isRecurringStaple: true,
+            isFavorite: true,
+            priority: .high,
+            lastPurchasedAt: Date(timeIntervalSince1970: 100),
+            purchaseCount: 4,
+            inventoryLinkBehavior: .addToInventoryWhenChecked
+        )
+        context.insert(household)
+        context.insert(store)
+        context.insert(list)
+        context.insert(existingCopy)
+        context.insert(item)
+        try context.save()
+
+        let copy = ShoppingListService.duplicateList(
+            list,
+            items: [item],
+            existingLists: [list, existingCopy],
+            context: context,
+            now: Date(timeIntervalSince1970: 200)
+        )
+        let copiedItem = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ShoppingListItem>()).first { $0.shoppingListID == copy.id }
+        )
+
+        XCTAssertEqual(copy.name, "Weekly Copy 2")
+        XCTAssertEqual(copy.storeID, store.id)
+        XCTAssertEqual(copy.listType, .store)
+        XCTAssertEqual(copy.notes, "Main trip")
+        XCTAssertFalse(copiedItem.isChecked)
+        XCTAssertNil(copiedItem.checkedAt)
+        XCTAssertEqual(copiedItem.purchaseCount, 0)
+        XCTAssertNil(copiedItem.lastPurchasedAt)
+        XCTAssertTrue(copiedItem.isRecurringStaple)
+        XCTAssertTrue(copiedItem.isFavorite)
+        XCTAssertEqual(copiedItem.priority, .high)
+        XCTAssertEqual(copiedItem.inventoryLinkBehavior, .addToInventoryWhenChecked)
+    }
+
+    @MainActor
+    func testShoppingListMoveMergesDuplicatesAndClearsIncompatibleSection() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let firstStore = FoodStore(householdID: household.id, name: "First Store")
+        let secondStore = FoodStore(householdID: household.id, name: "Second Store")
+        let firstList = ShoppingList(householdID: household.id, name: "First", storeID: firstStore.id)
+        let secondList = ShoppingList(householdID: household.id, name: "Second", storeID: secondStore.id)
+        let sectionID = UUID()
+        let apples = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: firstList.id,
+            name: "Apples",
+            storeSectionID: sectionID
+        )
+        let bread = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: firstList.id,
+            name: "Bread"
+        )
+        let existingBread = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: secondList.id,
+            name: "bread",
+            isChecked: true
+        )
+        context.insert(household)
+        context.insert(firstStore)
+        context.insert(secondStore)
+        context.insert(firstList)
+        context.insert(secondList)
+        context.insert(apples)
+        context.insert(bread)
+        context.insert(existingBread)
+        try context.save()
+
+        XCTAssertTrue(ShoppingListService.moveItem(
+            apples,
+            from: firstList,
+            to: secondList,
+            existingDestinationItems: [existingBread],
+            context: context
+        ))
+        XCTAssertEqual(apples.shoppingListID, secondList.id)
+        XCTAssertNil(apples.storeSectionID)
+
+        XCTAssertTrue(ShoppingListService.moveItem(
+            bread,
+            from: firstList,
+            to: secondList,
+            existingDestinationItems: [apples, existingBread],
+            context: context
+        ))
+        let destinationItems = try context.fetch(FetchDescriptor<ShoppingListItem>())
+            .filter { $0.shoppingListID == secondList.id }
+        XCTAssertEqual(destinationItems.count, 2)
+        XCTAssertFalse(existingBread.isChecked)
     }
 
     @MainActor

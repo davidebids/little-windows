@@ -89,7 +89,7 @@ Insights support short lookback ranges, previous-period comparison, plain-langua
 
 Food & Home tracks household food routines separately from child and dog care events. It includes:
 
-- Shopping lists with store-specific sections, priorities, quantities, notes, recurring staples, checked state, and reactivation helpers.
+- Shopping lists with store-specific sections, priorities, quantities, notes, recurring staples, checked state, smart history reactivation, bulk entry, reusable list duplication, and reordering helpers.
 - Named home to-do lists with active and completed sections plus added/completed caregiver tracking.
 - Store layouts with default sections such as Produce, Refrigerated, Frozen, Pantry, Household, and Other.
 - Inventory locations and items with quantity, unit, status, expiration, and notes.

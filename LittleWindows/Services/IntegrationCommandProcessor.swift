@@ -73,17 +73,26 @@ enum IntegrationCommandProcessor {
         to event: BabyEvent,
         requestedAt: Date
     ) -> Bool {
-        // A delayed duplicate must not undo a newer in-app timer action.
-        guard event.updatedAt <= requestedAt.addingTimeInterval(0.75) else {
-            return false
-        }
         switch action {
         case .stopActive, .stop:
-            return event.isTimerRunning
+            guard event.isTimerRunning else { return false }
+            // General event metadata can change while the app is waking or
+            // importing CloudKit data. Only a timer segment that began after
+            // this command proves that the user resumed/restarted the timer
+            // after tapping Stop.
+            let activeSegmentStart = event.activeTimerSegmentStartDate
+                ?? event.startDate
+            return activeSegmentStart <= requestedAt.addingTimeInterval(0.75)
         case .resume:
-            return event.isTimerDraft && !event.isTimerRunning
+            // A delayed Resume must not undo a newer in-app Stop.
+            return event.isTimerDraft
+                && !event.isTimerRunning
+                && event.updatedAt <= requestedAt.addingTimeInterval(0.75)
         case .switchSide:
-            return event.type == .nursing && event.isTimerDraft
+            // A delayed side switch must not overtake a newer nursing edit.
+            return event.type == .nursing
+                && event.isTimerDraft
+                && event.updatedAt <= requestedAt.addingTimeInterval(0.75)
         }
     }
 

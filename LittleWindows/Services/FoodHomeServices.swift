@@ -165,6 +165,99 @@ enum ShoppingListService {
     }
 
     @discardableResult
+    static func updateList(
+        _ list: ShoppingList,
+        name: String,
+        notes: String,
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return false }
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard list.name != trimmedName || list.notes != trimmedNotes.nilIfEmpty else { return false }
+        list.name = trimmedName
+        list.notes = trimmedNotes.nilIfEmpty
+        list.updatedAt = now
+        save(context)
+        return true
+    }
+
+    @discardableResult
+    static func duplicateList(
+        _ list: ShoppingList,
+        items: [ShoppingListItem],
+        existingLists: [ShoppingList],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> ShoppingList {
+        let existingNames = Set(existingLists.map { normalizedShoppingName($0.name) })
+        let baseName = "\(list.name) Copy"
+        var name = baseName
+        var suffix = 2
+        while existingNames.contains(normalizedShoppingName(name)) {
+            name = "\(baseName) \(suffix)"
+            suffix += 1
+        }
+
+        let copy = ShoppingList(
+            householdID: list.householdID,
+            name: name,
+            storeID: list.storeID,
+            listType: list.listType,
+            createdAt: now,
+            updatedAt: now,
+            sortOrder: (existingLists.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1,
+            notes: list.notes
+        )
+        context.insert(copy)
+
+        for source in items
+            .filter({ $0.shoppingListID == list.id })
+            .sorted(by: shoppingItemOrder) {
+            context.insert(ShoppingListItem(
+                householdID: copy.householdID,
+                shoppingListID: copy.id,
+                foodItemID: source.foodItemID,
+                name: source.name,
+                quantity: source.quantity,
+                unit: source.unit,
+                notes: source.notes,
+                storeSectionID: source.storeSectionID,
+                categoryName: source.categoryName,
+                isRecurringStaple: source.isRecurringStaple,
+                isFavorite: source.isFavorite,
+                priority: source.priority,
+                addedBy: source.addedBy,
+                createdAt: now,
+                updatedAt: now,
+                sortOrder: source.sortOrder,
+                inventoryLinkBehavior: source.inventoryLinkBehavior
+            ))
+        }
+        save(context)
+        return copy
+    }
+
+    @discardableResult
+    static func reorderLists(
+        _ orderedLists: [ShoppingList],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        guard let householdID = orderedLists.first?.householdID,
+              orderedLists.allSatisfy({ $0.householdID == householdID && !$0.isArchived }) else {
+            return false
+        }
+        for (index, list) in orderedLists.enumerated() {
+            list.sortOrder = index
+            list.updatedAt = now
+        }
+        save(context)
+        return true
+    }
+
+    @discardableResult
     static func archiveList(
         _ list: ShoppingList,
         context: ModelContext,
@@ -177,25 +270,104 @@ enum ShoppingListService {
         return true
     }
 
+    @discardableResult
     static func addItem(
         named name: String,
         to list: ShoppingList,
         sectionID: UUID?,
         existingItems: [ShoppingListItem],
-        context: ModelContext
-    ) {
+        context: ModelContext,
+        now: Date = Date(),
+        saveImmediately: Bool = true
+    ) -> ShoppingListItem? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
+
+        if let existing = existingItems.first(where: {
+            $0.shoppingListID == list.id
+                && normalizedShoppingName($0.name) == normalizedShoppingName(trimmed)
+        }) {
+            var changed = false
+            if existing.isChecked {
+                existing.isChecked = false
+                existing.checkedAt = nil
+                existing.lastUncheckedAt = now
+                changed = true
+            }
+            if let sectionID, existing.storeSectionID != sectionID {
+                existing.storeSectionID = sectionID
+                changed = true
+            }
+            if changed {
+                existing.updatedAt = now
+                list.updatedAt = now
+                if saveImmediately { save(context) }
+            }
+            return existing
+        }
+
         let nextOrder = (existingItems.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
-        context.insert(ShoppingListItem(
+        let item = ShoppingListItem(
             householdID: list.householdID,
             shoppingListID: list.id,
             name: trimmed,
             storeSectionID: sectionID,
+            createdAt: now,
+            updatedAt: now,
             sortOrder: nextOrder
-        ))
-        list.updatedAt = Date()
+        )
+        context.insert(item)
+        list.updatedAt = now
+        if saveImmediately { save(context) }
+        return item
+    }
+
+    @discardableResult
+    static func addItems(
+        from text: String,
+        to list: ShoppingList,
+        sectionID: UUID?,
+        existingItems: [ShoppingListItem],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Int {
+        let names = text
+            .components(separatedBy: .newlines)
+            .flatMap { line in
+                line.split(separator: ",", omittingEmptySubsequences: true).map(String.init)
+            }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var workingItems = existingItems
+        var changedCount = 0
+        for name in names {
+            let normalizedName = normalizedShoppingName(name)
+            let previous = workingItems.first {
+                $0.shoppingListID == list.id
+                    && normalizedShoppingName($0.name) == normalizedName
+            }
+            let wasChecked = previous?.isChecked == true
+            let previousSectionID = previous?.storeSectionID
+            guard let item = addItem(
+                named: name,
+                to: list,
+                sectionID: sectionID,
+                existingItems: workingItems,
+                context: context,
+                now: now,
+                saveImmediately: false
+            ) else { continue }
+            if previous == nil {
+                workingItems.append(item)
+                changedCount += 1
+            } else if wasChecked || (sectionID != nil && previousSectionID != sectionID) {
+                changedCount += 1
+            }
+        }
+        guard changedCount > 0 else { return 0 }
         save(context)
+        return changedCount
     }
 
     static func updateItem(
@@ -286,6 +458,88 @@ enum ShoppingListService {
         save(context)
     }
 
+    static func reactivateFrequentItems(
+        in list: ShoppingList,
+        items: [ShoppingListItem],
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        var changed = false
+        for item in items
+            where item.shoppingListID == list.id
+                && item.purchaseCount >= 2
+                && item.isChecked {
+            item.isChecked = false
+            item.checkedAt = nil
+            item.lastUncheckedAt = now
+            item.updatedAt = now
+            changed = true
+        }
+        guard changed else { return }
+        list.updatedAt = now
+        save(context)
+    }
+
+    @discardableResult
+    static func addUsedUpInventoryItems(
+        _ inventoryItems: [InventoryItem],
+        to list: ShoppingList,
+        existingItems: [ShoppingListItem],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Int {
+        let names = inventoryItems
+            .filter { $0.householdID == list.householdID && $0.status == .usedUp }
+            .map(\.name)
+            .joined(separator: "\n")
+        return addItems(
+            from: names,
+            to: list,
+            sectionID: nil,
+            existingItems: existingItems,
+            context: context,
+            now: now
+        )
+    }
+
+    @discardableResult
+    static func moveItem(
+        _ item: ShoppingListItem,
+        from sourceList: ShoppingList,
+        to destinationList: ShoppingList,
+        existingDestinationItems: [ShoppingListItem],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        guard item.shoppingListID == sourceList.id,
+              sourceList.householdID == destinationList.householdID,
+              sourceList.id != destinationList.id else { return false }
+
+        if let duplicate = existingDestinationItems.first(where: {
+            $0.shoppingListID == destinationList.id
+                && normalizedShoppingName($0.name) == normalizedShoppingName(item.name)
+        }) {
+            if duplicate.isChecked && !item.isChecked {
+                duplicate.isChecked = false
+                duplicate.checkedAt = nil
+                duplicate.lastUncheckedAt = now
+                duplicate.updatedAt = now
+            }
+            context.delete(item)
+        } else {
+            item.shoppingListID = destinationList.id
+            item.sortOrder = (existingDestinationItems.map { $0.sortOrder ?? 0 }.max() ?? -1) + 1
+            if sourceList.storeID != destinationList.storeID {
+                item.storeSectionID = nil
+            }
+            item.updatedAt = now
+        }
+        sourceList.updatedAt = now
+        destinationList.updatedAt = now
+        save(context)
+        return true
+    }
+
     static func reactivateLastTrip(
         in list: ShoppingList,
         items: [ShoppingListItem],
@@ -357,6 +611,17 @@ enum ShoppingListService {
         list.updatedAt = now
         save(context)
     }
+
+    private static func shoppingItemOrder(_ lhs: ShoppingListItem, _ rhs: ShoppingListItem) -> Bool {
+        (lhs.sortOrder ?? 0, lhs.name) < (rhs.sortOrder ?? 0, rhs.name)
+    }
+}
+
+private func normalizedShoppingName(_ value: String) -> String {
+    value
+        .split(whereSeparator: \Character.isWhitespace)
+        .joined(separator: " ")
+        .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
 }
 
 @MainActor
@@ -1154,6 +1419,14 @@ struct FoodSuggestion: Identifiable, Equatable {
     var title: String
     var detail: String
     var systemImage: String
+    var action: FoodSuggestionAction
+}
+
+enum FoodSuggestionAction: Equatable {
+    case reactivateStaples
+    case reactivateFrequent
+    case addUsedUpInventory
+    case reviewMealPrep
 }
 
 enum FoodSuggestionService {
@@ -1169,7 +1442,8 @@ enum FoodSuggestionService {
             result.append(FoodSuggestion(
                 title: "Reactivate staples",
                 detail: "\(staples) checked staple items are ready for the next trip.",
-                systemImage: "arrow.clockwise.circle.fill"
+                systemImage: "arrow.clockwise.circle.fill",
+                action: .reactivateStaples
             ))
         }
         let frequent = items.filter { $0.shoppingListID == list.id && $0.purchaseCount >= 2 && $0.isChecked }.count
@@ -1177,15 +1451,24 @@ enum FoodSuggestionService {
             result.append(FoodSuggestion(
                 title: "Add usual \(list.name) items",
                 detail: "\(frequent) frequently purchased items are checked off.",
-                systemImage: "cart.badge.plus"
+                systemImage: "cart.badge.plus",
+                action: .reactivateFrequent
             ))
         }
-        let usedUp = inventoryItems.filter { $0.householdID == list.householdID && $0.status == .usedUp }.count
+        let activeNames = Set(items.lazy.filter {
+            $0.shoppingListID == list.id && !$0.isChecked
+        }.map { normalizedShoppingName($0.name) })
+        let usedUp = inventoryItems.filter {
+            $0.householdID == list.householdID
+                && $0.status == .usedUp
+                && !activeNames.contains(normalizedShoppingName($0.name))
+        }.count
         if usedUp > 0 {
             result.append(FoodSuggestion(
                 title: "Add items used up recently",
                 detail: "\(usedUp) inventory items are marked used up.",
-                systemImage: "tray.and.arrow.up.fill"
+                systemImage: "tray.and.arrow.up.fill",
+                action: .addUsedUpInventory
             ))
         }
         let lowMealPrep = mealPrepItems.filter {
@@ -1195,7 +1478,8 @@ enum FoodSuggestionService {
             result.append(FoodSuggestion(
                 title: "Check meal prep",
                 detail: "\(lowMealPrep) prepared items are low or finished.",
-                systemImage: "fork.knife.circle.fill"
+                systemImage: "fork.knife.circle.fill",
+                action: .reviewMealPrep
             ))
         }
         return result
