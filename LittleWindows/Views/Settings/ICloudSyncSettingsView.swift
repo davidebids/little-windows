@@ -103,10 +103,6 @@ struct ICloudSyncSettingsView: View {
             }
             .labeledContentStyle(AdaptiveLabeledContentStyle())
 
-            Section("Back up before testing") {
-                Text("Use Settings > Data > Export JSON backup before changing iCloud sync setup, resetting development data, or testing migrations on devices.")
-                    .foregroundStyle(.secondary)
-            }
         }
         .navigationTitle("iCloud Sync")
         .navigationBarTitleDisplayMode(.inline)

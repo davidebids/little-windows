@@ -13,8 +13,7 @@ enum HouseholdService {
         }
         let household = Household(name: "Home")
         context.insert(household)
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        _ = PersistenceService.save(context: context)
         return household
     }
 }
@@ -47,23 +46,75 @@ enum StoreLayoutService {
         return store
     }
 
+    @discardableResult
     static func createSection(
         name: String,
         store: FoodStore,
         existingSections: [FoodStoreSection],
         context: ModelContext
-    ) {
+    ) -> FoodStoreSection? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
         let nextOrder = (existingSections.map(\.sortOrder).max() ?? -1) + 1
-        context.insert(FoodStoreSection(
+        let section = FoodStoreSection(
             householdID: store.householdID,
             storeID: store.id,
             name: trimmed,
             sortOrder: nextOrder
-        ))
+        )
+        context.insert(section)
         store.updatedAt = Date()
         save(context)
+        return section
+    }
+
+    @discardableResult
+    static func reorderSections(
+        _ orderedSections: [FoodStoreSection],
+        in store: FoodStore,
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        guard orderedSections.allSatisfy({ $0.storeID == store.id }) else { return false }
+        var changed = false
+        for (index, section) in orderedSections.enumerated() where section.sortOrder != index {
+            section.sortOrder = index
+            section.updatedAt = now
+            changed = true
+        }
+        guard changed else { return false }
+        store.updatedAt = now
+        save(context)
+        return true
+    }
+
+    @discardableResult
+    static func deleteSection(
+        _ section: FoodStoreSection,
+        from store: FoodStore,
+        shoppingItems: [ShoppingListItem],
+        remainingSections: [FoodStoreSection],
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        guard section.storeID == store.id else { return false }
+
+        for item in shoppingItems where item.storeSectionID == section.id {
+            item.storeSectionID = nil
+            item.updatedAt = now
+        }
+        context.delete(section)
+
+        let orderedRemainingSections = remainingSections
+            .filter { $0.id != section.id && $0.storeID == store.id }
+            .sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
+        for (index, remainingSection) in orderedRemainingSections.enumerated() {
+            remainingSection.sortOrder = index
+            remainingSection.updatedAt = now
+        }
+        store.updatedAt = now
+        save(context)
+        return true
     }
 
     @discardableResult
@@ -767,13 +818,65 @@ enum ReturnTrackingService {
     static func createReturn(
         householdID: UUID,
         sortOrder: Int,
+        itemName: String,
+        itemQuantity: Double?,
+        itemReason: String,
+        returnURLString: String,
+        packageName: String,
+        carrier: ReturnPackageCarrier,
+        method: ReturnPackageMethod,
+        trackingNumber: String,
+        returnByDate: Date?,
+        photoAttachmentIDs: [UUID],
         context: ModelContext
     ) -> ReturnRequest? {
+        let trimmedItemName = itemName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPackageName = packageName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTrackingNumber = trackingNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasItem = !trimmedItemName.isEmpty
+        let hasExplicitPackageDetails = !trimmedPackageName.isEmpty
+            || carrier != .wholeFoods
+            || method != .dropOff
+            || !trimmedTrackingNumber.isEmpty
+            || returnByDate != nil
+            || !photoAttachmentIDs.isEmpty
+        guard hasItem || hasExplicitPackageDetails else { return nil }
+
         let request = ReturnRequest(
             householdID: householdID,
             sortOrder: sortOrder
         )
         context.insert(request)
+
+        // The creation form always presents a populated send-back method and
+        // partner. Persist those selections on the first save, including when
+        // they are still the defaults, so the saved return matches the form.
+        let package = ReturnPackage(
+            householdID: householdID,
+            returnRequestID: request.id,
+            name: trimmedPackageName,
+            carrier: carrier,
+            method: method,
+            trackingNumber: trimmedTrackingNumber.nilIfEmpty,
+            returnByDate: returnByDate,
+            photoAttachmentIDs: photoAttachmentIDs,
+            sortOrder: 0
+        )
+        context.insert(package)
+
+        if hasItem {
+            context.insert(ReturnItem(
+                householdID: householdID,
+                returnRequestID: request.id,
+                packageID: package.id,
+                name: trimmedItemName,
+                quantity: itemQuantity,
+                reason: itemReason.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                returnURLString: returnURLString.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                sortOrder: 0
+            ))
+        }
+
         save(context)
         return request
     }
@@ -1230,6 +1333,7 @@ enum FoodReminderService {
         type: FoodReminderType,
         title: String,
         dateTime: Date,
+        timeZoneIdentifier: String = CareTimeZoneSettings.effectiveIdentifier(),
         relatedTodoListID: UUID?,
         relatedShoppingListID: UUID?,
         relatedMealPrepItemID: UUID?,
@@ -1244,7 +1348,8 @@ enum FoodReminderService {
             relatedShoppingListID: relatedShoppingListID,
             relatedMealPrepItemID: relatedMealPrepItemID,
             relatedReturnRequestID: relatedReturnRequestID,
-            dateTime: dateTime
+            dateTime: dateTime,
+            timeZoneIdentifier: timeZoneIdentifier
         )
         context.insert(reminder)
         save(context)
@@ -1261,8 +1366,7 @@ enum FoodReminderService {
 
 @MainActor
 func save(_ context: ModelContext) {
-    try? context.save()
-    PersistenceService.recordLocalSave()
+    guard PersistenceService.save(context: context) else { return }
     WidgetSnapshotService.refreshFood(context: context)
 }
 

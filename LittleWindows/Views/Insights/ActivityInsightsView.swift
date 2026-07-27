@@ -130,7 +130,9 @@ struct MedicineInsightsView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(event.displayTitle)
                                     .font(.subheadline.weight(.semibold))
-                                Text(event.startDate.formatted(date: .abbreviated, time: .shortened))
+                                Text(
+                                    "\(DateFormatting.dayString(from: event.startDate, timeZone: event.startTimeZone)) \(DateFormatting.timeString(from: event.startDate, timeZone: event.startTimeZone, includesTimeZone: event.shouldShowTimeZoneInTimeline))"
+                                )
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

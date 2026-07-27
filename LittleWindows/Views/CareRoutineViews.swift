@@ -13,12 +13,19 @@ struct PendingRoutineStepCompletion {
     var stepID: UUID
 }
 
+struct CareRoutineTodayItem: Identifiable {
+    var id: UUID { routine.id }
+    var routine: CareRoutine
+    var steps: [CareRoutineStep]
+    var activeRun: CareRoutineRun?
+    var latestRun: CareRoutineRun?
+}
+
 struct CareRoutinesTodayCard: View {
     @State private var routinePendingDelete: CareRoutine?
 
-    var routines: [CareRoutine]
-    var steps: [CareRoutineStep]
-    var runs: [CareRoutineRun]
+    var items: [CareRoutineTodayItem]
+    var routineCount: Int
     var templates: [CareRoutineTemplate]
     var addTemplate: (CareRoutineTemplate) -> Void
     var startRoutine: (CareRoutine) -> Void
@@ -29,7 +36,7 @@ struct CareRoutinesTodayCard: View {
 
     var body: some View {
         Section {
-            if routines.isEmpty {
+            if items.isEmpty {
                 RoutineTemplateStarterCard(
                     templates: templates,
                     addTemplate: addTemplate,
@@ -39,25 +46,22 @@ struct CareRoutinesTodayCard: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } else {
-                ForEach(routines.prefix(3)) { routine in
-                    let routineSteps = CareRoutineService.steps(for: routine, steps: steps)
-                    let run = CareRoutineService.activeRun(for: routine, runs: runs)
-                    let latestRun = CareRoutineService.latestRun(for: routine, runs: runs)
+                ForEach(items) { item in
                     CareRoutineTodayRow(
-                        routine: routine,
-                        steps: routineSteps,
-                        activeRun: run,
-                        latestRun: latestRun,
-                        start: { startRoutine(routine) },
-                        resume: { run.map { openRun(routine, $0) } }
+                        routine: item.routine,
+                        steps: item.steps,
+                        activeRun: item.activeRun,
+                        latestRun: item.latestRun,
+                        start: { startRoutine(item.routine) },
+                        resume: { item.activeRun.map { openRun(item.routine, $0) } }
                     )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .swipeActions {
-                        if let run {
+                        if let activeRun = item.activeRun {
                             Button {
-                                cancelRun(run)
+                                cancelRun(activeRun)
                             } label: {
                                 Label("Cancel", systemImage: "xmark.circle.fill")
                             }
@@ -65,14 +69,14 @@ struct CareRoutinesTodayCard: View {
                         }
 
                         Button(role: .destructive) {
-                            routinePendingDelete = routine
+                            routinePendingDelete = item.routine
                         } label: {
                             Label("Delete", systemImage: "trash.fill")
                         }
                     }
                 }
 
-                if routines.count > 3 || !templates.isEmpty {
+                if routineCount > 3 || !templates.isEmpty {
                     Button(action: manage) {
                         Label("Manage routines", systemImage: "slider.horizontal.3")
                             .font(.subheadline.weight(.semibold))
@@ -85,7 +89,7 @@ struct CareRoutinesTodayCard: View {
                 }
             }
         } header: {
-            AppSectionHeader(title: "Routines", subtitle: routines.isEmpty ? "Templates" : "\(routines.count) saved")
+            AppSectionHeader(title: "Routines", subtitle: items.isEmpty ? "Templates" : "\(routineCount) saved")
         }
         .appActionSheet(
             isPresented: Binding(
@@ -153,7 +157,7 @@ private struct RoutineTemplateStarterCard: View {
             RoundedRectangle(cornerRadius: 22)
                 .fill(AppTheme.accent.opacity(0.055))
         }
-        .appSurface()
+        .routineTodaySurface()
     }
 
     private var templateButtons: some View {
@@ -243,36 +247,41 @@ private struct CareRoutineTodayRow: View {
         color(named: routine.tintName)
     }
 
-    private var completedCount: Int {
-        activeRun?.completedStepIDs.count ?? 0
+    private struct ProgressState {
+        var completedCount: Int
+        var resolvedCount: Int
+        var nextStep: CareRoutineStep?
     }
 
-    private var skippedCount: Int {
-        activeRun?.skippedStepIDs.count ?? 0
+    private var progressState: ProgressState {
+        guard let activeRun else {
+            return ProgressState(
+                completedCount: 0,
+                resolvedCount: 0,
+                nextStep: steps.first
+            )
+        }
+
+        let completedIDs = Set(activeRun.completedStepIDs)
+        let skippedIDs = Set(activeRun.skippedStepIDs)
+        let resolvedIDs = completedIDs.union(skippedIDs)
+        return ProgressState(
+            completedCount: completedIDs.count,
+            resolvedCount: min(resolvedIDs.count, steps.count),
+            nextStep: steps.first { !resolvedIDs.contains($0.id) }
+        )
     }
 
-    private var resolvedCount: Int {
-        min(completedCount + skippedCount, steps.count)
-    }
-
-    private var progressText: String {
+    private func progressText(_ progress: ProgressState) -> String {
         guard activeRun != nil else {
             return "\(steps.count) step\(steps.count == 1 ? "" : "s")"
         }
-        return "\(completedCount)/\(steps.count) done"
+        return "\(progress.completedCount)/\(steps.count) done"
     }
 
-    private var nextStep: CareRoutineStep? {
-        guard let activeRun else {
-            return steps.first
-        }
-        let resolvedIDs = Set(activeRun.completedStepIDs + activeRun.skippedStepIDs)
-        return steps.first { !resolvedIDs.contains($0.id) }
-    }
-
-    private var detailText: String {
+    private func detailText(_ progress: ProgressState) -> String {
         if activeRun != nil {
-            if let nextStep {
+            if let nextStep = progress.nextStep {
                 return "Next: \(nextStep.title)"
             }
             return "Ready to finish"
@@ -308,6 +317,9 @@ private struct CareRoutineTodayRow: View {
     }
 
     var body: some View {
+        let progress = progressState
+        let progressLabel = progressText(progress)
+
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: routine.iconName)
@@ -329,7 +341,7 @@ private struct CareRoutineTodayRow: View {
                         }
                     }
 
-                    Text(detailText)
+                    Text(detailText(progress))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -344,7 +356,7 @@ private struct CareRoutineTodayRow: View {
 
                 Spacer(minLength: 8)
 
-                Text(progressText)
+                Text(progressLabel)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(activeRun == nil ? .secondary : tint)
                     .padding(.horizontal, 9)
@@ -352,10 +364,10 @@ private struct CareRoutineTodayRow: View {
                     .background(tint.opacity(0.10), in: Capsule())
             }
 
-            ProgressView(value: Double(resolvedCount), total: Double(max(steps.count, 1)))
+            ProgressView(value: Double(progress.resolvedCount), total: Double(max(steps.count, 1)))
                 .tint(tint)
                 .accessibilityLabel("\(routine.title) progress")
-                .accessibilityValue(progressText)
+                .accessibilityValue(progressLabel)
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
@@ -375,7 +387,7 @@ private struct CareRoutineTodayRow: View {
             RoundedRectangle(cornerRadius: 22)
                 .fill(tint.opacity(activeRun == nil ? 0.045 : 0.075))
         }
-        .appSurface()
+        .routineTodaySurface()
     }
 
     private var metadataLabels: some View {
@@ -1022,6 +1034,7 @@ struct CareRoutineRunView: View {
     var skip: (CareRoutineStep) -> Void
     var finish: () -> Void
     var cancel: () -> Void
+    var canPerform: (CareRoutineStep) -> Bool = { _ in true }
 
     private var completedCount: Int {
         steps.filter { run.isCompleted(stepID: $0.id) }.count
@@ -1075,6 +1088,7 @@ struct CareRoutineRunView: View {
                         isCompleted: run.isCompleted(stepID: step.id),
                         isSkipped: run.isSkipped(stepID: step.id),
                         resolutionRecord: run.resolutionRecord(for: step.id),
+                        isPerformEnabled: canPerform(step),
                         perform: { perform(step) },
                         skip: { skip(step) }
                     )
@@ -1101,6 +1115,7 @@ private struct StepRunRow: View {
     var isCompleted: Bool
     var isSkipped: Bool
     var resolutionRecord: CareRoutineStepResolutionRecord?
+    var isPerformEnabled: Bool
     var perform: () -> Void
     var skip: () -> Void
 
@@ -1131,6 +1146,7 @@ private struct StepRunRow: View {
                     Button(actionTitle, action: perform)
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
+                        .disabled(!isPerformEnabled)
                         .accessibilityLabel("\(actionTitle) \(step.title)")
                     Button("Skip", action: skip)
                         .buttonStyle(.bordered)
@@ -1170,7 +1186,9 @@ private struct StepRunRow: View {
         case .logEvent:
             return "Log \(step.eventType?.displayName ?? "Event")"
         case .startTimer:
-            return "Start \(step.eventType?.displayName ?? "Timer")"
+            return isPerformEnabled
+                ? "Start \(step.eventType?.displayName ?? "Timer")"
+                : "\(step.eventType?.displayName ?? "Timer") timer already active"
         case .checklist,
              .openFoodHome,
              .openFoodQuickAdd,
@@ -1224,6 +1242,23 @@ private func color(named name: String) -> Color {
     case "mint": return .mint
     case "pink": return .pink
     default: return .indigo
+    }
+}
+
+private struct RoutineTodaySurfaceModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 22))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(AppTheme.line, lineWidth: 0.5)
+            }
+    }
+}
+
+private extension View {
+    func routineTodaySurface() -> some View {
+        modifier(RoutineTodaySurfaceModifier())
     }
 }
 

@@ -7,6 +7,18 @@ final class LiveActivityManager {
 
     private init() {}
 
+    func updateTimer(_ timer: ActiveTimerSnapshot) async {
+        guard let activity = Activity<LittleWindowsActivityAttributes>.activities.first(where: {
+            $0.content.state.timer.id == timer.id
+        }) else {
+            return
+        }
+        await activity.update(ActivityContent(
+            state: LittleWindowsActivityAttributes.ContentState(timer: timer),
+            staleDate: nil
+        ))
+    }
+
     func synchronize(profile: BabyProfile?, events: [BabyEvent]) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             await endAll()

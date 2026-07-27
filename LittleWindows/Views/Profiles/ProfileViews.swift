@@ -435,7 +435,7 @@ struct ProfileEditorView: View {
             )
             applyProfilePhoto(to: createdProfile)
         }
-        try? modelContext.save()
+        guard PersistenceService.save(context: modelContext) else { return }
         dismiss()
     }
 

@@ -30,9 +30,19 @@ struct AppointmentDetailView: View {
     private var appointmentTimeSummary: String {
         guard let endDate = appointment.endDate,
               endDate > appointment.startDate else {
-            return DateFormatting.time.string(from: appointment.startDate)
+            return DateFormatting.timeString(
+                from: appointment.startDate,
+                timeZone: appointment.timeZone,
+                includesTimeZone: true
+            )
         }
-        return DateFormatting.window(start: appointment.startDate, end: endDate)
+        return DateFormatting.window(
+            start: appointment.startDate,
+            end: endDate,
+            startTimeZone: appointment.timeZone,
+            endTimeZone: appointment.timeZone,
+            includesTimeZones: true
+        )
     }
 
     var body: some View {
@@ -198,7 +208,7 @@ struct AppointmentDetailView: View {
                         appointment.temperatureEntryID = event.id
                     }
                     appointment.updatedAt = Date()
-                    try? modelContext.save()
+                    _ = PersistenceService.save(context: modelContext)
                 }
             }
         }
@@ -406,8 +416,7 @@ struct AppointmentDetailView: View {
         appointment.vaccinesGiven = vaccinesGiven
         appointment.medicationsDiscussed = medicationsDiscussed
         appointment.updatedAt = Date()
-        try? modelContext.save()
-        PersistenceService.recordLocalSave()
+        _ = PersistenceService.save(context: modelContext)
     }
 
     private func cleanedOptional(_ value: String) -> String? {
@@ -420,7 +429,7 @@ struct AppointmentDetailView: View {
             appointmentID: appointment.id
         )
         modelContext.delete(appointment)
-        try? modelContext.save()
+        guard PersistenceService.save(context: modelContext) else { return }
         dismiss()
     }
 }

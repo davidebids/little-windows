@@ -4,10 +4,14 @@ import Foundation
 @MainActor
 final class NightLightAudioService: ObservableObject {
     @Published private(set) var isPlaying = false
+    @Published private(set) var isPreparing = false
     @Published private(set) var statusMessage: String?
 
     private var player: AVAudioPlayer?
     private var currentSound: NightLightSound = .none
+    private var requestedVolume = 0.0
+    private var preparationTask: Task<Void, Never>?
+    private var generatedAudioCache: [NightLightSound: Data] = [:]
 
     func play(_ sound: NightLightSound, volume: Double) {
         guard sound != .none else {
@@ -15,49 +19,44 @@ final class NightLightAudioService: ObservableObject {
             return
         }
 
-        if sound == currentSound, let player, player.isPlaying {
-            player.volume = Self.playbackVolume(for: volume)
+        requestedVolume = volume
+        if sound == currentSound {
+            player?.volume = Self.playbackVolume(for: volume)
             return
         }
 
         stop(clearStatus: false)
+        currentSound = sound
+        requestedVolume = volume
+        statusMessage = nil
 
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(
-                .playback,
-                mode: .default,
-                options: [.mixWithOthers]
-            )
-            try session.setActive(true)
+        if let masteredLoopURL = Self.masteredLoopURL(for: sound) {
+            startPlayback(sound: sound, source: .url(masteredLoopURL))
+            return
+        }
 
-            let audioPlayer: AVAudioPlayer
-            if let masteredLoopURL = Self.masteredLoopURL(for: sound) {
-                audioPlayer = try AVAudioPlayer(contentsOf: masteredLoopURL)
-            } else {
-                audioPlayer = try AVAudioPlayer(
-                    data: Self.generatedWAVData(for: sound)
-                )
-            }
-            audioPlayer.numberOfLoops = -1
-            audioPlayer.volume = Self.playbackVolume(for: volume)
-            audioPlayer.prepareToPlay()
+        if let cachedData = generatedAudioCache[sound] {
+            startPlayback(sound: sound, source: .data(cachedData))
+            return
+        }
 
-            guard audioPlayer.play() else {
-                throw NightLightAudioError.playbackDidNotStart
-            }
-
-            player = audioPlayer
-            currentSound = sound
-            isPlaying = true
-            statusMessage = nil
-        } catch {
-            stop(clearStatus: false)
-            statusMessage = "Could not start ambient sound. Check the device volume and try again."
+        isPreparing = true
+        preparationTask = Task { [weak self] in
+            let data = await Task.detached(priority: .utility) {
+                Self.generatedWAVData(for: sound)
+            }.value
+            guard !Task.isCancelled,
+                  let self,
+                  self.currentSound == sound else { return }
+            self.generatedAudioCache[sound] = data
+            self.preparationTask = nil
+            self.isPreparing = false
+            self.startPlayback(sound: sound, source: .data(data))
         }
     }
 
     func updateVolume(_ volume: Double) {
+        requestedVolume = volume
         player?.volume = Self.playbackVolume(for: volume)
     }
 
@@ -215,10 +214,13 @@ final class NightLightAudioService: ObservableObject {
     }
 
     private func stop(clearStatus: Bool) {
+        preparationTask?.cancel()
+        preparationTask = nil
         player?.stop()
         player = nil
         currentSound = .none
         isPlaying = false
+        isPreparing = false
         if clearStatus {
             statusMessage = nil
         }
@@ -226,6 +228,42 @@ final class NightLightAudioService: ObservableObject {
             false,
             options: .notifyOthersOnDeactivation
         )
+    }
+
+    private func startPlayback(sound: NightLightSound, source: AudioSource) {
+        guard currentSound == sound else { return }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(
+                .playback,
+                mode: .default,
+                options: [.mixWithOthers]
+            )
+            try session.setActive(true)
+
+            let audioPlayer: AVAudioPlayer
+            switch source {
+            case .url(let url):
+                audioPlayer = try AVAudioPlayer(contentsOf: url)
+            case .data(let data):
+                audioPlayer = try AVAudioPlayer(data: data)
+            }
+            audioPlayer.numberOfLoops = -1
+            audioPlayer.volume = Self.playbackVolume(for: requestedVolume)
+            audioPlayer.prepareToPlay()
+
+            guard audioPlayer.play() else {
+                throw NightLightAudioError.playbackDidNotStart
+            }
+
+            player = audioPlayer
+            isPlaying = true
+            isPreparing = false
+            statusMessage = nil
+        } catch {
+            stop(clearStatus: false)
+            statusMessage = "Could not start ambient sound. Check the device volume and try again."
+        }
     }
 
     nonisolated static func masteredLoopURL(
@@ -308,6 +346,11 @@ final class NightLightAudioService: ObservableObject {
             data.append(contentsOf: $0)
         }
     }
+}
+
+private enum AudioSource {
+    case url(URL)
+    case data(Data)
 }
 
 private enum NightLightAudioError: Error {

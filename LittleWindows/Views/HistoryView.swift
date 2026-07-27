@@ -230,6 +230,8 @@ struct HistoryView: View {
                     reset: { reset(event) },
                     save: { endDate in save(event, endDate: endDate) },
                     discard: { delete(event) },
+                    setStartTimeZone: { setStartTimeZone($0, for: event) },
+                    setEndTimeZone: { setEndTimeZone($0, for: event) },
                     switchNursingSide: event.type == .nursing
                         ? { switchNursingSide(event) }
                         : nil,
@@ -515,6 +517,11 @@ struct HistoryView: View {
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: selectedDate)
         let end = calendar.startOfNextDay(for: selectedDate)
+        // A local calendar day can be up to 26 hours away from the device's
+        // current zone (UTC-12 through UTC+14). Fetch a little beyond that,
+        // then apply the event's recorded local day in memory.
+        let eventFetchStart = start.addingTimeInterval(-30 * 60 * 60)
+        let eventFetchEnd = end.addingTimeInterval(30 * 60 * 60)
         let selectedProfileID = profile?.id
 
         do {
@@ -522,13 +529,17 @@ struct HistoryView: View {
                 let eventDescriptor = FetchDescriptor<BabyEvent>(
                     predicate: #Predicate<BabyEvent> { event in
                         event.profileID == selectedProfileID &&
-                            event.startDate >= start &&
-                            event.startDate < end
+                            event.startDate >= eventFetchStart &&
+                            event.startDate < eventFetchEnd
                     },
                     sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
                 )
                 events = try modelContext.fetch(eventDescriptor)
-                    .filter { Self.visibleDayEvent($0, selectedProfileID: selectedProfileID) }
+                    .filter {
+                        Self.visibleDayEvent($0, selectedProfileID: selectedProfileID)
+                            && $0.occursOnLocalDay(selectedDate, calendar: calendar)
+                    }
+                    .sorted { $0.localStartMinute(calendar: calendar) > $1.localStartMinute(calendar: calendar) }
 
                 let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
                     predicate: #Predicate<DoctorAppointment> { appointment in
@@ -552,13 +563,17 @@ struct HistoryView: View {
             } else {
                 let eventDescriptor = FetchDescriptor<BabyEvent>(
                     predicate: #Predicate<BabyEvent> { event in
-                        event.startDate >= start &&
-                            event.startDate < end
+                        event.startDate >= eventFetchStart &&
+                            event.startDate < eventFetchEnd
                     },
                     sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
                 )
                 events = try modelContext.fetch(eventDescriptor)
-                    .filter { Self.visibleDayEvent($0, selectedProfileID: selectedProfileID) }
+                    .filter {
+                        Self.visibleDayEvent($0, selectedProfileID: selectedProfileID)
+                            && $0.occursOnLocalDay(selectedDate, calendar: calendar)
+                    }
+                    .sorted { $0.localStartMinute(calendar: calendar) > $1.localStartMinute(calendar: calendar) }
 
                 let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
                     predicate: #Predicate<DoctorAppointment> { appointment in
@@ -665,6 +680,13 @@ struct HistoryView: View {
 
     private func adjustStart(of event: BabyEvent, to date: Date) {
         EventTimerService.adjustStartDate(event, to: date)
+        Task {
+            await eventChanged(
+                event,
+                refreshPrediction: false,
+                waitForSystemIntegrations: true
+            )
+        }
     }
 
     private func stop(_ event: BabyEvent) {
@@ -691,6 +713,28 @@ struct HistoryView: View {
 
     private func reset(_ event: BabyEvent) {
         EventMutationService.resetTimer(event, context: modelContext)
+        Task {
+            await eventChanged(
+                event,
+                refreshPrediction: false,
+                waitForSystemIntegrations: true
+            )
+        }
+    }
+
+    private func setStartTimeZone(_ identifier: String, for event: BabyEvent) {
+        event.startTimeZoneIdentifier = identifier
+        Task {
+            await eventChanged(
+                event,
+                refreshPrediction: false,
+                waitForSystemIntegrations: true
+            )
+        }
+    }
+
+    private func setEndTimeZone(_ identifier: String, for event: BabyEvent) {
+        event.endTimeZoneIdentifier = identifier
         Task {
             await eventChanged(
                 event,
@@ -755,7 +799,7 @@ struct HistoryView: View {
             context: modelContext
         )
         modelContext.delete(milestone)
-        try? modelContext.save()
+        guard PersistenceService.save(context: modelContext) else { return }
         refreshDayData()
     }
 
@@ -765,7 +809,7 @@ struct HistoryView: View {
                 appointmentID: appointment.id
             )
             modelContext.delete(appointment)
-            try? modelContext.save()
+            guard PersistenceService.save(context: modelContext) else { return }
             refreshDayData()
         }
     }
@@ -791,7 +835,7 @@ private struct CalendarAppointmentRow: View {
                             .foregroundStyle(.green)
                     }
                 }
-                Text("\(DateFormatting.time.string(from: appointment.startDate)) · \(appointment.appointmentType.displayName)")
+                Text("\(DateFormatting.timeString(from: appointment.startDate, timeZone: appointment.timeZone, includesTimeZone: true)) · \(appointment.appointmentType.displayName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -859,14 +903,12 @@ enum DayTimelineLayout {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [DayTimelinePlacement] {
-        let dayStart = calendar.startOfDay(for: date)
-        let dayEnd = calendar.startOfNextDay(for: date)
         let intervals = events.compactMap { event -> Interval? in
-            guard event.startDate >= dayStart, event.startDate < dayEnd else { return nil }
+            guard event.occursOnLocalDay(date, calendar: calendar) else { return nil }
             let rawEnd = event.endDate ?? (event.isActiveTimer ? now : event.startDate)
-            let clippedEnd = min(dayEnd, max(event.startDate, rawEnd))
-            let startMinute = max(0, event.startDate.timeIntervalSince(dayStart) / 60)
-            let actualEndMinute = max(startMinute, clippedEnd.timeIntervalSince(dayStart) / 60)
+            let startMinute = max(0, event.localStartMinute(calendar: calendar))
+            let elapsedMinutes = max(0, rawEnd.timeIntervalSince(event.startDate) / 60)
+            let actualEndMinute = min(24 * 60, startMinute + elapsedMinutes)
             let displayEndMinute = min(24 * 60, max(actualEndMinute, startMinute + 30))
             return Interval(
                 eventID: event.id,
@@ -992,6 +1034,9 @@ private struct CalendarDayView: View {
                 Text(date.formatted(.dateTime.month(.wide).day()))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text("Times use each entry's recorded zone")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             HStack(spacing: 12) {
@@ -1068,7 +1113,8 @@ private struct CalendarDayView: View {
         if calendar.isDateInToday(date) {
             referenceDate = Date()
         } else {
-            referenceDate = events.min { $0.startDate < $1.startDate }?.startDate ?? date
+            let earliestMinute = events.map { $0.localStartMinute(calendar: calendar) }.min()
+            return max(0, Int((earliestMinute ?? 60) / 60) - 1)
         }
         return max(0, calendar.component(.hour, from: referenceDate) - 1)
     }
@@ -1173,11 +1219,21 @@ private struct CalendarEventBlock: View {
 
     private var timeText: String {
         if let endDate = event.endDate {
-            return DateFormatting.window(start: event.startDate, end: endDate)
+            return DateFormatting.window(
+                start: event.startDate,
+                end: endDate,
+                startTimeZone: event.startTimeZone,
+                endTimeZone: event.endTimeZone,
+                includesTimeZones: event.shouldShowTimeZoneInTimeline
+            )
         }
         return event.isActiveTimer
-            ? "\(DateFormatting.time.string(from: event.startDate)) - now"
-            : DateFormatting.time.string(from: event.startDate)
+            ? "\(DateFormatting.timeString(from: event.startDate, timeZone: event.startTimeZone, includesTimeZone: event.shouldShowTimeZoneInTimeline)) - now"
+            : DateFormatting.timeString(
+                from: event.startDate,
+                timeZone: event.startTimeZone,
+                includesTimeZone: event.shouldShowTimeZoneInTimeline
+            )
     }
 
     private var detailText: String? {

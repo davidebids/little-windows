@@ -3,18 +3,170 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+enum DataMutationScope: Equatable {
+    case localDevice
+    case privateICloud
+    case sharedFamilyOwner
+    case sharedFamilyParticipant
+    case sharedFamilyUnknownRole
+
+    static func resolve(
+        isUsingCloudKitStore: Bool,
+        startupMode: FamilySyncMode,
+        currentMode: FamilySyncMode,
+        familyRole: FamilyShareRole
+    ) -> DataMutationScope {
+        if isUsingCloudKitStore {
+            return .privateICloud
+        }
+        guard startupMode == .sharedFamilySync,
+              currentMode == .sharedFamilySync else {
+            return .localDevice
+        }
+        switch familyRole {
+        case .owner:
+            return .sharedFamilyOwner
+        case .participant:
+            return .sharedFamilyParticipant
+        case .none:
+            return .sharedFamilyUnknownRole
+        }
+    }
+
+    var allowsBulkMutation: Bool {
+        self != .sharedFamilyParticipant && self != .sharedFamilyUnknownRole
+    }
+
+    var deleteButtonTitle: String {
+        switch self {
+        case .localDevice:
+            return "Delete Data on This Device"
+        case .privateICloud:
+            return "Delete Synced Data Everywhere"
+        case .sharedFamilyOwner:
+            return "Delete Shared Family Data"
+        case .sharedFamilyParticipant, .sharedFamilyUnknownRole:
+            return "Delete All Data"
+        }
+    }
+
+    var scopeTitle: String {
+        switch self {
+        case .localDevice:
+            return "This device only"
+        case .privateICloud:
+            return "Every device on this Apple Account"
+        case .sharedFamilyOwner:
+            return "Every Family Sync caregiver"
+        case .sharedFamilyParticipant:
+            return "Family Sync participant"
+        case .sharedFamilyUnknownRole:
+            return "Family Sync role unavailable"
+        }
+    }
+
+    var dataSectionExplanation: String {
+        switch self {
+        case .localDevice:
+            return "Imports and deletions affect only the local store currently open on this device."
+        case .privateICloud:
+            return "This store uses private iCloud Sync. Imports and deletions will propagate to other devices signed into this Apple Account."
+        case .sharedFamilyOwner:
+            return "You own this Family Sync space. Imports and deletions will propagate to every accepted caregiver."
+        case .sharedFamilyParticipant:
+            return "Only the Family Sync owner can replace or erase the entire shared dataset. Open Family Sync to leave and optionally delete this device's downloaded copy."
+        case .sharedFamilyUnknownRole:
+            return "Little Windows could not confirm who owns this Family Sync space. Bulk import and deletion are disabled until the role is available."
+        }
+    }
+
+    var destructiveDetail: String {
+        switch self {
+        case .localDevice:
+            return "Only the data in the store currently open on this device will change."
+        case .privateICloud:
+            return "The change will sync to every device signed into this Apple Account."
+        case .sharedFamilyOwner:
+            return "The change will be published to every accepted Family Sync caregiver."
+        case .sharedFamilyParticipant:
+            return "Participants cannot replace or erase the complete shared family dataset."
+        case .sharedFamilyUnknownRole:
+            return "Little Windows must confirm the Family Sync owner before changing the complete dataset."
+        }
+    }
+
+    var successSuffix: String {
+        switch self {
+        case .localDevice:
+            return "on this device."
+        case .privateICloud:
+            return "and the change will sync to your other devices."
+        case .sharedFamilyOwner:
+            return "and the change will sync to family caregivers."
+        case .sharedFamilyParticipant, .sharedFamilyUnknownRole:
+            return "."
+        }
+    }
+}
+
+private enum DestructiveDataAction {
+    case importBackup
+    case deleteAll
+}
+
+private struct PendingDestructiveDataOperation: Identifiable {
+    let id = UUID()
+    var action: DestructiveDataAction
+    var scope: DataMutationScope
+
+    var title: String {
+        switch action {
+        case .importBackup:
+            return "Replace Current Data?"
+        case .deleteAll:
+            return scope.deleteButtonTitle + "?"
+        }
+    }
+
+    var buttonTitle: String {
+        switch action {
+        case .importBackup:
+            return "Replace Data"
+        case .deleteAll:
+            return scope.deleteButtonTitle
+        }
+    }
+
+    var message: String {
+        let actionDescription: String
+        switch action {
+        case .importBackup:
+            actionDescription = "This backup will replace all current Little Windows data."
+        case .deleteAll:
+            actionDescription = "This will delete all Little Windows data."
+        }
+        return "\(actionDescription)\n\n\(scope.scopeTitle): \(scope.destructiveDetail)\n\nA local automatic recovery backup will be created first."
+    }
+}
+
+private enum SettingsRoute: Hashable {
+    case monthlyAgeGuides
+}
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
 
     @StateObject private var profileService = ProfileService.shared
-    @State private var showingDeleteConfirmation = false
+    @StateObject private var router = DeepLinkRouter.shared
     @State private var showingExporter = false
     @State private var showingImporter = false
-    @State private var showingImportConfirmation = false
     @State private var exportDocument = BackupDocument()
     @State private var pendingImportData: Data?
+    @State private var pendingDestructiveOperation: PendingDestructiveDataOperation?
     @State private var statusMessage: String?
+    @AppStorage(PersistenceService.familySyncModeKey)
+    private var currentSyncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
 
     private var selectedProfile: BabyProfile? {
         profileService.selectedProfile(in: profiles)
@@ -22,6 +174,19 @@ struct SettingsView: View {
 
     private var isDogProfile: Bool {
         selectedProfile?.profileType == .dog
+    }
+
+    private var dataMutationScope: DataMutationScope {
+        let familyRole = CloudKitSharingService.shared
+            .currentFamilySyncStatus()
+            .role
+        return DataMutationScope.resolve(
+            isUsingCloudKitStore: PersistenceService.isUsingCloudKitStore,
+            startupMode: PersistenceService.syncModeAtStartup,
+            currentMode: FamilySyncMode(rawValue: currentSyncModeRawValue)
+                ?? PersistenceService.familySyncMode(),
+            familyRole: familyRole
+        )
     }
 
     var body: some View {
@@ -57,6 +222,8 @@ struct SettingsView: View {
                 )
             }
 
+            CareTimeZoneSettingsNavigationSection()
+
             if !isDogProfile {
                 ChildSleepSettingsNavigationSection(profile: selectedProfile)
             }
@@ -80,10 +247,10 @@ struct SettingsView: View {
             AppointmentSettingsNavigationSection(profile: selectedProfile)
 
             if !isDogProfile {
-                MonthlyAgeGuideSettingsNavigationSection(profile: selectedProfile)
+                MonthlyAgeGuideSettingsNavigationSection()
             }
 
-            Section("Data") {
+            Section {
                 NavigationLink {
                     LazySettingsDestination {
                         CareReportExportView()
@@ -97,9 +264,25 @@ struct SettingsView: View {
                 Button("Import JSON backup", systemImage: "square.and.arrow.down") {
                     showingImporter = true
                 }
-                Button("Delete all data", systemImage: "trash", role: .destructive) {
-                    showingDeleteConfirmation = true
+                .disabled(!dataMutationScope.allowsBulkMutation)
+                Button(dataMutationScope.deleteButtonTitle, systemImage: "trash", role: .destructive) {
+                    pendingDestructiveOperation = PendingDestructiveDataOperation(
+                        action: .deleteAll,
+                        scope: dataMutationScope
+                    )
                 }
+                .disabled(!dataMutationScope.allowsBulkMutation)
+
+                if dataMutationScope == .sharedFamilyParticipant
+                    || dataMutationScope == .sharedFamilyUnknownRole {
+                    Button("Review Family Sync", systemImage: "person.2.badge.gearshape.fill") {
+                        router.showingFamilySyncSettings = true
+                    }
+                }
+            } header: {
+                Text("Data")
+            } footer: {
+                Text(dataMutationScope.dataSectionExplanation)
             }
 
             SettingsBuildInfoFooter()
@@ -107,6 +290,15 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
         .navigationTitle("Settings")
+        .navigationDestination(isPresented: $router.showingFamilySyncSettings) {
+            FamilySyncSettingsView()
+        }
+        .navigationDestination(for: SettingsRoute.self) { route in
+            switch route {
+            case .monthlyAgeGuides:
+                MonthlyAgeGuideSettingsView(profile: selectedProfile)
+            }
+        }
         .fileExporter(
             isPresented: $showingExporter,
             document: exportDocument,
@@ -120,45 +312,32 @@ struct SettingsView: View {
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
             importBackup(result)
         }
-        .appActionSheet(
-            isPresented: $showingImportConfirmation,
-            title: "Replace Current Data?",
-            message: "This replaces every current profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
-            systemImage: "square.and.arrow.down",
-            tint: .red,
-            options: [
-                AppActionSheetOption(
-                    title: "Import Backup",
-                    subtitle: "Replace all current Little Windows data.",
-                    systemImage: "square.and.arrow.down.fill",
-                    tint: .red,
-                    role: .destructive
-                ) {
-                    performPendingImport()
+        .alert(
+            pendingDestructiveOperation?.title ?? "Confirm Data Change",
+            isPresented: Binding(
+                get: { pendingDestructiveOperation != nil },
+                set: { if !$0 { pendingDestructiveOperation = nil } }
+            ),
+            presenting: pendingDestructiveOperation
+        ) { operation in
+            Button(operation.buttonTitle, role: .destructive) {
+                pendingDestructiveOperation = nil
+                switch operation.action {
+                case .importBackup:
+                    performPendingImport(scope: operation.scope)
+                case .deleteAll:
+                    deleteAll(scope: operation.scope)
                 }
-            ],
-            cancelAction: {
-                pendingImportData = nil
             }
-        )
-        .appActionSheet(
-            isPresented: $showingDeleteConfirmation,
-            title: "Delete All Data?",
-            message: "This permanently deletes every profile, event, prediction, milestone, appointment, and guide-read state. Export a backup first if you may need this history.",
-            systemImage: "trash",
-            tint: .red,
-            options: [
-                AppActionSheetOption(
-                    title: "Delete All Data",
-                    subtitle: "Remove all local Little Windows history.",
-                    systemImage: "trash.fill",
-                    tint: .red,
-                    role: .destructive
-                ) {
-                    deleteAll()
+            Button("Cancel", role: .cancel) {
+                pendingDestructiveOperation = nil
+                if case .importBackup = operation.action {
+                    pendingImportData = nil
                 }
-            ]
-        )
+            }
+        } message: { operation in
+            Text(operation.message)
+        }
         .alert("Little Windows", isPresented: Binding(
             get: { statusMessage != nil },
             set: { if !$0 { statusMessage = nil } }
@@ -184,29 +363,51 @@ struct SettingsView: View {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: url)
+            try DataExportImportService.validateBackupData(data)
             pendingImportData = data
-            showingImportConfirmation = true
+            pendingDestructiveOperation = PendingDestructiveDataOperation(
+                action: .importBackup,
+                scope: dataMutationScope
+            )
         } catch {
             statusMessage = "Import failed: \(error.localizedDescription)"
         }
     }
 
-    private func performPendingImport() {
-        guard let data = pendingImportData else { return }
+    private func performPendingImport(scope: DataMutationScope) {
+        guard scope.allowsBulkMutation,
+              dataMutationScope == scope,
+              let data = pendingImportData else {
+            pendingImportData = nil
+            statusMessage = "Import was stopped because the active sync scope changed. Review Data settings and try again."
+            return
+        }
         do {
             try DataExportImportService.importData(data, context: modelContext)
             pendingImportData = nil
-            statusMessage = "Backup imported."
+            statusMessage = "Backup imported \(scope.successSuffix)"
+            SystemIntegrationReconciler.requestReconciliation()
         } catch {
             pendingImportData = nil
             statusMessage = "Import failed: \(error.localizedDescription)"
         }
     }
 
-    private func deleteAll() {
+    private func deleteAll(scope: DataMutationScope) {
+        guard scope.allowsBulkMutation,
+              dataMutationScope == scope else {
+            statusMessage = "Deletion was stopped because the active sync scope changed. Review Data settings and try again."
+            return
+        }
         do {
+            _ = try DataExportImportService.createAutomaticRecoveryBackup(
+                context: modelContext,
+                reason: "before-delete-all"
+            )
             try DataExportImportService.deleteAll(context: modelContext)
-            statusMessage = "All history was deleted."
+            UserDefaults.standard.removeObject(forKey: FirstRunOnboarding.completedKey)
+            statusMessage = "All Little Windows data was deleted \(scope.successSuffix)"
+            SystemIntegrationReconciler.requestReconciliation()
         } catch {
             statusMessage = "Delete failed: \(error.localizedDescription)"
         }
@@ -222,6 +423,179 @@ struct LazySettingsDestination<Content: View>: View {
 
     var body: some View {
         content()
+    }
+}
+
+private struct CareTimeZoneSettingsNavigationSection: View {
+    @AppStorage(CareTimeZoneSettings.modeKey)
+    private var modeRawValue = CareTimeZoneMode.automatic.rawValue
+    @AppStorage(CareTimeZoneSettings.manualIdentifierKey)
+    private var manualIdentifier = TimeZone.autoupdatingCurrent.identifier
+
+    private var mode: CareTimeZoneMode {
+        CareTimeZoneMode(rawValue: modeRawValue) ?? .automatic
+    }
+
+    private var selectedTimeZone: TimeZone {
+        if mode == .manual, let value = TimeZone(identifier: manualIdentifier) {
+            return value
+        }
+        return .autoupdatingCurrent
+    }
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                CareTimeZoneSettingsView()
+            } label: {
+                LabeledContent {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(mode.displayName)
+                        Text(CareTimeZoneSettings.displayName(for: selectedTimeZone))
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                } label: {
+                    Label("Time zone", systemImage: "globe.americas.fill")
+                }
+            }
+        } header: {
+            Text("Dates & times")
+        } footer: {
+            Text("New care entries remember the time zone where each timestamp was recorded, so travel does not change historical clock times or daily totals.")
+        }
+    }
+}
+
+private struct CareTimeZoneSettingsView: View {
+    @AppStorage(CareTimeZoneSettings.modeKey)
+    private var modeRawValue = CareTimeZoneMode.automatic.rawValue
+    @AppStorage(CareTimeZoneSettings.manualIdentifierKey)
+    private var manualIdentifier = TimeZone.autoupdatingCurrent.identifier
+
+    private var mode: Binding<CareTimeZoneMode> {
+        Binding(
+            get: { CareTimeZoneMode(rawValue: modeRawValue) ?? .automatic },
+            set: { modeRawValue = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Time zone", selection: mode) {
+                    ForEach(CareTimeZoneMode.allCases) { value in
+                        Text(value.displayName).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                LabeledContent(
+                    "Device detected",
+                    value: CareTimeZoneSettings.displayName(for: .autoupdatingCurrent)
+                )
+
+                if mode.wrappedValue == .manual {
+                    NavigationLink {
+                        TimeZonePickerView(selection: $manualIdentifier)
+                    } label: {
+                        LabeledContent(
+                            "Override",
+                            value: TimeZone(identifier: manualIdentifier)
+                                .map { CareTimeZoneSettings.displayName(for: $0) }
+                                ?? manualIdentifier
+                        )
+                    }
+                }
+            } footer: {
+                Text("Automatic follows the device and captures a concrete zone on every new start and end time. Use an override if the device has not switched zones yet or you want to log in another location's time.")
+            }
+
+            Section("Existing entries") {
+                Text("Open any care entry to review or change its start and end time zones. Changing this setting does not rewrite history.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Time Zone")
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: mode.wrappedValue) { _, newValue in
+            if newValue == .manual, TimeZone(identifier: manualIdentifier) == nil {
+                manualIdentifier = TimeZone.autoupdatingCurrent.identifier
+            }
+        }
+    }
+}
+
+struct TimeZonePickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selection: String
+    @State private var searchText = ""
+
+    private static let identifiers = TimeZone.knownTimeZoneIdentifiers.sorted { first, second in
+        let firstZone = TimeZone(identifier: first) ?? .gmt
+        let secondZone = TimeZone(identifier: second) ?? .gmt
+        let firstOffset = firstZone.secondsFromGMT()
+        let secondOffset = secondZone.secondsFromGMT()
+        if firstOffset != secondOffset { return firstOffset < secondOffset }
+        return first.localizedCaseInsensitiveCompare(second) == .orderedAscending
+    }
+
+    private var filteredIdentifiers: [String] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return Self.identifiers }
+        return Self.identifiers.filter { identifier in
+            guard let timeZone = TimeZone(identifier: identifier) else { return false }
+            return identifier.localizedCaseInsensitiveContains(query)
+                || CareTimeZoneSettings.displayName(for: timeZone)
+                    .localizedCaseInsensitiveContains(query)
+                || (timeZone.abbreviation()?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    var body: some View {
+        List {
+            Section("Suggested") {
+                timeZoneButton(TimeZone.autoupdatingCurrent.identifier)
+                if selection != TimeZone.autoupdatingCurrent.identifier {
+                    timeZoneButton(selection)
+                }
+            }
+
+            Section("All time zones") {
+                ForEach(filteredIdentifiers, id: \.self) { identifier in
+                    timeZoneButton(identifier)
+                }
+            }
+        }
+        .navigationTitle("Choose Time Zone")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "City, region, or abbreviation")
+    }
+
+    @ViewBuilder
+    private func timeZoneButton(_ identifier: String) -> some View {
+        if let timeZone = TimeZone(identifier: identifier) {
+            Button {
+                selection = identifier
+                dismiss()
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(CareTimeZoneSettings.displayName(for: timeZone))
+                            .foregroundStyle(.primary)
+                        Text("\(identifier) · \(CareTimeZoneSettings.gmtOffsetText(for: timeZone))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if selection == identifier {
+                        Image(systemName: "checkmark")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -378,7 +752,7 @@ private struct ChildSleepSettingsSections: View {
                             } else {
                                 notificationsEnabled = false
                                 Task {
-                                    await notificationManager.cancelPendingLittleWindowAlerts()
+                                    await notificationManager.cancelAllPendingLittleWindowAlerts()
                                 }
                             }
                         }
@@ -462,9 +836,7 @@ private struct ChildSleepSettingsSections: View {
                             } else {
                                 sleepPressureAlertsEnabled = false
                                 Task {
-                                    await notificationManager.cancelPendingSleepPressureAlerts(
-                                        profileID: profileID
-                                    )
+                                    await notificationManager.cancelAllPendingSleepPressureAlerts()
                                 }
                             }
                         }
@@ -581,6 +953,7 @@ private struct ChildSleepSettingsSections: View {
         )
         let notificationStatus = notificationManager.statusText(
             prediction: currentPrediction,
+            profileID: profileID,
             settings: .current,
             isSleeping: selectedProfileIsSleeping
         )
@@ -744,6 +1117,7 @@ private struct ChildSleepSettingsSections: View {
 }
 
 private struct AppointmentSettingsSection: View {
+    @Environment(\.modelContext) private var modelContext
     @Query private var appointments: [DoctorAppointment]
     @AppStorage("appointmentRemindersEnabled") private var appointmentRemindersEnabled = true
     @StateObject private var notificationManager = NotificationManager.shared
@@ -796,21 +1170,7 @@ private struct AppointmentSettingsSection: View {
             Toggle("Appointment reminders", isOn: $appointmentRemindersEnabled)
                 .onChange(of: appointmentRemindersEnabled) { _, enabled in
                     Task {
-                        let appointments = selectedProfileAppointments
-                        if enabled {
-                            for appointment in appointments where !appointment.isCompleted {
-                                await notificationManager.rescheduleAppointmentReminders(
-                                    appointment: appointment,
-                                    babyName: profile?.name ?? "Baby"
-                                )
-                            }
-                        } else {
-                            for appointment in appointments {
-                                await notificationManager.cancelAppointmentReminders(
-                                    appointmentID: appointment.id
-                                )
-                            }
-                        }
+                        await SystemIntegrationReconciler.reconcile(context: modelContext)
                     }
                 }
         } header: {
@@ -988,15 +1348,9 @@ private struct MonthlyAgeGuideSettingsSection: View {
 }
 
 private struct MonthlyAgeGuideSettingsNavigationSection: View {
-    let profile: BabyProfile?
-
     var body: some View {
         Section {
-            NavigationLink {
-                LazySettingsDestination {
-                    MonthlyAgeGuideSettingsView(profile: profile)
-                }
-            } label: {
+            NavigationLink(value: SettingsRoute.monthlyAgeGuides) {
                 Label("Monthly guide notifications", systemImage: "book.pages.fill")
             }
         } header: {
@@ -1100,6 +1454,7 @@ private struct FoodReminderSettingsLauncher: View {
 private struct SyncSettingsSection: View {
     @AppStorage(PersistenceService.iCloudSyncEnabledKey) private var isICloudSyncEnabled = true
     @AppStorage(PersistenceService.familySyncModeKey) private var syncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
+    @AppStorage(CloudKitSharingService.inactiveReasonKey) private var inactiveReasonRawValue = ""
 
     private var syncMode: FamilySyncMode {
         FamilySyncMode(rawValue: syncModeRawValue)
@@ -1126,8 +1481,12 @@ private struct SyncSettingsSection: View {
                 }
             } label: {
                 LabeledContent {
-                    Text(syncMode == .sharedFamilySync ? "On" : "Off")
-                        .foregroundStyle(.secondary)
+                    Text(inactiveReasonRawValue.isEmpty
+                        ? (syncMode == .sharedFamilySync ? "On" : "Off")
+                        : "Review")
+                    .foregroundStyle(
+                        inactiveReasonRawValue.isEmpty ? Color.secondary : Color.orange
+                    )
                 } label: {
                     Label("Family Sync", systemImage: "person.2.badge.gearshape.fill")
                 }

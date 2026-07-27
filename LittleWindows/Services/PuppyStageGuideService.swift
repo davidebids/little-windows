@@ -56,8 +56,7 @@ final class PuppyStageGuideService {
         }
         state.lastOpenedAt = now
         state.updatedAt = now
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
     }
 
     func markStageCardDismissed(
@@ -76,8 +75,7 @@ final class PuppyStageGuideService {
         state.profileID = state.profileID ?? profileID
         state.isDismissedFromToday = true
         state.updatedAt = now
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
     }
 
     func ageWeeks(for profile: CareProfile, now: Date = Date(), calendar: Calendar = .current) -> Double {

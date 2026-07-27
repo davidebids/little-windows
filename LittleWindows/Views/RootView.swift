@@ -1,6 +1,29 @@
 import SwiftData
 import SwiftUI
 
+@MainActor
+enum AppInteractionMonitor {
+    private static var lastInteractionAt = Date()
+
+    static func noteInteraction(at date: Date = Date()) {
+        lastInteractionAt = date
+    }
+
+    static func waitUntilIdle(
+        for idleDuration: TimeInterval = 1.5
+    ) async {
+        while !Task.isCancelled {
+            let remaining = idleDuration - Date().timeIntervalSince(lastInteractionAt)
+            guard remaining > 0 else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(min(500, remaining * 1_000)))
+            } catch {
+                return
+            }
+        }
+    }
+}
+
 enum AppTheme {
     static let accent = Color.indigo
     static let background = Color(uiColor: .systemGroupedBackground)
@@ -155,6 +178,7 @@ struct AppActionSheetOption: Identifiable {
     var systemImage: String
     var tint: Color
     var role: ButtonRole?
+    var isEnabled: Bool
     var isSelected: Bool
     var action: () -> Void
 
@@ -164,6 +188,7 @@ struct AppActionSheetOption: Identifiable {
         systemImage: String,
         tint: Color = AppTheme.accent,
         role: ButtonRole? = nil,
+        isEnabled: Bool = true,
         isSelected: Bool = false,
         action: @escaping () -> Void
     ) {
@@ -172,6 +197,7 @@ struct AppActionSheetOption: Identifiable {
         self.systemImage = systemImage
         self.tint = tint
         self.role = role
+        self.isEnabled = isEnabled
         self.isSelected = isSelected
         self.action = action
     }
@@ -241,6 +267,10 @@ private struct AppActionSheetView: View {
                             AppActionSheetRow(option: option)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(option.title)
+                        .accessibilityHint(option.subtitle ?? "")
+                        .disabled(!option.isEnabled)
+                        .opacity(option.isEnabled ? 1 : 0.48)
                     }
                 }
                 .padding(.vertical, 1)
@@ -323,10 +353,20 @@ struct RootView: View {
     @State private var shouldOpenSettingsAfterOnboarding = false
     @State private var hasCheckedInitialOnboardingState = false
     @State private var showingFamilySyncAcceptanceStatus = false
+    @State private var showingFamilySyncAccessEndedStatus = false
+    @State private var localSaveErrorMessage: String?
     @AppStorage(CloudKitSharingService.acceptanceStatusMessageKey)
     private var familySyncAcceptanceMessage = ""
+    @AppStorage(PersistenceService.familySyncModeKey)
+    private var familySyncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
     @AppStorage("familySync.lastPresentedAcceptanceStatusMessage")
     private var lastPresentedFamilySyncAcceptanceMessage = ""
+    @AppStorage(CloudKitSharingService.inactiveReasonKey)
+    private var familySyncInactiveReasonRawValue = ""
+    @AppStorage(CloudKitSharingService.inactiveEventIDKey)
+    private var familySyncInactiveEventID = ""
+    @AppStorage("familySync.lastPresentedInactiveEventID")
+    private var lastPresentedFamilySyncInactiveEventID = ""
 
     private var selectedProfile: CareProfile? {
         profileService.selectedProfile(in: profiles)
@@ -450,8 +490,30 @@ struct RootView: View {
         } message: {
             Text(familySyncAcceptanceMessage)
         }
+        .alert(
+            familySyncInactiveReason?.title ?? "Family Sync access ended",
+            isPresented: $showingFamilySyncAccessEndedStatus
+        ) {
+            Button("Review Family Sync") {
+                lastPresentedFamilySyncInactiveEventID = familySyncInactiveEventID
+                router.route(URL(string: "littlewindows://settings/family-sync")!)
+            }
+            Button("Later", role: .cancel) {
+                lastPresentedFamilySyncInactiveEventID = familySyncInactiveEventID
+            }
+        } message: {
+            Text(familySyncInactiveReason?.detail ?? "Family Sync is no longer active. Your downloaded data remains on this device.")
+        }
+        .alert("Changes weren’t saved", isPresented: Binding(
+            get: { localSaveErrorMessage != nil },
+            set: { if !$0 { localSaveErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Little Windows kept the previous saved version. \(localSaveErrorMessage ?? "Please try again.")")
+        }
         .onOpenURL { url in
-            route(url)
+            handleIncomingURL(url)
         }
         .task {
             markOnboardingCompleteForExistingData()
@@ -470,6 +532,7 @@ struct RootView: View {
             }
             consumePendingSystemAction()
             presentFamilySyncAcceptanceStatusIfNeeded()
+            presentFamilySyncAccessEndedStatusIfNeeded()
         }
         .onReceive(
             NotificationCenter.default.publisher(
@@ -477,6 +540,28 @@ struct RootView: View {
             )
         ) { _ in
             presentFamilySyncAcceptanceStatusIfNeeded()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: CloudKitSharingService.shareStateDidChangeNotification
+            )
+        ) { _ in
+            presentFamilySyncAccessEndedStatusIfNeeded()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: PersistenceService.localSaveDidFailNotification
+            )
+        ) { notification in
+            localSaveErrorMessage = notification.userInfo?["message"] as? String
+                ?? "Please try again."
+        }
+        .onChange(of: familySyncInactiveEventID) { _, _ in
+            presentFamilySyncAccessEndedStatusIfNeeded()
+        }
+        .onChange(of: router.showingFamilySyncSettings) { _, isShowing in
+            guard isShowing, !familySyncInactiveEventID.isEmpty else { return }
+            lastPresentedFamilySyncInactiveEventID = familySyncInactiveEventID
         }
         .onChange(of: profiles.count) { _, _ in
             markOnboardingCompleteForExistingData()
@@ -491,13 +576,64 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { consumePendingSystemAction() }
+            if phase == .active {
+                consumePendingSystemAction()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: SystemIntegrationReconciler.reconciliationRequestedNotification
+        )) { _ in
+            Task {
+                await SystemIntegrationReconciler.reconcile(context: modelContext)
+            }
+        }
+        .task(id: "\(scenePhase)-\(familySyncModeRawValue)") {
+            guard scenePhase == .active else { return }
+            await pollFamilyTimerChangesWhileActive()
+        }
+        .task(id: "system-integrations-\(scenePhase)") {
+            guard scenePhase == .active else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await AppInteractionMonitor.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            await SystemIntegrationReconciler.reconcileIfNeeded(context: modelContext)
         }
     }
 
     private func markOnboardingCompleteForExistingData() {
         guard !hasCompletedInitialOnboarding, !profiles.isEmpty else { return }
         hasCompletedInitialOnboarding = true
+    }
+
+    private func pollFamilyTimerChangesWhileActive() async {
+        do {
+            try await Task.sleep(
+                for: .seconds(
+                    CloudKitSharingService.foregroundTimerInitialDelaySeconds
+                )
+            )
+        } catch {
+            return
+        }
+
+        while !Task.isCancelled,
+              PersistenceService.familySyncMode() == .sharedFamilySync {
+            let retryDelay: TimeInterval
+            do {
+                _ = try await CloudKitSharingService.shared.pollForForegroundTimerChanges(
+                    context: modelContext
+                )
+                retryDelay = CloudKitSharingService.foregroundTimerPollIntervalSeconds
+            } catch {
+                retryDelay = CloudKitSharingService.foregroundTimerFailureRetrySeconds
+            }
+            do {
+                try await Task.sleep(for: .seconds(retryDelay))
+            } catch {
+                return
+            }
+        }
     }
 
     private func route(_ url: URL) {
@@ -520,8 +656,42 @@ struct RootView: View {
     }
 
     private func consumePendingSystemAction() {
-        if let url = IntegrationCommandStore.consumePendingURL() {
-            route(url)
+        Task { @MainActor in
+            while let url = IntegrationCommandStore.consumePendingURL() {
+                if await IntegrationCommandStore.deliverToRunningApp(url) {
+                    presentProcessedSystemAction(url)
+                    continue
+                }
+                route(url)
+                break
+            }
+        }
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        Task { @MainActor in
+            if await IntegrationCommandStore.deliverToRunningApp(url) {
+                IntegrationCommandStore.clearPendingURL(matching: url)
+                presentProcessedSystemAction(url)
+            } else {
+                route(url)
+            }
+        }
+    }
+
+    private func presentProcessedSystemAction(_ url: URL) {
+        var path = [url.host].compactMap { $0 }
+            + url.pathComponents.filter { $0 != "/" }
+        if path.count >= 2,
+           path[0] == "profile",
+           let profileID = UUID(uuidString: path[1]) {
+            router.pendingProfileID = profileID
+            path.removeFirst(2)
+        }
+        guard path.first == "action" else { return }
+        router.selectedTab = .today
+        if path.count == 3, let eventID = UUID(uuidString: path[2]) {
+            router.pendingAction = .showEvent(eventID)
         }
     }
 
@@ -531,6 +701,19 @@ struct RootView: View {
             return
         }
         showingFamilySyncAcceptanceStatus = true
+    }
+
+    private var familySyncInactiveReason: FamilyShareInactiveReason? {
+        FamilyShareInactiveReason(rawValue: familySyncInactiveReasonRawValue)
+    }
+
+    private func presentFamilySyncAccessEndedStatusIfNeeded() {
+        guard familySyncInactiveReason != nil,
+              !familySyncInactiveEventID.isEmpty,
+              familySyncInactiveEventID != lastPresentedFamilySyncInactiveEventID else {
+            return
+        }
+        showingFamilySyncAccessEndedStatus = true
     }
 }
 
@@ -890,8 +1073,7 @@ enum DebugSimulatorSmokeSeedService {
         seedMilestones(profile: child, today: today, context: context)
         seedFoodHome(today: today, context: context)
 
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        _ = PersistenceService.save(context: context)
     }
 
     @MainActor
@@ -1020,6 +1202,7 @@ enum DebugSimulatorSmokeSeedService {
         configure: (BabyEvent) -> Void
     ) {
         let resolvedEndDate = type.supportsTimer ? endDate : nil
+        let timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
         let event = fetch(BabyEvent.self, id: id, context: context) ?? BabyEvent(
             id: id,
             profileID: profile.id,
@@ -1027,6 +1210,8 @@ enum DebugSimulatorSmokeSeedService {
             title: title,
             startDate: startDate,
             endDate: resolvedEndDate,
+            startTimeZoneIdentifier: timeZoneIdentifier,
+            endTimeZoneIdentifier: resolvedEndDate == nil ? nil : timeZoneIdentifier,
             caregiverName: "Sample Caregiver",
             notes: notes
         )
@@ -1039,6 +1224,10 @@ enum DebugSimulatorSmokeSeedService {
         event.title = title
         event.startDate = startDate
         event.endDate = resolvedEndDate
+        event.startTimeZoneIdentifier = event.startTimeZoneIdentifier ?? timeZoneIdentifier
+        event.endTimeZoneIdentifier = resolvedEndDate == nil
+            ? nil
+            : (event.endTimeZoneIdentifier ?? timeZoneIdentifier)
         event.caregiverName = "Sample Caregiver"
         event.notes = notes
         event.updatedAt = Date()

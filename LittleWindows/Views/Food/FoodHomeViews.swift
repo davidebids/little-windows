@@ -68,7 +68,10 @@ struct FoodHomeView: View {
                         }
                 }
             }
-            .navigationTitle("Food & Home")
+            .navigationTitle("Home")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(AppTheme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: FoodRoute.reminders) {
@@ -106,23 +109,15 @@ struct FoodHomeView: View {
     @ViewBuilder
     private func content(household: Household) -> some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(FoodHomeSection.allCases) { section in
-                        FoodHomeSectionButton(
-                            section: section,
-                            isSelected: selectedSection == section
-                        ) {
-                            selectedSection = section
-                            path.removeLast(path.count)
-                        }
+            FoodHomeSectionPicker(selectedSection: selectedSection) { section in
+                guard selectedSection != section else { return }
+                withAnimation(.snappy(duration: 0.24)) {
+                    selectedSection = section
+                    if !path.isEmpty {
+                        path.removeLast(path.count)
                     }
                 }
-                .padding(.horizontal)
             }
-            .scrollIndicators(.hidden)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
 
             switch selectedSection {
             case .todos:
@@ -557,6 +552,47 @@ struct FoodHomeView: View {
     }
 }
 
+private struct FoodHomeSectionPicker: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let selectedSection: FoodHomeSection
+    let select: (FoodHomeSection) -> Void
+
+    private var columns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: 8),
+            count: dynamicTypeSize.isAccessibilitySize ? 2 : 4
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Home areas")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(selectedSection.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(FoodHomeSection.allCases) { section in
+                    FoodHomeSectionButton(
+                        section: section,
+                        isSelected: selectedSection == section
+                    ) {
+                        select(section)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .background(AppTheme.background)
+    }
+}
+
 private struct FoodHomeSectionButton: View {
     let section: FoodHomeSection
     let isSelected: Bool
@@ -564,21 +600,71 @@ private struct FoodHomeSectionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label(section.title, systemImage: section.systemImage)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .foregroundStyle(isSelected ? .white : .primary)
-                .padding(.horizontal, 12)
-                .frame(height: 34)
-                .background(
-                    isSelected
-                        ? AppTheme.accent.gradient
-                        : Color.primary.opacity(0.055).gradient,
-                    in: Capsule()
-                )
+            VStack(spacing: 7) {
+                Image(systemName: section.systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isSelected ? .white : section.tint)
+                    .frame(width: 34, height: 30)
+                    .background(
+                        isSelected ? Color.white.opacity(0.16) : section.tint.opacity(0.11),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+
+                Text(section.selectorTitle)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isSelected ? .white : .primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 66)
+            .padding(.horizontal, 4)
+            .background(
+                isSelected ? section.tint.gradient : AppTheme.surface.gradient,
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        isSelected ? section.tint.opacity(0.7) : AppTheme.line,
+                        lineWidth: isSelected ? 1.2 : 0.6
+                    )
+            }
+            .shadow(
+                color: isSelected ? section.tint.opacity(0.2) : .clear,
+                radius: 8,
+                y: 3
+            )
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel(section.title)
+    }
+}
+
+private extension FoodHomeSection {
+    var selectorTitle: String {
+        switch self {
+        case .todos: "To-Do"
+        case .shopping: "Shopping"
+        case .returns: "Returns"
+        case .inventory: "Inventory"
+        case .mealPrep: "Meal Prep"
+        case .stores: "Stores"
+        case .insights: "Insights"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .todos: .indigo
+        case .shopping: .blue
+        case .returns: .orange
+        case .inventory: .brown
+        case .mealPrep: .green
+        case .stores: .purple
+        case .insights: .teal
+        }
     }
 }
 
@@ -1202,8 +1288,6 @@ private struct ShoppingListsView: View {
     let openList: (ShoppingList) -> Void
 
     @State private var showingNewList = false
-    @State private var newListName = ""
-    @State private var selectedStoreID: UUID?
     @State private var listPendingDelete: ShoppingList?
     @State private var showingDeleteConfirmation = false
 
@@ -1246,7 +1330,6 @@ private struct ShoppingListsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    selectedStoreID = nil
                     showingNewList = true
                 } label: {
                     Image(systemName: "plus")
@@ -1255,36 +1338,7 @@ private struct ShoppingListsView: View {
             }
         }
         .sheet(isPresented: $showingNewList) {
-            NavigationStack {
-                Form {
-                    TextField("List name", text: $newListName)
-                    Picker("Store", selection: $selectedStoreID) {
-                        Text("General").tag(UUID?.none)
-                        ForEach(stores) { store in
-                            Text(store.name).tag(UUID?.some(store.id))
-                        }
-                    }
-                }
-                .navigationTitle("New List")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { showingNewList = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Add") {
-                            _ = ShoppingListService.createList(
-                                name: newListName,
-                                householdID: household.id,
-                                storeID: selectedStoreID,
-                                context: modelContext
-                            )
-                            newListName = ""
-                            showingNewList = false
-                        }
-                    }
-                }
-            }
+            ShoppingListCreateView(household: household, stores: stores)
         }
         .confirmationDialog(
             "Delete shopping list?",
@@ -1302,6 +1356,90 @@ private struct ShoppingListsView: View {
             }
         } message: {
             Text("This removes the list from active shopping lists.")
+        }
+    }
+}
+
+private struct ShoppingListCreateView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let household: Household
+    let stores: [FoodStore]
+
+    @State private var name = ""
+    @State private var selectedStoreID: UUID?
+    @State private var newlyCreatedStore: FoodStore?
+    @State private var showingNewStore = false
+
+    private var availableStores: [FoodStore] {
+        guard let newlyCreatedStore,
+              !stores.contains(where: { $0.id == newlyCreatedStore.id })
+        else { return stores }
+        return stores + [newlyCreatedStore]
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("List") {
+                    TextField("List name", text: $name)
+                        .accessibilityIdentifier("shopping-list.name")
+                }
+
+                Section {
+                    Picker("Use store", selection: $selectedStoreID) {
+                        Text("General").tag(UUID?.none)
+                        ForEach(availableStores) { store in
+                            Text(store.name).tag(UUID?.some(store.id))
+                        }
+                    }
+                    .accessibilityIdentifier("shopping-list.store")
+
+                    Button {
+                        showingNewStore = true
+                    } label: {
+                        Label(
+                            stores.isEmpty ? "Add Your First Store" : "Add a New Store",
+                            systemImage: "plus.circle.fill"
+                        )
+                    }
+                    .accessibilityIdentifier("shopping-list.add-store")
+                } header: {
+                    Text("Store (Optional)")
+                } footer: {
+                    Text("General lists work anywhere. Add a store to organize this list using that store's aisles and sections.")
+                }
+            }
+            .navigationTitle("New Shopping List")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        guard ShoppingListService.createList(
+                            name: name,
+                            householdID: household.id,
+                            storeID: selectedStoreID,
+                            context: modelContext
+                        ) != nil else { return }
+                        dismiss()
+                    }
+                    .disabled(!canSave)
+                    .accessibilityIdentifier("shopping-list.save")
+                }
+            }
+            .sheet(isPresented: $showingNewStore) {
+                StoreCreateView(household: household) { store in
+                    newlyCreatedStore = store
+                    selectedStoreID = store.id
+                }
+            }
         }
     }
 }
@@ -2948,7 +3086,6 @@ private struct StoresView: View {
     let openStore: (FoodStore) -> Void
 
     @State private var showingNewStore = false
-    @State private var storeName = ""
     @State private var storePendingArchive: FoodStore?
     @State private var showingArchiveConfirmation = false
 
@@ -2998,29 +3135,7 @@ private struct StoresView: View {
             }
         }
         .sheet(isPresented: $showingNewStore) {
-            NavigationStack {
-                Form {
-                    TextField("Store name", text: $storeName)
-                }
-                .navigationTitle("New Store")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { showingNewStore = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Add") {
-                            _ = StoreLayoutService.createStore(
-                                name: storeName,
-                                householdID: household.id,
-                                context: modelContext
-                            )
-                            storeName = ""
-                            showingNewStore = false
-                        }
-                    }
-                }
-            }
+            StoreCreateView(household: household) { _ in }
         }
         .confirmationDialog(
             "Archive store?",
@@ -3042,6 +3157,52 @@ private struct StoresView: View {
     }
 }
 
+private struct StoreCreateView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let household: Household
+    let onCreated: (FoodStore) -> Void
+
+    @State private var name = ""
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Store name", text: $name)
+                        .accessibilityIdentifier("store.name")
+                } footer: {
+                    Text("Common sections are added automatically. You can rename or reorder them from Stores later.")
+                }
+            }
+            .navigationTitle("New Store")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        guard let store = StoreLayoutService.createStore(
+                            name: name,
+                            householdID: household.id,
+                            context: modelContext
+                        ) else { return }
+                        onCreated(store)
+                        dismiss()
+                    }
+                    .disabled(!canSave)
+                    .accessibilityIdentifier("store.save")
+                }
+            }
+        }
+    }
+}
+
 private struct StoreEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -3051,6 +3212,7 @@ private struct StoreEditorView: View {
     @State private var nameDraft: String
     @State private var notesDraft: String
     @State private var newSectionName = ""
+    @State private var sectionPendingRemoval: FoodStoreSection?
     @State private var showingArchiveConfirmation = false
     @State private var pendingSave: Task<Void, Never>?
 
@@ -3063,6 +3225,9 @@ private struct StoreEditorView: View {
     }
 
     var body: some View {
+        let orderedSections = sections.sorted {
+            ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name)
+        }
         let itemCountBySectionID = shoppingItems.reduce(into: [UUID: Int]()) { counts, item in
             if let sectionID = item.storeSectionID {
                 counts[sectionID, default: 0] += 1
@@ -3076,27 +3241,46 @@ private struct StoreEditorView: View {
                 TextField("Notes", text: $notesDraft, axis: .vertical)
                     .onChange(of: notesDraft) { _, _ in scheduleSave() }
             }
-            Section("Sections") {
-                ForEach(sections) { section in
-                    StoreSectionEditorView(
-                        section: section,
-                        itemCount: itemCountBySectionID[section.id, default: 0]
-                    )
-                }
+
+            Section {
                 HStack {
-                    TextField("New section", text: $newSectionName)
+                    TextField("Section name", text: $newSectionName)
+                        .submitLabel(.done)
+                        .onSubmit(addSection)
+                        .accessibilityIdentifier("store.add-section.name")
                     Button("Add") {
-                        StoreLayoutService.createSection(
-                            name: newSectionName,
-                            store: store,
-                            existingSections: sections,
-                            context: modelContext
-                        )
-                        newSectionName = ""
+                        addSection()
                     }
                     .disabled(newSectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("store.add-section")
                 }
+            } header: {
+                Text("Add Section")
             }
+
+            Section {
+                if orderedSections.isEmpty {
+                    ContentUnavailableView(
+                        "No sections",
+                        systemImage: "square.grid.2x2",
+                        description: Text("Add the first aisle or area for this store.")
+                    )
+                } else {
+                    ForEach(orderedSections) { section in
+                        StoreSectionEditorView(
+                            section: section,
+                            itemCount: itemCountBySectionID[section.id, default: 0],
+                            remove: { sectionPendingRemoval = section }
+                        )
+                    }
+                    .onMove(perform: moveSections)
+                }
+            } header: {
+                Text("Aisle Order")
+            } footer: {
+                Text("Tap a name to rename it. Tap Edit to drag sections into order. Any section, including a default, can be removed; its items move to Other.")
+            }
+
             Section {
                 Button("Archive Store", role: .destructive) {
                     showingArchiveConfirmation = true
@@ -3105,8 +3289,40 @@ private struct StoreEditorView: View {
         }
         .navigationTitle(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Store" : nameDraft)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if sections.count > 1 {
+                    EditButton()
+                }
+            }
+        }
         .onDisappear(perform: saveNow)
         .onChange(of: store.id) { _, _ in syncDraftsFromStore() }
+        .alert(
+            sectionPendingRemoval.map { "Remove \($0.name)?" } ?? "Remove section?",
+            isPresented: Binding(
+                get: { sectionPendingRemoval != nil },
+                set: { if !$0 { sectionPendingRemoval = nil } }
+            )
+        ) {
+            Button("Remove Section", role: .destructive) {
+                if let sectionPendingRemoval {
+                    StoreLayoutService.deleteSection(
+                        sectionPendingRemoval,
+                        from: store,
+                        shoppingItems: shoppingItems,
+                        remainingSections: sections,
+                        context: modelContext
+                    )
+                }
+                sectionPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) {
+                sectionPendingRemoval = nil
+            }
+        } message: {
+            Text(sectionRemovalMessage)
+        }
         .confirmationDialog(
             "Archive \(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? store.name : nameDraft)?",
             isPresented: $showingArchiveConfirmation,
@@ -3120,6 +3336,39 @@ private struct StoreEditorView: View {
         } message: {
             Text("Archived stores are removed from active store lists and section pickers.")
         }
+    }
+
+    private var orderedSections: [FoodStoreSection] {
+        sections.sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
+    }
+
+    private var sectionRemovalMessage: String {
+        guard let sectionPendingRemoval else { return "" }
+        let itemCount = shoppingItems.filter { $0.storeSectionID == sectionPendingRemoval.id }.count
+        guard itemCount > 0 else {
+            return "This removes the section from this store."
+        }
+        return "\(itemCount) item\(itemCount == 1 ? "" : "s") currently use this section. They will move to Other."
+    }
+
+    private func addSection() {
+        guard StoreLayoutService.createSection(
+            name: newSectionName,
+            store: store,
+            existingSections: sections,
+            context: modelContext
+        ) != nil else { return }
+        newSectionName = ""
+    }
+
+    private func moveSections(from source: IndexSet, to destination: Int) {
+        var reordered = orderedSections
+        reordered.move(fromOffsets: source, toOffset: destination)
+        StoreLayoutService.reorderSections(
+            reordered,
+            in: store,
+            context: modelContext
+        )
     }
 
     private func syncDraftsFromStore() {
@@ -3159,12 +3408,14 @@ private struct StoreSectionEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var section: FoodStoreSection
     let itemCount: Int
+    let remove: () -> Void
     @State private var nameDraft: String
     @State private var pendingSave: Task<Void, Never>?
 
-    init(section: FoodStoreSection, itemCount: Int) {
+    init(section: FoodStoreSection, itemCount: Int, remove: @escaping () -> Void) {
         self.section = section
         self.itemCount = itemCount
+        self.remove = remove
         _nameDraft = State(initialValue: section.name)
     }
 
@@ -3175,6 +3426,11 @@ private struct StoreSectionEditorView: View {
             Text(itemCount == 1 ? "1 item" : "\(itemCount) items")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            Button(role: .destructive, action: remove) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Remove \(section.name)")
         }
         .onChange(of: nameDraft) { _, _ in schedulePersist() }
         .onChange(of: section.id) { _, _ in syncDraftFromSection() }
@@ -4309,7 +4565,7 @@ private struct ReturnCreateView: View {
         }
     }
 
-    private var hasPackageDetails: Bool {
+    private var hasExplicitPackageDetails: Bool {
         !packageName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || carrier != .wholeFoods
             || method != .dropOff
@@ -4319,7 +4575,7 @@ private struct ReturnCreateView: View {
     }
 
     private var canSave: Bool {
-        !itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPackageDetails
+        !itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasExplicitPackageDetails
     }
 
     private func importPhotoItems(_ items: [PhotosPickerItem]) {
@@ -4340,46 +4596,28 @@ private struct ReturnCreateView: View {
     }
 
     private func save() {
-        guard let request = ReturnTrackingService.createReturn(
-            householdID: household.id,
-            sortOrder: sortOrder,
-            context: modelContext
-        ) else {
-            return
-        }
+        guard canSave else { return }
 
         for draft in photoDrafts {
             insertReturnPhoto(draft, in: modelContext)
         }
 
-        var packageID: UUID?
-        if hasPackageDetails {
-            let package = ReturnTrackingService.addPackage(
-                name: packageName,
-                carrier: carrier,
-                method: method,
-                trackingNumber: trackingNumber,
-                returnByDate: hasReturnByDate ? returnByDate : nil,
-                photoAttachmentIDs: photoDrafts.map(\.id),
-                to: request,
-                existingPackages: [],
-                context: modelContext
-            )
-            packageID = package.id
-        }
+        guard ReturnTrackingService.createReturn(
+            householdID: household.id,
+            sortOrder: sortOrder,
+            itemName: itemName,
+            itemQuantity: hasItemQuantity ? itemQuantity : nil,
+            itemReason: itemReason,
+            returnURLString: returnURLString,
+            packageName: packageName,
+            carrier: carrier,
+            method: method,
+            trackingNumber: trackingNumber,
+            returnByDate: hasReturnByDate ? returnByDate : nil,
+            photoAttachmentIDs: photoDrafts.map(\.id),
+            context: modelContext
+        ) != nil else { return }
 
-        if !itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            _ = ReturnTrackingService.addItem(
-                name: itemName,
-                quantity: hasItemQuantity ? itemQuantity : nil,
-                reason: itemReason,
-                returnURLString: returnURLString,
-                packageID: packageID,
-                to: request,
-                existingItems: [],
-                context: modelContext
-            )
-        }
         dismiss()
     }
 }
@@ -4727,6 +4965,7 @@ struct FoodReminderSettingsView: View {
     @State private var title = ""
     @State private var type: FoodReminderType = .todos
     @State private var dateTime = Date().addingTimeInterval(3600)
+    @State private var timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
     @State private var selectedTodoListID: UUID?
     @State private var selectedListID: UUID?
     @State private var selectedMealPrepID: UUID?
@@ -4742,6 +4981,18 @@ struct FoodReminderSettingsView: View {
                 }
                 TextField("Title", text: $title)
                 DatePicker("Time", selection: $dateTime)
+                    .environment(\.timeZone, reminderTimeZone)
+                NavigationLink {
+                    TimeZonePickerView(selection: $timeZoneIdentifier)
+                } label: {
+                    LabeledContent(
+                        "Time zone",
+                        value: CareTimeZoneSettings.displayName(
+                            for: reminderTimeZone,
+                            on: dateTime
+                        )
+                    )
+                }
                 if type == .todos {
                     Picker("To-do list", selection: $selectedTodoListID) {
                         Text("None").tag(UUID?.none)
@@ -4781,6 +5032,7 @@ struct FoodReminderSettingsView: View {
                             type: type,
                             title: title.isEmpty ? defaultTitle : title,
                             dateTime: dateTime,
+                            timeZoneIdentifier: reminderTimeZone.identifier,
                             relatedTodoListID: selectedTodoListID,
                             relatedShoppingListID: selectedListID,
                             relatedMealPrepItemID: selectedMealPrepID,
@@ -4801,7 +5053,9 @@ struct FoodReminderSettingsView: View {
                 }
                 ForEach(activeReminders) { reminder in
                     LabeledContent {
-                        Text(DateFormatting.day.string(from: reminder.dateTime))
+                        Text(
+                            "\(DateFormatting.dayString(from: reminder.dateTime, timeZone: TimeZone(identifier: reminder.timeZoneIdentifier ?? "") ?? .autoupdatingCurrent)) · \(DateFormatting.timeString(from: reminder.dateTime, timeZone: TimeZone(identifier: reminder.timeZoneIdentifier ?? "") ?? .autoupdatingCurrent, includesTimeZone: true))"
+                        )
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(reminder.title)
@@ -4844,6 +5098,11 @@ struct FoodReminderSettingsView: View {
         case .returns: "Check return"
         case .custom: "Food & Home reminder"
         }
+    }
+
+    private var reminderTimeZone: TimeZone {
+        TimeZone(identifier: timeZoneIdentifier)
+            ?? CareTimeZoneSettings.effectiveTimeZone()
     }
 }
 

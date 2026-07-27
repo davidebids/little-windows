@@ -565,8 +565,7 @@ enum CareRoutineService {
     }
 
     private static func save(_ context: ModelContext) {
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        _ = PersistenceService.save(context: context)
     }
 
     private static func normalizedSteps(_ steps: [CareRoutineStepInput]) -> [CareRoutineStepInput] {

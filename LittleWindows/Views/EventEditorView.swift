@@ -1,10 +1,13 @@
 import SwiftData
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct EventEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \BabyEvent.startDate, order: .reverse) private var allEvents: [BabyEvent]
     @StateObject private var profileService = ProfileService.shared
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
     @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
@@ -17,6 +20,8 @@ struct EventEditorView: View {
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var hasEndDate: Bool
+    @State private var startTimeZoneIdentifier: String
+    @State private var endTimeZoneIdentifier: String
     @State private var caregiverName: String
     @State private var notes: String
     @State private var sleepKind: SleepKind
@@ -97,6 +102,7 @@ struct EventEditorView: View {
     @State private var dogGlucoseMealRelation: DogMealRelation
     @State private var recentMedicineNames: [String]
     @State private var growthMeasurementEditor: GrowthMeasurementEditorKind?
+    @State private var showingSolidFoodPicker: Bool
     @State private var validationMessage: String?
 
     init(type: EventType, event: BabyEvent? = nil, onSave: @escaping (BabyEvent) -> Void) {
@@ -108,17 +114,33 @@ struct EventEditorView: View {
         _startDate = State(initialValue: event?.startDate ?? Date())
         _endDate = State(initialValue: event?.endDate ?? Date())
         _hasEndDate = State(initialValue: selectedType.supportsTimer && (event == nil || event?.endDate != nil))
+        let effectiveTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
+        let initialStartTimeZoneIdentifier = event?.startTimeZoneIdentifier
+            ?? effectiveTimeZoneIdentifier
+        _startTimeZoneIdentifier = State(initialValue: initialStartTimeZoneIdentifier)
+        _endTimeZoneIdentifier = State(
+            initialValue: event?.endTimeZoneIdentifier
+                ?? event?.startTimeZoneIdentifier
+                ?? effectiveTimeZoneIdentifier
+        )
         _caregiverName = State(initialValue: event?.caregiverName ?? "")
         _notes = State(initialValue: event?.notes ?? "")
         _sleepKind = State(initialValue: event?.sleepKind ?? .nap)
         _feedKind = State(initialValue: event?.feedKind ?? .bottle)
         _amountOzText = State(initialValue: Self.amountText(for: event?.amountOz))
         _foodDescription = State(initialValue: event?.foodDescription ?? "")
-        _solidReaction = State(initialValue: event?.solidReaction ?? .unknown)
+        _solidReaction = State(
+            initialValue: event?.solidReaction == .sensitivity
+                ? .unknown
+                : event?.solidReaction ?? .unknown
+        )
         _solidTexture = State(initialValue: event?.solidTexture ?? .unknown)
         _solidFeedingStyle = State(initialValue: event?.solidFeedingStyle ?? .unknown)
         _solidAllergenExposure = State(initialValue: event?.solidAllergenExposure ?? false)
-        _solidSensitivityObserved = State(initialValue: event?.solidSensitivityObserved ?? false)
+        _solidSensitivityObserved = State(
+            initialValue: event?.solidSensitivityObserved == true
+                || event?.solidReaction == .sensitivity
+        )
         _nursingSide = State(initialValue: event?.nursingSide ?? .left)
         _nursingMinutes = State(initialValue: (event?.totalNursingDurationSeconds ?? 0) / 60)
         _diaperKind = State(initialValue: event?.diaperKind ?? .wet)
@@ -204,6 +226,7 @@ struct EventEditorView: View {
         _dogGlucoseMealRelation = State(initialValue: dog.glucoseMealRelation ?? .unknown)
         _recentMedicineNames = State(initialValue: [])
         _growthMeasurementEditor = State(initialValue: nil)
+        _showingSolidFoodPicker = State(initialValue: false)
     }
 
     private var selectedProfile: CareProfile? {
@@ -231,6 +254,35 @@ struct EventEditorView: View {
 
     private var positiveAmountOz: Double? {
         Self.positiveAmount(from: amountOzText)
+    }
+
+    private var selectedSolidFoodNames: [String] {
+        SolidFoodSelection.names(from: foodDescription)
+    }
+
+    private var recentSolidFoodNames: [String] {
+        var seen = Set<String>()
+        var result = [String]()
+        for event in allEvents where event.id != existingEvent?.id {
+            guard event.type == .feed,
+                  event.feedKind == .solid,
+                  event.matchesProfile(activeProfileID) else { continue }
+            for name in SolidFoodSelection.names(from: event.foodDescription) {
+                let normalizedName = SolidFoodSelection.normalizedName(name)
+                guard seen.insert(normalizedName).inserted else { continue }
+                result.append(name)
+                if result.count == 8 { return result }
+            }
+        }
+        return result
+    }
+
+    private var startTimeZone: TimeZone {
+        TimeZone(identifier: startTimeZoneIdentifier) ?? .autoupdatingCurrent
+    }
+
+    private var endTimeZone: TimeZone {
+        TimeZone(identifier: endTimeZoneIdentifier) ?? startTimeZone
     }
 
     private static func amountText(for amount: Double?) -> String {
@@ -270,11 +322,13 @@ struct EventEditorView: View {
                     TextField("Title", text: $title)
                 }
                 DatePicker("Start", selection: $startDate)
+                    .environment(\.timeZone, startTimeZone)
                 if type.supportsTimer {
                     Toggle("Has ended", isOn: $hasEndDate)
                 }
                 if type.supportsTimer, hasEndDate {
                     DatePicker("End", selection: $endDate, in: startDate...)
+                        .environment(\.timeZone, endTimeZone)
                 }
                 LabeledContent("Logged by") {
                     TextField("Name", text: $caregiverName)
@@ -285,6 +339,38 @@ struct EventEditorView: View {
                 Text("Event")
             } footer: {
                 Text("This name is saved with the event so history can show who logged it.")
+            }
+
+            Section {
+                NavigationLink {
+                    TimeZonePickerView(selection: $startTimeZoneIdentifier)
+                } label: {
+                    LabeledContent(
+                        "Start time zone",
+                        value: CareTimeZoneSettings.displayName(
+                            for: startTimeZone,
+                            on: startDate
+                        )
+                    )
+                }
+
+                if type.supportsTimer, hasEndDate {
+                    NavigationLink {
+                        TimeZonePickerView(selection: $endTimeZoneIdentifier)
+                    } label: {
+                        LabeledContent(
+                            "End time zone",
+                            value: CareTimeZoneSettings.displayName(
+                                for: endTimeZone,
+                                on: endDate
+                            )
+                        )
+                    }
+                }
+            } header: {
+                Text("Time zones")
+            } footer: {
+                Text("Clock times stay attached to these zones when you travel. Durations use real elapsed time, even when the start and end are in different zones.")
             }
 
             eventSpecificFields
@@ -322,6 +408,14 @@ struct EventEditorView: View {
             .presentationDetents([.height(600), .large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showingSolidFoodPicker) {
+            SolidFoodPickerView(
+                initialSelection: selectedSolidFoodNames,
+                recentFoodNames: recentSolidFoodNames
+            ) { names in
+                foodDescription = SolidFoodSelection.description(from: names) ?? ""
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
@@ -341,6 +435,16 @@ struct EventEditorView: View {
         }
         .onChange(of: startDate) { _, newValue in
             if endDate < newValue { endDate = newValue }
+        }
+        .onChange(of: startTimeZoneIdentifier) { oldValue, newValue in
+            if endTimeZoneIdentifier == oldValue {
+                endTimeZoneIdentifier = newValue
+            }
+        }
+        .onChange(of: hasEndDate) { _, hasEnded in
+            if hasEnded, TimeZone(identifier: endTimeZoneIdentifier) == nil {
+                endTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
+            }
         }
         .onChange(of: temperatureUnit) { oldValue, newValue in
             guard oldValue != newValue else { return }
@@ -376,6 +480,7 @@ struct EventEditorView: View {
                 Picker("Kind", selection: $feedKind) {
                     ForEach(FeedKind.allCases) { Text($0.displayName).tag($0) }
                 }
+                .accessibilityIdentifier("event.feed-kind")
                 if feedKind == .bottle {
                     LabeledContent("Amount") {
                         TextField("Optional", text: $amountOzText)
@@ -383,22 +488,27 @@ struct EventEditorView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
-                TextField("Food or details", text: $foodDescription)
                 if feedKind == .solid {
+                    SolidFoodSelectionRow(
+                        foodNames: selectedSolidFoodNames,
+                        onChooseFoods: { showingSolidFoodPicker = true }
+                    )
+                    SolidReactionPicker(selection: $solidReaction)
+                    SolidFoodSafetyPicker(
+                        allergenExposure: $solidAllergenExposure,
+                        sensitivityObserved: $solidSensitivityObserved
+                    )
                     Picker("Style", selection: $solidFeedingStyle) {
                         ForEach(SolidFeedingStyle.allCases) { Text($0.displayName).tag($0) }
                     }
                     Picker("Texture", selection: $solidTexture) {
                         ForEach(SolidTexture.allCases) { Text($0.displayName).tag($0) }
                     }
-                    Picker("Reaction", selection: $solidReaction) {
-                        ForEach(SolidReaction.allCases) { Text($0.displayName).tag($0) }
-                    }
-                    Toggle("Common allergen exposure", isOn: $solidAllergenExposure)
-                    Toggle("Sensitivity observed", isOn: $solidSensitivityObserved)
                     Text("Food reactions are notes for care conversations only. Contact your pediatrician for allergy or medical concerns.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else {
+                    TextField("Details", text: $foodDescription)
                 }
             }
         case .pumping:
@@ -883,6 +993,10 @@ struct EventEditorView: View {
             event.startDate = startDate
         }
         event.endDate = type.supportsTimer && hasEndDate ? max(endDate, startDate) : nil
+        event.startTimeZoneIdentifier = startTimeZone.identifier
+        event.endTimeZoneIdentifier = type.supportsTimer && hasEndDate
+            ? endTimeZone.identifier
+            : nil
         event.caregiverName = caregiverName.nilIfBlank
         event.notes = notes.nilIfBlank
         event.sleepKind = type == .sleep ? sleepKind : nil
@@ -1547,5 +1661,742 @@ private struct TemperatureSlider: View {
         let percentage = 1 - Double((clampedY - tubeTop) / (tubeBottom - tubeTop))
         let rawValue = range.lowerBound + percentage * (range.upperBound - range.lowerBound)
         value = (rawValue * 10).rounded() / 10
+    }
+}
+
+private struct SolidFoodSelectionRow: View {
+    let foodNames: [String]
+    let onChooseFoods: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Foods", systemImage: "carrot.fill")
+                    .font(.headline)
+                Spacer()
+                Text(foodNames.isEmpty ? "Optional" : "\(foodNames.count) selected")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if foodNames.isEmpty {
+                Text("Choose foods from visual suggestions, recent entries, or your custom foods.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(foodNames, id: \.self) { name in
+                            Text(name)
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 7)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        }
+                    }
+                }
+            }
+
+            Button(action: onChooseFoods) {
+                Label(
+                    foodNames.isEmpty ? "Choose Foods" : "Change Foods",
+                    systemImage: "square.grid.2x2.fill"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("solid-food.choose")
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct SolidReactionPicker: View {
+    @Binding var selection: SolidReaction
+
+    private let options: [(SolidReaction, String, String, Color)] = [
+        (.loved, "Loved it", "heart.fill", .pink),
+        (.liked, "Liked it", "hand.thumbsup.fill", .green),
+        (.neutral, "It was okay", "face.smiling", .blue),
+        (.disliked, "Didn't like it", "hand.thumbsdown.fill", .orange)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Reaction")
+                    .font(.headline)
+                Spacer()
+                if selection != .unknown {
+                    Button("Clear") { selection = .unknown }
+                        .font(.caption.weight(.semibold))
+                }
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.flexible()), GridItem(.flexible())],
+                spacing: 10
+            ) {
+                ForEach(options, id: \.0) { option in
+                    let isSelected = selection == option.0
+                    Button {
+                        selection = isSelected ? .unknown : option.0
+                    } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: option.2)
+                                .font(.title3)
+                                .foregroundStyle(option.3)
+                            Text(option.1)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                            Spacer(minLength: 0)
+                            if isSelected {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .background(
+                            isSelected
+                                ? Color.accentColor.opacity(0.12)
+                                : Color.secondary.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(
+                                    isSelected ? Color.accentColor : Color.secondary.opacity(0.15),
+                                    lineWidth: isSelected ? 1.5 : 1
+                                )
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .accessibilityIdentifier("solid-reaction.\(option.0.rawValue)")
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct SolidFoodSafetyPicker: View {
+    @Binding var allergenExposure: Bool
+    @Binding var sensitivityObserved: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Allergen & sensitivity")
+                .font(.headline)
+
+            safetyChoice(
+                title: "Common allergen",
+                detail: "This food included a common allergen",
+                systemImage: "exclamationmark.shield.fill",
+                tint: .purple,
+                identifier: "solid-allergen.exposure",
+                isSelected: $allergenExposure
+            )
+            safetyChoice(
+                title: "Reaction noticed",
+                detail: "A possible allergy or sensitivity was observed",
+                systemImage: "exclamationmark.triangle.fill",
+                tint: .red,
+                identifier: "solid-allergen.reaction",
+                isSelected: $sensitivityObserved
+            )
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func safetyChoice(
+        title: String,
+        detail: String,
+        systemImage: String,
+        tint: Color,
+        identifier: String,
+        isSelected: Binding<Bool>
+    ) -> some View {
+        Button {
+            isSelected.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .foregroundStyle(tint)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: isSelected.wrappedValue ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected.wrappedValue ? Color.accentColor : .secondary)
+            }
+            .padding(11)
+            .background(
+                isSelected.wrappedValue
+                    ? Color.accentColor.opacity(0.1)
+                    : Color.secondary.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected.wrappedValue ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
+    }
+}
+
+private struct SolidFoodPickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \SolidFoodCatalogItem.name) private var customFoods: [SolidFoodCatalogItem]
+    @Query(sort: \PhotoAttachment.createdAt, order: .reverse) private var photoAttachments: [PhotoAttachment]
+
+    let recentFoodNames: [String]
+    let onDone: ([String]) -> Void
+
+    @State private var selectedNames: [String]
+    @State private var searchText = ""
+    @State private var editorRoute: SolidFoodEditorRoute?
+    @State private var foodPendingDeletion: SolidFoodCatalogItem?
+
+    init(
+        initialSelection: [String],
+        recentFoodNames: [String],
+        onDone: @escaping ([String]) -> Void
+    ) {
+        self.recentFoodNames = recentFoodNames
+        self.onDone = onDone
+        _selectedNames = State(initialValue: initialSelection)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 26) {
+                    if let quickAddName {
+                        Button {
+                            select(quickAddName)
+                            searchText = ""
+                        } label: {
+                            Label("Use “\(quickAddName)” for this feeding", systemImage: "plus.circle.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
+                                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if !filteredRecentFoods.isEmpty {
+                        foodSection(title: "Recent foods") {
+                            ForEach(filteredRecentFoods, id: \.self) { name in
+                                foodTile(
+                                    for: name,
+                                    emoji: popularFood(matching: name)?.emoji,
+                                    photoData: customFood(matching: name).flatMap(photoData(for:))
+                                )
+                            }
+                        }
+                    }
+
+                    foodSection(title: "My foods") {
+                        addCustomFoodTile
+                        ForEach(filteredCustomFoods) { food in
+                            foodTile(
+                                for: food.name,
+                                photoData: photoData(for: food)
+                            )
+                            .contextMenu {
+                                Button {
+                                    editorRoute = SolidFoodEditorRoute(item: food)
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) {
+                                    foodPendingDeletion = food
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+
+                    if !filteredPopularFoods.isEmpty {
+                        foodIdeasSection
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+                .padding(.bottom, 104)
+            }
+            .navigationTitle("Choose Foods")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search or enter a food")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 14) {
+                    Text("\(selectedNames.count) selected")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Button {
+                        onDone(selectedNames)
+                        dismiss()
+                    } label: {
+                        Text("Use Foods")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("solid-food.use-selection")
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 12)
+                .background(.bar)
+            }
+            .sheet(item: $editorRoute) { route in
+                NavigationStack {
+                    CustomSolidFoodEditorView(
+                        item: route.item,
+                        existingItems: customFoods,
+                        existingPhoto: route.item.flatMap(photoAttachment(for:))
+                    ) { oldName, newName in
+                        replaceSelection(oldName: oldName, newName: newName)
+                    }
+                }
+            }
+            .confirmationDialog(
+                "Delete custom food?",
+                isPresented: Binding(
+                    get: { foodPendingDeletion != nil },
+                    set: { if !$0 { foodPendingDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let foodPendingDeletion {
+                    Button("Delete \(foodPendingDeletion.name)", role: .destructive) {
+                        removeSelection(foodPendingDeletion.name)
+                        _ = SolidFoodCatalogService.delete(
+                            foodPendingDeletion,
+                            context: modelContext
+                        )
+                        self.foodPendingDeletion = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    foodPendingDeletion = nil
+                }
+            } message: {
+                Text("Past feeding entries keep the food name. The custom photo will also be removed.")
+            }
+        }
+    }
+
+    private var quickAddName: String? {
+        let name = SolidFoodSelection.cleanedName(searchText)
+        guard !name.isEmpty else { return nil }
+        let normalizedName = SolidFoodSelection.normalizedName(name)
+        let knownNames = recentFoodNames
+            + customFoods.map(\.name)
+            + SolidFoodIdeaCatalog.foods.map(\.name)
+        return knownNames.contains {
+            SolidFoodSelection.normalizedName($0) == normalizedName
+        } ? nil : name
+    }
+
+    private var filteredRecentFoods: [String] {
+        recentFoodNames.filter(matchesSearch)
+    }
+
+    private var filteredCustomFoods: [SolidFoodCatalogItem] {
+        customFoods.filter { matchesSearch($0.name) }
+    }
+
+    private var filteredPopularFoods: [SolidFoodIdea] {
+        SolidFoodIdeaCatalog.foods.filter { matchesSearch($0.name) }
+    }
+
+    private func matchesSearch(_ name: String) -> Bool {
+        let query = SolidFoodSelection.normalizedName(searchText)
+        return query.isEmpty || SolidFoodSelection.normalizedName(name).contains(query)
+    }
+
+    @ViewBuilder
+    private func foodSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 96), spacing: 12)],
+                spacing: 12,
+                content: content
+            )
+        }
+    }
+
+    private var foodIdeasSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Food ideas")
+                    .font(.headline)
+                Text("A varied starting library for tracking foods as your child moves into solids.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(SolidFoodIdeaCategory.allCases) { category in
+                let foods = filteredPopularFoods.filter { $0.category == category }
+                if !foods.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(category.displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 96), spacing: 12)],
+                            spacing: 12
+                        ) {
+                            ForEach(foods) { food in
+                                foodTile(for: food.name, emoji: food.emoji)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text("Food ideas are for logging only. Prepare each food in a texture and shape appropriate for your child.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func foodTile(
+        for name: String,
+        emoji: String? = nil,
+        photoData: Data? = nil
+    ) -> some View {
+        let selected = isSelected(name)
+        return Button {
+            toggle(name)
+        } label: {
+            VStack(spacing: 8) {
+                ZStack(alignment: .topTrailing) {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.secondary.opacity(0.08))
+                        .frame(height: 76)
+                        .overlay {
+                            if let photoData, let image = UIImage(data: photoData) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                            } else if let emoji {
+                                Text(emoji)
+                                    .font(.system(size: 43))
+                            } else {
+                                Image(systemName: "fork.knife")
+                                    .font(.title)
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .clipped()
+                    Image(systemName: selected ? "checkmark.circle.fill" : "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(selected ? Color.accentColor : .secondary)
+                        .background(Circle().fill(.background))
+                        .padding(5)
+                }
+                Text(name)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .top)
+            }
+            .padding(7)
+            .background(
+                selected ? Color.accentColor.opacity(0.1) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 18)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityIdentifier(
+            "solid-food.option.\(SolidFoodSelection.normalizedName(name))"
+        )
+    }
+
+    private var addCustomFoodTile: some View {
+        Button {
+            editorRoute = SolidFoodEditorRoute(item: nil)
+        } label: {
+            VStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        Color.secondary.opacity(0.5),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 5])
+                    )
+                    .frame(height: 76)
+                    .overlay {
+                        Image(systemName: "plus")
+                            .font(.title2.weight(.medium))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                Text("Custom food")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .frame(minHeight: 32, alignment: .top)
+            }
+            .padding(7)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Creates a reusable food with an optional photo")
+    }
+
+    private func photoAttachment(for food: SolidFoodCatalogItem) -> PhotoAttachment? {
+        guard let photoAttachmentID = food.photoAttachmentID else { return nil }
+        return photoAttachments.first { $0.id == photoAttachmentID }
+    }
+
+    private func photoData(for food: SolidFoodCatalogItem) -> Data? {
+        photoAttachment(for: food)?.previewData
+    }
+
+    private func customFood(matching name: String) -> SolidFoodCatalogItem? {
+        let normalizedName = SolidFoodSelection.normalizedName(name)
+        return customFoods.first { $0.normalizedName == normalizedName }
+    }
+
+    private func popularFood(matching name: String) -> SolidFoodIdea? {
+        let normalizedName = SolidFoodSelection.normalizedName(name)
+        return SolidFoodIdeaCatalog.foods.first {
+            SolidFoodSelection.normalizedName($0.name) == normalizedName
+        }
+    }
+
+    private func isSelected(_ name: String) -> Bool {
+        let normalizedName = SolidFoodSelection.normalizedName(name)
+        return selectedNames.contains {
+            SolidFoodSelection.normalizedName($0) == normalizedName
+        }
+    }
+
+    private func toggle(_ name: String) {
+        isSelected(name) ? removeSelection(name) : select(name)
+    }
+
+    private func select(_ name: String) {
+        guard !isSelected(name) else { return }
+        selectedNames.append(SolidFoodSelection.cleanedName(name))
+    }
+
+    private func removeSelection(_ name: String) {
+        let normalizedName = SolidFoodSelection.normalizedName(name)
+        selectedNames.removeAll {
+            SolidFoodSelection.normalizedName($0) == normalizedName
+        }
+    }
+
+    private func replaceSelection(oldName: String?, newName: String) {
+        if let oldName, isSelected(oldName) {
+            let oldNormalizedName = SolidFoodSelection.normalizedName(oldName)
+            if let index = selectedNames.firstIndex(where: {
+                SolidFoodSelection.normalizedName($0) == oldNormalizedName
+            }) {
+                selectedNames[index] = newName
+            }
+        } else {
+            select(newName)
+        }
+    }
+
+}
+
+private struct SolidFoodEditorRoute: Identifiable {
+    let id: UUID
+    let item: SolidFoodCatalogItem?
+
+    init(item: SolidFoodCatalogItem?) {
+        id = item?.id ?? UUID()
+        self.item = item
+    }
+}
+
+private struct CustomSolidFoodEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    let item: SolidFoodCatalogItem?
+    let existingItems: [SolidFoodCatalogItem]
+    let existingPhoto: PhotoAttachment?
+    let onSave: (String?, String) -> Void
+
+    @State private var name: String
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var photoDraft: PhotoAttachmentDraft?
+    @State private var removeExistingPhoto = false
+    @State private var isImportingPhoto = false
+
+    init(
+        item: SolidFoodCatalogItem?,
+        existingItems: [SolidFoodCatalogItem],
+        existingPhoto: PhotoAttachment?,
+        onSave: @escaping (String?, String) -> Void
+    ) {
+        self.item = item
+        self.existingItems = existingItems
+        self.existingPhoto = existingPhoto
+        self.onSave = onSave
+        _name = State(initialValue: item?.name ?? "")
+    }
+
+    var body: some View {
+        Form {
+            Section("Food") {
+                TextField("Food name", text: $name)
+                    .textInputAutocapitalization(.words)
+                if hasDuplicateName {
+                    Label(
+                        "A custom food with this name already exists.",
+                        systemImage: "exclamationmark.circle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                }
+            }
+
+            Section {
+                if let previewData, let image = UIImage(data: previewData) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 210)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                    Button(role: .destructive) {
+                        photoDraft = nil
+                        removeExistingPhoto = true
+                    } label: {
+                        Label("Remove Photo", systemImage: "trash")
+                    }
+                }
+
+                PhotosPicker(
+                    selection: $selectedPhotoItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label(
+                        previewData == nil ? "Choose Photo" : "Replace Photo",
+                        systemImage: "photo.badge.plus"
+                    )
+                }
+                .disabled(isImportingPhoto)
+            } header: {
+                Text("Photo")
+            } footer: {
+                Text("Optional. The photo appears on this food's tile and syncs with your Little Windows data.")
+            }
+        }
+        .navigationTitle(item == nil ? "New Custom Food" : "Edit Custom Food")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .fontWeight(.semibold)
+                    .disabled(!canSave)
+            }
+        }
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            importPhoto(from: newItem)
+        }
+    }
+
+    private var cleanedName: String {
+        SolidFoodSelection.cleanedName(name)
+    }
+
+    private var hasDuplicateName: Bool {
+        let normalizedName = SolidFoodSelection.normalizedName(cleanedName)
+        guard !normalizedName.isEmpty else { return false }
+        return existingItems.contains {
+            $0.id != item?.id && $0.normalizedName == normalizedName
+        }
+    }
+
+    private var canSave: Bool {
+        !cleanedName.isEmpty && !hasDuplicateName && !isImportingPhoto
+    }
+
+    private var previewData: Data? {
+        if let photoDraft {
+            return photoDraft.thumbnailData ?? photoDraft.imageData
+        }
+        guard !removeExistingPhoto else { return nil }
+        return existingPhoto?.previewData
+    }
+
+    private func importPhoto(from item: PhotosPickerItem) {
+        Task {
+            isImportingPhoto = true
+            defer {
+                isImportingPhoto = false
+                selectedPhotoItem = nil
+            }
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let draft = PhotoAttachmentImageProcessor.draft(from: data) else { return }
+            photoDraft = draft
+            removeExistingPhoto = false
+        }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        let oldName = item?.name
+        if let item {
+            guard SolidFoodCatalogService.update(
+                item,
+                name: cleanedName,
+                photoDraft: photoDraft,
+                removeExistingPhoto: removeExistingPhoto,
+                context: modelContext
+            ) else { return }
+            onSave(oldName, item.name)
+        } else {
+            guard let item = SolidFoodCatalogService.create(
+                name: cleanedName,
+                photoDraft: photoDraft,
+                existingItems: existingItems,
+                context: modelContext
+            ) else { return }
+            onSave(nil, item.name)
+        }
+        dismiss()
     }
 }

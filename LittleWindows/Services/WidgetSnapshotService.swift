@@ -91,6 +91,27 @@ enum WidgetSnapshotService {
         write(snapshot)
     }
 
+    @discardableResult
+    static func refreshActiveTimer(
+        _ event: BabyEvent,
+        at date: Date = Date()
+    ) -> ActiveTimerSnapshot {
+        var snapshot = read()
+        let existingTimer = snapshot.activeTimer
+        let timer = activeSnapshot(
+            event: event,
+            profileID: event.profileID ?? existingTimer?.profileID,
+            babyName: existingTimer?.babyName ?? snapshot.babyName,
+            additionalActiveCount: existingTimer?.additionalActiveCount ?? 0,
+            now: date
+        )
+        snapshot.generatedAt = date
+        snapshot.profileID = event.profileID ?? snapshot.profileID
+        snapshot.activeTimer = timer
+        write(snapshot)
+        return timer
+    }
+
     static func makeSnapshot(
         profileID: UUID? = nil,
         profileType: CareProfileType = .child,
@@ -113,7 +134,7 @@ enum WidgetSnapshotService {
             )
         }
         let todayEvents = events.filter {
-            !$0.isTimerDraft && calendar.isDate($0.startDate, inSameDayAs: now)
+            !$0.isTimerDraft && $0.occursOnLocalDay(now, calendar: calendar)
         }
         let daily = DailySummaryService.summary(for: todayEvents)
         let careSessions = groupedCareSessions(todayEvents).count
@@ -291,7 +312,10 @@ enum WidgetSnapshotService {
             return (candidate, score)
         }
 
-        var scored = candidates.enumerated().map { index, candidate in
+        var scored = candidates.enumerated().compactMap { index, candidate -> (candidate: QuickLogActionCandidate, score: Double)? in
+            guard !(candidate.startsTimer && activeTypes.contains(candidate.eventType)) else {
+                return nil
+            }
             var score = candidate.baseScore
             let signal = stats[index]
             score += min(Double(signal.recentCount), 8) * 0.28
@@ -312,10 +336,6 @@ enum WidgetSnapshotService {
                 }
             } else {
                 score += 0.45
-            }
-
-            if candidate.startsTimer, activeTypes.contains(candidate.eventType) {
-                score -= 4
             }
 
             return pinAdjusted(candidate, score: score)
@@ -495,7 +515,36 @@ enum WidgetSnapshotService {
         additionalActiveCount: Int,
         now: Date = Date()
     ) -> ActiveTimerSnapshot {
-        ActiveTimerSnapshot(
+        var leftDuration = event.leftDurationSeconds ?? 0
+        var rightDuration = event.rightDurationSeconds ?? 0
+        if event.type == .nursing, event.isTimerRunning {
+            let segmentStart = event.activeTimerSegmentStartDate ?? event.startDate
+            let liveSegmentDuration = max(0, now.timeIntervalSince(segmentStart))
+            switch event.activeNursingSide {
+            case .left:
+                leftDuration += liveSegmentDuration
+            case .right:
+                rightDuration += liveSegmentDuration
+            case .none:
+                break
+            }
+        }
+        let activeSideDuration: TimeInterval
+        switch event.activeNursingSide {
+        case .left:
+            activeSideDuration = leftDuration
+        case .right:
+            activeSideDuration = rightDuration
+        case .none:
+            activeSideDuration = 0
+        }
+        let activeSideTimerStartDate = event.type == .nursing
+            && event.isTimerRunning
+            && event.activeNursingSide != nil
+            ? now.addingTimeInterval(-activeSideDuration)
+            : nil
+
+        return ActiveTimerSnapshot(
             id: event.id,
             profileID: profileID ?? event.profileID,
             profileName: babyName,
@@ -508,8 +557,9 @@ enum WidgetSnapshotService {
             elapsedSeconds: event.timerElapsed(at: now),
             caregiverName: event.caregiverName,
             activeNursingSideRawValue: event.activeNursingSide?.rawValue,
-            leftDurationSeconds: event.leftDurationSeconds ?? 0,
-            rightDurationSeconds: event.rightDurationSeconds ?? 0,
+            activeNursingSideTimerStartDate: activeSideTimerStartDate,
+            leftDurationSeconds: leftDuration,
+            rightDurationSeconds: rightDuration,
             additionalActiveCount: additionalActiveCount
         )
     }
@@ -525,15 +575,21 @@ enum WidgetSnapshotService {
         return snapshot
     }
 
+    static func clear() {
+        write(.empty)
+    }
+
     private static func write(_ snapshot: WidgetSnapshot) {
-        Task.detached(priority: .utility) {
-            guard let data = try? JSONEncoder().encode(snapshot) else { return }
-            let url = SystemIntegrationConstants.sharedFileURL(
-                SystemIntegrationConstants.widgetSnapshotFilename
-            )
-            try? data.write(to: url, options: .atomic)
-            WidgetCenter.shared.reloadAllTimelines()
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        let url = SystemIntegrationConstants.sharedFileURL(
+            SystemIntegrationConstants.widgetSnapshotFilename
+        )
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            return
         }
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private static func shoppingListSnapshot(

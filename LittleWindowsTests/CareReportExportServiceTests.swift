@@ -221,6 +221,59 @@ final class CareReportExportServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testReportUsesEachEventsRecordedLocalDayAndExportsZones() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        var pacificCalendar = Calendar(identifier: .gregorian)
+        pacificCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let selectedDay = try XCTUnwrap(
+            pacificCalendar.date(from: DateComponents(year: 2026, month: 1, day: 15))
+        )
+        let nextDay = try XCTUnwrap(
+            pacificCalendar.date(byAdding: .day, value: 1, to: selectedDay)
+        )
+        let start = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-01-15T06:00:00Z")
+        )
+        let profile = BabyProfile(
+            profileType: .child,
+            name: "Sample Child",
+            birthDate: selectedDay
+        )
+        let event = BabyEvent(
+            profileID: profile.id,
+            type: .diaper,
+            startDate: start,
+            startTimeZoneIdentifier: "America/New_York"
+        )
+        context.insert(profile)
+        context.insert(event)
+        try context.save()
+
+        let report = try CareReportExportService.makeReport(
+            profile: profile,
+            options: CareReportExportOptions(
+                startDate: selectedDay,
+                endDate: selectedDay,
+                includeNotes: true,
+                includeCaregiverNames: true,
+                includeAppointments: false,
+                includeMilestones: false
+            ),
+            context: context,
+            calendar: pacificCalendar,
+            now: selectedDay
+        )
+
+        XCTAssertEqual(report.events.map(\.id), [event.id])
+        XCTAssertFalse(pacificCalendar.isDate(start, inSameDayAs: selectedDay))
+        XCTAssertLessThan(selectedDay, nextDay)
+        let csv = CareReportExportService.csvString(for: report)
+        XCTAssertTrue(csv.contains("Start Time Zone"))
+        XCTAssertTrue(csv.contains("America/New_York"))
+    }
+
+    @MainActor
     func testPDFGenerationProducesNonEmptyPDFData() throws {
         let profile = BabyProfile(
             profileType: .child,

@@ -26,7 +26,7 @@ struct ActiveTimerCard: View {
                                 Text(event.isTimerRunning ? "Running now" : "Stopped · Ready to save")
                                     .font(.caption)
                                     .foregroundStyle(event.isTimerRunning ? .secondary : event.type.tint)
-                                Text("Started \(event.startDate.formatted(date: .omitted, time: .shortened)) · Tap to edit")
+                                Text("Started \(DateFormatting.timeString(from: event.startDate, timeZone: event.startTimeZone, includesTimeZone: event.shouldShowTimeZoneInTimeline)) · Tap to edit")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -114,12 +114,16 @@ struct ActiveTimerEditorView: View {
     let reset: () -> Void
     let save: (Date?) -> Void
     let discard: () -> Void
+    let setStartTimeZone: (String) -> Void
+    let setEndTimeZone: (String) -> Void
     let switchNursingSide: (() -> Void)?
     let setNursingSide: ((NursingSide) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedStart: Date
     @State private var selectedEnd: Date
+    @State private var startTimeZoneIdentifier: String
+    @State private var endTimeZoneIdentifier: String
     @State private var showingResetConfirmation = false
     @State private var showingDiscardConfirmation = false
 
@@ -131,6 +135,8 @@ struct ActiveTimerEditorView: View {
         reset: @escaping () -> Void,
         save: @escaping (Date?) -> Void,
         discard: @escaping () -> Void,
+        setStartTimeZone: @escaping (String) -> Void = { _ in },
+        setEndTimeZone: @escaping (String) -> Void = { _ in },
         switchNursingSide: (() -> Void)? = nil,
         setNursingSide: ((NursingSide) -> Void)? = nil
     ) {
@@ -141,10 +147,28 @@ struct ActiveTimerEditorView: View {
         self.reset = reset
         self.save = save
         self.discard = discard
+        self.setStartTimeZone = setStartTimeZone
+        self.setEndTimeZone = setEndTimeZone
         self.switchNursingSide = switchNursingSide
         self.setNursingSide = setNursingSide
         _selectedStart = State(initialValue: event.startDate)
         _selectedEnd = State(initialValue: Self.defaultEndDate(for: event))
+        _startTimeZoneIdentifier = State(
+            initialValue: event.startTimeZoneIdentifier
+                ?? CareTimeZoneSettings.effectiveIdentifier()
+        )
+        _endTimeZoneIdentifier = State(
+            initialValue: event.endTimeZoneIdentifier
+                ?? CareTimeZoneSettings.effectiveIdentifier()
+        )
+    }
+
+    private var startTimeZone: TimeZone {
+        TimeZone(identifier: startTimeZoneIdentifier) ?? .autoupdatingCurrent
+    }
+
+    private var endTimeZone: TimeZone {
+        TimeZone(identifier: endTimeZoneIdentifier) ?? startTimeZone
     }
 
     var body: some View {
@@ -206,6 +230,41 @@ struct ActiveTimerEditorView: View {
                     .appSurface(cornerRadius: 28)
                 }
 
+                if event.type == .nursing {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack {
+                                Label(
+                                    "Nursing sides",
+                                    systemImage: "figure.and.child.holdinghands"
+                                )
+                                .font(.headline)
+
+                                Spacer()
+
+                                Text("Total \(DurationFormatting.liveString(seconds: event.timerElapsed(at: context.date)))")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+
+                            NursingSideSelector(
+                                event: event,
+                                date: context.date,
+                                isCompact: false,
+                                setNursingSide: setNursingSide,
+                                switchNursingSide: switchNursingSide
+                            )
+
+                            Text("Tap Left or Right whenever sides change. Each side keeps its own running total until you save the event.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(18)
+                        .appSurface()
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Timer controls", systemImage: "timer")
                         .font(.headline)
@@ -262,6 +321,7 @@ struct ActiveTimerEditorView: View {
                         in: ...Date(),
                         displayedComponents: [.date, .hourAndMinute]
                     )
+                    .environment(\.timeZone, startTimeZone)
                     .font(.body.weight(.medium))
                     .onChange(of: selectedStart) { _, newValue in
                         apply(newValue)
@@ -276,10 +336,45 @@ struct ActiveTimerEditorView: View {
                             in: selectedStart...Date(),
                             displayedComponents: [.date, .hourAndMinute]
                         )
+                        .environment(\.timeZone, endTimeZone)
                         .font(.body.weight(.medium))
 
                         Divider()
                     }
+
+                    NavigationLink {
+                        TimeZonePickerView(selection: $startTimeZoneIdentifier)
+                    } label: {
+                        LabeledContent(
+                            "Start time zone",
+                            value: CareTimeZoneSettings.displayName(
+                                for: startTimeZone,
+                                on: selectedStart
+                            )
+                        )
+                    }
+
+                    if !event.isTimerRunning {
+                        Divider()
+
+                        NavigationLink {
+                            TimeZonePickerView(selection: $endTimeZoneIdentifier)
+                        } label: {
+                            LabeledContent(
+                                "End time zone",
+                                value: CareTimeZoneSettings.displayName(
+                                    for: endTimeZone,
+                                    on: selectedEnd
+                                )
+                            )
+                        }
+                    }
+
+                    Text("The elapsed timer stays exact when the start and end are in different time zones.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
 
                     HStack(spacing: 8) {
                         adjustmentButton("−5 min", minutes: -5)
@@ -289,41 +384,6 @@ struct ActiveTimerEditorView: View {
                 }
                 .padding(18)
                 .appSurface()
-
-                if event.type == .nursing {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack {
-                                Label(
-                                    "Nursing sides",
-                                    systemImage: "figure.and.child.holdinghands"
-                                )
-                                .font(.headline)
-
-                                Spacer()
-
-                                Text("Total \(DurationFormatting.liveString(seconds: event.timerElapsed(at: context.date)))")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-
-                            NursingSideSelector(
-                                event: event,
-                                date: context.date,
-                                isCompact: false,
-                                setNursingSide: setNursingSide,
-                                switchNursingSide: switchNursingSide
-                            )
-
-                            Text("Tap Left or Right whenever sides change. Each side keeps its own running total until you save the event.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(18)
-                        .appSurface()
-                    }
-                }
 
                 VStack(spacing: 12) {
                     Button {
@@ -375,6 +435,10 @@ struct ActiveTimerEditorView: View {
                     reset()
                     selectedStart = event.startDate
                     selectedEnd = Self.defaultEndDate(for: event)
+                    startTimeZoneIdentifier = event.startTimeZoneIdentifier
+                        ?? CareTimeZoneSettings.effectiveIdentifier()
+                    endTimeZoneIdentifier = event.endTimeZoneIdentifier
+                        ?? CareTimeZoneSettings.effectiveIdentifier()
                 }
             ]
         )
@@ -408,7 +472,18 @@ struct ActiveTimerEditorView: View {
         .onChange(of: event.isTimerRunning) { _, isRunning in
             if !isRunning {
                 selectedEnd = Self.defaultEndDate(for: event)
+                endTimeZoneIdentifier = event.endTimeZoneIdentifier
+                    ?? CareTimeZoneSettings.effectiveIdentifier()
             }
+        }
+        .onChange(of: startTimeZoneIdentifier) { oldValue, identifier in
+            if endTimeZoneIdentifier == oldValue {
+                endTimeZoneIdentifier = identifier
+            }
+            setStartTimeZone(identifier)
+        }
+        .onChange(of: endTimeZoneIdentifier) { _, identifier in
+            setEndTimeZone(identifier)
         }
     }
 

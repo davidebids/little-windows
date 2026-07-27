@@ -34,6 +34,7 @@ enum EventTimerService {
             profileID: profileID,
             type: type,
             startDate: date,
+            startTimeZoneIdentifier: CareTimeZoneSettings.effectiveIdentifier(),
             caregiverName: caregiverName
         )
         event.createdAt = date
@@ -59,6 +60,7 @@ enum EventTimerService {
         accrueCurrentSegment(event, until: date)
         event.timerState = .stopped
         event.activeTimerSegmentStartDate = nil
+        event.endTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
         event.updatedAt = date
     }
 
@@ -70,6 +72,7 @@ enum EventTimerService {
         guard event.isTimerDraft, !event.isTimerRunning else { return }
         event.timerState = .running
         event.activeTimerSegmentStartDate = date
+        event.endTimeZoneIdentifier = nil
         event.updatedAt = date
     }
 
@@ -80,6 +83,8 @@ enum EventTimerService {
     ) {
         guard event.isTimerDraft else { return }
         event.startDate = date
+        event.startTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
+        event.endTimeZoneIdentifier = nil
         event.timerAccumulatedSeconds = 0
         event.leftDurationSeconds = event.type == .nursing ? 0 : nil
         event.rightDurationSeconds = event.type == .nursing ? 0 : nil
@@ -102,6 +107,9 @@ enum EventTimerService {
             event.endDate = max(endDate, event.startDate)
         } else {
             event.endDate = event.startDate.addingTimeInterval(elapsed)
+        }
+        if event.endTimeZoneIdentifier == nil {
+            event.endTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
         }
         event.timerState = nil
         event.timerAccumulatedSeconds = nil

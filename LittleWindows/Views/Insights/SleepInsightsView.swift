@@ -307,7 +307,9 @@ struct SleepInsightsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(event.sleepKind?.displayName ?? "Sleep")
                                 .font(.subheadline.weight(.semibold))
-                            Text("\(DateFormatting.day.string(from: event.startDate)) · \(DateFormatting.window(start: event.startDate, end: event.endDate ?? event.startDate))")
+                            Text(
+                                "\(DateFormatting.dayString(from: event.startDate, timeZone: event.startTimeZone)) · \(DateFormatting.window(start: event.startDate, end: event.endDate ?? event.startDate, startTimeZone: event.startTimeZone, endTimeZone: event.endTimeZone, includesTimeZones: event.shouldShowTimeZoneInTimeline))"
+                            )
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

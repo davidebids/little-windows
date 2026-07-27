@@ -6,6 +6,79 @@ enum EventTimerState: String, Codable {
     case stopped
 }
 
+enum CareTimeZoneMode: String, CaseIterable, Identifiable {
+    case automatic
+    case manual
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .manual: "Manual override"
+        }
+    }
+}
+
+enum CareTimeZoneSettings {
+    static let modeKey = "careTimeZoneMode"
+    static let manualIdentifierKey = "careTimeZoneManualIdentifier"
+
+    static func effectiveTimeZone(
+        defaults: UserDefaults = .standard,
+        automaticTimeZone: TimeZone = .autoupdatingCurrent
+    ) -> TimeZone {
+        let mode = CareTimeZoneMode(rawValue: defaults.string(forKey: modeKey) ?? "")
+            ?? .automatic
+        guard mode == .manual,
+              let identifier = defaults.string(forKey: manualIdentifierKey),
+              let selected = TimeZone(identifier: identifier) else {
+            return automaticTimeZone
+        }
+        return selected
+    }
+
+    static func effectiveIdentifier(
+        defaults: UserDefaults = .standard,
+        automaticTimeZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        effectiveTimeZone(defaults: defaults, automaticTimeZone: automaticTimeZone).identifier
+    }
+
+    static func displayName(for timeZone: TimeZone, on date: Date = Date()) -> String {
+        let city = timeZone.identifier
+            .split(separator: "/")
+            .last
+            .map(String.init)?
+            .replacingOccurrences(of: "_", with: " ")
+            ?? timeZone.identifier
+        let abbreviation = timeZone.abbreviation(for: date) ?? gmtOffsetText(for: timeZone, on: date)
+        return "\(city) (\(abbreviation))"
+    }
+
+    static func gmtOffsetText(for timeZone: TimeZone, on date: Date = Date()) -> String {
+        let seconds = timeZone.secondsFromGMT(for: date)
+        let sign = seconds < 0 ? "-" : "+"
+        let absoluteMinutes = abs(seconds) / 60
+        let hours = absoluteMinutes / 60
+        let minutes = absoluteMinutes % 60
+        return minutes == 0
+            ? "GMT\(sign)\(hours)"
+            : String(format: "GMT%@%d:%02d", sign, hours, minutes)
+    }
+
+    static func normalizedLocalDay(
+        for date: Date,
+        timeZone: TimeZone,
+        calendar: Calendar = .current
+    ) -> Date {
+        var sourceCalendar = calendar
+        sourceCalendar.timeZone = timeZone
+        let components = sourceCalendar.dateComponents([.year, .month, .day], from: date)
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+    }
+}
+
 @Model
 final class BabyEvent {
     var id: UUID = UUID()
@@ -15,6 +88,8 @@ final class BabyEvent {
     var title: String?
     var startDate: Date = Date()
     var endDate: Date?
+    var startTimeZoneIdentifier: String?
+    var endTimeZoneIdentifier: String?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
     var caregiverName: String?
@@ -74,6 +149,8 @@ final class BabyEvent {
         title: String? = nil,
         startDate: Date = Date(),
         endDate: Date? = nil,
+        startTimeZoneIdentifier: String? = nil,
+        endTimeZoneIdentifier: String? = nil,
         caregiverName: String? = nil,
         notes: String? = nil
     ) {
@@ -83,6 +160,9 @@ final class BabyEvent {
         self.title = title
         self.startDate = startDate
         self.endDate = endDate
+        self.startTimeZoneIdentifier = startTimeZoneIdentifier
+        self.endTimeZoneIdentifier = endTimeZoneIdentifier
+            ?? (endDate == nil ? nil : startTimeZoneIdentifier)
         self.createdAt = Date()
         self.updatedAt = Date()
         self.caregiverName = caregiverName
@@ -92,6 +172,80 @@ final class BabyEvent {
     var type: EventType {
         get { EventType.normalized(rawValue: typeRawValue) }
         set { typeRawValue = newValue.rawValue }
+    }
+
+    var startTimeZone: TimeZone {
+        startTimeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .autoupdatingCurrent
+    }
+
+    var endTimeZone: TimeZone {
+        endTimeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? startTimeZone
+    }
+
+    var spansTimeZones: Bool {
+        guard endDate != nil else { return false }
+        return startTimeZone.identifier != endTimeZone.identifier
+    }
+
+    var shouldShowTimeZoneInTimeline: Bool {
+        guard startTimeZoneIdentifier != nil else { return false }
+        return spansTimeZones || startTimeZone.identifier != TimeZone.autoupdatingCurrent.identifier
+    }
+
+    func localStartDay(calendar: Calendar = .current) -> Date {
+        CareTimeZoneSettings.normalizedLocalDay(
+            for: startDate,
+            timeZone: startTimeZoneIdentifier.flatMap(TimeZone.init(identifier:))
+                ?? calendar.timeZone,
+            calendar: calendar
+        )
+    }
+
+    func localEndDay(calendar: Calendar = .current) -> Date? {
+        endDate.map {
+            CareTimeZoneSettings.normalizedLocalDay(
+                for: $0,
+                timeZone: endTimeZoneIdentifier.flatMap(TimeZone.init(identifier:))
+                    ?? startTimeZoneIdentifier.flatMap(TimeZone.init(identifier:))
+                    ?? calendar.timeZone,
+                calendar: calendar
+            )
+        }
+    }
+
+    func occursOnLocalDay(_ date: Date, calendar: Calendar = .current) -> Bool {
+        localStartDay(calendar: calendar) == calendar.startOfDay(for: date)
+    }
+
+    func localStartMinute(calendar: Calendar = .current) -> Double {
+        var localCalendar = calendar
+        localCalendar.timeZone = startTimeZoneIdentifier.flatMap(TimeZone.init(identifier:))
+            ?? calendar.timeZone
+        let components = localCalendar.dateComponents([.hour, .minute, .second], from: startDate)
+        return Double((components.hour ?? 0) * 60 + (components.minute ?? 0))
+            + Double(components.second ?? 0) / 60
+    }
+
+    func localEndMinute(calendar: Calendar = .current) -> Double? {
+        guard let endDate else { return nil }
+        var localCalendar = calendar
+        localCalendar.timeZone = endTimeZoneIdentifier.flatMap(TimeZone.init(identifier:))
+            ?? startTimeZoneIdentifier.flatMap(TimeZone.init(identifier:))
+            ?? calendar.timeZone
+        let components = localCalendar.dateComponents([.hour, .minute, .second], from: endDate)
+        return Double((components.hour ?? 0) * 60 + (components.minute ?? 0))
+            + Double(components.second ?? 0) / 60
+    }
+
+    /// Rebuilds the recorded local wall-clock date in the supplied calendar's
+    /// time zone. This is for day-based charts and sorting, not elapsed-time math.
+    func normalizedLocalStartDate(calendar: Calendar = .current) -> Date {
+        let day = localStartDay(calendar: calendar)
+        return calendar.date(
+            byAdding: .second,
+            value: Int((localStartMinute(calendar: calendar) * 60).rounded()),
+            to: day
+        ) ?? day
     }
 
     var profileTypeSnapshot: CareProfileType? {

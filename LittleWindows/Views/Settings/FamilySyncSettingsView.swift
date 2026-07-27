@@ -11,6 +11,8 @@ struct FamilySyncSettingsView: View {
     @AppStorage("familySyncHomeTodoNotificationsEnabled")
     private var homeTodoNotificationsEnabled = true
     @State private var confirmLeave = false
+    @State private var confirmStopSharing = false
+    @State private var confirmDeleteInactiveData = false
     @State private var deleteLocalDataOnLeave = false
     @State private var isConfirmingLeave = false
 
@@ -22,7 +24,14 @@ struct FamilySyncSettingsView: View {
                 LabeledContent("iCloud Sync", value: viewModel.availability.title)
                 LabeledContent("Role", value: viewModel.state.role.displayName)
                 LabeledContent("Owner", value: viewModel.state.ownerDescription)
-                LabeledContent("Participant", value: viewModel.state.participantDescription)
+                if viewModel.state.role == .owner {
+                    LabeledContent(
+                        "Accepted caregivers",
+                        value: "\(viewModel.state.participantCount)"
+                    )
+                } else {
+                    LabeledContent("Participant", value: viewModel.state.participantDescription)
+                }
                 LabeledContent("Last sync", value: lastSyncText)
             }
             .labeledContentStyle(AdaptiveLabeledContentStyle())
@@ -34,6 +43,32 @@ struct FamilySyncSettingsView: View {
                     .foregroundStyle(.secondary)
                 Text("Private iCloud Sync remains available for devices signed into the same Apple Account.")
                     .foregroundStyle(.secondary)
+            }
+
+            if let inactiveReason = viewModel.state.inactiveReason {
+                Section("Access ended") {
+                    Label(inactiveReason.title, systemImage: "person.crop.circle.badge.xmark")
+                        .foregroundStyle(.orange)
+                    Text(inactiveReason.detail)
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        Task {
+                            await viewModel.resolveInactiveShare(
+                                context: modelContext,
+                                deleteLocalData: false
+                            )
+                        }
+                    } label: {
+                        Label("Keep Local Copy", systemImage: "internaldrive")
+                    }
+                    .disabled(familyActionIsRunning)
+
+                    Button("Delete Shared Data from This Device", role: .destructive) {
+                        confirmDeleteInactiveData = true
+                    }
+                    .disabled(familyActionIsRunning)
+                }
             }
 
             Section("Family sharing") {
@@ -130,14 +165,21 @@ struct FamilySyncSettingsView: View {
                     } label: {
                         Label(
                             leaveActionIsRunning
-                                ? "Leaving Family Sync"
-                                : "Leave Family Sync",
+                                ? leaveProgressTitle
+                                : leaveButtonTitle,
                             systemImage: leaveActionIsRunning
                                 ? "hourglass"
                                 : "person.crop.circle.badge.minus"
                         )
                     }
                     .disabled(familyActionIsRunning)
+
+                    if viewModel.state.role == .owner {
+                        Button("Stop Sharing for Everyone", role: .destructive) {
+                            confirmStopSharing = true
+                        }
+                        .disabled(familyActionIsRunning)
+                    }
                 }
 
                 if viewModel.state.status == .localOnly {
@@ -193,8 +235,8 @@ struct FamilySyncSettingsView: View {
 
             if viewModel.state.canLeaveShare {
                 Section("Leaving") {
-                    Toggle("Delete local shared data when leaving", isOn: $deleteLocalDataOnLeave)
-                    Text("Keeping local data leaves this device with a private copy. Deleting local data removes the synced Little Windows data from this device only.")
+                    Toggle("Delete local shared data when disconnecting", isOn: $deleteLocalDataOnLeave)
+                    Text(leavingDataExplanation)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -221,6 +263,13 @@ struct FamilySyncSettingsView: View {
         ) { _ in
             Task { await viewModel.refresh(force: true) }
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: CloudKitSharingService.shareStateDidChangeNotification
+            )
+        ) { _ in
+            Task { await viewModel.refresh(force: true) }
+        }
         .sheet(
             isPresented: Binding(
                 get: { viewModel.presentedShare != nil },
@@ -232,11 +281,11 @@ struct FamilySyncSettingsView: View {
             }
         }
         .confirmationDialog(
-            "Leave Family Sync?",
+            leaveConfirmationTitle,
             isPresented: $confirmLeave,
             titleVisibility: .visible
         ) {
-            Button("Leave Family Sync", role: .destructive) {
+            Button(leaveButtonTitle, role: .destructive) {
                 isConfirmingLeave = true
                 confirmLeave = false
                 Task {
@@ -251,7 +300,36 @@ struct FamilySyncSettingsView: View {
                 isConfirmingLeave = false
             }
         } message: {
-            Text("This stops syncing this device with the shared family data.")
+            Text(leaveConfirmationMessage)
+        }
+        .confirmationDialog(
+            "Stop sharing for everyone?",
+            isPresented: $confirmStopSharing,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Sharing for Everyone", role: .destructive) {
+                Task { await viewModel.stopSharingForEveryone() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Every caregiver will lose access to this family share. Their already-downloaded data will remain on their devices until they choose to delete it.")
+        }
+        .confirmationDialog(
+            "Delete this device's shared data?",
+            isPresented: $confirmDeleteInactiveData,
+            titleVisibility: .visible
+        ) {
+            Button("Delete from This Device", role: .destructive) {
+                Task {
+                    await viewModel.resolveInactiveShare(
+                        context: modelContext,
+                        deleteLocalData: true
+                    )
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes the downloaded Little Windows data from this device. It does not affect the former owner's data or other caregivers' local copies.")
         }
     }
 
@@ -268,9 +346,43 @@ struct FamilySyncSettingsView: View {
         viewModel.activeOperation == .leave || isConfirmingLeave
     }
 
+    private var leaveButtonTitle: String {
+        viewModel.state.role == .owner
+            ? "Turn Off on This Device"
+            : "Leave Family Sync"
+    }
+
+    private var leaveProgressTitle: String {
+        viewModel.state.role == .owner
+            ? "Turning Off on This Device"
+            : "Leaving Family Sync"
+    }
+
+    private var leaveConfirmationTitle: String {
+        viewModel.state.role == .owner
+            ? "Turn off on this device?"
+            : "Leave Family Sync?"
+    }
+
+    private var leaveConfirmationMessage: String {
+        if viewModel.state.role == .owner {
+            return "This device will stop syncing. The iCloud family share and every other caregiver's access will stay active."
+        }
+        return "This Apple Account will leave the share and this device will stop syncing. Other caregivers will keep access."
+    }
+
+    private var leavingDataExplanation: String {
+        let effect = viewModel.state.role == .owner
+            ? "Turning off Family Sync here does not stop the share for other caregivers."
+            : "Leaving removes this Apple Account from the share but does not stop sharing for other caregivers."
+        return "Keeping local data leaves this device with a private copy. Deleting local data removes the downloaded Little Windows data from this device only. \(effect)"
+    }
+
     private var operationStatusText: String? {
         if isConfirmingLeave {
-            return FamilySyncOperation.leave.statusText
+            return viewModel.state.role == .owner
+                ? "Turning off Family Sync on this device..."
+                : FamilySyncOperation.leave.statusText
         }
         return viewModel.activeOperation?.statusText
     }
@@ -321,7 +433,11 @@ private struct CloudSharingControllerView: UIViewControllerRepresentable {
         func cloudSharingController(
             _ csc: UICloudSharingController,
             failedToSaveShareWithError error: Error
-        ) {}
+        ) {
+            Task { @MainActor in
+                CloudKitSharingService.shared.handleShareSheetSaveFailed(error)
+            }
+        }
 
         func itemTitle(for csc: UICloudSharingController) -> String? {
             CloudKitSharingService.shared.shareTitle
@@ -335,8 +451,16 @@ private struct CloudSharingControllerView: UIViewControllerRepresentable {
             "app.littlewindows.family-sync"
         }
 
-        func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {}
+        func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {
+            Task { @MainActor in
+                CloudKitSharingService.shared.handleShareSheetDidSave()
+            }
+        }
 
-        func cloudSharingControllerDidStopSharing(_ csc: UICloudSharingController) {}
+        func cloudSharingControllerDidStopSharing(_ csc: UICloudSharingController) {
+            Task { @MainActor in
+                await CloudKitSharingService.shared.handleOwnerStoppedSharing()
+            }
+        }
     }
 }

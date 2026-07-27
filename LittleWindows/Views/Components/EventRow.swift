@@ -42,9 +42,19 @@ struct EventRow: View {
     }
 
     private var detail: String {
-        var pieces = [DateFormatting.time.string(from: event.startDate)]
+        var pieces = [DateFormatting.timeString(
+            from: event.startDate,
+            timeZone: event.startTimeZone,
+            includesTimeZone: event.shouldShowTimeZoneInTimeline
+        )]
         if let endDate = event.endDate {
-            pieces[0] = DateFormatting.window(start: event.startDate, end: endDate)
+            pieces[0] = DateFormatting.window(
+                start: event.startDate,
+                end: endDate,
+                startTimeZone: event.startTimeZone,
+                endTimeZone: event.endTimeZone,
+                includesTimeZones: event.shouldShowTimeZoneInTimeline
+            )
         }
         if let duration = event.timelineDurationDescription {
             pieces.append(duration)

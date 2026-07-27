@@ -116,14 +116,21 @@ enum CareReportExportService {
         let profileID = profile.id
         let lowerBound = range.lowerBound
         let upperBound = range.upperBound
+        // Cover the full UTC-12...UTC+14 spread before filtering by each
+        // event's recorded local calendar day.
+        let eventFetchLowerBound = lowerBound.addingTimeInterval(-30 * 60 * 60)
+        let eventFetchUpperBound = upperBound.addingTimeInterval(30 * 60 * 60)
         let events = try context.fetch(FetchDescriptor<BabyEvent>(
             predicate: #Predicate {
                 $0.profileID == profileID &&
-                    $0.startDate >= lowerBound &&
-                    $0.startDate < upperBound
+                    $0.startDate >= eventFetchLowerBound &&
+                    $0.startDate < eventFetchUpperBound
             },
             sortBy: [SortDescriptor(\.startDate)]
-        ))
+        )).filter {
+            let localDay = $0.localStartDay(calendar: calendar)
+            return localDay >= lowerBound && localDay < upperBound
+        }
         let appointments = options.includeAppointments
             ? try context.fetch(FetchDescriptor<DoctorAppointment>(
                 predicate: #Predicate {
@@ -175,23 +182,27 @@ enum CareReportExportService {
             "Amount / Value",
             "Details",
             "Caregiver",
-            "Notes"
+            "Notes",
+            "Start Time Zone",
+            "End Time Zone"
         ]
         var rows: [(date: Date, columns: [String])] = []
         rows += report.events.map { event in
             (event.startDate, [
                 report.profile.name,
                 report.profile.profileType.displayName,
-                dateFormatter.string(from: event.startDate),
-                timeFormatter.string(from: event.startDate),
-                event.endDate.map { timeFormatter.string(from: $0) } ?? "",
+                DateFormatting.dayString(from: event.startDate, timeZone: event.startTimeZone),
+                DateFormatting.timeString(from: event.startDate, timeZone: event.startTimeZone),
+                event.endDate.map { DateFormatting.timeString(from: $0, timeZone: event.endTimeZone) } ?? "",
                 durationText(for: event),
                 event.type.displayName,
                 subtypeText(for: event),
                 amountText(for: event),
                 detailsText(for: event),
                 report.options.includeCaregiverNames ? (event.caregiverName ?? "") : "",
-                report.options.includeNotes ? (event.notes ?? "") : ""
+                report.options.includeNotes ? (event.notes ?? "") : "",
+                event.startTimeZone.identifier,
+                event.endDate == nil ? "" : event.endTimeZone.identifier
             ])
         }
         if report.options.includeAppointments {
@@ -208,7 +219,9 @@ enum CareReportExportService {
                     "",
                     appointmentDetailsText(for: appointment, includeNotes: report.options.includeNotes),
                     report.options.includeCaregiverNames ? (appointment.caregiverName ?? "") : "",
-                    report.options.includeNotes ? (appointment.notes ?? "") : ""
+                    report.options.includeNotes ? (appointment.notes ?? "") : "",
+                    "",
+                    ""
                 ])
             }
         }
@@ -226,7 +239,9 @@ enum CareReportExportService {
                     milestone.approximateDate ? "Approximate date" : "",
                     milestone.title,
                     report.options.includeCaregiverNames ? (milestone.caregiverName ?? "") : "",
-                    report.options.includeNotes ? (milestone.notes ?? "") : ""
+                    report.options.includeNotes ? (milestone.notes ?? "") : "",
+                    "",
+                    ""
                 ])
             }
         }
@@ -875,7 +890,7 @@ enum CareReportExportService {
             detailParts.append("Notes: \(pdfSafeText(notes, limit: 260))")
         }
         drawTimelineRow(
-            time: dateTimeFormatter.string(from: event.startDate),
+            time: "\(DateFormatting.dayString(from: event.startDate, timeZone: event.startTimeZone)) \(DateFormatting.timeString(from: event.startDate, timeZone: event.startTimeZone, includesTimeZone: true))",
             title: title,
             details: compactJoined(detailParts, separator: "  |  "),
             cursor: &cursor,

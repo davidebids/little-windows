@@ -290,17 +290,25 @@ enum InsightsAnalyticsService {
         let previousPredictions = predictionAccuracy(records: records, range: previousRange)
 
         let currentNaps = completed.filter {
-            $0.isSleepBlock && $0.sleepKind == .nap && currentRange.contains($0.startDate)
+            $0.isSleepBlock &&
+                $0.sleepKind == .nap &&
+                localRangeContains($0, range: currentRange, calendar: calendar)
         }
         let previousNaps = completed.filter {
-            $0.isSleepBlock && $0.sleepKind == .nap && previousRange.contains($0.startDate)
+            $0.isSleepBlock &&
+                $0.sleepKind == .nap &&
+                localRangeContains($0, range: previousRange, calendar: calendar)
         }
         let bedtimes = bedtimeExtraction(events: completed, range: currentRange, calendar: calendar)
         let previousBedtimes = bedtimeExtraction(events: completed, range: previousRange, calendar: calendar)
         let morningWakes = morningWakeExtraction(events: completed, range: currentRange, calendar: calendar)
-        let currentCare = careSessions(events: events, range: currentRange)
-        let currentDiaperEvents = events.filter { $0.type == .diaper && currentRange.contains($0.startDate) }
-        let currentActivityEvents = events.filter { currentRange.contains($0.startDate) }
+        let currentCare = careSessions(events: events, range: currentRange, calendar: calendar)
+        let currentDiaperEvents = events.filter {
+            $0.type == .diaper && localRangeContains($0, range: currentRange, calendar: calendar)
+        }
+        let currentActivityEvents = events.filter {
+            localRangeContains($0, range: currentRange, calendar: calendar)
+        }
 
         let totalSleepAverage = average(dailySleep.map(\.totalMinutes))
         let previousTotalSleepAverage = average(previousSleep.map(\.totalMinutes))
@@ -371,7 +379,9 @@ enum InsightsAnalyticsService {
         let longestNap = currentNaps.compactMap(\.duration).max().map { $0 / 60 }
         let shortestNap = currentNaps.compactMap(\.duration).min().map { $0 / 60 }
         let longestNight = completed.filter {
-            $0.isSleepBlock && $0.sleepKind == .nightSleep && currentRange.contains($0.startDate)
+            $0.isSleepBlock &&
+                $0.sleepKind == .nightSleep &&
+                localRangeContains($0, range: currentRange, calendar: calendar)
         }.compactMap(\.duration).max().map { $0 / 60 }
         let napCountAverage = average(dailySleep.map { Double($0.napCount) })
         let morningAverage = circularTimeAverage(morningWakes.map(\.value), rollsAfterMidnight: false)
@@ -464,25 +474,37 @@ enum InsightsAnalyticsService {
         ]
 
         let nursingEvents = events.filter {
-            $0.type == .nursing && currentRange.contains($0.startDate)
+            $0.type == .nursing &&
+                localRangeContains($0, range: currentRange, calendar: calendar)
         }
         let previousNursing = events.filter {
-            $0.type == .nursing && previousRange.contains($0.startDate)
+            $0.type == .nursing &&
+                localRangeContains($0, range: previousRange, calendar: calendar)
         }
         let leftMinutes = nursingEvents.filter { $0.nursingSide == .left }.compactMap(\.duration).reduce(0, +) / 60
         let rightMinutes = nursingEvents.filter { $0.nursingSide == .right }.compactMap(\.duration).reduce(0, +) / 60
         let nursingTotal = leftMinutes + rightMinutes
         let previousNursingTotal = previousNursing.compactMap(\.duration).reduce(0, +) / 60
         let bottleEvents = events.filter {
-            $0.type == .feed && $0.feedKind == .bottle && currentRange.contains($0.startDate)
+            $0.type == .feed &&
+                $0.feedKind == .bottle &&
+                localRangeContains($0, range: currentRange, calendar: calendar)
         }
         let previousBottles = events.filter {
-            $0.type == .feed && $0.feedKind == .bottle && previousRange.contains($0.startDate)
+            $0.type == .feed &&
+                $0.feedKind == .bottle &&
+                localRangeContains($0, range: previousRange, calendar: calendar)
         }
         let bottleOunces = bottleEvents.compactMap(\.amountOz).reduce(0, +)
         let previousBottleOunces = previousBottles.compactMap(\.amountOz).reduce(0, +)
-        let careIntervals = zip(currentCare, currentCare.dropFirst()).map { $1.timeIntervalSince($0) / 60 }
-        let feedSleepIntervals = feedToSleepIntervals(events: events, range: currentRange)
+        let careIntervals = zip(currentCare, currentCare.dropFirst()).map {
+            $1.startDate.timeIntervalSince($0.startDate) / 60
+        }
+        let feedSleepIntervals = feedToSleepIntervals(
+            events: events,
+            range: currentRange,
+            calendar: calendar
+        )
         let beforeSleepCount = feedSleepIntervals.filter { $0 <= 30 }.count
         let feedingMetrics = [
             metric("Care sessions / day", average(dailyFeeding.map { Double($0.careSessions) }), average(previousFeeding.map { Double($0.careSessions) }), compare: compareToPrevious, format: oneDecimal, icon: "fork.knife", interpretation: "Bottle, solids, and grouped nursing sessions."),
@@ -745,9 +767,7 @@ enum InsightsAnalyticsService {
             predictionErrors: predictionErrors,
             napDurationBuckets: durationBuckets(currentNaps.compactMap(\.duration).map { $0 / 60 }),
             feedToSleepBuckets: intervalBuckets(feedSleepIntervals),
-            feedingHourBuckets: hourBuckets(events: currentCare.map {
-                BabyEvent(type: .custom, startDate: $0, endDate: $0)
-            }, calendar: calendar),
+            feedingHourBuckets: hourBuckets(events: currentCare, calendar: calendar),
             diaperHourBuckets: hourBuckets(events: currentDiaperEvents, calendar: calendar),
             nursingSideMinutes: [
                 CategoryValue(category: "Left", value: leftMinutes),
@@ -823,13 +843,19 @@ enum InsightsAnalyticsService {
         calendar: Calendar = .current
     ) -> [WakeWindowSummary] {
         let sleeps = events.filter { $0.isSleepBlock && $0.endDate != nil }
+        let sleepsByStartDate = sleeps.reduce(into: [Date: BabyEvent]()) { values, sleep in
+            values[sleep.startDate] = sleep
+        }
         return SleepPredictionEngine.wakeWindowSamples(from: sleeps, now: range.upperBound, calendar: calendar)
-            .filter { range.contains($0.date) }
-            .map {
-                WakeWindowSummary(
-                    date: $0.date,
-                    napIndex: $0.napIndex,
-                    minutes: $0.minutes
+            .compactMap { sample in
+                guard let sleep = sleepsByStartDate[sample.date],
+                      localRangeContains(sleep, range: range, calendar: calendar) else {
+                    return nil
+                }
+                return WakeWindowSummary(
+                    date: sleep.normalizedLocalStartDate(calendar: calendar),
+                    napIndex: sample.napIndex,
+                    minutes: sample.minutes
                 )
             }
     }
@@ -847,7 +873,9 @@ enum InsightsAnalyticsService {
         let sleeps = events
             .filter { $0.isSleepBlock && $0.endDate != nil }
             .sorted { $0.startDate < $1.startDate }
-        let candidateSleeps = sleeps.filter { range.contains($0.startDate) }
+        let candidateSleeps = sleeps.filter {
+            localRangeContains($0, range: range, calendar: calendar)
+        }
 
         var eventPrefixEnd = 0
         var recordPrefixEnd = 0
@@ -872,7 +900,7 @@ enum InsightsAnalyticsService {
             }
             return SleepPressureSummary(
                 eventID: sleep.id,
-                date: sleep.startDate,
+                date: sleep.normalizedLocalStartDate(calendar: calendar),
                 score: score,
                 band: pressure.band,
                 sleepKind: sleep.sleepKind,
@@ -894,13 +922,11 @@ enum InsightsAnalyticsService {
             $0.type == .sleep &&
             $0.sleepKind == .nightSleep &&
             range.contains(sleepBucketDate(for: $0, calendar: calendar)) &&
-            calendar.component(.hour, from: $0.startDate) >= 17
+            $0.localStartMinute(calendar: calendar) >= 17 * 60
         }.map {
-            let hour = calendar.component(.hour, from: $0.startDate)
-            let minute = calendar.component(.minute, from: $0.startDate)
             return ChartDataPoint(
                 date: sleepBucketDate(for: $0, calendar: calendar),
-                value: Double(hour * 60 + minute),
+                value: $0.localStartMinute(calendar: calendar),
                 category: "Bedtime"
             )
         }.sorted { $0.date < $1.date }
@@ -912,15 +938,20 @@ enum InsightsAnalyticsService {
         calendar: Calendar = .current
     ) -> [ChartDataPoint] {
         let night = events.filter {
-            guard $0.isSleepBlock, $0.sleepKind == .nightSleep, let end = $0.endDate else { return false }
-            return range.contains(calendar.startOfDay(for: end)) && calendar.component(.hour, from: end) < 12
+            guard $0.isSleepBlock,
+                  $0.sleepKind == .nightSleep,
+                  $0.endDate != nil,
+                  let endDay = $0.localEndDay(calendar: calendar),
+                  let endMinute = $0.localEndMinute(calendar: calendar) else { return false }
+            return range.contains(endDay) && endMinute < 12 * 60
         }
         return Dictionary(grouping: night) { event in
-            calendar.startOfDay(for: event.endDate ?? event.startDate)
+            event.localEndDay(calendar: calendar) ?? event.localStartDay(calendar: calendar)
         }.compactMap { day, values in
-            guard let wake = values.compactMap(\.endDate).max() else { return nil }
-            let minutes = calendar.component(.hour, from: wake) * 60 + calendar.component(.minute, from: wake)
-            return ChartDataPoint(date: day, value: Double(minutes), category: "Morning wake")
+            guard let wakeEvent = values.max(by: {
+                ($0.endDate ?? .distantPast) < ($1.endDate ?? .distantPast)
+            }), let minutes = wakeEvent.localEndMinute(calendar: calendar) else { return nil }
+            return ChartDataPoint(date: day, value: minutes, category: "Morning wake")
         }.sorted { $0.date < $1.date }
     }
 
@@ -1001,19 +1032,21 @@ enum InsightsAnalyticsService {
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [DailyFeedingSummary] {
-        let sessions = careSessions(events: events, range: range)
-        let nursing = groupedNursingSessions(events: events, range: range)
+        let sessions = careSessions(events: events, range: range, calendar: calendar)
+        let nursing = groupedNursingSessions(events: events, range: range, calendar: calendar)
         let bottles = events.filter {
-            $0.type == .feed && $0.feedKind == .bottle && range.contains($0.startDate)
+            $0.type == .feed &&
+                $0.feedKind == .bottle &&
+                localRangeContains($0, range: range, calendar: calendar)
         }
-        let sessionsByDay = Dictionary(grouping: sessions) {
-            calendar.startOfDay(for: $0)
+        let sessionsByDay = Dictionary(grouping: sessions) { event in
+            event.localStartDay(calendar: calendar)
         }.mapValues { $0.count }
-        let nursingByDay = Dictionary(grouping: nursing) {
-            calendar.startOfDay(for: $0)
+        let nursingByDay = Dictionary(grouping: nursing) { event in
+            event.localStartDay(calendar: calendar)
         }.mapValues { $0.count }
         let bottleOuncesByDay = Dictionary(grouping: bottles) {
-            calendar.startOfDay(for: $0.startDate)
+            $0.localStartDay(calendar: calendar)
         }.mapValues { values in
             values.compactMap(\.amountOz).reduce(0, +)
         }
@@ -1032,9 +1065,11 @@ enum InsightsAnalyticsService {
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [DailyDiaperSummary] {
-        let diapers = events.filter { $0.type == .diaper && range.contains($0.startDate) }
+        let diapers = events.filter {
+            $0.type == .diaper && localRangeContains($0, range: range, calendar: calendar)
+        }
         let diapersByDay = Dictionary(grouping: diapers) {
-            calendar.startOfDay(for: $0.startDate)
+            $0.localStartDay(calendar: calendar)
         }
         return dates(in: range, calendar: calendar).map { day in
             let values = diapersByDay[day] ?? []
@@ -1052,9 +1087,11 @@ enum InsightsAnalyticsService {
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [DailyActivitySummary] {
-        let values = events.filter { range.contains($0.startDate) }
+        let values = events.filter {
+            localRangeContains($0, range: range, calendar: calendar)
+        }
         let valuesByDay = Dictionary(grouping: values) {
-            calendar.startOfDay(for: $0.startDate)
+            $0.localStartDay(calendar: calendar)
         }
         return dates(in: range, calendar: calendar).map { day in
             let daily = valuesByDay[day] ?? []
@@ -1110,15 +1147,16 @@ enum InsightsAnalyticsService {
 
     static func feedToSleepIntervals(
         events: [BabyEvent],
-        range: Range<Date>
+        range: Range<Date>,
+        calendar: Calendar = .current
     ) -> [Double] {
-        let sessions = careSessions(events: events, range: range)
+        let sessions = careSessions(events: events, range: range, calendar: calendar)
         let sleeps = events.filter {
-            $0.isSleepBlock && range.contains($0.startDate)
+            $0.isSleepBlock && localRangeContains($0, range: range, calendar: calendar)
         }.sorted { $0.startDate < $1.startDate }
         return sleeps.compactMap { sleep in
-            guard let care = sessions.last(where: { $0 <= sleep.startDate }) else { return nil }
-            let minutes = sleep.startDate.timeIntervalSince(care) / 60
+            guard let care = sessions.last(where: { $0.startDate <= sleep.startDate }) else { return nil }
+            let minutes = sleep.startDate.timeIntervalSince(care.startDate) / 60
             return (0...240).contains(minutes) ? minutes : nil
         }
     }
@@ -1172,41 +1210,64 @@ enum InsightsAnalyticsService {
         return dates
     }
 
-    private static func sleepBucketDate(for event: BabyEvent, calendar: Calendar) -> Date {
-        guard event.sleepKind == .nightSleep || event.sleepKind == .nightWaking else {
-            return calendar.startOfDay(for: event.startDate)
+    private static func localRangeContains(
+        _ event: BabyEvent,
+        range: Range<Date>,
+        calendar: Calendar
+    ) -> Bool {
+        let isCalendarDayRange = range.lowerBound == calendar.startOfDay(for: range.lowerBound) &&
+            range.upperBound == calendar.startOfDay(for: range.upperBound)
+        if isCalendarDayRange {
+            return range.contains(event.localStartDay(calendar: calendar))
         }
-        let hour = calendar.component(.hour, from: event.startDate)
-        let date = hour < 12
-            ? calendar.date(byAdding: .day, value: -1, to: event.startDate) ?? event.startDate
-            : event.startDate
-        return calendar.startOfDay(for: date)
+        return range.contains(event.startDate)
     }
 
-    private static func careSessions(events: [BabyEvent], range: Range<Date>) -> [Date] {
-        let dates = events.filter {
-            ($0.type == .feed || $0.type == .nursing) && range.contains($0.startDate)
-        }.map(\.startDate).sorted()
-        var sessions = [Date]()
-        for date in dates {
-            if let previous = sessions.last, date.timeIntervalSince(previous) < 45 * 60 {
+    private static func sleepBucketDate(for event: BabyEvent, calendar: Calendar) -> Date {
+        guard event.sleepKind == .nightSleep || event.sleepKind == .nightWaking else {
+            return event.localStartDay(calendar: calendar)
+        }
+        let day = event.localStartDay(calendar: calendar)
+        return event.localStartMinute(calendar: calendar) < 12 * 60
+            ? calendar.date(byAdding: .day, value: -1, to: day) ?? day
+            : day
+    }
+
+    private static func careSessions(
+        events: [BabyEvent],
+        range: Range<Date>,
+        calendar: Calendar = .current
+    ) -> [BabyEvent] {
+        let values = events.filter {
+            ($0.type == .feed || $0.type == .nursing) &&
+                localRangeContains($0, range: range, calendar: calendar)
+        }.sorted { $0.startDate < $1.startDate }
+        var sessions = [BabyEvent]()
+        for event in values {
+            if let previous = sessions.last,
+               event.startDate.timeIntervalSince(previous.startDate) < 45 * 60 {
                 continue
             }
-            sessions.append(date)
+            sessions.append(event)
         }
         return sessions
     }
 
-    private static func groupedNursingSessions(events: [BabyEvent], range: Range<Date>) -> [Date] {
-        let dates = events.filter {
-            $0.type == .nursing && range.contains($0.startDate)
-        }.map(\.startDate).sorted()
-        var sessions = [Date]()
-        for date in dates {
-            if let previous = sessions.last, date.timeIntervalSince(previous) < 45 * 60 {
+    private static func groupedNursingSessions(
+        events: [BabyEvent],
+        range: Range<Date>,
+        calendar: Calendar = .current
+    ) -> [BabyEvent] {
+        let values = events.filter {
+            $0.type == .nursing && localRangeContains($0, range: range, calendar: calendar)
+        }.sorted { $0.startDate < $1.startDate }
+        var sessions = [BabyEvent]()
+        for event in values {
+            if let previous = sessions.last,
+               event.startDate.timeIntervalSince(previous.startDate) < 45 * 60 {
                 continue
             }
-            sessions.append(date)
+            sessions.append(event)
         }
         return sessions
     }
@@ -1269,7 +1330,7 @@ enum InsightsAnalyticsService {
             CategoryValue(
                 category: label,
                 value: Double(events.filter {
-                    (lower..<upper).contains(calendar.component(.hour, from: $0.startDate))
+                    (lower * 60..<upper * 60).contains(Int($0.localStartMinute(calendar: calendar)))
                 }.count)
             )
         }
@@ -1459,7 +1520,7 @@ enum InsightsAnalyticsService {
     ) -> InsightTrend? {
         let dirty = events.filter { $0.diaperKind == .dirty || $0.diaperKind == .both }
         guard !dirty.isEmpty else { return nil }
-        let morning = dirty.filter { calendar.component(.hour, from: $0.startDate) < 12 }.count
+        let morning = dirty.filter { $0.localStartMinute(calendar: calendar) < 12 * 60 }.count
         let wording = morning * 2 >= dirty.count ? "morning" : "afternoon or evening"
         return InsightTrend(
             metricName: "Dirty diaper timing",
@@ -1491,7 +1552,7 @@ enum InsightsAnalyticsService {
         calendar: Calendar
     ) -> InsightTrend? {
         guard !events.isEmpty else { return nil }
-        let evening = events.filter { calendar.component(.hour, from: $0.startDate) >= 17 }.count
+        let evening = events.filter { $0.localStartMinute(calendar: calendar) >= 17 * 60 }.count
         return InsightTrend(
             metricName: "Bath timing",
             currentValueDescription: "\(events.count) baths",

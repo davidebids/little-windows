@@ -378,7 +378,7 @@ struct MilestonesView: View {
                 Button {
                     milestone.isFavorite.toggle()
                     milestone.updatedAt = Date()
-                    try? modelContext.save()
+                    _ = PersistenceService.save(context: modelContext)
                 } label: {
                     Label(
                         milestone.isFavorite ? "Unfavorite" : "Favorite",
@@ -720,7 +720,7 @@ struct MilestonesView: View {
             context: modelContext
         )
         modelContext.delete(milestone)
-        try? modelContext.save()
+        _ = PersistenceService.save(context: modelContext)
     }
 
     private func handlePendingAgeGuideDeepLink() {
@@ -1568,7 +1568,7 @@ struct MilestoneEditorView: View {
                 isFavorite: isFavorite
             ))
         }
-        try? modelContext.save()
+        guard PersistenceService.save(context: modelContext) else { return }
         dismiss()
     }
 
@@ -1749,7 +1749,7 @@ struct MilestoneDetailView: View {
                         context: modelContext
                     )
                     modelContext.delete(milestone)
-                    try? modelContext.save()
+                    guard PersistenceService.save(context: modelContext) else { return }
                     dismiss()
                 }
             ]
@@ -1774,7 +1774,7 @@ struct MilestoneDetailView: View {
             set: {
                 milestone.isFavorite = $0
                 milestone.updatedAt = Date()
-                try? modelContext.save()
+                _ = PersistenceService.save(context: modelContext)
             }
         )
     }

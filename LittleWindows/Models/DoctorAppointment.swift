@@ -148,6 +148,7 @@ final class DoctorAppointment {
     var appointmentTypeRawValue: String = AppointmentType.pediatrician.rawValue
     var startDate: Date = Date()
     var endDate: Date?
+    var timeZoneIdentifier: String?
     var locationName: String?
     var address: String?
     var doctorName: String?
@@ -179,6 +180,7 @@ final class DoctorAppointment {
         appointmentType: AppointmentType = .pediatrician,
         startDate: Date = Date(),
         endDate: Date? = nil,
+        timeZoneIdentifier: String? = CareTimeZoneSettings.effectiveIdentifier(),
         locationName: String? = nil,
         address: String? = nil,
         doctorName: String? = nil,
@@ -209,6 +211,7 @@ final class DoctorAppointment {
         self.appointmentTypeRawValue = appointmentType.rawValue
         self.startDate = startDate
         self.endDate = endDate
+        self.timeZoneIdentifier = timeZoneIdentifier
         self.locationName = locationName
         self.address = address
         self.doctorName = doctorName
@@ -229,6 +232,11 @@ final class DoctorAppointment {
         self.updatedAt = updatedAt
         self.isCompleted = isCompleted
         self.caregiverName = caregiverName
+    }
+
+    var timeZone: TimeZone {
+        timeZoneIdentifier.flatMap(TimeZone.init(identifier:))
+            ?? CareTimeZoneSettings.effectiveTimeZone()
     }
 
     var appointmentType: AppointmentType {

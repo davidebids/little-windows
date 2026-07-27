@@ -23,11 +23,23 @@ struct BackupDocument: FileDocument {
     }
 }
 
+struct AutomaticRecoveryBackup: Identifiable, Hashable {
+    var url: URL
+    var createdAt: Date
+
+    var id: URL { url }
+
+    var displayName: String {
+        createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
 private struct BackupEnvelope: Codable {
     var version: Int
     var exportedAt: Date
     var profiles: [ProfileDTO]
     var photoAttachments: [PhotoAttachmentDTO]?
+    var solidFoods: [SolidFoodCatalogItemDTO]?
     var events: [EventDTO]
     var predictionRecords: [PredictionRecordDTO]
     var milestones: [MilestoneDTO]?
@@ -94,6 +106,14 @@ private struct PhotoAttachmentDTO: Codable {
     var updatedAt: Date
 }
 
+private struct SolidFoodCatalogItemDTO: Codable {
+    var id: UUID
+    var name: String
+    var photoAttachmentID: UUID?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 private struct EventDTO: Codable {
     var id: UUID
     var profileID: UUID?
@@ -102,6 +122,8 @@ private struct EventDTO: Codable {
     var title: String?
     var startDate: Date
     var endDate: Date?
+    var startTimeZoneIdentifier: String?
+    var endTimeZoneIdentifier: String?
     var createdAt: Date
     var updatedAt: Date
     var caregiverName: String?
@@ -200,6 +222,7 @@ private struct AppointmentDTO: Codable {
     var appointmentTypeRawValue: String
     var startDate: Date
     var endDate: Date?
+    var timeZoneIdentifier: String?
     var locationName: String?
     var address: String?
     var doctorName: String?
@@ -463,6 +486,7 @@ private struct FoodReminderDTO: Codable {
     var relatedMealPrepItemID: UUID?
     var relatedReturnRequestID: UUID?
     var dateTime: Date
+    var timeZoneIdentifier: String?
     var isEnabled: Bool
     var recurrence: String?
     var createdAt: Date
@@ -525,7 +549,9 @@ private struct CareRoutineRunDTO: Codable {
 }
 
 enum DataExportImportService {
-    @MainActor
+    private static let currentBackupVersion = 15
+    private static let recoveryBackupLimit = 3
+
     static func exportData(context: ModelContext) throws -> Data {
         let profiles = try context.fetch(FetchDescriptor<BabyProfile>()).map {
             ProfileDTO(
@@ -567,6 +593,15 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
+        let solidFoods = try context.fetch(FetchDescriptor<SolidFoodCatalogItem>()).map {
+            SolidFoodCatalogItemDTO(
+                id: $0.id,
+                name: $0.name,
+                photoAttachmentID: $0.photoAttachmentID,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
         let events = try context.fetch(FetchDescriptor<BabyEvent>()).map {
             EventDTO(
                 id: $0.id,
@@ -574,7 +609,11 @@ enum DataExportImportService {
                 profileTypeSnapshotRawValue: $0.profileTypeSnapshotRawValue,
                 typeRawValue: $0.typeRawValue,
                 title: $0.title,
-                startDate: $0.startDate, endDate: $0.endDate, createdAt: $0.createdAt,
+                startDate: $0.startDate,
+                endDate: $0.endDate,
+                startTimeZoneIdentifier: $0.startTimeZoneIdentifier,
+                endTimeZoneIdentifier: $0.endTimeZoneIdentifier,
+                createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt, caregiverName: $0.caregiverName, notes: $0.notes,
                 sleepKindRawValue: $0.sleepKindRawValue, feedKindRawValue: $0.feedKindRawValue,
                 amountOz: $0.amountOz, foodDescription: $0.foodDescription,
@@ -657,6 +696,7 @@ enum DataExportImportService {
                 appointmentTypeRawValue: $0.appointmentTypeRawValue,
                 startDate: $0.startDate,
                 endDate: $0.endDate,
+                timeZoneIdentifier: $0.timeZoneIdentifier,
                 locationName: $0.locationName,
                 address: $0.address,
                 doctorName: $0.doctorName,
@@ -933,6 +973,7 @@ enum DataExportImportService {
                 relatedMealPrepItemID: $0.relatedMealPrepItemID,
                 relatedReturnRequestID: $0.relatedReturnRequestID,
                 dateTime: $0.dateTime,
+                timeZoneIdentifier: $0.timeZoneIdentifier,
                 isEnabled: $0.isEnabled,
                 recurrence: $0.recurrence,
                 createdAt: $0.createdAt,
@@ -998,10 +1039,11 @@ enum DataExportImportService {
             )
         }
         let envelope = BackupEnvelope(
-            version: 13,
+            version: currentBackupVersion,
             exportedAt: Date(),
             profiles: profiles,
             photoAttachments: photoAttachments,
+            solidFoods: solidFoods,
             events: events,
             predictionRecords: records,
             milestones: milestones,
@@ -1038,13 +1080,22 @@ enum DataExportImportService {
     static func importData(
         _ data: Data,
         context: ModelContext,
-        recordLocalSave: Bool = true
+        recordLocalSave: Bool = true,
+        createRecoveryBackup: Bool = true
     ) throws {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(BackupEnvelope.self, from: data)
-        guard (1...13).contains(envelope.version) else { throw CocoaError(.fileReadUnknown) }
-        try deleteAll(context: context)
+        guard (1...currentBackupVersion).contains(envelope.version) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        try validate(envelope)
+        if createRecoveryBackup {
+            _ = try createAutomaticRecoveryBackup(context: context, reason: "before-import")
+        }
+
+        do {
+            try deleteAll(context: context, saveChanges: false, recordLocalSave: false)
 
         for value in envelope.profiles {
             context.insert(BabyProfile(
@@ -1086,6 +1137,15 @@ enum DataExportImportService {
                 ))
             }
         }
+        for value in envelope.solidFoods ?? [] {
+            context.insert(SolidFoodCatalogItem(
+                id: value.id,
+                name: value.name,
+                photoAttachmentID: value.photoAttachmentID,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
         let fallbackProfileID = envelope.profiles.first?.id
         for value in envelope.events {
             let event = BabyEvent(
@@ -1095,6 +1155,8 @@ enum DataExportImportService {
                 title: value.title,
                 startDate: value.startDate,
                 endDate: value.endDate,
+                startTimeZoneIdentifier: value.startTimeZoneIdentifier,
+                endTimeZoneIdentifier: value.endTimeZoneIdentifier,
                 caregiverName: value.caregiverName,
                 notes: value.notes
             )
@@ -1218,6 +1280,7 @@ enum DataExportImportService {
                 appointmentType: AppointmentType(rawValue: value.appointmentTypeRawValue) ?? .other,
                 startDate: value.startDate,
                 endDate: value.endDate,
+                timeZoneIdentifier: value.timeZoneIdentifier,
                 locationName: value.locationName,
                 address: value.address,
                 doctorName: value.doctorName,
@@ -1502,6 +1565,7 @@ enum DataExportImportService {
                 relatedMealPrepItemID: value.relatedMealPrepItemID,
                 relatedReturnRequestID: value.relatedReturnRequestID,
                 dateTime: value.dateTime,
+                timeZoneIdentifier: value.timeZoneIdentifier,
                 isEnabled: value.isEnabled,
                 recurrence: value.recurrence,
                 createdAt: value.createdAt,
@@ -1571,17 +1635,38 @@ enum DataExportImportService {
             run.stepResolutionRecordsData = value.stepResolutionRecordsData
             context.insert(run)
         }
-        CloudKitFamilySyncConflictResolver.resolveDuplicateActiveTimers(in: context)
-        try context.save()
-        if recordLocalSave {
-            PersistenceService.recordLocalSave()
+            CloudKitFamilySyncConflictResolver.resolveDuplicateActiveTimers(in: context)
+            _ = try LegacyTrackerGrowthMigration.migrate(in: context, saveChanges: false)
+            ProfileMigrationService.ensureProfilesAndAssignments(
+                context: context,
+                saveChanges: false
+            )
+            try context.save()
+            if recordLocalSave {
+                PersistenceService.recordLocalSave()
+            }
+        } catch {
+            context.rollback()
+            throw error
         }
-        _ = try LegacyTrackerGrowthMigration.migrate(in: context)
-        ProfileMigrationService.ensureProfilesAndAssignments(context: context)
+    }
+
+    static func validateBackupData(_ data: Data) throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(BackupEnvelope.self, from: data)
+        guard (1...currentBackupVersion).contains(envelope.version) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        try validate(envelope)
     }
 
     @MainActor
-    static func deleteAll(context: ModelContext) throws {
+    static func deleteAll(
+        context: ModelContext,
+        saveChanges: Bool = true,
+        recordLocalSave: Bool = true
+    ) throws {
         try deleteAll(CareRoutineRun.self, context: context)
         try deleteAll(CareRoutineStep.self, context: context)
         try deleteAll(CareRoutine.self, context: context)
@@ -1601,6 +1686,7 @@ enum DataExportImportService {
         try deleteAll(FoodStoreSection.self, context: context)
         try deleteAll(FoodStore.self, context: context)
         try deleteAll(Household.self, context: context)
+        try deleteAll(SolidFoodCatalogItem.self, context: context)
         try deleteAll(PhotoAttachment.self, context: context)
         try deleteAll(PredictionFactor.self, context: context)
         try deleteAll(SleepPredictionRecord.self, context: context)
@@ -1610,8 +1696,16 @@ enum DataExportImportService {
         try deleteAll(AgeGuideReadState.self, context: context)
         try deleteAll(PuppyStageGuideReadState.self, context: context)
         try deleteAll(BabyProfile.self, context: context)
-        try context.save()
-        PersistenceService.recordLocalSave()
+        guard saveChanges else { return }
+        do {
+            try context.save()
+            if recordLocalSave {
+                PersistenceService.recordLocalSave()
+            }
+        } catch {
+            context.rollback()
+            throw error
+        }
     }
 
     @MainActor
@@ -1622,6 +1716,304 @@ enum DataExportImportService {
         for item in try context.fetch(FetchDescriptor<T>()) {
             context.delete(item)
         }
+    }
+
+    @MainActor
+    @discardableResult
+    static func createAutomaticRecoveryBackup(
+        context: ModelContext,
+        reason: String
+    ) throws -> URL {
+        let data = try exportData(context: context)
+        let fileManager = FileManager.default
+        let baseDirectory = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+        let directory = baseDirectory
+            .appendingPathComponent("LittleWindows", isDirectory: true)
+            .appendingPathComponent("RecoveryBackups", isDirectory: true)
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let safeReason = reason
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9-]", with: "-", options: .regularExpression)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let timestamp = formatter.string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let url = directory
+            .appendingPathComponent("little-windows-\(safeReason)-\(timestamp)")
+            .appendingPathExtension("json")
+        try data.write(to: url, options: .atomic)
+
+        let backups = try fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension.lowercased() == "json" }
+        .sorted {
+            let first = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            let second = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return first > second
+        }
+        for oldBackup in backups.dropFirst(recoveryBackupLimit) {
+            try? fileManager.removeItem(at: oldBackup)
+        }
+        return url
+    }
+
+    static func automaticRecoveryBackups(
+        fileManager: FileManager = .default
+    ) -> [AutomaticRecoveryBackup] {
+        let baseDirectory = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+        let directory = baseDirectory
+            .appendingPathComponent("LittleWindows", isDirectory: true)
+            .appendingPathComponent("RecoveryBackups", isDirectory: true)
+        let urls = (try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        return urls
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .map { url in
+                let date = (try? url.resourceValues(
+                    forKeys: [.contentModificationDateKey]
+                ))?.contentModificationDate ?? .distantPast
+                return AutomaticRecoveryBackup(url: url, createdAt: date)
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    static func validatedRecoveryBackupData(at url: URL) throws -> Data {
+        let data = try Data(contentsOf: url)
+        try validateBackupData(data)
+        return data
+    }
+
+    static func mergeFamilySyncData(
+        base: Data?,
+        local: Data,
+        remote: Data,
+        localChangedAt: Date?,
+        remoteChangedAt: Date?
+    ) throws -> Data {
+        let baseObject = try base.map { try jsonObject(from: $0) }
+        let localObject = try jsonObject(from: local)
+        let remoteObject = try jsonObject(from: remote)
+        var merged = remoteObject
+
+        let collectionKeys = Set(localObject.compactMap { key, value in
+            value is [Any] ? key : nil
+        })
+        .union(remoteObject.compactMap { key, value in value is [Any] ? key : nil })
+        .union(baseObject?.compactMap { key, value in value is [Any] ? key : nil } ?? [])
+
+        for key in collectionKeys {
+            let baseRecords = recordsByID(baseObject?[key])
+            let localRecords = recordsByID(localObject[key])
+            let remoteRecords = recordsByID(remoteObject[key])
+            let allIDs = Set(baseRecords.keys)
+                .union(localRecords.keys)
+                .union(remoteRecords.keys)
+            let values = allIDs.compactMap { id -> [String: Any]? in
+                mergedRecord(
+                    base: baseRecords[id],
+                    local: localRecords[id],
+                    remote: remoteRecords[id],
+                    localChangedAt: localChangedAt,
+                    remoteChangedAt: remoteChangedAt
+                )
+            }
+            .sorted { stringValue($0["id"]) < stringValue($1["id"]) }
+            merged[key] = values
+        }
+
+        merged["version"] = max(
+            currentBackupVersion,
+            max(intValue(localObject["version"]), intValue(remoteObject["version"]))
+        )
+        merged["exportedAt"] = ISO8601DateFormatter().string(from: Date())
+        return try JSONSerialization.data(
+            withJSONObject: merged,
+            options: [.sortedKeys]
+        )
+    }
+
+    static func familySyncCanonicalData(from data: Data) throws -> Data {
+        var object = try jsonObject(from: data)
+        object.removeValue(forKey: "exportedAt")
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    static func familySyncEntityPayloads(from data: Data) throws -> [String: Data] {
+        let object = try jsonObject(from: data)
+        var result: [String: Data] = [:]
+        for (collection, value) in object {
+            guard let records = value as? [Any] else { continue }
+            for value in records {
+                guard let record = value as? [String: Any],
+                      let id = record["id"] as? String else {
+                    continue
+                }
+                result[familySyncEntityKey(collection: collection, id: id)] = try JSONSerialization.data(
+                    withJSONObject: record,
+                    options: [.sortedKeys]
+                )
+            }
+        }
+        return result
+    }
+
+    static func familySyncData(
+        template: Data,
+        entityPayloads: [String: Data]
+    ) throws -> Data {
+        var object = try jsonObject(from: template)
+        for (key, value) in object where value is [Any] {
+            object[key] = []
+        }
+        for (key, payload) in entityPayloads {
+            guard let parts = familySyncEntityKeyParts(key),
+                  let record = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
+                continue
+            }
+            var values = object[parts.collection] as? [[String: Any]] ?? []
+            values.append(record)
+            object[parts.collection] = values
+        }
+        for (key, value) in object {
+            guard let records = value as? [[String: Any]] else { continue }
+            object[key] = records.sorted {
+                stringValue($0["id"]) < stringValue($1["id"])
+            }
+        }
+        object["version"] = currentBackupVersion
+        object["exportedAt"] = ISO8601DateFormatter().string(from: Date())
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    static func familySyncEntityKey(collection: String, id: String) -> String {
+        "\(collection)|\(id)"
+    }
+
+    static func familySyncEntityKeyParts(_ key: String) -> (collection: String, id: String)? {
+        guard let separator = key.firstIndex(of: "|") else { return nil }
+        return (
+            String(key[..<separator]),
+            String(key[key.index(after: separator)...])
+        )
+    }
+
+    private static func validate(_ envelope: BackupEnvelope) throws {
+        let profileIDs = Set(envelope.profiles.map(\.id))
+        guard profileIDs.count == envelope.profiles.count else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let requiredCollections: [[UUID]] = [
+            envelope.events.map(\.id),
+            envelope.predictionRecords.map(\.id)
+        ]
+        guard requiredCollections.allSatisfy({ Set($0).count == $0.count }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        if let solidFoods = envelope.solidFoods,
+           Set(solidFoods.map(\.id)).count != solidFoods.count {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+    }
+
+    private static func jsonObject(from data: Data) throws -> [String: Any] {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return object
+    }
+
+    private static func recordsByID(_ value: Any?) -> [String: [String: Any]] {
+        guard let values = value as? [Any] else { return [:] }
+        var result: [String: [String: Any]] = [:]
+        for value in values {
+            guard let record = value as? [String: Any],
+                  let id = record["id"] as? String else {
+                continue
+            }
+            result[id] = record
+        }
+        return result
+    }
+
+    private static func mergedRecord(
+        base: [String: Any]?,
+        local: [String: Any]?,
+        remote: [String: Any]?,
+        localChangedAt: Date?,
+        remoteChangedAt: Date?
+    ) -> [String: Any]? {
+        switch (base, local, remote) {
+        case (_, nil, nil):
+            return nil
+        case (nil, let local?, nil):
+            return local
+        case (nil, nil, let remote?):
+            return remote
+        case (nil, let local?, let remote?):
+            return newer(local, remote)
+        case (let base?, let local?, let remote?):
+            let localChanged = !recordsEqual(local, base)
+            let remoteChanged = !recordsEqual(remote, base)
+            if !localChanged { return remote }
+            if !remoteChanged { return local }
+            return newer(local, remote)
+        case (let base?, let local?, nil):
+            guard !recordsEqual(local, base) else { return nil }
+            return recordDate(local) > (remoteChangedAt ?? .distantPast) ? local : nil
+        case (let base?, nil, let remote?):
+            guard !recordsEqual(remote, base) else { return nil }
+            return (localChangedAt ?? .distantPast) > recordDate(remote) ? nil : remote
+        }
+    }
+
+    private static func newer(
+        _ first: [String: Any],
+        _ second: [String: Any]
+    ) -> [String: Any] {
+        let firstDate = recordDate(first)
+        let secondDate = recordDate(second)
+        if firstDate != secondDate { return firstDate > secondDate ? first : second }
+        return stringValue(first["id"]) <= stringValue(second["id"]) ? first : second
+    }
+
+    private static func recordDate(_ record: [String: Any]) -> Date {
+        guard let value = record["updatedAt"] as? String else { return .distantPast }
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value) ?? .distantPast
+    }
+
+    private static func recordsEqual(
+        _ first: [String: Any],
+        _ second: [String: Any]
+    ) -> Bool {
+        NSDictionary(dictionary: first).isEqual(to: second)
+    }
+
+    private static func stringValue(_ value: Any?) -> String {
+        value as? String ?? ""
+    }
+
+    private static func intValue(_ value: Any?) -> Int {
+        (value as? NSNumber)?.intValue ?? 0
     }
 }
 
@@ -1637,7 +2029,10 @@ enum LegacyTrackerGrowthMigration {
 
     @MainActor
     @discardableResult
-    static func migrate(in context: ModelContext) throws -> Int {
+    static func migrate(
+        in context: ModelContext,
+        saveChanges: Bool = true
+    ) throws -> Int {
         let descriptor = FetchDescriptor<BabyEvent>(
             predicate: #Predicate {
                 $0.typeRawValue == "custom" && $0.title == "Growth"
@@ -1670,7 +2065,7 @@ enum LegacyTrackerGrowthMigration {
             migratedCount += 1
 
             guard let profile,
-                  Calendar.current.isDate(event.startDate, inSameDayAs: profile.birthDate) else {
+                  event.occursOnLocalDay(profile.birthDate) else {
                 continue
             }
             profile.birthWeightKilograms =
@@ -1682,7 +2077,7 @@ enum LegacyTrackerGrowthMigration {
                 ?? event.headCircumferenceCentimeters
         }
 
-        if migratedCount > 0 {
+        if migratedCount > 0, saveChanges {
             try context.save()
             PersistenceService.recordLocalSave()
         }

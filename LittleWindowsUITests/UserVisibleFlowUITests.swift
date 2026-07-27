@@ -3,6 +3,260 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testSettingsMonthlyGuideNavigation() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://settings"
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 8))
+        let monthlyGuideRow = app.buttons["Monthly guide notifications"]
+        for _ in 0..<4 where !monthlyGuideRow.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(monthlyGuideRow.waitForExistence(timeout: 3))
+
+        monthlyGuideRow.tap()
+        XCTAssertTrue(app.navigationBars["Monthly Guides"].waitForExistence(timeout: 4))
+    }
+
+    func testSolidFoodVisualPickerAndReactionControls() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/feed"
+        ]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 8))
+
+        let kindPicker = app.buttons["event.feed-kind"]
+        XCTAssertTrue(kindPicker.waitForExistence(timeout: 4))
+        kindPicker.tap()
+        XCTAssertTrue(app.buttons["Solid"].waitForExistence(timeout: 2))
+        app.buttons["Solid"].tap()
+
+        let chooseFoods = app.buttons["solid-food.choose"]
+        XCTAssertTrue(chooseFoods.waitForExistence(timeout: 4))
+        chooseFoods.tap()
+
+        XCTAssertTrue(app.navigationBars["Choose Foods"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["Custom food"].exists)
+        let foodSearch = app.searchFields["Search or enter a food"]
+        XCTAssertTrue(foodSearch.waitForExistence(timeout: 3))
+        foodSearch.tap()
+        foodSearch.typeText("spinach")
+        if app.keyboards.buttons["Search"].exists {
+            app.keyboards.buttons["Search"].tap()
+        }
+        let spinach = app.buttons["solid-food.option.spinach"]
+        XCTAssertTrue(spinach.waitForExistence(timeout: 3))
+        spinach.tap()
+        XCTAssertEqual(spinach.value as? String, "Selected")
+        XCTAssertTrue(app.staticTexts["1 selected"].waitForExistence(timeout: 2))
+        app.buttons["solid-food.use-selection"].tap()
+
+        XCTAssertTrue(app.staticTexts["Spinach"].waitForExistence(timeout: 4))
+        let lovedReaction = app.buttons["solid-reaction.loved"]
+        for _ in 0..<3 where !lovedReaction.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(lovedReaction.exists)
+        XCTAssertTrue(app.buttons["solid-allergen.exposure"].exists)
+        XCTAssertTrue(app.buttons["solid-allergen.reaction"].exists)
+    }
+
+    func testStoreSectionsHaveVisibleAddReorderAndRemoveControls() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://food/stores/00000000-0000-0000-0000-000000000801"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        XCTAssertTrue(app.navigationBars["Neighborhood Market"].waitForExistence(timeout: 8))
+
+        XCTAssertTrue(app.buttons["Edit"].exists)
+        XCTAssertTrue(app.buttons["Remove Produce"].exists)
+        let newSectionName = app.textFields["store.add-section.name"]
+        newSectionName.tap()
+        newSectionName.typeText("Bakery")
+        app.buttons["store.add-section"].tap()
+        XCTAssertTrue(app.buttons["Remove Bakery"].waitForExistence(timeout: 4))
+
+        app.buttons["Remove Produce"].tap()
+        XCTAssertTrue(app.alerts["Remove Produce?"].waitForExistence(timeout: 4))
+        app.alerts["Remove Produce?"].buttons["Remove Section"].tap()
+        XCTAssertTrue(app.buttons["Remove Produce"].waitForNonExistence(timeout: 4))
+    }
+
+    func testShoppingListCreationCanAddAndSelectAStore() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://food/shopping"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        XCTAssertTrue(waitForAnyText(["Reusable Lists", "Weekly groceries"], timeout: 8))
+
+        app.buttons["Create shopping list"].tap()
+        XCTAssertTrue(app.navigationBars["New Shopping List"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["shopping-list.add-store"].exists)
+        XCTAssertTrue(
+            app.staticTexts[
+                "General lists work anywhere. Add a store to organize this list using that store's aisles and sections."
+            ].exists
+        )
+
+        let listName = app.textFields["shopping-list.name"]
+        listName.tap()
+        listName.typeText("Test Errand List")
+        app.buttons["shopping-list.add-store"].tap()
+
+        XCTAssertTrue(app.navigationBars["New Store"].waitForExistence(timeout: 4))
+        let storeName = app.textFields["store.name"]
+        storeName.tap()
+        storeName.typeText("Test Market")
+        app.buttons["store.save"].tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(format: "label CONTAINS %@", "Test Market")
+            ).firstMatch.waitForExistence(timeout: 4),
+            "The newly created store should be selected without losing the list draft."
+        )
+        app.buttons["shopping-list.save"].tap()
+        XCTAssertTrue(app.staticTexts["Test Errand List"].waitForExistence(timeout: 5))
+    }
+
+    func testStartingSleepOpensRunningTimerEditor() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/sleep"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        let nap = app.buttons["Nap"]
+        XCTAssertTrue(nap.waitForExistence(timeout: 4))
+        nap.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Running"].waitForExistence(timeout: 5),
+            "Starting sleep should immediately show the active timer editor."
+        )
+        XCTAssertTrue(app.buttons["Stop"].exists)
+    }
+
+    func testStartingNonSleepTimerOpensRunningTimerEditor() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/pumping"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        XCTAssertTrue(
+            app.staticTexts["Pumping"].waitForExistence(timeout: 5),
+            "Starting a non-sleep timer should immediately show its active timer editor."
+        )
+        XCTAssertTrue(app.staticTexts["Running"].exists)
+        XCTAssertTrue(app.buttons["Stop"].exists)
+    }
+
     func testPlanDayArcAppearsInPlanner() {
         continueAfterFailure = false
 

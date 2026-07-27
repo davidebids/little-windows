@@ -73,8 +73,8 @@ final class ProfileService: ObservableObject {
         )
         context.insert(profile)
         switchProfile(profile)
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        _ = PersistenceService.save(context: context)
+        SystemIntegrationReconciler.requestReconciliation()
         return profile
     }
 
@@ -114,16 +114,17 @@ final class ProfileService: ObservableObject {
         )
         context.insert(profile)
         switchProfile(profile)
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        _ = PersistenceService.save(context: context)
+        SystemIntegrationReconciler.requestReconciliation()
         return profile
     }
 
     func updateChildProfile(_ profile: CareProfile) {
         profile.updatedAt = Date()
         switchProfile(profile)
-        try? profile.modelContext?.save()
-        PersistenceService.recordLocalSave()
+        if let context = profile.modelContext {
+            _ = PersistenceService.save(context: context)
+        }
     }
 
     func archiveProfile(
@@ -141,8 +142,8 @@ final class ProfileService: ObservableObject {
                 switchProfile(fallback)
             }
         }
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
+        SystemIntegrationReconciler.requestReconciliation()
     }
 
     func archiveChildProfile(
@@ -157,8 +158,8 @@ final class ProfileService: ObservableObject {
         profile.isArchived = false
         profile.updatedAt = Date()
         switchProfile(profile)
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
+        SystemIntegrationReconciler.requestReconciliation()
     }
 
     func canDeleteProfile(_ profile: CareProfile, profiles: [CareProfile]) -> Bool {
@@ -183,8 +184,8 @@ final class ProfileService: ObservableObject {
                 UserDefaults.standard.removeObject(forKey: selectedProfileKey)
             }
         }
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
+        SystemIntegrationReconciler.requestReconciliation()
     }
 
     func switchProfile(_ profile: CareProfile) {
@@ -224,7 +225,8 @@ final class ProfileService: ObservableObject {
 enum ProfileMigrationService {
     static func ensureProfilesAndAssignments(
         context: ModelContext,
-        profiles: [CareProfile]? = nil
+        profiles: [CareProfile]? = nil,
+        saveChanges: Bool = true
     ) {
         let existingProfiles = profiles ?? ((try? context.fetch(FetchDescriptor<CareProfile>())) ?? [])
         let activeProfiles = existingProfiles.filter { !$0.isArchived && $0.profileType == .child }
@@ -253,8 +255,11 @@ enum ProfileMigrationService {
         )
         let profilesForSelection = activeProfiles.isEmpty ? existingProfiles + [childProfile] : existingProfiles
         _ = ProfileService.shared.ensureSelection(in: profilesForSelection)
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        if saveChanges {
+            if PersistenceService.save(context: context) == false {
+                return
+            }
+        }
     }
 
     static func hasOrphanedProfileScopedRecords(

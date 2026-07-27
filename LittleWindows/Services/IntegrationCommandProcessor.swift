@@ -5,101 +5,103 @@ import SwiftData
 enum IntegrationCommandProcessor {
     static func process(_ url: URL, container: ModelContainer) async -> Bool {
         guard let command = timerCommand(from: url) else { return false }
+        guard let requestedAt = IntegrationCommandStore.requestedAt(
+            forTimerMutationURL: url
+        ) else {
+            // Recognize but discard an expired or malformed timer mutation.
+            return true
+        }
 
         let context = container.mainContext
-        let profiles = (try? context.fetch(FetchDescriptor<BabyProfile>())) ?? []
-        let profile: BabyProfile?
-        if let profileID = command.profileID {
-            ProfileService.shared.switchProfile(id: profileID, profiles: profiles)
-            profile = ProfileService.shared.selectedProfile(in: profiles)
-        } else {
-            profile = ProfileService.shared.ensureSelection(in: profiles)
-        }
-        let recentCutoff = Calendar.current.date(
-            byAdding: .day,
-            value: -45,
-            to: Calendar.current.startOfDay(for: Date())
-        ) ?? Date()
-        var eventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
-                event.startDate >= recentCutoff || event.endDate == nil
-            },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
-        )
-        eventDescriptor.fetchLimit = 900
-        let events = ((try? context.fetch(eventDescriptor)) ?? [])
-            .filter { $0.matchesProfile(profile?.id) }
-        let event: BabyEvent?
-        switch command.action {
-        case .stopActive:
-            event = EventTimerService.primaryActiveEvent(in: events)
-        case .stop(let id), .resume(let id), .switchSide(let id):
-            event = events.first { $0.id == id && $0.isTimerDraft }
-        }
+        switchToCommandProfileIfNeeded(command.profileID, context: context)
+        let event = fetchEvent(for: command, context: context)
         guard let event else { return true }
+        guard shouldApply(command.action, to: event, requestedAt: requestedAt) else {
+            return true
+        }
 
         switch command.action {
         case .stopActive, .stop:
-            EventTimerService.stop(event, context: context)
+            EventTimerService.stop(event, context: context, at: requestedAt)
         case .resume:
-            EventTimerService.resume(event, context: context)
+            EventTimerService.resume(event, context: context, at: requestedAt)
         case .switchSide:
-            EventTimerService.switchNursingSide(event, context: context)
+            EventTimerService.switchNursingSide(event, context: context, at: requestedAt)
         }
+        guard PersistenceService.save(context: context) else { return true }
 
-        var recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
-            predicate: #Predicate<SleepPredictionRecord> { record in
-                record.actualSleepEventID == nil || record.generatedAt >= recentCutoff
-            },
-            sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
-        )
-        recordDescriptor.fetchLimit = 120
-        let records = ((try? context.fetch(recordDescriptor)) ?? [])
-            .filter { $0.matchesProfile(profile?.id) }
-        let defaults = UserDefaults.standard
-        await EventMutationService.eventDidChange(
-            event,
-            profile: profile,
-            events: events,
-            records: records,
-            context: context,
-            settings: PredictionSettings(
-                feedAdjustmentEnabled: defaultBool(
-                    "feedAdjustmentEnabled",
-                    fallback: true,
-                    defaults: defaults
-                ),
-                nursingAdjustmentEnabled: defaultBool(
-                    "nursingAdjustmentEnabled",
-                    fallback: true,
-                    defaults: defaults
-                ),
-                bedtimePredictionEnabled: defaultBool(
-                    "bedtimePredictionEnabled",
-                    fallback: true,
-                    defaults: defaults
-                ),
-                customBaselineMinimum: positiveDouble(
-                    "customWakeMinimum",
-                    defaults: defaults
-                ),
-                customBaselineMaximum: positiveDouble(
-                    "customWakeMaximum",
-                    defaults: defaults
-                )
-            ),
-            notificationsEnabled: defaultBool(
-                "predictionNotificationsEnabled",
-                fallback: false,
-                defaults: defaults
-            ),
-            notificationLeadMinutes: defaults.object(forKey: "notificationLeadMinutes") == nil
-                ? 10
-                : defaults.integer(forKey: "notificationLeadMinutes"),
-            refreshPrediction: command.action.shouldRefreshPrediction,
-            waitForSystemIntegrations: true
-        )
+        let timer = WidgetSnapshotService.refreshActiveTimer(event, at: requestedAt)
+        Task { @MainActor in
+            await LiveActivityManager.shared.updateTimer(timer)
+        }
         return true
+    }
+
+    private static func fetchEvent(
+        for command: TimerCommand,
+        context: ModelContext
+    ) -> BabyEvent? {
+        switch command.action {
+        case .stopActive:
+            var descriptor = FetchDescriptor<BabyEvent>(
+                predicate: #Predicate<BabyEvent> { event in
+                    event.endDate == nil
+                },
+                sortBy: [SortDescriptor(\BabyEvent.startDate, order: .forward)]
+            )
+            descriptor.fetchLimit = 30
+            let profileID = command.profileID ?? ProfileService.shared.selectedProfileID
+            let events = ((try? context.fetch(descriptor)) ?? [])
+            let scopedEvents = events.filter { $0.matchesProfile(profileID) }
+            return EventTimerService.primaryActiveEvent(in: scopedEvents)
+                ?? (command.profileID == nil
+                    ? EventTimerService.primaryActiveEvent(in: events)
+                    : nil)
+        case .stop(let id), .resume(let id), .switchSide(let id):
+            var descriptor = FetchDescriptor<BabyEvent>(
+                predicate: #Predicate<BabyEvent> { event in
+                    event.id == id
+                }
+            )
+            descriptor.fetchLimit = 1
+            return (try? context.fetch(descriptor))?.first
+        }
+    }
+
+    private static func shouldApply(
+        _ action: TimerAction,
+        to event: BabyEvent,
+        requestedAt: Date
+    ) -> Bool {
+        // A delayed duplicate must not undo a newer in-app timer action.
+        guard event.updatedAt <= requestedAt.addingTimeInterval(0.75) else {
+            return false
+        }
+        switch action {
+        case .stopActive, .stop:
+            return event.isTimerRunning
+        case .resume:
+            return event.isTimerDraft && !event.isTimerRunning
+        case .switchSide:
+            return event.type == .nursing && event.isTimerDraft
+        }
+    }
+
+    private static func switchToCommandProfileIfNeeded(
+        _ profileID: UUID?,
+        context: ModelContext
+    ) {
+        guard let profileID else { return }
+        var descriptor = FetchDescriptor<BabyProfile>(
+            predicate: #Predicate<BabyProfile> { profile in
+                profile.id == profileID
+            }
+        )
+        descriptor.fetchLimit = 1
+        if let profile = (try? context.fetch(descriptor))?.first,
+           !profile.isArchived {
+            ProfileService.shared.switchProfile(profile)
+        }
     }
 
     private static func timerCommand(from url: URL) -> TimerCommand? {
@@ -131,33 +133,11 @@ enum IntegrationCommandProcessor {
         }
     }
 
-    private static func defaultBool(
-        _ key: String,
-        fallback: Bool,
-        defaults: UserDefaults
-    ) -> Bool {
-        defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
-    }
-
-    private static func positiveDouble(
-        _ key: String,
-        defaults: UserDefaults
-    ) -> Double? {
-        let value = defaults.double(forKey: key)
-        return value > 0 ? value : nil
-    }
-
     private enum TimerAction {
         case stopActive
         case stop(UUID)
         case resume(UUID)
         case switchSide(UUID)
-
-        var shouldRefreshPrediction: Bool {
-            switch self {
-            case .stopActive, .stop, .resume, .switchSide: false
-            }
-        }
     }
 
     private struct TimerCommand {

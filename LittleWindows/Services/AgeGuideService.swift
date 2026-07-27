@@ -95,8 +95,7 @@ struct AgeGuideService {
         }
         state.lastOpenedAt = now
         state.updatedAt = now
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
     }
 
     @MainActor
@@ -121,8 +120,7 @@ struct AgeGuideService {
         }
         state.isDismissedFromToday = true
         state.updatedAt = now
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
     }
 
     private static func fallbackGuides() -> [AgeGuide] {

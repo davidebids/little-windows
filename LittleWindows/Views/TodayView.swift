@@ -12,6 +12,29 @@ private enum TodayScrollAnchor {
     case timeline
 }
 
+private final class TodayScrollInteractionState {
+    var isDragging = false
+}
+
+private struct TodayScrollInteractionModifier: ViewModifier {
+    @State private var interactionState = TodayScrollInteractionState()
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { _ in
+                    guard !interactionState.isDragging else { return }
+                    interactionState.isDragging = true
+                    AppInteractionMonitor.noteInteraction()
+                }
+                .onEnded { _ in
+                    interactionState.isDragging = false
+                    AppInteractionMonitor.noteInteraction()
+                }
+        )
+    }
+}
+
 private struct DogPottySubtitleKey: Hashable {
     var pottyType: DogPottyType
     var accident: Bool?
@@ -32,6 +55,7 @@ private struct TodayRenderState {
     var isDogProfile: Bool
     var currentHouseholdID: UUID?
     var visibleCareRoutines: [CareRoutine]
+    var careRoutineTodayItems: [CareRoutineTodayItem]
     var suggestedRoutineTemplates: [CareRoutineTemplate]
     var currentAgeGuide: AgeGuide?
     var shouldShowAgeGuideCard: Bool
@@ -53,6 +77,10 @@ private struct TodayRenderState {
         visibleCareTypes.contains(type)
     }
 
+    func hasActiveTimer(of type: EventType) -> Bool {
+        activeEvents.contains { $0.type == type && $0.isTimerDraft }
+    }
+
     static let empty = TodayRenderState(
         profile: nil,
         profileID: nil,
@@ -68,6 +96,7 @@ private struct TodayRenderState {
         isDogProfile: false,
         currentHouseholdID: nil,
         visibleCareRoutines: [],
+        careRoutineTodayItems: [],
         suggestedRoutineTemplates: [],
         currentAgeGuide: nil,
         shouldShowAgeGuideCard: false,
@@ -139,6 +168,8 @@ struct TodayView: View {
     @State private var repeatFeedback: RepeatFeedback?
     @State private var showingCareCustomization = false
     @State private var cachedRenderState: TodayRenderState?
+    @State private var hasCompletedInitialSetup = false
+    @State private var renderStateRefreshTask: Task<Void, Never>?
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -248,7 +279,7 @@ struct TodayView: View {
     }
     private var todayEvents: [BabyEvent] {
         scopedEvents.filter {
-            !$0.isTimerDraft && Calendar.current.isDateInToday($0.startDate)
+            !$0.isTimerDraft && $0.occursOnLocalDay(Date())
         }
     }
     private var activeEvents: [BabyEvent] {
@@ -362,6 +393,14 @@ struct TodayView: View {
             profileType: profile?.profileType,
             householdID: currentHouseholdID
         )
+        let careRoutineTodayItems = visibleCareRoutines.prefix(3).map { routine in
+            CareRoutineTodayItem(
+                routine: routine,
+                steps: CareRoutineService.steps(for: routine, steps: careRoutineSteps),
+                activeRun: CareRoutineService.activeRun(for: routine, runs: careRoutineRuns),
+                latestRun: CareRoutineService.latestRun(for: routine, runs: careRoutineRuns)
+            )
+        }
         let existingRoutineKinds = Set(visibleCareRoutines.compactMap(\.templateKind))
         let suggestedRoutineTemplates = CareRoutineService.templates(for: profile?.profileType).filter {
             !existingRoutineKinds.contains($0.kind)
@@ -416,7 +455,7 @@ struct TodayView: View {
                 lastLoggedDates[event.type] = logDate
             }
 
-            if event.startDate >= todayStart, calendar.isDate(event.startDate, inSameDayAs: now) {
+            if event.occursOnLocalDay(now, calendar: calendar) {
                 todayEvents.append(event)
             }
 
@@ -547,6 +586,7 @@ struct TodayView: View {
             isDogProfile: profile?.profileType == .dog,
             currentHouseholdID: currentHouseholdID,
             visibleCareRoutines: visibleCareRoutines,
+            careRoutineTodayItems: careRoutineTodayItems,
             suggestedRoutineTemplates: suggestedRoutineTemplates,
             currentAgeGuide: currentAgeGuide,
             shouldShowAgeGuideCard: shouldShowAgeGuideCard,
@@ -585,7 +625,7 @@ struct TodayView: View {
         let prediction = state.prediction
         let profile = state.profile
 
-        ScrollViewReader { scrollProxy in
+        let listContent = ScrollViewReader { scrollProxy in
             List {
                 Section {
                     HStack(alignment: .center, spacing: 14) {
@@ -721,10 +761,13 @@ struct TodayView: View {
                     appointmentsSection(state)
                 }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.background)
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(AppTheme.background)
+            .modifier(TodayScrollInteractionModifier())
         }
+
+        listContent
         .navigationTitle("Today")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -785,7 +828,11 @@ struct TodayView: View {
                         perform: { performRoutineStep($0, routine: routine, run: run) },
                         skip: { skipRoutineStep($0, routine: routine, run: run) },
                         finish: { finishRoutineRun(run, routine: routine) },
-                        cancel: { cancelRoutineRun(run) }
+                        cancel: { cancelRoutineRun(run) },
+                        canPerform: { step in
+                            step.action != .startTimer
+                                || activeTimer(of: step.eventType ?? .custom) == nil
+                        }
                     )
                 }
             }
@@ -873,6 +920,7 @@ struct TodayView: View {
         .modifier(
             SleepKindChooser(
                 isPresented: $showingSleepChooser,
+                timerIsActive: state.hasActiveTimer(of: .sleep),
                 startSleep: { kind in
                     startTimer(.sleep, sleepKind: kind)
                 }
@@ -898,17 +946,23 @@ struct TodayView: View {
             options: [
                 AppActionSheetOption(
                     title: "Left Side",
-                    subtitle: "Begin tracking time on the left side.",
+                    subtitle: state.hasActiveTimer(of: .nursing)
+                        ? "A nursing timer is already active."
+                        : "Begin tracking time on the left side.",
                     systemImage: "l.circle.fill",
-                    tint: .pink
+                    tint: .pink,
+                    isEnabled: !state.hasActiveTimer(of: .nursing)
                 ) {
                     startNursing(.left)
                 },
                 AppActionSheetOption(
                     title: "Right Side",
-                    subtitle: "Begin tracking time on the right side.",
+                    subtitle: state.hasActiveTimer(of: .nursing)
+                        ? "A nursing timer is already active."
+                        : "Begin tracking time on the right side.",
                     systemImage: "r.circle.fill",
-                    tint: .pink
+                    tint: .pink,
+                    isEnabled: !state.hasActiveTimer(of: .nursing)
                 ) {
                     startNursing(.right)
                 }
@@ -956,7 +1010,7 @@ struct TodayView: View {
             handlePendingDeepLink()
         }
         .onChange(of: renderRefreshToken) { _, _ in
-            refreshCachedRenderState()
+            scheduleRenderStateRefresh()
         }
         .onChange(of: deepLinkRouter.pendingProfileID) { _, _ in
             handlePendingProfileSwitch()
@@ -981,18 +1035,23 @@ struct TodayView: View {
             }
         }
         .task {
-            refreshCachedRenderState()
+            guard !hasCompletedInitialSetup else { return }
+            hasCompletedInitialSetup = true
             _ = HouseholdService.ensureDefaultHousehold(context: modelContext)
             _ = profileService.ensureSelection(in: profiles)
-            refreshCachedRenderState()
             refreshActiveSleepPlan()
             handlePendingProfileSwitch()
             handlePendingDeepLink()
             handlePendingAppointmentDeepLink()
             handlePendingPuppyGuideDeepLink()
             handlePendingRoutineDeepLink()
+            await AppInteractionMonitor.waitUntilIdle()
+            guard !Task.isCancelled else {
+                hasCompletedInitialSetup = false
+                return
+            }
+            refreshCachedRenderState()
             await syncActiveSleepPlanWakeAlert()
-            scheduleWidgetSnapshotRefresh()
         }
     }
 
@@ -1132,7 +1191,8 @@ struct TodayView: View {
                     },
                     onLogTraining: {
                         startTimer(.training)
-                    }
+                    },
+                    isTrainingTimerActive: state.hasActiveTimer(of: .training)
                 )
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -1150,7 +1210,11 @@ struct TodayView: View {
 
                 if state.shows(.sleep) {
                     Button {
-                        showingSleepChooser = true
+                        if let activeSleep = activeTimer(of: .sleep) {
+                            activeTimerToEdit = activeSleep
+                        } else {
+                            showingSleepChooser = true
+                        }
                     } label: {
                         HStack(spacing: 13) {
                             Image(systemName: "moon.stars.fill")
@@ -1159,14 +1223,18 @@ struct TodayView: View {
                                 .frame(width: 42, height: 42)
                                 .background(.white.opacity(0.14), in: Circle())
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Start sleep")
+                                Text(state.hasActiveTimer(of: .sleep) ? "Sleep timer active" : "Start sleep")
                                     .font(.headline)
-                                Text(lastEventSubtitle(.sleep, state: state))
+                                Text(
+                                    state.hasActiveTimer(of: .sleep)
+                                        ? "Tap to manage the running timer"
+                                        : lastEventSubtitle(.sleep, state: state)
+                                )
                                     .font(.caption)
                                     .foregroundStyle(.white.opacity(0.72))
                             }
                             Spacer()
-                            Image(systemName: "play.fill")
+                            Image(systemName: state.hasActiveTimer(of: .sleep) ? "timer" : "play.fill")
                                 .font(.subheadline)
                                 .foregroundStyle(.white)
                                 .frame(width: 34, height: 34)
@@ -1184,6 +1252,12 @@ struct TodayView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("today.start-sleep")
+                    .accessibilityHint(
+                        state.hasActiveTimer(of: .sleep)
+                            ? "Open the active sleep timer"
+                            : "Choose a sleep type and start the timer"
+                    )
                 }
 
                 LazyVGrid(
@@ -1203,9 +1277,12 @@ struct TodayView: View {
                     if state.shows(.nursing) {
                         QuickActionButton(
                             title: "Nursing",
-                            subtitle: lastEventSubtitle(.nursing, state: state),
+                            subtitle: state.hasActiveTimer(of: .nursing)
+                                ? "Timer active"
+                                : lastEventSubtitle(.nursing, state: state),
                             icon: "figure.and.child.holdinghands",
-                            color: .pink
+                            color: .pink,
+                            isEnabled: !state.hasActiveTimer(of: .nursing)
                         ) {
                             showingNursingChooser = true
                         }
@@ -1213,9 +1290,12 @@ struct TodayView: View {
                     if state.shows(.pumping) {
                         QuickActionButton(
                             title: "Pumping",
-                            subtitle: lastEventSubtitle(.pumping, state: state),
+                            subtitle: state.hasActiveTimer(of: .pumping)
+                                ? "Timer active"
+                                : lastEventSubtitle(.pumping, state: state),
                             icon: "drop.circle.fill",
-                            color: .cyan
+                            color: .cyan,
+                            isEnabled: !state.hasActiveTimer(of: .pumping)
                         ) {
                             startTimer(.pumping)
                         }
@@ -1243,9 +1323,12 @@ struct TodayView: View {
                     if state.shows(.activity) {
                         QuickActionButton(
                             title: "Activity",
-                            subtitle: lastEventSubtitle(.activity, state: state),
+                            subtitle: state.hasActiveTimer(of: .activity)
+                                ? "Timer active"
+                                : lastEventSubtitle(.activity, state: state),
                             icon: "figure.play",
-                            color: .green
+                            color: .green,
+                            isEnabled: !state.hasActiveTimer(of: .activity)
                         ) {
                             showingActivityChooser = true
                         }
@@ -1348,9 +1431,12 @@ struct TodayView: View {
                     if state.shows(.walk) {
                         QuickActionButton(
                             title: "Start Walk",
-                            subtitle: lastEventSubtitle(.walk, state: state),
+                            subtitle: state.hasActiveTimer(of: .walk)
+                                ? "Timer active"
+                                : lastEventSubtitle(.walk, state: state),
                             icon: "figure.walk",
-                            color: .green
+                            color: .green,
+                            isEnabled: !state.hasActiveTimer(of: .walk)
                         ) {
                             startTimer(.walk)
                         }
@@ -1388,9 +1474,12 @@ struct TodayView: View {
                     if state.shows(.rest) {
                         QuickActionButton(
                             title: "Rest",
-                            subtitle: lastEventSubtitle(.rest, state: state),
+                            subtitle: state.hasActiveTimer(of: .rest)
+                                ? "Timer active"
+                                : lastEventSubtitle(.rest, state: state),
                             icon: "bed.double.fill",
-                            color: .indigo
+                            color: .indigo,
+                            isEnabled: !state.hasActiveTimer(of: .rest)
                         ) {
                             startTimer(.rest)
                         }
@@ -1398,9 +1487,12 @@ struct TodayView: View {
                     if state.shows(.training) {
                         QuickActionButton(
                             title: "Training",
-                            subtitle: lastEventSubtitle(.training, state: state),
+                            subtitle: state.hasActiveTimer(of: .training)
+                                ? "Timer active"
+                                : lastEventSubtitle(.training, state: state),
                             icon: "graduationcap.fill",
-                            color: .purple
+                            color: .purple,
+                            isEnabled: !state.hasActiveTimer(of: .training)
                         ) {
                             startTimer(.training)
                         }
@@ -1551,9 +1643,8 @@ struct TodayView: View {
 
     private func careRoutinesSection(_ state: TodayRenderState) -> some View {
         CareRoutinesTodayCard(
-            routines: state.visibleCareRoutines,
-            steps: careRoutineSteps,
-            runs: careRoutineRuns,
+            items: state.careRoutineTodayItems,
+            routineCount: state.visibleCareRoutines.count,
             templates: state.suggestedRoutineTemplates,
             addTemplate: addRoutineTemplate,
             startRoutine: startRoutine,
@@ -1639,6 +1730,8 @@ struct TodayView: View {
             reset: { reset(event) },
             save: { endDate in save(event, endDate: endDate) },
             discard: { delete(event) },
+            setStartTimeZone: { setStartTimeZone($0, for: event) },
+            setEndTimeZone: { setEndTimeZone($0, for: event) },
             switchNursingSide: nursingSideSwitcher(for: event),
             setNursingSide: nursingSideSetter(for: event)
         )
@@ -1659,8 +1752,15 @@ struct TodayView: View {
         _ type: EventType,
         nursingSide: NursingSide? = nil,
         sleepKind: SleepKind? = nil,
-        activityType: ActivityType? = nil
+        activityType: ActivityType? = nil,
+        presentsEditor: Bool = true
     ) -> BabyEvent? {
+        if let existingTimer = activeTimer(of: type) {
+            if presentsEditor {
+                activeTimerToEdit = existingTimer
+            }
+            return nil
+        }
         let created = EventMutationService.startTimer(
             type: type,
             nursingSide: nursingSide,
@@ -1673,6 +1773,9 @@ struct TodayView: View {
             context: modelContext
         )
         if let created {
+            if presentsEditor {
+                activeTimerToEdit = created
+            }
             Task {
                 await eventChanged(
                     created,
@@ -1690,17 +1793,24 @@ struct TodayView: View {
         }
     }
 
+    private func activeTimer(of type: EventType) -> BabyEvent? {
+        scopedEvents.first { $0.type == type && $0.isTimerDraft }
+    }
+
     private func logDogPotty(_ pottyType: DogPottyType, accident: Bool) {
         var details = DogEventDetails()
         details.pottyType = pottyType
         details.pottyLocation = accident ? .indoorAccident : .outside
         details.accident = accident
         let now = Date()
+        let timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
         let event = BabyEvent(
             profileID: selectedProfileID,
             type: .potty,
             startDate: now,
             endDate: now,
+            startTimeZoneIdentifier: timeZoneIdentifier,
+            endTimeZoneIdentifier: timeZoneIdentifier,
             caregiverName: activeCaregiverName
         )
         event.profileTypeSnapshot = .dog
@@ -1826,8 +1936,7 @@ struct TodayView: View {
         if routine.reminderEnabled {
             routine.reminderEnabled = false
             routine.updatedAt = Date()
-            try? modelContext.save()
-            PersistenceService.recordLocalSave()
+            guard PersistenceService.save(context: modelContext) else { return }
             Task {
                 await notificationManager.cancelRoutineReminder(routineID: routine.id)
             }
@@ -1850,8 +1959,7 @@ struct TodayView: View {
             routine.reminderTimeMinutesAfterMidnight = routine.reminderTimeMinutesAfterMidnight
                 ?? CareRoutineService.defaultReminderMinutes
             routine.updatedAt = Date()
-            try? modelContext.save()
-            PersistenceService.recordLocalSave()
+            guard PersistenceService.save(context: modelContext) else { return }
             await notificationManager.scheduleRoutineReminder(routine: routine)
         }
     }
@@ -1872,8 +1980,7 @@ struct TodayView: View {
         guard granted else {
             routine.reminderEnabled = false
             routine.updatedAt = Date()
-            try? modelContext.save()
-            PersistenceService.recordLocalSave()
+            guard PersistenceService.save(context: modelContext) else { return }
             showingPermissionDenied = true
             await notificationManager.cancelRoutineReminder(routineID: routine.id)
             return
@@ -1882,8 +1989,7 @@ struct TodayView: View {
         routine.reminderTimeMinutesAfterMidnight = routine.reminderTimeMinutesAfterMidnight
             ?? CareRoutineService.defaultReminderMinutes
         routine.updatedAt = Date()
-        try? modelContext.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: modelContext) else { return }
         await notificationManager.scheduleRoutineReminder(routine: routine)
     }
 
@@ -1908,7 +2014,8 @@ struct TodayView: View {
                 step.eventType ?? .custom,
                 nursingSide: step.nursingSide,
                 sleepKind: step.sleepKind,
-                activityType: step.activityType
+                activityType: step.activityType,
+                presentsEditor: false
             )
             if created != nil {
                 completeRoutineStep(step, routine: routine, run: run)
@@ -2083,9 +2190,7 @@ struct TodayView: View {
     }
 
     private func startNursing(_ side: NursingSide) {
-        if let event = startTimer(.nursing, nursingSide: side) {
-            activeTimerToEdit = event
-        }
+        startTimer(.nursing, nursingSide: side)
     }
 
     private func refreshWidgetSnapshot() {
@@ -2096,10 +2201,12 @@ struct TodayView: View {
         )
     }
 
-    private func scheduleWidgetSnapshotRefresh() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            refreshWidgetSnapshot()
+    private func scheduleRenderStateRefresh() {
+        renderStateRefreshTask?.cancel()
+        renderStateRefreshTask = Task { @MainActor in
+            await AppInteractionMonitor.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            refreshCachedRenderState()
         }
     }
 
@@ -2232,6 +2339,28 @@ struct TodayView: View {
         }
     }
 
+    private func setStartTimeZone(_ identifier: String, for event: BabyEvent) {
+        event.startTimeZoneIdentifier = identifier
+        Task {
+            await eventChanged(
+                event,
+                refreshPrediction: false,
+                waitForSystemIntegrations: true
+            )
+        }
+    }
+
+    private func setEndTimeZone(_ identifier: String, for event: BabyEvent) {
+        event.endTimeZoneIdentifier = identifier
+        Task {
+            await eventChanged(
+                event,
+                refreshPrediction: false,
+                waitForSystemIntegrations: true
+            )
+        }
+    }
+
     private func save(_ event: BabyEvent, endDate: Date? = nil) {
         EventMutationService.saveTimer(event, context: modelContext, endDate: endDate)
         Task {
@@ -2270,7 +2399,7 @@ struct TodayView: View {
     private func markCompleted(_ appointment: DoctorAppointment) {
         appointment.isCompleted = true
         appointment.updatedAt = Date()
-        try? modelContext.save()
+        guard PersistenceService.save(context: modelContext) else { return }
         Task {
             await notificationManager.cancelAppointmentReminders(
                 appointmentID: appointment.id
@@ -2312,7 +2441,11 @@ struct TodayView: View {
             }
         case .startTimer(let type, let side):
             if type == .sleep {
-                showingSleepChooser = true
+                if let existingTimer = activeTimer(of: .sleep) {
+                    activeTimerToEdit = existingTimer
+                } else {
+                    showingSleepChooser = true
+                }
             } else {
                 startTimer(type, nursingSide: side)
             }
@@ -2408,6 +2541,14 @@ struct TodayView: View {
 
     private func adjustStart(of event: BabyEvent, to date: Date) {
         EventTimerService.adjustStartDate(event, to: date)
+        Task {
+            await eventChanged(
+                event,
+                refreshPrediction: false,
+                waitForSystemIntegrations: true
+            )
+            await syncActiveSleepPlanWakeAlert(for: event)
+        }
     }
 
     private func delete(_ event: BabyEvent) {
@@ -2545,13 +2686,17 @@ struct TodayView: View {
 
     private var activityOptions: [AppActionSheetOption] {
         ActivityType.allCases.map { activity in
-            AppActionSheetOption(
+            let timerAlreadyActive = activity != .custom && activeTimer(of: .activity) != nil
+            return AppActionSheetOption(
                 title: activity.displayName,
-                subtitle: activity == .custom
-                    ? "Open the editor for a custom activity."
-                    : "Start a timer now.",
+                subtitle: timerAlreadyActive
+                    ? "An activity timer is already active."
+                    : (activity == .custom
+                        ? "Open the editor for a custom activity."
+                        : "Start a timer now."),
                 systemImage: activity.systemImage,
-                tint: .green
+                tint: .green,
+                isEnabled: !timerAlreadyActive
             ) {
                 if activity == .custom {
                     editorRoute = EventEditorRoute(type: .activity)
@@ -2610,21 +2755,27 @@ private struct RepeatFeedbackBanner: View {
 
 private struct SleepKindChooser: ViewModifier {
     @Binding var isPresented: Bool
+    let timerIsActive: Bool
     let startSleep: (SleepKind) -> Void
 
     func body(content: Content) -> some View {
         content.appActionSheet(
             isPresented: $isPresented,
             title: "Start Sleep",
-            message: "This keeps daytime naps and overnight sleep accurate in History and Insights.",
+            message: timerIsActive
+                ? "A sleep timer is already active. Manage it from the timer card."
+                : "This keeps daytime naps and overnight sleep accurate in History and Insights.",
             systemImage: "moon.zzz.fill",
             tint: .indigo,
             options: SleepKind.allCases.map { kind in
                 AppActionSheetOption(
                     title: kind.displayName,
-                    subtitle: sleepKindSubtitle(kind),
+                    subtitle: timerIsActive
+                        ? "A sleep timer is already active."
+                        : sleepKindSubtitle(kind),
                     systemImage: kind.systemImage,
-                    tint: sleepKindTint(kind)
+                    tint: sleepKindTint(kind),
+                    isEnabled: !timerIsActive
                 ) {
                     startSleep(kind)
                 }
@@ -2654,6 +2805,7 @@ private struct QuickActionButton: View {
     var subtitle: String? = nil
     var icon: String
     var color: Color
+    var isEnabled = true
     var action: () -> Void
 
     var body: some View {
@@ -2661,6 +2813,9 @@ private struct QuickActionButton: View {
             QuickActionButtonLabel(title: title, subtitle: subtitle, icon: icon, color: color)
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.46)
+        .accessibilityHint(isEnabled ? "" : "A timer of this type is already active")
     }
 }
 

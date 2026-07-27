@@ -118,7 +118,7 @@ struct AppointmentsListView: View {
             appointmentID: appointment.id
         )
         modelContext.delete(appointment)
-        try? modelContext.save()
+        _ = PersistenceService.save(context: modelContext)
     }
 }
 
@@ -193,8 +193,15 @@ struct AppointmentCard: View {
     }
 
     private var dateText: String {
-        let day = DateFormatting.day.string(from: appointment.startDate)
-        let time = DateFormatting.time.string(from: appointment.startDate)
+        let day = DateFormatting.dayString(
+            from: appointment.startDate,
+            timeZone: appointment.timeZone
+        )
+        let time = DateFormatting.timeString(
+            from: appointment.startDate,
+            timeZone: appointment.timeZone,
+            includesTimeZone: true
+        )
         return "\(day) at \(time)"
     }
 }
@@ -215,6 +222,7 @@ struct AppointmentEditorView: View {
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var hasEndDate: Bool
+    @State private var timeZoneIdentifier: String
     @State private var doctorName: String
     @State private var clinicName: String
     @State private var locationName: String
@@ -247,6 +255,10 @@ struct AppointmentEditorView: View {
         _startDate = State(initialValue: appointment?.startDate ?? Date().addingTimeInterval(24 * 60 * 60))
         _endDate = State(initialValue: appointment?.endDate ?? Date().addingTimeInterval(25 * 60 * 60))
         _hasEndDate = State(initialValue: appointment?.endDate != nil)
+        _timeZoneIdentifier = State(
+            initialValue: appointment?.timeZoneIdentifier
+                ?? CareTimeZoneSettings.effectiveIdentifier()
+        )
         _doctorName = State(initialValue: appointment?.doctorName ?? "")
         _clinicName = State(initialValue: appointment?.clinicName ?? "")
         _locationName = State(initialValue: appointment?.locationName ?? "")
@@ -272,9 +284,22 @@ struct AppointmentEditorView: View {
                     }
                 }
                 DatePicker("Starts", selection: $startDate)
+                    .environment(\.timeZone, appointmentTimeZone)
                 Toggle("Has end time", isOn: $hasEndDate)
                 if hasEndDate {
                     DatePicker("Ends", selection: $endDate, in: startDate...)
+                        .environment(\.timeZone, appointmentTimeZone)
+                }
+                NavigationLink {
+                    TimeZonePickerView(selection: $timeZoneIdentifier)
+                } label: {
+                    LabeledContent(
+                        "Time zone",
+                        value: CareTimeZoneSettings.displayName(
+                            for: appointmentTimeZone,
+                            on: startDate
+                        )
+                    )
                 }
             }
 
@@ -386,6 +411,7 @@ struct AppointmentEditorView: View {
         value.appointmentType = appointmentType
         value.startDate = startDate
         value.endDate = hasEndDate ? endDate : nil
+        value.timeZoneIdentifier = appointmentTimeZone.identifier
         value.doctorName = clean(doctorName)
         value.clinicName = clean(clinicName)
         value.locationName = clean(locationName)
@@ -397,7 +423,7 @@ struct AppointmentEditorView: View {
         value.reminderLeadTimes = Array(selectedLeadTimes)
         value.caregiverName = activeCaregiverName
         value.updatedAt = Date()
-        try? modelContext.save()
+        guard PersistenceService.save(context: modelContext) else { return }
         Task {
             if remindersEnabled {
                 _ = await NotificationManager.shared.requestAuthorization()
@@ -417,6 +443,11 @@ struct AppointmentEditorView: View {
     private func clean(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private var appointmentTimeZone: TimeZone {
+        TimeZone(identifier: timeZoneIdentifier)
+            ?? CareTimeZoneSettings.effectiveTimeZone()
     }
 }
 

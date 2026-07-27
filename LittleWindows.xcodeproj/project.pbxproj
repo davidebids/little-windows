@@ -12,6 +12,8 @@
 		B00000000000000000000003 /* Models/BabyEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003 /* Models/BabyEvent.swift */; };
 		B00000000000000000000004 /* Models/EventType.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000004 /* Models/EventType.swift */; };
 		B00000000000000000000005 /* Models/EventSubtypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000005 /* Models/EventSubtypes.swift */; };
+		B10000000000000000000001 /* Models/SolidFoodCatalogItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* Models/SolidFoodCatalogItem.swift */; };
+		B10000000000000000000002 /* Services/SolidFoodCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* Services/SolidFoodCatalogService.swift */; };
 		B00000000000000000000006 /* Models/PredictionFactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000006 /* Models/PredictionFactor.swift */; };
 		B00000000000000000000007 /* Models/SleepPredictionRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000007 /* Models/SleepPredictionRecord.swift */; };
 		B00000000000000000000008 /* Services/DailySummaryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000008 /* Services/DailySummaryService.swift */; };
@@ -184,6 +186,8 @@
 		F00000000000000000000003 /* Models/BabyEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BabyEvent.swift; sourceTree = "<group>"; };
 		F00000000000000000000004 /* Models/EventType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/EventType.swift; sourceTree = "<group>"; };
 		F00000000000000000000005 /* Models/EventSubtypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/EventSubtypes.swift; sourceTree = "<group>"; };
+		F10000000000000000000001 /* Models/SolidFoodCatalogItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SolidFoodCatalogItem.swift; sourceTree = "<group>"; };
+		F10000000000000000000002 /* Services/SolidFoodCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SolidFoodCatalogService.swift; sourceTree = "<group>"; };
 		F00000000000000000000006 /* Models/PredictionFactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/PredictionFactor.swift; sourceTree = "<group>"; };
 		F00000000000000000000007 /* Models/SleepPredictionRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SleepPredictionRecord.swift; sourceTree = "<group>"; };
 		F00000000000000000000008 /* Services/DailySummaryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/DailySummaryService.swift; sourceTree = "<group>"; };
@@ -369,6 +373,7 @@
 				F00000000000000000000003 /* Models/BabyEvent.swift */,
 				F00000000000000000000004 /* Models/EventType.swift */,
 				F00000000000000000000005 /* Models/EventSubtypes.swift */,
+				F10000000000000000000001 /* Models/SolidFoodCatalogItem.swift */,
 				F00000000000000000000006 /* Models/PredictionFactor.swift */,
 				F00000000000000000000007 /* Models/SleepPredictionRecord.swift */,
 				F00000000000000000000021 /* Models/InsightMetric.swift */,
@@ -387,6 +392,7 @@
 				F00000000000000000000091 /* Models/CareRoutineModels.swift */,
 				F00000000000000000000008 /* Services/DailySummaryService.swift */,
 				F00000000000000000000009 /* Services/DataExportImportService.swift */,
+				F10000000000000000000002 /* Services/SolidFoodCatalogService.swift */,
 				F0000000000000000000000A /* Services/EventMutationService.swift */,
 				F0000000000000000000000B /* Services/NotificationManager.swift */,
 				F0000000000000000000000C /* Services/PredictionTuningService.swift */,
@@ -701,6 +707,7 @@
 				B00000000000000000000003 /* Models/BabyEvent.swift in Sources */,
 				B00000000000000000000004 /* Models/EventType.swift in Sources */,
 				B00000000000000000000005 /* Models/EventSubtypes.swift in Sources */,
+				B10000000000000000000001 /* Models/SolidFoodCatalogItem.swift in Sources */,
 				B00000000000000000000006 /* Models/PredictionFactor.swift in Sources */,
 				B00000000000000000000007 /* Models/SleepPredictionRecord.swift in Sources */,
 				B0000000000000000000001F /* Models/InsightMetric.swift in Sources */,
@@ -719,6 +726,7 @@
 				B00000000000000000000091 /* Models/CareRoutineModels.swift in Sources */,
 				B00000000000000000000008 /* Services/DailySummaryService.swift in Sources */,
 				B00000000000000000000009 /* Services/DataExportImportService.swift in Sources */,
+				B10000000000000000000002 /* Services/SolidFoodCatalogService.swift in Sources */,
 				B0000000000000000000000A /* Services/EventMutationService.swift in Sources */,
 				B0000000000000000000000B /* Services/NotificationManager.swift in Sources */,
 				B0000000000000000000000C /* Services/PredictionTuningService.swift in Sources */,
@@ -989,13 +997,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.4;
+				CURRENT_PROJECT_VERSION = 1.3.5;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.4;
+				MARKETING_VERSION = 1.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1014,13 +1022,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.4;
+				CURRENT_PROJECT_VERSION = 1.3.5;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.4;
+				MARKETING_VERSION = 1.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1068,11 +1076,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.4;
+				CURRENT_PROJECT_VERSION = 1.3.5;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.4;
+				MARKETING_VERSION = 1.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1088,11 +1096,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.4;
+				CURRENT_PROJECT_VERSION = 1.3.5;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.4;
+				MARKETING_VERSION = 1.3.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

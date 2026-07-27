@@ -23,10 +23,11 @@ First launch presents onboarding for a new empty store. It does not create defau
 - Food & Home: household to-do lists, shopping lists, store layouts and sections, shopping mode, recurring staples, inventory locations, meal prep tracking, return tracking, and food reminders.
 - Night Light: full-screen low-light presets, color and shape controls, animated glow modes, ambient sounds, sleep timer, and keep-awake behavior.
 - Settings: backup/import, iCloud sync, Family Sync, notifications, prediction tuning, diagnostics, and local data reset.
+- Travel-aware time zones: automatic per-timestamp zone capture, a device-level manual override, and per-entry start/end zone editing.
 
 ## Care Logging
 
-Child logs cover sleep, night wakings, feed, nursing, pumping, diaper, potty, medicine, growth, temperature, activity, and custom events. Feed logs distinguish bottle, solids, and other feeds; bottle and pumping entries support optional ounce amounts; and solid-food feed logs can include feeding style, texture, reaction, common-allergen exposure, and sensitivity notes.
+Child logs cover sleep, night wakings, feed, nursing, pumping, diaper, potty, medicine, growth, temperature, activity, and custom events. Feed logs distinguish bottle, solids, and other feeds; bottle and pumping entries support optional ounce amounts; and solid-food feed logs include a visual multi-food picker, recent foods, a grouped 50-food starter library, reusable custom foods with optional photos, feeding style, texture, general reaction, common-allergen exposure, and sensitivity notes.
 
 The child care form keeps pumping, solids, potty, and the rest of the child activity set in the same event editing surface. Structured details include:
 
@@ -38,6 +39,8 @@ The child care form keeps pumping, solids, potty, and the rest of the child acti
 Dog logs cover food, water, treat, potty, walk, rest, training, grooming, medicine, symptoms, growth, temperature, vaccines, glucose, and custom events.
 
 Sleep, feed, nursing, pumping, activity, walk, rest, training, grooming, and custom logs can run as active timers. Stopped timer drafts can be reviewed, resumed, saved, or discarded before they enter the permanent history.
+
+Care events store concrete start and end time-zone identifiers. A timer can therefore begin in one zone and end in another without changing its real elapsed duration, while Today, History, summaries, insights, widgets, backups, Family Sync, and report exports continue to use each entry's recorded local day and clock time.
 
 Quick repeat and backup/import preserve the production care details above, including pumping amounts, solid feeding style, diaper/potty details, medicine details, growth values, temperature readings, and activity metadata.
 
@@ -125,7 +128,9 @@ System surfaces pass commands back to the app and read lightweight App Group sna
 
 ## Backup, Report Export, Import, And Fixtures
 
-Settings supports JSON backup export/import and full local data deletion/reset. Backups include profiles, events, prediction records, appointments, milestones, photo attachments, guide state, Food & Home data, and related local metadata.
+Settings supports JSON backup export/import and full data deletion/reset. The confirmation identifies whether the action affects only this device, private iCloud devices on the same Apple Account, or every caregiver in a Family Sync space. Only a confirmed Family Sync owner can replace or erase the complete shared dataset. Both operations create a local automatic recovery backup first. Backups include profiles, events and their recorded time zones, prediction records, appointments, milestones, photo attachments, the custom solid-food catalog, guide state, Home data, and related local metadata.
+
+If the SwiftData store cannot open, Little Windows presents a recovery screen instead of terminating. It can retry without changing the store, restore a validated automatic backup, or preserve the unreadable store and start empty. Recovery archives all store artifacts before opening a new local-only copy, so it does not silently delete iCloud or Family Sync data.
 
 Settings also supports profile-scoped CSV and PDF care report export for doctor visits and caregiver handoff. Report export includes selectable 7-day, 30-day, and custom date ranges, optional notes and caregiver names, and care-profile events with appointments and milestones when enabled. CSV/PDF reports are human-readable only; JSON remains the restore/import format.
 

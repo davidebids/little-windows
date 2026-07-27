@@ -165,6 +165,7 @@ enum PhotoAttachmentOwnerKind: String, Codable, CaseIterable, Identifiable {
     case milestone
     case profilePhoto
     case returnPhoto
+    case solidFood
 
     var id: String { rawValue }
 }

@@ -58,12 +58,15 @@ enum EventMutationService {
         guard canQuickRepeat(source) else { return nil }
         let duration = source.duration ?? 0
         let endDate = duration > 0 ? date.addingTimeInterval(duration) : date
+        let timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
         let event = BabyEvent(
             profileID: source.profileID ?? profileID,
             type: source.type,
             title: source.title,
             startDate: date,
             endDate: endDate,
+            startTimeZoneIdentifier: timeZoneIdentifier,
+            endTimeZoneIdentifier: timeZoneIdentifier,
             caregiverName: caregiverName,
             notes: source.notes
         )
@@ -136,8 +139,7 @@ enum EventMutationService {
                 settings: settings
             )
             : currentPrediction(in: records)
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
         Task { @MainActor in
             await refreshSystemIntegrations(
                 profile: profile,
@@ -168,6 +170,7 @@ enum EventMutationService {
             PredictionTuningService.resolveLatestPrediction(with: event, records: records)
         }
         let shouldRefreshPrediction = refreshPrediction && affectsSleepPredictionRefresh(event)
+        let shouldRefreshNotification = shouldRefreshLittleWindowAlert(after: event)
         let prediction = shouldRefreshPrediction
             ? replacePrediction(
                 profile: profile,
@@ -177,14 +180,13 @@ enum EventMutationService {
                 settings: settings
             )
             : currentPrediction(in: records)
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
         if waitForSystemIntegrations {
             await refreshSystemIntegrations(
                 profile: profile,
                 events: events,
                 prediction: prediction,
-                scheduleNotification: shouldRefreshPrediction,
+                scheduleNotification: shouldRefreshNotification,
                 notificationsEnabled: notificationsEnabled,
                 notificationLeadMinutes: notificationLeadMinutes,
                 settings: settings
@@ -195,7 +197,7 @@ enum EventMutationService {
                     profile: profile,
                     events: events,
                     prediction: prediction,
-                    scheduleNotification: shouldRefreshPrediction,
+                    scheduleNotification: shouldRefreshNotification,
                     notificationsEnabled: notificationsEnabled,
                     notificationLeadMinutes: notificationLeadMinutes,
                     settings: settings
@@ -220,8 +222,7 @@ enum EventMutationService {
             context: context,
             settings: settings
         )
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        guard PersistenceService.save(context: context) else { return }
         Task { @MainActor in
             await refreshSystemIntegrations(
                 profile: profile,
@@ -324,17 +325,18 @@ enum EventMutationService {
         settings: PredictionSettings
     ) async {
         WidgetSnapshotService.refresh(profile: profile, events: events, prediction: prediction)
+        let isSleeping = events.contains {
+            $0.isSleepBlock && $0.isTimerRunning
+        }
         if scheduleNotification {
             await NotificationManager.shared.schedule(
                 prediction: prediction,
                 babyName: profile?.name ?? "Baby",
                 profileID: profile?.id,
                 leadMinutes: notificationLeadMinutes,
-                enabled: notificationsEnabled
+                enabled: notificationsEnabled,
+                isSleeping: isSleeping
             )
-            let isSleeping = events.contains {
-                $0.isSleepBlock && $0.isTimerRunning
-            }
             let pressure = SleepPredictionEngine.sleepPressure(
                 profile: profile,
                 events: events,
@@ -354,5 +356,9 @@ enum EventMutationService {
 
     private static func affectsSleepPredictionRefresh(_ event: BabyEvent) -> Bool {
         event.isSleepBlock || (event.type.affectsSleepPrediction && event.type != .sleep)
+    }
+
+    static func shouldRefreshLittleWindowAlert(after event: BabyEvent) -> Bool {
+        affectsSleepPredictionRefresh(event)
     }
 }

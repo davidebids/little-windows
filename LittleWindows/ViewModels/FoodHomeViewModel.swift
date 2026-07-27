@@ -2,8 +2,8 @@ import Foundation
 
 enum FoodHomeSection: String, CaseIterable, Identifiable {
     case todos
-    case returns
     case shopping
+    case returns
     case inventory
     case mealPrep
     case stores

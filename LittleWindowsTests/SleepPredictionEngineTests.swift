@@ -27,7 +27,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             return
         }
 
-        let modelContainer = PersistenceService.makeModelContainer()
+        let modelContainer = try PersistenceService.makeModelContainer()
         let context = modelContainer.mainContext
         switch mode {
         case "write":
@@ -73,6 +73,119 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         PersistenceService.setICloudSyncEnabled(true, defaults: defaults)
         XCTAssertTrue(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+    }
+
+    func testDestructiveDataScopeUsesOpenStoreAndConfirmedFamilyRole() {
+        XCTAssertEqual(
+            DataMutationScope.resolve(
+                isUsingCloudKitStore: true,
+                startupMode: .privateICloudSync,
+                currentMode: .localOnly,
+                familyRole: .none
+            ),
+            .privateICloud
+        )
+        XCTAssertEqual(
+            DataMutationScope.resolve(
+                isUsingCloudKitStore: false,
+                startupMode: .sharedFamilySync,
+                currentMode: .sharedFamilySync,
+                familyRole: .owner
+            ),
+            .sharedFamilyOwner
+        )
+        XCTAssertEqual(
+            DataMutationScope.resolve(
+                isUsingCloudKitStore: false,
+                startupMode: .sharedFamilySync,
+                currentMode: .sharedFamilySync,
+                familyRole: .participant
+            ),
+            .sharedFamilyParticipant
+        )
+        XCTAssertFalse(DataMutationScope.sharedFamilyParticipant.allowsBulkMutation)
+        XCTAssertFalse(DataMutationScope.sharedFamilyUnknownRole.allowsBulkMutation)
+        XCTAssertEqual(
+            DataMutationScope.resolve(
+                isUsingCloudKitStore: false,
+                startupMode: .sharedFamilySync,
+                currentMode: .privateICloudSync,
+                familyRole: .owner
+            ),
+            .localDevice
+        )
+        XCTAssertEqual(
+            DataMutationScope.resolve(
+                isUsingCloudKitStore: false,
+                startupMode: .localOnly,
+                currentMode: .privateICloudSync,
+                familyRole: .none
+            ),
+            .localDevice
+        )
+    }
+
+    func testUnreadableStoreRecoveryPreservesAllArtifactsBeforeReset() throws {
+        let fileManager = FileManager.default
+        let testRoot = fileManager.temporaryDirectory.appendingPathComponent(
+            "LittleWindowsRecoveryTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: testRoot) }
+
+        let storeDirectory = testRoot.appendingPathComponent("Store", isDirectory: true)
+        let archiveRoot = testRoot.appendingPathComponent("Archives", isDirectory: true)
+        try fileManager.createDirectory(
+            at: storeDirectory,
+            withIntermediateDirectories: true
+        )
+        let storeURL = storeDirectory.appendingPathComponent("LittleWindows.store")
+        let artifacts: [(String, Data)] = [
+            ("LittleWindows.store", Data("main".utf8)),
+            ("LittleWindows.store-wal", Data("wal".utf8)),
+            ("LittleWindows.store-shm", Data("shm".utf8))
+        ]
+        for (name, data) in artifacts {
+            try data.write(to: storeDirectory.appendingPathComponent(name))
+        }
+        let supportDirectory = storeDirectory.appendingPathComponent(
+            ".LittleWindows_SUPPORT",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: supportDirectory,
+            withIntermediateDirectories: true
+        )
+        try Data("support".utf8).write(
+            to: supportDirectory.appendingPathComponent("metadata")
+        )
+        let unrelatedURL = storeDirectory.appendingPathComponent("keep-me.txt")
+        try Data("unrelated".utf8).write(to: unrelatedURL)
+
+        let preservedURL = try XCTUnwrap(PersistenceService.preserveStoreArtifacts(
+            at: storeURL,
+            archiveRoot: archiveRoot,
+            fileManager: fileManager,
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+
+        for (name, expectedData) in artifacts {
+            XCTAssertFalse(fileManager.fileExists(
+                atPath: storeDirectory.appendingPathComponent(name).path
+            ))
+            XCTAssertEqual(
+                try Data(contentsOf: preservedURL.appendingPathComponent(name)),
+                expectedData
+            )
+        }
+        XCTAssertFalse(fileManager.fileExists(atPath: supportDirectory.path))
+        XCTAssertEqual(
+            try Data(contentsOf: preservedURL
+                .appendingPathComponent(".LittleWindows_SUPPORT", isDirectory: true)
+                .appendingPathComponent("metadata")),
+            Data("support".utf8)
+        )
+        XCTAssertTrue(fileManager.fileExists(atPath: unrelatedURL.path))
     }
 
     @MainActor
@@ -390,6 +503,142 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(subscription.notificationInfo?.shouldSendContentAvailable, true)
     }
 
+    func testFamilySyncUsesFastForegroundTimerPollingCadence() {
+        XCTAssertEqual(
+            CloudKitSharingService.foregroundTimerPollIntervalSeconds,
+            5
+        )
+        XCTAssertEqual(CloudKitSharingService.foregroundTimerInitialDelaySeconds, 3)
+        XCTAssertEqual(CloudKitSharingService.foregroundTimerFailureRetrySeconds, 30)
+        XCTAssertEqual(
+            (0...5).map(CloudKitSharingService.localMutationBusyRetryDelaySeconds),
+            [2, 4, 8, 16, 30, 30]
+        )
+        XCTAssertTrue(CloudKitSharingService.foregroundPollNeedsDownload(
+            remoteChecksum: "new",
+            lastKnownChecksum: "old",
+            pendingUpload: false
+        ))
+        XCTAssertFalse(CloudKitSharingService.foregroundPollNeedsDownload(
+            remoteChecksum: "new",
+            lastKnownChecksum: "new",
+            pendingUpload: false
+        ))
+        XCTAssertFalse(CloudKitSharingService.foregroundPollNeedsDownload(
+            remoteChecksum: "new",
+            lastKnownChecksum: "old",
+            pendingUpload: true
+        ))
+        XCTAssertTrue(FamilySyncReason.launch.usesLightweightRemoteCheck)
+        XCTAssertTrue(FamilySyncReason.foregroundTimerPoll.usesLightweightRemoteCheck)
+        XCTAssertFalse(FamilySyncReason.localMutation.usesLightweightRemoteCheck)
+        XCTAssertFalse(FamilySyncReason.remoteNotification.usesLightweightRemoteCheck)
+        XCTAssertTrue(FamilySyncReason.manual.requiresExplicitAccountCheck)
+        XCTAssertFalse(FamilySyncReason.launch.requiresExplicitAccountCheck)
+        XCTAssertFalse(FamilySyncReason.foregroundTimerPoll.requiresExplicitAccountCheck)
+        XCTAssertTrue(FamilySyncReason.launch.ensuresPushSubscription)
+        XCTAssertTrue(FamilySyncReason.manual.ensuresPushSubscription)
+        XCTAssertFalse(FamilySyncReason.foregroundTimerPoll.ensuresPushSubscription)
+    }
+
+    @MainActor
+    func testForegroundIntegrationReconciliationSkipsRecentUnchangedState() {
+        let now = Date(timeIntervalSinceReferenceDate: 500_000)
+        XCTAssertFalse(SystemIntegrationReconciler.needsForegroundReconciliation(
+            lastCompletedAt: now.addingTimeInterval(-60),
+            lastLocalSaveAt: now.addingTimeInterval(-120),
+            now: now,
+            maximumAge: 15 * 60
+        ))
+        XCTAssertTrue(SystemIntegrationReconciler.needsForegroundReconciliation(
+            lastCompletedAt: now.addingTimeInterval(-120),
+            lastLocalSaveAt: now.addingTimeInterval(-60),
+            now: now,
+            maximumAge: 15 * 60
+        ))
+        XCTAssertTrue(SystemIntegrationReconciler.needsForegroundReconciliation(
+            lastCompletedAt: now.addingTimeInterval(-16 * 60),
+            lastLocalSaveAt: nil,
+            now: now,
+            maximumAge: 15 * 60
+        ))
+        XCTAssertTrue(SystemIntegrationReconciler.needsForegroundReconciliation(
+            lastCompletedAt: nil,
+            lastLocalSaveAt: nil,
+            now: now,
+            maximumAge: 15 * 60
+        ))
+    }
+
+    func testFamilySyncOnlyTreatsConfirmedCloudKitAccessFailuresAsTerminal() {
+        XCTAssertTrue(CloudKitSharingService.isTerminalShareAccessError(code: .permissionFailure))
+        XCTAssertTrue(CloudKitSharingService.isTerminalShareAccessError(code: .unknownItem))
+        XCTAssertTrue(CloudKitSharingService.isTerminalShareAccessError(code: .zoneNotFound))
+        XCTAssertTrue(CloudKitSharingService.isTerminalShareAccessError(code: .userDeletedZone))
+        XCTAssertFalse(CloudKitSharingService.isTerminalShareAccessError(code: .networkUnavailable))
+        XCTAssertFalse(CloudKitSharingService.isTerminalShareAccessError(code: .serviceUnavailable))
+        XCTAssertFalse(CloudKitSharingService.isTerminalShareAccessError(code: .notAuthenticated))
+    }
+
+    @MainActor
+    func testFamilySyncAccessEndedStateRequiresLocalCopyDecision() throws {
+        let defaults = try makeIsolatedDefaults()
+        PersistenceService.setFamilySyncMode(.privateICloudSync, defaults: defaults)
+        defaults.set(
+            FamilyShareInactiveReason.accessEnded.rawValue,
+            forKey: CloudKitSharingService.inactiveReasonKey
+        )
+        defaults.set(UUID().uuidString, forKey: CloudKitSharingService.inactiveEventIDKey)
+        let service = CloudKitSharingService(defaults: defaults)
+
+        let inactiveState = service.currentState(privateSyncAvailable: true)
+
+        XCTAssertEqual(inactiveState.status, .accessEnded)
+        XCTAssertEqual(inactiveState.inactiveReason, .accessEnded)
+        XCTAssertFalse(inactiveState.canCreateShare)
+        XCTAssertFalse(inactiveState.canResumeShare)
+
+        let container = try makeInMemoryContainer()
+        try service.resolveInactiveShare(
+            context: container.mainContext,
+            deleteLocalData: false
+        )
+        let resolvedState = service.currentState(privateSyncAvailable: true)
+
+        XCTAssertEqual(resolvedState.status, .readyToShare)
+        XCTAssertNil(resolvedState.inactiveReason)
+        XCTAssertTrue(resolvedState.canCreateShare)
+    }
+
+    @MainActor
+    func testFamilySyncAccessEndedNotificationOpensSettings() {
+        let content = NotificationManager.shared.buildFamilySyncAccessEndedNotificationContent(
+            reason: .accessEnded
+        )
+
+        XCTAssertEqual(content.title, "Family Sync access ended")
+        XCTAssertTrue(content.body.contains("downloaded data remains"))
+        XCTAssertEqual(content.categoryIdentifier, NotificationManager.familySyncActivityCategoryID)
+        XCTAssertEqual(
+            content.userInfo["deepLink"] as? String,
+            "littlewindows://settings/family-sync"
+        )
+    }
+
+    @MainActor
+    func testFamilySyncSettingsDeepLinkOpensRecoveryScreen() {
+        let router = DeepLinkRouter.shared
+        router.showingSettings = false
+        router.showingFamilySyncSettings = false
+
+        router.route(URL(string: "littlewindows://settings/family-sync")!)
+
+        XCTAssertTrue(router.showingSettings)
+        XCTAssertTrue(router.showingFamilySyncSettings)
+        router.showingSettings = false
+        router.showingFamilySyncSettings = false
+    }
+
     @MainActor
     private func fetchOrCreateSmokeProfile(
         named name: String,
@@ -498,6 +747,17 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertFalse(EventType.custom.affectsSleepPrediction)
     }
 
+    @MainActor
+    func testSleepAndCareTimerStateChangesRefreshLittleWindowAlerts() {
+        let sleep = BabyEvent(type: .sleep, startDate: Date())
+        let nursing = BabyEvent(type: .nursing, startDate: Date())
+        let diaper = BabyEvent(type: .diaper, startDate: Date(), endDate: Date())
+
+        XCTAssertTrue(EventMutationService.shouldRefreshLittleWindowAlert(after: sleep))
+        XCTAssertTrue(EventMutationService.shouldRefreshLittleWindowAlert(after: nursing))
+        XCTAssertFalse(EventMutationService.shouldRefreshLittleWindowAlert(after: diaper))
+    }
+
     func testPottyIconUsesProfileContext() {
         XCTAssertEqual(EventType.potty.systemImage(for: .child), "figure.child")
         XCTAssertEqual(EventType.potty.systemImage(for: nil), "figure.child")
@@ -568,6 +828,38 @@ final class SleepPredictionEngineTests: XCTestCase {
                 now: prediction.predictedWindowStart
             ),
             .skip(.alertTimePassed)
+        )
+    }
+
+    @MainActor
+    func testLittleWindowAlertPausesWhileSleepingAndSchedulesAfterStopping() {
+        let prediction = makeLittleWindowPrediction()
+        let settings = LittleWindowAlertSettings(
+            enabled: true,
+            leadMinutes: 10,
+            napAlertsEnabled: true,
+            bedtimeAlertsEnabled: true,
+            confidenceThreshold: .low
+        )
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+
+        XCTAssertEqual(
+            NotificationManager.schedulingDecision(
+                prediction: prediction,
+                settings: settings,
+                isSleeping: true,
+                now: now
+            ),
+            .skip(.sleeping)
+        )
+        XCTAssertEqual(
+            NotificationManager.schedulingDecision(
+                prediction: prediction,
+                settings: settings,
+                isSleeping: false,
+                now: now
+            ),
+            .schedule(prediction.predictedWindowStart.addingTimeInterval(-10 * 60))
         )
     }
 
@@ -856,7 +1148,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         let event = BabyEvent(
             profileID: sibling.id,
             type: .diaper,
-            startDate: Date(timeIntervalSinceReferenceDate: 1_000)
+            startDate: Date(timeIntervalSinceReferenceDate: 1_000),
+            startTimeZoneIdentifier: "America/New_York"
         )
         let appointment = DoctorAppointment(
             profileID: sibling.id,
@@ -873,7 +1166,123 @@ final class SleepPredictionEngineTests: XCTestCase {
         let importedEvents = try context.fetch(FetchDescriptor<BabyEvent>())
         let importedAppointments = try context.fetch(FetchDescriptor<DoctorAppointment>())
         XCTAssertEqual(importedEvents.first?.profileID, sibling.id)
+        XCTAssertEqual(importedEvents.first?.startTimeZoneIdentifier, "America/New_York")
         XCTAssertEqual(importedAppointments.first?.profileID, sibling.id)
+    }
+
+    @MainActor
+    func testInvalidBackupLeavesExistingDataUntouched() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let existingProfile = BabyProfile(
+            name: "Test Child",
+            birthDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        context.insert(existingProfile)
+        try context.save()
+
+        let validBackup = try DataExportImportService.exportData(context: context)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: validBackup) as? [String: Any]
+        )
+        var profiles = try XCTUnwrap(object["profiles"] as? [[String: Any]])
+        profiles.append(try XCTUnwrap(profiles.first))
+        object["profiles"] = profiles
+        let invalidBackup = try JSONSerialization.data(withJSONObject: object)
+
+        XCTAssertThrowsError(
+            try DataExportImportService.importData(
+                invalidBackup,
+                context: context,
+                createRecoveryBackup: false
+            )
+        )
+
+        let profilesAfterFailure = try context.fetch(FetchDescriptor<BabyProfile>())
+        XCTAssertEqual(profilesAfterFailure.map(\.id), [existingProfile.id])
+        XCTAssertEqual(profilesAfterFailure.first?.name, "Test Child")
+    }
+
+    func testTravelEventKeepsElapsedDurationAndRecordedLocalTimes() throws {
+        let formatter = ISO8601DateFormatter()
+        let start = try XCTUnwrap(formatter.date(from: "2026-07-15T14:00:00Z"))
+        let end = try XCTUnwrap(formatter.date(from: "2026-07-15T15:00:00Z"))
+        let event = BabyEvent(
+            type: .sleep,
+            startDate: start,
+            endDate: end,
+            startTimeZoneIdentifier: "America/New_York",
+            endTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        event.sleepKind = .nap
+
+        XCTAssertEqual(event.duration, 60 * 60)
+        XCTAssertEqual(event.localStartMinute(), 10 * 60)
+        XCTAssertEqual(event.localEndMinute(), 8 * 60)
+        XCTAssertTrue(event.spansTimeZones)
+
+        let display = DateFormatting.window(
+            start: start,
+            end: end,
+            startTimeZone: event.startTimeZone,
+            endTimeZone: event.endTimeZone,
+            includesTimeZones: true
+        )
+        XCTAssertTrue(display.contains("EDT"))
+        XCTAssertTrue(display.contains("PDT"))
+
+        var pacificCalendar = Calendar(identifier: .gregorian)
+        pacificCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let selectedDay = try XCTUnwrap(
+            pacificCalendar.date(from: DateComponents(year: 2026, month: 7, day: 15))
+        )
+        XCTAssertTrue(event.occursOnLocalDay(selectedDay, calendar: pacificCalendar))
+
+        let placement = try XCTUnwrap(
+            DayTimelineLayout.placements(
+                for: [event],
+                on: selectedDay,
+                calendar: pacificCalendar
+            ).first
+        )
+        XCTAssertEqual(placement.startMinute, 10 * 60)
+        XCTAssertEqual(placement.endMinute, 11 * 60)
+    }
+
+    func testRecordedZonePreventsEntryMovingToPreviousDayAfterTravel() throws {
+        let formatter = ISO8601DateFormatter()
+        let eastCoastOneAM = try XCTUnwrap(formatter.date(from: "2026-01-15T06:00:00Z"))
+        let event = BabyEvent(
+            type: .diaper,
+            startDate: eastCoastOneAM,
+            startTimeZoneIdentifier: "America/New_York"
+        )
+
+        var pacificCalendar = Calendar(identifier: .gregorian)
+        pacificCalendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let january15 = try XCTUnwrap(
+            pacificCalendar.date(from: DateComponents(year: 2026, month: 1, day: 15))
+        )
+
+        XCTAssertFalse(pacificCalendar.isDate(event.startDate, inSameDayAs: january15))
+        XCTAssertTrue(event.occursOnLocalDay(january15, calendar: pacificCalendar))
+    }
+
+    func testManualCareTimeZoneOverrideWinsOverDetectedZone() throws {
+        let suiteName = "CareTimeZoneSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(CareTimeZoneMode.manual.rawValue, forKey: CareTimeZoneSettings.modeKey)
+        defaults.set("America/New_York", forKey: CareTimeZoneSettings.manualIdentifierKey)
+
+        let detected = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        XCTAssertEqual(
+            CareTimeZoneSettings.effectiveIdentifier(
+                defaults: defaults,
+                automaticTimeZone: detected
+            ),
+            "America/New_York"
+        )
     }
 
     @MainActor
@@ -1474,6 +1883,17 @@ final class SleepPredictionEngineTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testNightLightGeneratedSoundPreparesWithoutBlockingStart() {
+        let service = NightLightAudioService()
+
+        service.play(.pinkNoise, volume: 0.25)
+
+        XCTAssertTrue(service.isPreparing)
+        XCTAssertFalse(service.isPlaying)
+        service.stop()
+    }
+
     func testNightLightWhiteNoiseHasBundledMasteredLoop() throws {
         let url = try XCTUnwrap(
             NightLightAudioService.masteredLoopURL(for: .whiteNoise)
@@ -1696,6 +2116,51 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(event.isTimerDraft)
         XCTAssertFalse(event.isTimerRunning)
         XCTAssertGreaterThan(event.timerElapsed(), 0)
+    }
+
+    @MainActor
+    func testLiveActivityStopUsesWidgetTapTime() async throws {
+        let container = try makeInMemoryContainer()
+        let startedAt = Date().addingTimeInterval(-300)
+        let requestedAt = Date().addingTimeInterval(-2)
+        let event = BabyEvent(type: .sleep, startDate: startedAt)
+        event.updatedAt = startedAt
+        container.mainContext.insert(event)
+        try container.mainContext.save()
+
+        let processed = await IntegrationCommandProcessor.process(
+            URL(string: "littlewindows://action/stop/\(event.id.uuidString)?requestedAt=\(requestedAt.timeIntervalSince1970)")!,
+            container: container
+        )
+
+        XCTAssertTrue(processed)
+        XCTAssertFalse(event.isTimerRunning)
+        XCTAssertEqual(
+            event.timerAccumulatedSeconds ?? 0,
+            requestedAt.timeIntervalSince(startedAt),
+            accuracy: 0.01
+        )
+    }
+
+    @MainActor
+    func testDelayedWidgetStopDoesNotOverrideNewerTimerAction() async throws {
+        let container = try makeInMemoryContainer()
+        let requestedAt = Date().addingTimeInterval(-2)
+        let event = BabyEvent(
+            type: .sleep,
+            startDate: Date().addingTimeInterval(-300)
+        )
+        event.updatedAt = requestedAt.addingTimeInterval(1)
+        container.mainContext.insert(event)
+        try container.mainContext.save()
+
+        let processed = await IntegrationCommandProcessor.process(
+            URL(string: "littlewindows://action/stop/\(event.id.uuidString)?requestedAt=\(requestedAt.timeIntervalSince1970)")!,
+            container: container
+        )
+
+        XCTAssertTrue(processed)
+        XCTAssertTrue(event.isTimerRunning)
     }
 
     @MainActor
@@ -3442,6 +3907,80 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testWidgetRefreshPublishesStoppedAndSavedTimerStateBeforeReturning() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let event = try XCTUnwrap(EventTimerService.start(
+            type: .sleep,
+            sleepKind: .nap,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            at: now.addingTimeInterval(-300)
+        ))
+
+        WidgetSnapshotService.refresh(
+            profile: nil,
+            events: [event],
+            prediction: nil
+        )
+        XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.id, event.id)
+        XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.resolvedIsRunning, true)
+
+        EventTimerService.stop(event, context: container.mainContext, at: now)
+        WidgetSnapshotService.refresh(
+            profile: nil,
+            events: [event],
+            prediction: nil
+        )
+        XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.id, event.id)
+        XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.resolvedIsRunning, false)
+
+        EventTimerService.save(event, context: container.mainContext, at: now)
+        WidgetSnapshotService.refresh(
+            profile: nil,
+            events: [event],
+            prediction: nil
+        )
+        XCTAssertNil(WidgetSnapshotService.read().activeTimer)
+    }
+
+    @MainActor
+    func testQuickActionsOmitStartsForTimerTypesThatAreAlreadyActive() {
+        let now = Date(timeIntervalSinceReferenceDate: 342_000)
+        let sleep = BabyEvent(
+            type: .sleep,
+            startDate: now.addingTimeInterval(-600)
+        )
+        let nursing = BabyEvent(
+            type: .nursing,
+            startDate: now.addingTimeInterval(-300)
+        )
+        nursing.nursingSide = .left
+        nursing.activeNursingSide = .left
+        let activeTimer = WidgetSnapshotService.activeSnapshot(
+            event: nursing,
+            babyName: "Test Child",
+            additionalActiveCount: 1,
+            now: now
+        )
+
+        let actions = WidgetSnapshotService.makeQuickActions(
+            profileType: .child,
+            events: [sleep, nursing],
+            activeTimer: activeTimer,
+            pinnedActionIDs: ["sleep", "nursing-left"],
+            now: now
+        )
+        let actionIDs = Set(actions.map(\.id))
+
+        XCTAssertFalse(actionIDs.contains("sleep"))
+        XCTAssertFalse(actionIDs.contains("nursing-left"))
+        XCTAssertFalse(actionIDs.contains("nursing-right"))
+        XCTAssertTrue(actionIDs.contains("active-timer"))
+    }
+
+    @MainActor
     func testDogQuickActionsPreferDogCareEvents() {
         let now = Date(timeIntervalSinceReferenceDate: 345_000)
         let food = BabyEvent(type: .food, startDate: now.addingTimeInterval(-3_600))
@@ -3765,6 +4304,45 @@ final class SleepPredictionEngineTests: XCTestCase {
             accuracy: 0.001
         )
         XCTAssertEqual(snapshot.todaySummary.careSessionCount, 0)
+    }
+
+    @MainActor
+    func testTimerStartRejectsSameTypeDraftButAllowsDifferentType() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 355_000)
+        let sleep = try XCTUnwrap(EventTimerService.start(
+            type: .sleep,
+            sleepKind: .nap,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            at: now.addingTimeInterval(-120)
+        ))
+        EventTimerService.stop(
+            sleep,
+            context: container.mainContext,
+            at: now
+        )
+
+        let duplicateSleep = EventTimerService.start(
+            type: .sleep,
+            sleepKind: .nightSleep,
+            caregiverName: "Caregiver 1",
+            events: [sleep],
+            context: container.mainContext,
+            at: now
+        )
+        let nursing = EventTimerService.start(
+            type: .nursing,
+            nursingSide: .left,
+            caregiverName: "Caregiver 1",
+            events: [sleep],
+            context: container.mainContext,
+            at: now
+        )
+
+        XCTAssertNil(duplicateSleep)
+        XCTAssertNotNil(nursing)
     }
 
     func testDailySummaryTracksDogCareMetricsSeparately() {
@@ -4127,11 +4705,52 @@ final class SleepPredictionEngineTests: XCTestCase {
             additionalActiveCount: 0,
             now: now
         )
+        let widgetSnapshot = WidgetSnapshotService.makeSnapshot(
+            babyName: "Test Child",
+            events: [event],
+            prediction: nil,
+            now: now
+        )
 
         XCTAssertEqual(result, correctedStart)
         XCTAssertEqual(event.startDate, correctedStart)
         XCTAssertEqual(snapshot.startDate, correctedStart)
+        XCTAssertEqual(snapshot.elapsedSeconds ?? 0, 420, accuracy: 0.001)
+        XCTAssertEqual(widgetSnapshot.activeTimer?.startDate, correctedStart)
+        XCTAssertEqual(widgetSnapshot.activeTimer?.elapsedSeconds ?? 0, 420, accuracy: 0.001)
         XCTAssertEqual(now.timeIntervalSince(event.startDate), 420, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testNursingTimerSnapshotCarriesLiveTotalAndActiveSideTime() {
+        let now = Date(timeIntervalSinceReferenceDate: 150_000)
+        let event = BabyEvent(
+            type: .nursing,
+            startDate: now.addingTimeInterval(-900)
+        )
+        event.timerState = .running
+        event.timerAccumulatedSeconds = 600
+        event.activeTimerSegmentStartDate = now.addingTimeInterval(-300)
+        event.nursingSide = .right
+        event.activeNursingSide = .right
+        event.leftDurationSeconds = 420
+        event.rightDurationSeconds = 180
+
+        let snapshot = WidgetSnapshotService.activeSnapshot(
+            event: event,
+            babyName: "Test Child",
+            additionalActiveCount: 0,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.resolvedElapsedSeconds, 900, accuracy: 0.001)
+        XCTAssertEqual(snapshot.leftDurationSeconds, 420, accuracy: 0.001)
+        XCTAssertEqual(snapshot.rightDurationSeconds, 480, accuracy: 0.001)
+        XCTAssertEqual(snapshot.activeNursingSideElapsedSeconds, 480, accuracy: 0.001)
+        XCTAssertEqual(
+            snapshot.activeNursingSideTimerStartDate,
+            now.addingTimeInterval(-480)
+        )
     }
 
     @MainActor
@@ -4842,6 +5461,81 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testSolidFoodCatalogAndPhotoRoundTripThroughJSONBackup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let photoDraft = PhotoAttachmentDraft(
+            imageData: Data([1, 3, 5, 7]),
+            thumbnailData: Data([1, 3])
+        )
+        let item = try XCTUnwrap(SolidFoodCatalogService.create(
+            name: "  Family oatmeal  ",
+            photoDraft: photoDraft,
+            existingItems: [],
+            context: context,
+            now: Date(timeIntervalSince1970: 1_790_000_000)
+        ))
+        XCTAssertTrue(PersistenceService.save(context: context))
+
+        let backup = try DataExportImportService.exportData(context: context)
+        try DataExportImportService.importData(backup, context: context)
+
+        let imported = try XCTUnwrap(
+            context.fetch(FetchDescriptor<SolidFoodCatalogItem>()).first
+        )
+        XCTAssertEqual(imported.name, "Family oatmeal")
+        XCTAssertEqual(imported.normalizedName, "family oatmeal")
+        XCTAssertEqual(imported.photoAttachmentID, photoDraft.id)
+
+        let photo = try XCTUnwrap(
+            context.fetch(FetchDescriptor<PhotoAttachment>()).first {
+                $0.id == photoDraft.id
+            }
+        )
+        XCTAssertEqual(photo.ownerKind, .solidFood)
+        XCTAssertNil(photo.profileID)
+        XCTAssertEqual(photo.imageData, Data([1, 3, 5, 7]))
+        XCTAssertEqual(photo.thumbnailData, Data([1, 3]))
+    }
+
+    func testSolidFoodSelectionCleansAndDeduplicatesNames() {
+        let names = SolidFoodSelection.names(
+            from: "Banana, yogurt\n banana , Crème fraîche"
+        )
+        XCTAssertEqual(names, ["Banana", "yogurt", "Crème fraîche"])
+        XCTAssertEqual(
+            SolidFoodSelection.description(from: names),
+            "Banana, yogurt, Crème fraîche"
+        )
+    }
+
+    func testSolidFoodIdeaCatalogProvidesBalancedUniqueStarterLibrary() {
+        let ideas = SolidFoodIdeaCatalog.foods
+        let normalizedNames = ideas.map { SolidFoodSelection.normalizedName($0.name) }
+        let expectedFoods = [
+            "Spinach", "Peas", "Yogurt", "Carrot", "Prune", "Green beans",
+            "Mango", "Egg", "Strawberry", "Pasta", "Blueberry", "Oatmeal",
+            "Chicken", "Lentils", "Tofu", "Peanut butter", "Salmon"
+        ]
+
+        XCTAssertGreaterThanOrEqual(ideas.count, 50)
+        XCTAssertEqual(Set(normalizedNames).count, ideas.count)
+        XCTAssertTrue(ideas.allSatisfy { !$0.emoji.isEmpty })
+        for expectedFood in expectedFoods {
+            XCTAssertTrue(
+                normalizedNames.contains(SolidFoodSelection.normalizedName(expectedFood)),
+                "Expected the starter library to include \(expectedFood)"
+            )
+        }
+        for category in SolidFoodIdeaCategory.allCases {
+            XCTAssertTrue(
+                ideas.contains { $0.category == category },
+                "Expected at least one food in \(category.displayName)"
+            )
+        }
+    }
+
+    @MainActor
     func testAppointmentsRoundTripThroughJSONBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -4856,6 +5550,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             appointmentType: .wellnessCheck,
             startDate: startDate,
             endDate: startDate.addingTimeInterval(30 * 60),
+            timeZoneIdentifier: "America/New_York",
             locationName: "Suite 4",
             address: "123 Care Lane",
             doctorName: "Dr. Rivera",
@@ -4891,6 +5586,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(imported.appointmentType, .wellnessCheck)
         XCTAssertEqual(imported.startDate, startDate)
         XCTAssertEqual(imported.endDate, startDate.addingTimeInterval(30 * 60))
+        XCTAssertEqual(imported.timeZoneIdentifier, "America/New_York")
         XCTAssertEqual(imported.locationName, "Suite 4")
         XCTAssertEqual(imported.address, "123 Care Lane")
         XCTAssertEqual(imported.doctorName, "Dr. Rivera")
@@ -5064,7 +5760,8 @@ final class SleepPredictionEngineTests: XCTestCase {
             type: .shopping,
             title: "Check shopping list",
             relatedShoppingListID: list.id,
-            dateTime: Date(timeIntervalSince1970: 1_780_200_000)
+            dateTime: Date(timeIntervalSince1970: 1_780_200_000),
+            timeZoneIdentifier: "America/Chicago"
         )
         let todoReminder = FoodReminder(
             householdID: household.id,
@@ -5125,8 +5822,49 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(importedMealPrep.tagsJSON, "freezer,dinner")
         XCTAssertEqual(importedUsage.notes, "Dinner")
         XCTAssertEqual(importedReminder.relatedShoppingListID, list.id)
+        XCTAssertEqual(importedReminder.timeZoneIdentifier, "America/Chicago")
         XCTAssertEqual(importedTodoReminder.type, .todos)
         XCTAssertEqual(importedTodoReminder.relatedTodoListID, todoList.id)
+    }
+
+    @MainActor
+    func testCreatingReturnPersistsDefaultSendBackDetailsOnFirstSave() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        context.insert(household)
+
+        let request = try XCTUnwrap(ReturnTrackingService.createReturn(
+            householdID: household.id,
+            sortOrder: 0,
+            itemName: "Sample Item",
+            itemQuantity: 1,
+            itemReason: "Not needed",
+            returnURLString: "https://example.com/return",
+            packageName: "",
+            carrier: .wholeFoods,
+            method: .dropOff,
+            trackingNumber: "",
+            returnByDate: nil,
+            photoAttachmentIDs: [],
+            context: context
+        ))
+
+        let package = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ReturnPackage>()).first {
+                $0.returnRequestID == request.id
+            }
+        )
+        let item = try XCTUnwrap(
+            context.fetch(FetchDescriptor<ReturnItem>()).first {
+                $0.returnRequestID == request.id
+            }
+        )
+
+        XCTAssertEqual(package.carrier, .wholeFoods)
+        XCTAssertEqual(package.method, .dropOff)
+        XCTAssertEqual(item.packageID, package.id)
+        XCTAssertEqual(item.name, "Sample Item")
     }
 
     @MainActor
@@ -5735,6 +6473,67 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testStoreSectionsCanReorderAndRemoveDefaultsWithoutOrphaningItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        context.insert(household)
+        try context.save()
+
+        let store = try XCTUnwrap(StoreLayoutService.createStore(
+            name: "Test Store",
+            householdID: household.id,
+            context: context
+        ))
+        let originalSections = try context.fetch(FetchDescriptor<FoodStoreSection>())
+            .filter { $0.storeID == store.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(originalSections.count, 6)
+
+        let produce = try XCTUnwrap(originalSections.first { $0.name == "Produce" })
+        let list = try XCTUnwrap(ShoppingListService.createList(
+            name: "Test List",
+            householdID: household.id,
+            storeID: store.id,
+            context: context
+        ))
+        let item = ShoppingListItem(
+            householdID: household.id,
+            shoppingListID: list.id,
+            name: "Sample Item",
+            storeSectionID: produce.id
+        )
+        context.insert(item)
+        try context.save()
+
+        let reversedSections = Array(originalSections.reversed())
+        XCTAssertTrue(StoreLayoutService.reorderSections(
+            reversedSections,
+            in: store,
+            context: context,
+            now: Date(timeIntervalSince1970: 400)
+        ))
+        XCTAssertEqual(reversedSections.map(\.sortOrder), Array(0..<reversedSections.count))
+
+        XCTAssertTrue(StoreLayoutService.deleteSection(
+            produce,
+            from: store,
+            shoppingItems: [item],
+            remainingSections: reversedSections,
+            context: context,
+            now: Date(timeIntervalSince1970: 500)
+        ))
+
+        let remainingSections = try context.fetch(FetchDescriptor<FoodStoreSection>())
+            .filter { $0.storeID == store.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(remainingSections.count, 5)
+        XCTAssertFalse(remainingSections.contains { $0.id == produce.id })
+        XCTAssertEqual(remainingSections.map(\.sortOrder), Array(0..<remainingSections.count))
+        XCTAssertNil(item.storeSectionID)
+    }
+
+    @MainActor
     func testFoodCleanupServicesRemoveAndArchiveUserItems() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -5844,6 +6643,73 @@ final class SleepPredictionEngineTests: XCTestCase {
         PersistenceService.setFamilySyncMode(.sharedFamilySync, defaults: defaults)
         XCTAssertEqual(PersistenceService.familySyncMode(defaults: defaults), .sharedFamilySync)
         XCTAssertTrue(PersistenceService.isICloudSyncEnabled(defaults: defaults))
+    }
+
+    func testFamilySyncCanonicalDataIgnoresExportTimestamp() throws {
+        let first = Data(
+            #"{"version":14,"exportedAt":"2026-07-26T10:00:00Z","profiles":[],"events":[]}"#.utf8
+        )
+        let second = Data(
+            #"{"version":14,"exportedAt":"2026-07-26T10:05:00Z","profiles":[],"events":[]}"#.utf8
+        )
+
+        XCTAssertEqual(
+            try DataExportImportService.familySyncCanonicalData(from: first),
+            try DataExportImportService.familySyncCanonicalData(from: second)
+        )
+    }
+
+    func testFamilySyncThreeWayMergePreservesConcurrentRecordChanges() throws {
+        let eventID = UUID().uuidString
+        let appointmentID = UUID().uuidString
+        let base = Data(
+            #"{"version":14,"exportedAt":"2026-07-26T10:00:00Z","events":[],"appointments":[]}"#.utf8
+        )
+        let local = Data(
+            """
+            {"version":14,"exportedAt":"2026-07-26T10:01:00Z","events":[{"id":"\(eventID)","updatedAt":"2026-07-26T10:01:00Z"}],"appointments":[]}
+            """.utf8
+        )
+        let remote = Data(
+            """
+            {"version":14,"exportedAt":"2026-07-26T10:02:00Z","events":[],"appointments":[{"id":"\(appointmentID)","updatedAt":"2026-07-26T10:02:00Z"}]}
+            """.utf8
+        )
+
+        let merged = try DataExportImportService.mergeFamilySyncData(
+            base: base,
+            local: local,
+            remote: remote,
+            localChangedAt: Date(timeIntervalSince1970: 100),
+            remoteChangedAt: Date(timeIntervalSince1970: 200)
+        )
+        let records = try DataExportImportService.familySyncEntityPayloads(from: merged)
+
+        XCTAssertNotNil(records["events|\(eventID)"])
+        XCTAssertNotNil(records["appointments|\(appointmentID)"])
+    }
+
+    func testFamilySyncThreeWayMergeRetainsRemoteDeletion() throws {
+        let eventID = UUID().uuidString
+        let baseAndLocal = Data(
+            """
+            {"version":14,"exportedAt":"2026-07-26T10:00:00Z","events":[{"id":"\(eventID)","updatedAt":"2026-07-26T10:00:00Z"}]}
+            """.utf8
+        )
+        let remote = Data(
+            #"{"version":14,"exportedAt":"2026-07-26T10:02:00Z","events":[]}"#.utf8
+        )
+
+        let merged = try DataExportImportService.mergeFamilySyncData(
+            base: baseAndLocal,
+            local: baseAndLocal,
+            remote: remote,
+            localChangedAt: Date(timeIntervalSince1970: 100),
+            remoteChangedAt: Date(timeIntervalSince1970: 200)
+        )
+        let records = try DataExportImportService.familySyncEntityPayloads(from: merged)
+
+        XCTAssertNil(records["events|\(eventID)"])
     }
 
     @MainActor

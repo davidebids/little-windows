@@ -89,6 +89,7 @@ final class DeepLinkRouter: ObservableObject {
         rawValue: UserDefaults.standard.string(forKey: "reportsDisplayMode") ?? ""
     ) ?? .day
     @Published var showingSettings = false
+    @Published var showingFamilySyncSettings = false
     @Published var isDataReady = false
 
     private init() {}
@@ -183,6 +184,9 @@ final class DeepLinkRouter: ObservableObject {
             selectedTab = .reports
         } else if components == ["settings"] {
             showingSettings = true
+        } else if components == ["settings", "family-sync"] {
+            showingSettings = true
+            showingFamilySyncSettings = true
         } else if components == ["milestones"] || components == ["memories"] {
             selectedTab = .milestones
         } else if components == ["age-guides"] {

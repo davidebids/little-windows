@@ -49,6 +49,7 @@ struct ActiveTimerSnapshot: Codable, Hashable, Identifiable {
     var elapsedSeconds: TimeInterval?
     var caregiverName: String?
     var activeNursingSideRawValue: String?
+    var activeNursingSideTimerStartDate: Date?
     var leftDurationSeconds: Double
     var rightDurationSeconds: Double
     var additionalActiveCount: Int
@@ -63,6 +64,17 @@ struct ActiveTimerSnapshot: Codable, Hashable, Identifiable {
 
     var resolvedElapsedSeconds: TimeInterval {
         elapsedSeconds ?? 0
+    }
+
+    var activeNursingSideElapsedSeconds: TimeInterval {
+        switch activeNursingSide {
+        case .left:
+            leftDurationSeconds
+        case .right:
+            rightDurationSeconds
+        case .none:
+            0
+        }
     }
 
     var stopURL: URL {

@@ -8,6 +8,7 @@ struct PuppyStageGuideCard: View {
     var onRead: () -> Void
     var onAddMilestone: () -> Void
     var onLogTraining: () -> Void
+    var isTrainingTimerActive = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,8 +40,13 @@ struct PuppyStageGuideCard: View {
                     .tint(.teal)
                 Button("Add milestone", systemImage: "heart.fill", action: onAddMilestone)
                     .buttonStyle(.bordered)
-                Button("Log training", systemImage: "graduationcap.fill", action: onLogTraining)
+                Button(
+                    isTrainingTimerActive ? "Training active" : "Log training",
+                    systemImage: isTrainingTimerActive ? "timer" : "graduationcap.fill",
+                    action: onLogTraining
+                )
                     .buttonStyle(.bordered)
+                    .disabled(isTrainingTimerActive)
             }
             .font(.caption.weight(.semibold))
         }
@@ -160,7 +166,7 @@ struct PuppyStageGuideDetailView: View {
                 EventEditorView(type: route.type, event: route.event) { event in
                     event.profileID = event.profileID ?? profile?.id
                     event.profileTypeSnapshot = .dog
-                    try? modelContext.save()
+                    _ = PersistenceService.save(context: modelContext)
                 }
             }
         }

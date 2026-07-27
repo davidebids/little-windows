@@ -926,6 +926,7 @@ final class FoodReminder {
     var relatedMealPrepItemID: UUID?
     var relatedReturnRequestID: UUID?
     var dateTime: Date = Date()
+    var timeZoneIdentifier: String?
     var isEnabled: Bool = true
     var recurrence: String?
     var createdAt: Date = Date()
@@ -941,6 +942,7 @@ final class FoodReminder {
         relatedMealPrepItemID: UUID? = nil,
         relatedReturnRequestID: UUID? = nil,
         dateTime: Date,
+        timeZoneIdentifier: String? = CareTimeZoneSettings.effectiveIdentifier(),
         isEnabled: Bool = true,
         recurrence: String? = nil,
         createdAt: Date = Date(),
@@ -955,6 +957,7 @@ final class FoodReminder {
         self.relatedMealPrepItemID = relatedMealPrepItemID
         self.relatedReturnRequestID = relatedReturnRequestID
         self.dateTime = dateTime
+        self.timeZoneIdentifier = timeZoneIdentifier
         self.isEnabled = isEnabled
         self.recurrence = recurrence
         self.createdAt = createdAt

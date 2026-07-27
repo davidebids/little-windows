@@ -42,6 +42,61 @@ enum DateFormatting {
         return "\(startText)-\(endText)"
     }
 
+    static func timeString(
+        from date: Date,
+        timeZone: TimeZone,
+        includesTimeZone: Bool = false
+    ) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.timeZone = timeZone
+        let value = formatter.string(from: date)
+        guard includesTimeZone else { return value }
+        let abbreviation = timeZone.abbreviation(for: date)
+            ?? gmtOffsetText(for: timeZone, on: date)
+        return "\(value) \(abbreviation)"
+    }
+
+    private static func gmtOffsetText(for timeZone: TimeZone, on date: Date) -> String {
+        let seconds = timeZone.secondsFromGMT(for: date)
+        let sign = seconds < 0 ? "-" : "+"
+        let absoluteMinutes = abs(seconds) / 60
+        let hours = absoluteMinutes / 60
+        let minutes = absoluteMinutes % 60
+        return minutes == 0
+            ? "GMT\(sign)\(hours)"
+            : String(format: "GMT%@%d:%02d", sign, hours, minutes)
+    }
+
+    static func dayString(from date: Date, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeZone = timeZone
+        return formatter.string(from: date)
+    }
+
+    static func window(
+        start: Date,
+        end: Date,
+        startTimeZone: TimeZone,
+        endTimeZone: TimeZone,
+        includesTimeZones: Bool
+    ) -> String {
+        let showZones = includesTimeZones || startTimeZone.identifier != endTimeZone.identifier
+        let startText = timeString(
+            from: start,
+            timeZone: startTimeZone,
+            includesTimeZone: showZones
+        )
+        let endText = timeString(
+            from: end,
+            timeZone: endTimeZone,
+            includesTimeZone: showZones
+        )
+        guard end > start else { return startText }
+        return "\(startText)-\(endText)"
+    }
+
     static func age(from birthDate: Date, to date: Date = Date(), calendar: Calendar = .current) -> String {
         let components = calendar.dateComponents([.year, .month, .day], from: birthDate, to: date)
         let years = components.year ?? 0

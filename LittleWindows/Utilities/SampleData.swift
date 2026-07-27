@@ -31,8 +31,7 @@ enum SampleData {
         if let profile = try? context.fetch(FetchDescriptor<BabyProfile>()).first {
             ProfileService.shared.switchProfile(profile)
         }
-        try? context.save()
-        PersistenceService.recordLocalSave()
+        _ = PersistenceService.save(context: context)
     }
 
     static func bundledLegacyTrackerHistory() throws -> Data {

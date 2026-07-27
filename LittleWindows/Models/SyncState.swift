@@ -119,6 +119,7 @@ enum FamilyShareStatus: String, Equatable {
     case notConfigured
     case readyToShare
     case sharing
+    case accessEnded
     case needsICloud
     case localOnly
     case error
@@ -131,12 +132,46 @@ enum FamilyShareStatus: String, Equatable {
             return "Ready"
         case .sharing:
             return "Sharing"
+        case .accessEnded:
+            return "Access ended"
         case .needsICloud:
             return "Needs iCloud"
         case .localOnly:
             return "Local only"
         case .error:
             return "Needs attention"
+        }
+    }
+}
+
+enum FamilyShareInactiveReason: String, Equatable {
+    case accessEnded
+    case shareNoLongerAvailable
+
+    var title: String {
+        switch self {
+        case .accessEnded:
+            return "Family Sync access ended"
+        case .shareNoLongerAvailable:
+            return "Family sharing ended"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .accessEnded:
+            return "The owner stopped sharing or removed this Apple Account. Syncing has stopped, but the data already downloaded to this device is still available as a private copy."
+        case .shareNoLongerAvailable:
+            return "This family share is no longer available in iCloud. Syncing has stopped, but the data on this device is still available as a private copy."
+        }
+    }
+
+    var notificationBody: String {
+        switch self {
+        case .accessEnded:
+            return "The owner stopped sharing or removed your access. Your downloaded data remains on this device."
+        case .shareNoLongerAvailable:
+            return "The shared family space is no longer active. Your data remains on this device."
         }
     }
 }
@@ -158,6 +193,7 @@ struct FamilyShareState: Equatable {
     var canManageShare: Bool
     var canSyncNow: Bool
     var canLeaveShare: Bool
+    var inactiveReason: FamilyShareInactiveReason?
     var lastAcceptanceMessage: String?
     var lastErrorMessage: String?
 }

@@ -8,7 +8,7 @@ struct DogInsightsView: View {
 
     private var periodEvents: [BabyEvent] {
         events.filter { event in
-            let day = Calendar.current.startOfDay(for: event.startDate)
+            let day = event.localStartDay()
             return day >= period.lowerBound && day <= period.upperBound && !event.isTimerDraft
         }
     }
@@ -171,7 +171,7 @@ struct DogInsightsView: View {
         var day = Calendar.current.startOfDay(for: period.lowerBound)
         let end = Calendar.current.startOfDay(for: period.upperBound)
         while day <= end {
-            let eventsForDay = periodEvents.filter { Calendar.current.isDate($0.startDate, inSameDayAs: day) }
+            let eventsForDay = periodEvents.filter { $0.occursOnLocalDay(day) }
             result.append(DogChartPoint(date: day, value: value(eventsForDay), kind: kind))
             day = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? end.addingTimeInterval(86_400)
         }

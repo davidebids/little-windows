@@ -9,12 +9,12 @@ extension LittleWindowsURLIntent {
     static var openAppWhenRun: Bool { true }
 
     func perform() async throws -> some IntentResult {
-        IntegrationCommandStore.enqueue(destinationURL)
-        if await IntegrationCommandStore.deliverToRunningApp(destinationURL) {
+        let commandURL = IntegrationCommandStore.enqueue(destinationURL)
+        if await IntegrationCommandStore.deliverToRunningApp(commandURL) {
             return .result()
         }
         if #available(iOS 18.2, *) {
-            return .result(opensIntent: OpenURLIntent(destinationURL))
+            return .result(opensIntent: OpenURLIntent(commandURL))
         }
         return .result()
     }

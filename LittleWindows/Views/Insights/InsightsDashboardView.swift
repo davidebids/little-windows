@@ -271,6 +271,8 @@ struct InsightsDashboardView: View {
         let calendar = Calendar.current
         let range = eventFetchRange
         let rangeEnd = calendar.startOfNextDay(for: range.upperBound)
+        let eventFetchStart = range.lowerBound.addingTimeInterval(-30 * 60 * 60)
+        let eventFetchEnd = rangeEnd.addingTimeInterval(30 * 60 * 60)
 
         do {
             if let selectedProfileID, viewModel.selectedSection == .growth {
@@ -293,8 +295,8 @@ struct InsightsDashboardView: View {
                 let descriptor = FetchDescriptor<BabyEvent>(
                     predicate: #Predicate<BabyEvent> { event in
                         event.profileID == selectedProfileID &&
-                            event.startDate >= range.lowerBound &&
-                            event.startDate < rangeEnd
+                            event.startDate >= eventFetchStart &&
+                            event.startDate < eventFetchEnd
                     },
                     sortBy: [SortDescriptor(\BabyEvent.startDate)]
                 )
@@ -302,7 +304,7 @@ struct InsightsDashboardView: View {
             } else {
                 let descriptor = FetchDescriptor<BabyEvent>(
                     predicate: #Predicate<BabyEvent> { event in
-                        event.startDate >= range.lowerBound && event.startDate < rangeEnd
+                        event.startDate >= eventFetchStart && event.startDate < eventFetchEnd
                     },
                     sortBy: [SortDescriptor(\BabyEvent.startDate)]
                 )

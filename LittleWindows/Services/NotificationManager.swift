@@ -149,8 +149,11 @@ final class NotificationManager: NSObject, ObservableObject {
     static let openRoutineActionID = "OPEN_CARE_ROUTINES"
     static let familySyncActivityCategoryID = "FAMILY_SYNC_ACTIVITY"
     static let openFamilySyncActivityActionID = "OPEN_FAMILY_SYNC_ACTIVITY"
+    static let familySyncAccessEndedNotificationID = "family.sync.access-ended"
 
     private static let stateKey = "littleWindowNotificationState"
+    private static let statesByProfileKey = "littleWindowNotificationStatesByProfile"
+    private static let unscopedStateKey = "unscoped"
     private static let allNotificationIDs = [
         nextNotificationID,
         prewindowNotificationID,
@@ -159,9 +162,12 @@ final class NotificationManager: NSObject, ObservableObject {
 
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var notificationState: LittleWindowNotificationState
+    private var statesByProfile: [String: LittleWindowNotificationState]
 
     private override init() {
-        notificationState = Self.loadState()
+        let loadedStates = Self.loadStatesByProfile()
+        statesByProfile = loadedStates
+        notificationState = loadedStates[Self.unscopedStateKey] ?? Self.loadState()
         super.init()
         UNUserNotificationCenter.current().delegate = self
     }
@@ -302,7 +308,8 @@ final class NotificationManager: NSObject, ObservableObject {
         babyName: String,
         profileID: UUID? = nil,
         leadMinutes: Int,
-        enabled: Bool
+        enabled: Bool,
+        isSleeping: Bool = false
     ) async {
         var settings = LittleWindowAlertSettings.current
         settings.enabled = enabled
@@ -311,7 +318,8 @@ final class NotificationManager: NSObject, ObservableObject {
             prediction: prediction,
             babyName: babyName,
             profileID: profileID,
-            settings: settings
+            settings: settings,
+            isSleeping: isSleeping
         )
     }
 
@@ -358,7 +366,8 @@ final class NotificationManager: NSObject, ObservableObject {
                 LittleWindowNotificationState(
                     skipReason: reason,
                     lastUpdatedAt: now
-                )
+                ),
+                profileID: profileID
             )
             return
         }
@@ -371,13 +380,14 @@ final class NotificationManager: NSObject, ObservableObject {
                 LittleWindowNotificationState(
                     skipReason: status == .denied ? .permissionDenied : .alertsOff,
                     lastUpdatedAt: now
-                )
+                ),
+                profileID: profileID
             )
             return
         }
 
         if Self.shouldKeepExistingSchedule(
-            state: notificationState,
+            state: state(profileID: profileID),
             prediction: prediction,
             fireDate: fireDate,
             settings: settings
@@ -396,11 +406,7 @@ final class NotificationManager: NSObject, ObservableObject {
             profileID: profileID,
             leadMinutes: settings.leadMinutes
         )
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: fireDate
-        )
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let trigger = Self.oneShotTrigger(at: fireDate, now: now)
         let identifier = settings.leadMinutes == 0
             ? Self.scopedNotificationID(Self.windowStartNotificationID, profileID: profileID)
             : Self.scopedNotificationID(Self.prewindowNotificationID, profileID: profileID)
@@ -422,14 +428,16 @@ final class NotificationManager: NSObject, ObservableObject {
                     settingsSignature: settings.signature,
                     skipReason: nil,
                     lastUpdatedAt: now
-                )
+                ),
+                profileID: profileID
             )
         } catch {
             updateState(
                 LittleWindowNotificationState(
                     skipReason: .alertsOff,
                     lastUpdatedAt: now
-                )
+                ),
+                profileID: profileID
             )
         }
     }
@@ -442,7 +450,24 @@ final class NotificationManager: NSObject, ObservableObject {
             withIdentifiers: Self.littleWindowNotificationIDs(profileID: profileID)
         )
         if clearState {
-            updateState(.empty)
+            updateState(.empty, profileID: profileID)
+        }
+    }
+
+    func cancelAllPendingLittleWindowAlerts(clearState: Bool = true) async {
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let identifiers = pending.map(\.identifier).filter { identifier in
+            Self.allNotificationIDs.contains(identifier)
+                || Self.allNotificationIDs.contains { identifier.hasSuffix(".\($0)") }
+        }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: identifiers
+        )
+        if clearState {
+            statesByProfile.removeAll()
+            notificationState = .empty
+            UserDefaults.standard.removeObject(forKey: Self.statesByProfileKey)
+            UserDefaults.standard.removeObject(forKey: Self.stateKey)
         }
     }
 
@@ -479,14 +504,10 @@ final class NotificationManager: NSObject, ObservableObject {
             babyName: babyName,
             profileID: profileID
         )
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: fireDate
-        )
         let request = UNNotificationRequest(
             identifier: Self.sleepPressureNotificationID(profileID: profileID),
             content: content,
-            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            trigger: Self.oneShotTrigger(at: fireDate, now: now)
         )
         try? await UNUserNotificationCenter.current().add(request)
     }
@@ -494,6 +515,17 @@ final class NotificationManager: NSObject, ObservableObject {
     func cancelPendingSleepPressureAlerts(profileID: UUID? = nil) async {
         UNUserNotificationCenter.current().removePendingNotificationRequests(
             withIdentifiers: [Self.sleepPressureNotificationID(profileID: profileID)]
+        )
+    }
+
+    func cancelAllPendingSleepPressureAlerts() async {
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let identifiers = pending.map(\.identifier).filter {
+            $0 == Self.sleepPressureNotificationBaseID
+                || $0.hasSuffix(".\(Self.sleepPressureNotificationBaseID)")
+        }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: identifiers
         )
     }
 
@@ -533,10 +565,6 @@ final class NotificationManager: NSObject, ObservableObject {
                 Double(-leadTime.rawValue) * 60
             )
             guard fireDate > now else { continue }
-            let components = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute],
-                from: fireDate
-            )
             let request = UNNotificationRequest(
                 identifier: Self.appointmentNotificationID(
                     appointmentID: appointment.id,
@@ -549,14 +577,10 @@ final class NotificationManager: NSObject, ObservableObject {
                     profileID: appointment.profileID,
                     leadTime: leadTime
                 ),
-                trigger: UNCalendarNotificationTrigger(
-                    dateMatching: components,
-                    repeats: false
-                )
+                trigger: Self.oneShotTrigger(at: fireDate, now: now)
             )
             try? await center.add(request)
         }
-        appointment.lastScheduledAt = Date()
     }
 
     func cancelAppointmentReminders(appointmentID: UUID) async {
@@ -590,11 +614,7 @@ final class NotificationManager: NSObject, ObservableObject {
         )
         let trigger: UNNotificationTrigger?
         if alert.wakeByDate > now {
-            let components = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute],
-                from: alert.wakeByDate
-            )
-            trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            trigger = Self.oneShotTrigger(at: alert.wakeByDate, now: now)
         } else {
             trigger = nil
         }
@@ -619,7 +639,10 @@ final class NotificationManager: NSObject, ObservableObject {
         leadTime: AppointmentReminderLeadTime
     ) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
-        let time = DateFormatting.time.string(from: appointment.startDate)
+        let time = Self.timeString(
+            from: appointment.startDate,
+            timeZone: appointment.timeZone
+        )
         switch leadTime {
         case .oneDay:
             content.title = "\(babyName)'s appointment tomorrow"
@@ -675,7 +698,7 @@ final class NotificationManager: NSObject, ObservableObject {
         timing: MonthlyAgeGuideNotificationTiming,
         now: Date = Date()
     ) async {
-        await cancelMonthlyAgeGuideNotifications()
+        await cancelMonthlyAgeGuideNotifications(profileID: profile.id)
         guard UserDefaults.standard.object(forKey: "monthlyAgeGuideNotificationsEnabled") == nil
                 || UserDefaults.standard.bool(forKey: "monthlyAgeGuideNotificationsEnabled") else {
             return
@@ -710,10 +733,6 @@ final class NotificationManager: NSObject, ObservableObject {
             return
         }
 
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: candidate.1
-        )
         let request = UNNotificationRequest(
             identifier: Self.monthlyAgeGuideNotificationID(
                 guideID: candidate.0.id,
@@ -724,28 +743,23 @@ final class NotificationManager: NSObject, ObservableObject {
                 babyName: profile.name,
                 profileID: profile.id
             ),
-            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            trigger: Self.oneShotTrigger(at: candidate.1, now: now)
         )
-        try? await UNUserNotificationCenter.current().add(request)
-
-        let state = readStates.first { $0.guideID == candidate.0.id } ?? AgeGuideReadState(
-            profileID: profile.id,
-            guideID: candidate.0.id
-        )
-        if state.modelContext == nil {
-            context.insert(state)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+        } catch {
+            return
         }
-        state.notificationSentAt = now
-        state.updatedAt = now
-        try? context.save()
-        PersistenceService.recordLocalSave()
     }
 
-    func cancelMonthlyAgeGuideNotifications() async {
+    func cancelMonthlyAgeGuideNotifications(profileID: UUID? = nil) async {
         let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
         let identifiers = pending
             .map(\.identifier)
-            .filter { $0.hasPrefix("ageguide.") }
+            .filter { identifier in
+                guard let profileID else { return identifier.hasPrefix("ageguide.") }
+                return identifier.hasPrefix("ageguide.\(profileID.uuidString).")
+            }
         UNUserNotificationCenter.current().removePendingNotificationRequests(
             withIdentifiers: identifiers
         )
@@ -759,14 +773,10 @@ final class NotificationManager: NSObject, ObservableObject {
         guard status == .authorized || status == .provisional || status == .ephemeral else {
             return
         }
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: reminder.dateTime
-        )
         let request = UNNotificationRequest(
             identifier: Self.foodReminderNotificationID(reminderID: reminder.id),
             content: buildFoodReminderNotificationContent(reminder: reminder),
-            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            trigger: Self.oneShotTrigger(at: reminder.dateTime, now: now)
         )
         try? await UNUserNotificationCenter.current().add(request)
     }
@@ -892,6 +902,150 @@ final class NotificationManager: NSObject, ObservableObject {
         return content
     }
 
+    func reconcileScheduledNotifications(
+        context: ModelContext,
+        profiles: [BabyProfile],
+        events: [BabyEvent],
+        predictionRecords: [SleepPredictionRecord],
+        appointments: [DoctorAppointment],
+        foodReminders: [FoodReminder],
+        routines: [CareRoutine],
+        ageGuideReadStates: [AgeGuideReadState]
+    ) async {
+        await refreshAuthorizationStatus()
+        let allowed = authorizationStatus == .authorized
+            || authorizationStatus == .provisional
+            || authorizationStatus == .ephemeral
+        guard allowed else { return }
+
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let appointmentIDs = Set(appointments.filter {
+            !$0.isCompleted && $0.remindersEnabled
+        }.map { "appointment.\($0.id.uuidString)." })
+        let foodIDs = Set(foodReminders.filter {
+            $0.isEnabled && $0.dateTime > Date()
+        }.map { Self.foodReminderNotificationID(reminderID: $0.id) })
+        let routineIDs = Set(routines.filter {
+            !$0.isArchived && $0.reminderEnabled
+        }.map { Self.routineReminderNotificationID(routineID: $0.id) })
+        let orphaned = pending.map(\.identifier).filter { identifier in
+            if identifier.hasPrefix("appointment.") {
+                return !appointmentIDs.contains { identifier.hasPrefix($0) }
+            }
+            if identifier.hasPrefix("food.reminder.") {
+                return !foodIDs.contains(identifier)
+            }
+            if identifier.hasPrefix("routine.reminder.") {
+                return !routineIDs.contains(identifier)
+            }
+            return false
+        }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: orphaned
+        )
+
+        let predictionSettings = PredictionSettings(
+            feedAdjustmentEnabled: Self.defaultBool("feedAdjustmentEnabled", fallback: true),
+            nursingAdjustmentEnabled: Self.defaultBool("nursingAdjustmentEnabled", fallback: true),
+            bedtimePredictionEnabled: Self.defaultBool("bedtimePredictionEnabled", fallback: true),
+            customBaselineMinimum: Self.positiveDouble("customWakeMinimum"),
+            customBaselineMaximum: Self.positiveDouble("customWakeMaximum")
+        )
+        if LittleWindowAlertSettings.current.enabled {
+            for profile in profiles where !profile.isArchived && profile.profileType == .child {
+                let scopedEvents = events.filter { $0.matchesProfile(profile.id) }
+                let scopedRecords = predictionRecords.filter { $0.matchesProfile(profile.id) }
+                let prediction = PredictionTuningService.currentPrediction(
+                    profile: profile,
+                    events: scopedEvents,
+                    records: scopedRecords,
+                    settings: predictionSettings
+                )
+                await rescheduleLittleWindowAlertIfNeeded(
+                    prediction: prediction,
+                    babyName: profile.name,
+                    profileID: profile.id,
+                    isSleeping: scopedEvents.contains {
+                        $0.isSleepBlock && $0.isTimerRunning
+                    }
+                )
+            }
+        } else {
+            await cancelAllPendingLittleWindowAlerts()
+        }
+
+        if UserDefaults.standard.bool(forKey: "sleepPressureAlertsEnabled") {
+            for profile in profiles where !profile.isArchived && profile.profileType == .child {
+                let scopedEvents = events.filter { $0.matchesProfile(profile.id) }
+                let scopedRecords = predictionRecords.filter { $0.matchesProfile(profile.id) }
+                await rescheduleSleepPressureAlertIfNeeded(
+                    pressure: SleepPredictionEngine.sleepPressure(
+                        profile: profile,
+                        events: scopedEvents,
+                        records: scopedRecords,
+                        settings: predictionSettings
+                    ),
+                    babyName: profile.name,
+                    profileID: profile.id,
+                    enabled: true,
+                    isSleeping: scopedEvents.contains {
+                        $0.isSleepBlock && $0.isTimerRunning
+                    }
+                )
+            }
+        } else {
+            await cancelAllPendingSleepPressureAlerts()
+        }
+
+        if UserDefaults.standard.object(forKey: "appointmentRemindersEnabled") == nil
+            || UserDefaults.standard.bool(forKey: "appointmentRemindersEnabled") {
+            for appointment in appointments where !appointment.isCompleted && appointment.remindersEnabled {
+                let name = profiles.first { $0.id == appointment.profileID }?.name ?? "Baby"
+                await rescheduleAppointmentReminders(
+                    appointment: appointment,
+                    babyName: name
+                )
+            }
+        } else {
+            for appointment in appointments {
+                await cancelAppointmentReminders(appointmentID: appointment.id)
+            }
+        }
+
+        for reminder in foodReminders {
+            if reminder.isEnabled && reminder.dateTime > Date() {
+                await scheduleFoodReminder(reminder: reminder)
+            } else {
+                await cancelFoodReminder(reminderID: reminder.id)
+            }
+        }
+        for routine in routines {
+            if !routine.isArchived && routine.reminderEnabled {
+                await scheduleRoutineReminder(routine: routine)
+            } else {
+                await cancelRoutineReminder(routineID: routine.id)
+            }
+        }
+
+        if UserDefaults.standard.bool(forKey: "monthlyAgeGuideNotificationsEnabled") {
+            let timing = MonthlyAgeGuideNotificationTiming(
+                rawValue: UserDefaults.standard.string(
+                    forKey: "monthlyAgeGuideNotificationTiming"
+                ) ?? ""
+            ) ?? .monthlyBirthday
+            for profile in profiles where !profile.isArchived && profile.profileType == .child {
+                await scheduleMonthlyAgeGuideNotification(
+                    profile: profile,
+                    readStates: ageGuideReadStates.filter { $0.matchesProfile(profile.id) },
+                    context: context,
+                    timing: timing
+                )
+            }
+        } else {
+            await cancelMonthlyAgeGuideNotifications()
+        }
+    }
+
     func showFamilySyncActivityNotification(
         _ notification: FamilySyncActivityNotification
     ) async {
@@ -916,6 +1070,37 @@ final class NotificationManager: NSObject, ObservableObject {
             trigger: nil
         )
         try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func showFamilySyncAccessEndedNotification(
+        reason: FamilyShareInactiveReason
+    ) async {
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else {
+            return
+        }
+
+        let request = UNNotificationRequest(
+            identifier: Self.familySyncAccessEndedNotificationID,
+            content: buildFamilySyncAccessEndedNotificationContent(reason: reason),
+            trigger: nil
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func buildFamilySyncAccessEndedNotificationContent(
+        reason: FamilyShareInactiveReason
+    ) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = reason.title
+        content.body = reason.notificationBody
+        content.sound = .default
+        content.categoryIdentifier = Self.familySyncActivityCategoryID
+        content.userInfo = [
+            "deepLink": Self.deepLink(path: "settings/family-sync", profileID: nil)
+        ]
+        return content
     }
 
     nonisolated static func familySyncActivityNotificationsEnabled(
@@ -1000,24 +1185,19 @@ final class NotificationManager: NSObject, ObservableObject {
                 as? UNMutableNotificationContent
             guard let content else { return }
             let fireDate = Date().addingTimeInterval(10 * 60)
-            let components = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute],
-                from: fireDate
-            )
             let request = UNNotificationRequest(
                 identifier: response.notification.request.identifier,
                 content: content,
-                trigger: UNCalendarNotificationTrigger(
-                    dateMatching: components,
-                    repeats: false
-                )
+                trigger: Self.oneShotTrigger(at: fireDate)
             )
             try? await UNUserNotificationCenter.current().add(request)
-            var state = notificationState
+            let profileID = (content.userInfo["profileID"] as? String)
+                .flatMap(UUID.init(uuidString:))
+            var state = state(profileID: profileID)
             state.lastScheduledAlertTime = fireDate
             state.skipReason = nil
             state.lastUpdatedAt = Date()
-            updateState(state)
+            updateState(state, profileID: profileID)
             return
         }
 
@@ -1081,6 +1261,7 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func statusText(
         prediction: SleepPrediction?,
+        profileID: UUID? = nil,
         settings: LittleWindowAlertSettings = .current,
         isSleeping: Bool = false,
         now: Date = Date()
@@ -1096,8 +1277,9 @@ final class NotificationManager: NSObject, ObservableObject {
             if authorizationStatus == .denied {
                 return "Notifications disabled in iOS Settings"
             }
-            if notificationState.lastScheduledAlertTime != nil,
-               notificationState.skipReason == nil {
+            let storedState = state(profileID: profileID)
+            if storedState.lastScheduledAlertTime != nil,
+               storedState.skipReason == nil {
                 return settings.leadMinutes == 0
                     ? "Alert scheduled at window start"
                     : "Alert scheduled \(settings.leadMinutes) minutes before"
@@ -1137,6 +1319,24 @@ final class NotificationManager: NSObject, ObservableObject {
         leadMinutes: Int
     ) -> Date {
         prediction.predictedWindowStart.addingTimeInterval(Double(-leadMinutes) * 60)
+    }
+
+    private static func oneShotTrigger(
+        at fireDate: Date,
+        now: Date = Date()
+    ) -> UNTimeIntervalNotificationTrigger {
+        UNTimeIntervalNotificationTrigger(
+            timeInterval: max(1, fireDate.timeIntervalSince(now)),
+            repeats: false
+        )
+    }
+
+    private static func timeString(from date: Date, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        formatter.timeZone = timeZone
+        return formatter.string(from: date)
     }
 
     static func schedulingDecision(
@@ -1358,11 +1558,34 @@ final class NotificationManager: NSObject, ObservableObject {
         return "profile/\(profileID)/"
     }
 
-    private func updateState(_ state: LittleWindowNotificationState) {
+    private static func defaultBool(_ key: String, fallback: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: key) == nil
+            ? fallback
+            : UserDefaults.standard.bool(forKey: key)
+    }
+
+    private static func positiveDouble(_ key: String) -> Double? {
+        let value = UserDefaults.standard.double(forKey: key)
+        return value > 0 ? value : nil
+    }
+
+    private func state(profileID: UUID?) -> LittleWindowNotificationState {
+        statesByProfile[Self.stateStorageKey(profileID: profileID)] ?? .empty
+    }
+
+    private func updateState(
+        _ state: LittleWindowNotificationState,
+        profileID: UUID? = nil
+    ) {
+        statesByProfile[Self.stateStorageKey(profileID: profileID)] = state
         notificationState = state
-        if let data = try? JSONEncoder().encode(state) {
-            UserDefaults.standard.set(data, forKey: Self.stateKey)
+        if let data = try? JSONEncoder().encode(statesByProfile) {
+            UserDefaults.standard.set(data, forKey: Self.statesByProfileKey)
         }
+    }
+
+    private static func stateStorageKey(profileID: UUID?) -> String {
+        profileID?.uuidString ?? unscopedStateKey
     }
 
     private static func loadState() -> LittleWindowNotificationState {
@@ -1374,6 +1597,160 @@ final class NotificationManager: NSObject, ObservableObject {
             return .empty
         }
         return state
+    }
+
+    private static func loadStatesByProfile() -> [String: LittleWindowNotificationState] {
+        if let data = UserDefaults.standard.data(forKey: statesByProfileKey),
+           let states = try? JSONDecoder().decode(
+            [String: LittleWindowNotificationState].self,
+            from: data
+           ) {
+            return states
+        }
+        let legacy = loadState()
+        return legacy == .empty ? [:] : [unscopedStateKey: legacy]
+    }
+}
+
+@MainActor
+enum SystemIntegrationReconciler {
+    static let reconciliationRequestedNotification = Notification.Name(
+        "SystemIntegrationReconciler.reconciliationRequested"
+    )
+    private static let lastCompletedAtKey = "systemIntegrations.lastReconciledAt"
+    private static var reconciliationTask: Task<Void, Never>?
+
+    static func requestReconciliation() {
+        NotificationCenter.default.post(name: reconciliationRequestedNotification, object: nil)
+    }
+
+    static func reconcileIfNeeded(
+        context: ModelContext,
+        now: Date = Date(),
+        defaults: UserDefaults = .standard
+    ) async {
+        guard needsForegroundReconciliation(
+            lastCompletedAt: defaults.object(forKey: lastCompletedAtKey) as? Date,
+            lastLocalSaveAt: PersistenceService.lastLocalSaveAt(defaults: defaults),
+            now: now
+        ) else {
+            return
+        }
+        await reconcile(context: context, defaults: defaults)
+    }
+
+    static func reconcile(context: ModelContext) async {
+        await reconcile(context: context, defaults: .standard)
+    }
+
+    static func needsForegroundReconciliation(
+        lastCompletedAt: Date?,
+        lastLocalSaveAt: Date?,
+        now: Date,
+        calendar: Calendar = .current,
+        maximumAge: TimeInterval = 15 * 60
+    ) -> Bool {
+        guard let lastCompletedAt else { return true }
+        if let lastLocalSaveAt, lastLocalSaveAt > lastCompletedAt {
+            return true
+        }
+        if !calendar.isDate(lastCompletedAt, inSameDayAs: now) {
+            return true
+        }
+        return now.timeIntervalSince(lastCompletedAt) >= maximumAge
+    }
+
+    private static func reconcile(
+        context: ModelContext,
+        defaults: UserDefaults
+    ) async {
+        if let reconciliationTask {
+            await reconciliationTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            await performReconciliation(context: context)
+            defaults.set(Date(), forKey: lastCompletedAtKey)
+        }
+        reconciliationTask = task
+        await task.value
+        reconciliationTask = nil
+    }
+
+    private static func performReconciliation(context: ModelContext) async {
+        let profiles = (try? context.fetch(FetchDescriptor<BabyProfile>())) ?? []
+        let recentCutoff = Calendar.current.date(
+            byAdding: .day,
+            value: -45,
+            to: Calendar.current.startOfDay(for: Date())
+        ) ?? Date()
+        var eventDescriptor = FetchDescriptor<BabyEvent>(
+            predicate: #Predicate<BabyEvent> { event in
+                event.startDate >= recentCutoff || event.endDate == nil
+            }
+        )
+        eventDescriptor.fetchLimit = 1_200
+        let events = (try? context.fetch(eventDescriptor)) ?? []
+        await Task.yield()
+        var predictionDescriptor = FetchDescriptor<SleepPredictionRecord>(
+            predicate: #Predicate<SleepPredictionRecord> { record in
+                record.generatedAt >= recentCutoff || record.actualSleepEventID == nil
+            }
+        )
+        predictionDescriptor.fetchLimit = 500
+        let predictionRecords = (try? context.fetch(predictionDescriptor)) ?? []
+        await Task.yield()
+        let appointments = (try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? []
+        let foodReminders = (try? context.fetch(FetchDescriptor<FoodReminder>())) ?? []
+        let routines = (try? context.fetch(FetchDescriptor<CareRoutine>())) ?? []
+        let ageGuideReadStates = (try? context.fetch(
+            FetchDescriptor<AgeGuideReadState>()
+        )) ?? []
+        let profile = ProfileService.shared.ensureSelection(in: profiles)
+        let scopedEvents = events.filter { $0.matchesProfile(profile?.id) }
+        let scopedRecords = predictionRecords.filter { $0.matchesProfile(profile?.id) }
+        let prediction = PredictionTuningService.currentPrediction(
+            profile: profile,
+            events: scopedEvents,
+            records: scopedRecords,
+            settings: PredictionSettings(
+                feedAdjustmentEnabled: UserDefaults.standard.object(
+                    forKey: "feedAdjustmentEnabled"
+                ) == nil || UserDefaults.standard.bool(forKey: "feedAdjustmentEnabled"),
+                nursingAdjustmentEnabled: UserDefaults.standard.object(
+                    forKey: "nursingAdjustmentEnabled"
+                ) == nil || UserDefaults.standard.bool(forKey: "nursingAdjustmentEnabled"),
+                bedtimePredictionEnabled: UserDefaults.standard.object(
+                    forKey: "bedtimePredictionEnabled"
+                ) == nil || UserDefaults.standard.bool(forKey: "bedtimePredictionEnabled"),
+                customBaselineMinimum: positiveDouble("customWakeMinimum"),
+                customBaselineMaximum: positiveDouble("customWakeMaximum")
+            )
+        )
+        WidgetSnapshotService.refresh(
+            profile: profile,
+            events: scopedEvents,
+            prediction: prediction
+        )
+        await Task.yield()
+        WidgetSnapshotService.refreshFood(context: context)
+        await Task.yield()
+        await LiveActivityManager.shared.synchronize(profile: profile, events: scopedEvents)
+        await NotificationManager.shared.reconcileScheduledNotifications(
+            context: context,
+            profiles: profiles,
+            events: events,
+            predictionRecords: predictionRecords,
+            appointments: appointments,
+            foodReminders: foodReminders,
+            routines: routines,
+            ageGuideReadStates: ageGuideReadStates
+        )
+    }
+
+    private static func positiveDouble(_ key: String) -> Double? {
+        let value = UserDefaults.standard.double(forKey: key)
+        return value > 0 ? value : nil
     }
 }
 

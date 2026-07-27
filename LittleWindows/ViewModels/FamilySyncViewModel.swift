@@ -9,6 +9,8 @@ enum FamilySyncOperation: Equatable {
     case manage
     case sync
     case leave
+    case stopSharing
+    case resolve
 
     var statusText: String {
         switch self {
@@ -22,6 +24,10 @@ enum FamilySyncOperation: Equatable {
             return "Syncing shared family data..."
         case .leave:
             return "Leaving Family Sync..."
+        case .stopSharing:
+            return "Stopping Family Sync for everyone..."
+        case .resolve:
+            return "Updating Family Sync..."
         }
     }
 }
@@ -45,6 +51,7 @@ final class FamilySyncViewModel: ObservableObject {
         canManageShare: false,
         canSyncNow: false,
         canLeaveShare: false,
+        inactiveReason: nil,
         lastAcceptanceMessage: nil,
         lastErrorMessage: nil
     )
@@ -61,6 +68,12 @@ final class FamilySyncViewModel: ObservableObject {
         await statusService.refreshStatus(force: force)
         availability = statusService.availability
         state = sharingService.currentState(privateSyncAvailable: statusService.isICloudAvailable)
+        if state.role == .owner, state.syncMode == .sharedFamilySync {
+            await sharingService.refreshShareMembership()
+            state = sharingService.currentState(
+                privateSyncAvailable: statusService.isICloudAvailable
+            )
+        }
     }
 
     func startSharing(context: ModelContext) async {
@@ -136,6 +149,37 @@ final class FamilySyncViewModel: ObservableObject {
         defer { activeOperation = nil }
         do {
             try await sharingService.leaveFamilyShare(
+                context: context,
+                deleteLocalData: deleteLocalData
+            )
+            await refresh()
+        } catch {
+            state.lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func stopSharingForEveryone() async {
+        guard activeOperation == nil else { return }
+        activeOperation = .stopSharing
+        clearActionError()
+        await Task.yield()
+        defer { activeOperation = nil }
+        do {
+            try await sharingService.stopFamilyShareForEveryone()
+            await refresh()
+        } catch {
+            state.lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func resolveInactiveShare(context: ModelContext, deleteLocalData: Bool) async {
+        guard activeOperation == nil else { return }
+        activeOperation = .resolve
+        clearActionError()
+        await Task.yield()
+        defer { activeOperation = nil }
+        do {
+            try sharingService.resolveInactiveShare(
                 context: context,
                 deleteLocalData: deleteLocalData
             )

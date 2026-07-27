@@ -1021,7 +1021,7 @@ enum SleepPredictionEngine {
         let napsToday = events.filter {
             $0.isSleepBlock &&
             $0.sleepKind == .nap &&
-            calendar.isDate($0.startDate, inSameDayAs: now)
+            $0.occursOnLocalDay(now, calendar: calendar)
         }.count
         let typicalNapCount = typicalDailyNapCount(events: completedSleeps, now: now, calendar: calendar)
         let bedtimeCandidate = settings.bedtimePredictionEnabled &&
@@ -1154,11 +1154,14 @@ enum SleepPredictionEngine {
         let typicalBedtimes = completedSleeps
             .filter {
                 $0.sleepKind == .nightSleep &&
-                calendar.component(.hour, from: $0.startDate) >= 17
+                $0.localStartMinute(calendar: calendar) >= 17 * 60
             }
             .suffix(14)
-            .map(\.startDate)
-        let bedtimeDate = circularTypicalTime(for: typicalBedtimes, on: now, calendar: calendar)
+        let bedtimeDate = circularTypicalTime(
+            for: Array(typicalBedtimes),
+            on: now,
+            calendar: calendar
+        )
         var kind: PredictionKind = .nap
         var finalStart = provisionalStart
 
@@ -1294,7 +1297,7 @@ enum SleepPredictionEngine {
         let napsToday = committedEvents.filter {
             $0.isSleepBlock &&
                 $0.sleepKind == .nap &&
-                calendar.isDate($0.startDate, inSameDayAs: now)
+                $0.occursOnLocalDay(now, calendar: calendar)
         }.count
         let typicalNapCount = typicalDailyNapCount(events: completedSleeps, now: now, calendar: calendar)
         let bedtimeCandidate = settings.bedtimePredictionEnabled &&
@@ -1406,12 +1409,15 @@ enum SleepPredictionEngine {
         let typicalBedtimes = completedSleeps
             .filter {
                 $0.sleepKind == .nightSleep &&
-                    calendar.component(.hour, from: $0.startDate) >= 17
+                    $0.localStartMinute(calendar: calendar) >= 17 * 60
             }
             .suffix(14)
-            .map(\.startDate)
         if bedtimeCandidate,
-           let bedtime = circularTypicalTime(for: typicalBedtimes, on: now, calendar: calendar),
+           let bedtime = circularTypicalTime(
+                for: Array(typicalBedtimes),
+                on: now,
+                calendar: calendar
+           ),
            now >= bedtime.addingTimeInterval(-75 * 60),
            now <= bedtime.addingTimeInterval(45 * 60) {
             rawScore += 5
@@ -1497,7 +1503,7 @@ enum SleepPredictionEngine {
         var napCountsByDay = [Date: Int]()
         var napIndexesByID = [UUID: Int]()
         for sleep in sorted where sleep.sleepKind == .nap {
-            let day = calendar.startOfDay(for: sleep.startDate)
+            let day = sleep.localStartDay(calendar: calendar)
             let napIndex = min(4, napCountsByDay[day, default: 0] + 1)
             napCountsByDay[day] = napIndex
             napIndexesByID[sleep.id] = napIndex
@@ -1530,7 +1536,7 @@ enum SleepPredictionEngine {
             $0.id != sleep.id &&
             $0.sleepKind == .nap &&
             $0.startDate < sleep.startDate &&
-            calendar.isDate($0.startDate, inSameDayAs: sleep.startDate)
+            $0.localStartDay(calendar: calendar) == sleep.localStartDay(calendar: calendar)
         }.count
         return min(4, earlierNaps + 1)
     }
@@ -1540,7 +1546,7 @@ enum SleepPredictionEngine {
             $0.isSleepBlock &&
             $0.sleepKind == .nap &&
             $0.startDate < date &&
-            calendar.isDate($0.startDate, inSameDayAs: date)
+            $0.occursOnLocalDay(date, calendar: calendar)
         }.count + 1)
     }
 
@@ -1697,20 +1703,18 @@ enum SleepPredictionEngine {
     ) -> Double {
         let start = calendar.date(byAdding: .day, value: -14, to: now) ?? .distantPast
         let naps = events.filter { $0.sleepKind == .nap && $0.startDate >= start }
-        let grouped = Dictionary(grouping: naps) { calendar.startOfDay(for: $0.startDate) }
+        let grouped = Dictionary(grouping: naps) { $0.localStartDay(calendar: calendar) }
         guard !grouped.isEmpty else { return 3 }
         return Double(grouped.values.reduce(0) { $0 + $1.count }) / Double(grouped.count)
     }
 
     private static func circularTypicalTime(
-        for dates: [Date],
+        for events: [BabyEvent],
         on targetDate: Date,
         calendar: Calendar
     ) -> Date? {
-        guard !dates.isEmpty else { return nil }
-        let minutes = dates.map {
-            Double((calendar.component(.hour, from: $0) * 60) + calendar.component(.minute, from: $0))
-        }
+        guard !events.isEmpty else { return nil }
+        let minutes = events.map { $0.localStartMinute(calendar: calendar) }
         let shifted = minutes.map { $0 < 12 * 60 ? $0 + 24 * 60 : $0 }
         let average = shifted.reduce(0, +) / Double(shifted.count)
         let normalized = Int(average.rounded()) % (24 * 60)
@@ -1730,7 +1734,7 @@ enum SleepPredictionEngine {
         settings: PredictionSettings
     ) -> Int {
         let naps = events.filter { $0.sleepKind == .nap }
-        let grouped = Dictionary(grouping: naps) { calendar.startOfDay(for: $0.startDate) }
+        let grouped = Dictionary(grouping: naps) { $0.localStartDay(calendar: calendar) }
         if !grouped.isEmpty {
             let average = Double(grouped.values.reduce(0) { $0 + $1.count }) / Double(grouped.count)
             return min(4, max(1, Int(average.rounded())))
