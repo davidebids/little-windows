@@ -45,6 +45,19 @@ final class CareReportExportServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testDiaperRashAppearsOnlyWhenRecorded() {
+        let withRash = BabyEvent(type: .diaper)
+        withRash.diaperKind = .wet
+        withRash.diaperRash = true
+
+        let withoutRash = BabyEvent(type: .diaper)
+        withoutRash.diaperKind = .wet
+
+        XCTAssertTrue(CareReportExportService.detailsText(for: withRash).contains("Diaper rash"))
+        XCTAssertFalse(CareReportExportService.detailsText(for: withoutRash).contains("Diaper rash"))
+    }
+
+    @MainActor
     func testCSVIncludesAppointmentsAndMilestonesWhenEnabled() {
         let start = Date(timeIntervalSince1970: 1_800)
         let profile = BabyProfile(

@@ -52,4 +52,19 @@ enum CaregiverIdentityService {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return !name.isEmpty
     }
+
+    static func normalizedName(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
+        ).lowercased()
+    }
+
+    static func namesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs = normalizedName(lhs), let rhs = normalizedName(rhs) else { return false }
+        return lhs == rhs
+    }
 }

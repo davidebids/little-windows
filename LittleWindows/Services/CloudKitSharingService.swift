@@ -1779,13 +1779,17 @@ enum FamilySharingError: LocalizedError {
 enum FamilySyncActivityDiff {
     static func notification(
         localData: Data,
-        remoteData: Data
+        remoteData: Data,
+        currentCaregiverName: String = CaregiverIdentityService.currentCaregiverName()
     ) -> FamilySyncActivityNotification? {
         guard let local = try? FamilySyncDatasetSnapshot(data: localData),
               let remote = try? FamilySyncDatasetSnapshot(data: remoteData) else {
             return nil
         }
-        return remote.changeCandidates(comparedTo: local)
+        return remote.changeCandidates(
+            comparedTo: local,
+            currentCaregiverName: currentCaregiverName
+        )
             .sorted { left, right in
                 if left.date != right.date { return left.date > right.date }
                 return left.priority > right.priority
@@ -1805,6 +1809,8 @@ private struct FamilySyncDatasetSnapshot {
         var shoppingListItems: [ShoppingListItemDigest]?
         var homeTodoLists: [HomeTodoListDigest]?
         var homeTodoItems: [HomeTodoItemDigest]?
+        var packingTrips: [PackingTripDigest]?
+        var packingItems: [PackingItemDigest]?
         var inventoryItems: [InventoryItemDigest]?
         var mealPrepItems: [MealPrepItemDigest]?
         var returnRequests: [ReturnRequestDigest]?
@@ -1897,6 +1903,41 @@ private struct FamilySyncDatasetSnapshot {
         var sortOrder: Int?
     }
 
+    struct PackingTripDigest: Decodable {
+        var id: UUID
+        var title: String
+        var destinationName: String?
+        var destinationDetail: String?
+        var destinationLatitude: Double?
+        var destinationLongitude: Double?
+        var destinationTimeZoneIdentifier: String?
+        var destinationStops: [TripDestinationStop]?
+        var timeZoneIdentifier: String?
+        var startDate: Date
+        var endDate: Date
+        var statusRawValue: String
+        var createdBy: String?
+        var createdAt: Date
+        var updatedAt: Date
+        var completedAt: Date?
+        var isArchived: Bool
+    }
+
+    struct PackingItemDigest: Decodable {
+        var id: UUID
+        var tripID: UUID
+        var title: String
+        var priorityRawValue: String
+        var stateRawValue: String
+        var addedBy: String?
+        var assignedCaregiverName: String?
+        var caregiverReminderEnabled: Bool?
+        var packedBy: String?
+        var packedAt: Date?
+        var createdAt: Date
+        var updatedAt: Date
+    }
+
     struct InventoryItemDigest: Decodable {
         var id: UUID
         var name: String
@@ -1973,6 +2014,8 @@ private struct FamilySyncDatasetSnapshot {
     var shoppingItemsByID: [UUID: ShoppingListItemDigest]
     var homeTodoListsByID: [UUID: HomeTodoListDigest]
     var homeTodoItemsByID: [UUID: HomeTodoItemDigest]
+    var packingTripsByID: [UUID: PackingTripDigest]
+    var packingItemsByID: [UUID: PackingItemDigest]
     var inventoryItemsByID: [UUID: InventoryItemDigest]
     var mealPrepItemsByID: [UUID: MealPrepItemDigest]
     var returnRequestsByID: [UUID: ReturnRequestDigest]
@@ -2004,6 +2047,12 @@ private struct FamilySyncDatasetSnapshot {
         homeTodoItemsByID = Dictionary(
             uniqueKeysWithValues: (envelope.homeTodoItems ?? []).map { ($0.id, $0) }
         )
+        packingTripsByID = Dictionary(
+            uniqueKeysWithValues: (envelope.packingTrips ?? []).map { ($0.id, $0) }
+        )
+        packingItemsByID = Dictionary(
+            uniqueKeysWithValues: (envelope.packingItems ?? []).map { ($0.id, $0) }
+        )
         inventoryItemsByID = Dictionary(
             uniqueKeysWithValues: (envelope.inventoryItems ?? []).map { ($0.id, $0) }
         )
@@ -2024,7 +2073,10 @@ private struct FamilySyncDatasetSnapshot {
         )
     }
 
-    func changeCandidates(comparedTo local: FamilySyncDatasetSnapshot) -> [ChangeCandidate] {
+    func changeCandidates(
+        comparedTo local: FamilySyncDatasetSnapshot,
+        currentCaregiverName: String
+    ) -> [ChangeCandidate] {
         var candidates = [ChangeCandidate]()
         candidates.append(contentsOf: eventChanges(comparedTo: local))
         candidates.append(contentsOf: milestoneChanges(comparedTo: local))
@@ -2032,6 +2084,10 @@ private struct FamilySyncDatasetSnapshot {
         candidates.append(contentsOf: shoppingListChanges(comparedTo: local))
         candidates.append(contentsOf: shoppingItemChanges(comparedTo: local))
         candidates.append(contentsOf: homeTodoChanges(comparedTo: local))
+        candidates.append(contentsOf: packingTripChanges(
+            comparedTo: local,
+            currentCaregiverName: currentCaregiverName
+        ))
         candidates.append(contentsOf: inventoryChanges(comparedTo: local))
         candidates.append(contentsOf: mealPrepChanges(comparedTo: local))
         candidates.append(contentsOf: returnChanges(comparedTo: local))
@@ -2262,6 +2318,122 @@ private struct FamilySyncDatasetSnapshot {
                 )
             )
         }
+    }
+
+    private func packingTripChanges(
+        comparedTo local: FamilySyncDatasetSnapshot,
+        currentCaregiverName: String
+    ) -> [ChangeCandidate] {
+        var candidates = packingTripsByID.values.compactMap { trip -> ChangeCandidate? in
+            let previous = local.packingTripsByID[trip.id]
+            guard isNewOrUpdated(remoteDate: trip.updatedAt, localDate: previous?.updatedAt) else {
+                return nil
+            }
+            if let previous,
+               trip.title == previous.title,
+               trip.destinationName == previous.destinationName,
+               trip.destinationDetail == previous.destinationDetail,
+               trip.destinationLatitude == previous.destinationLatitude,
+               trip.destinationLongitude == previous.destinationLongitude,
+               trip.destinationTimeZoneIdentifier == previous.destinationTimeZoneIdentifier,
+               trip.destinationStops == previous.destinationStops,
+               trip.timeZoneIdentifier == previous.timeZoneIdentifier,
+               trip.startDate == previous.startDate,
+               trip.endDate == previous.endDate,
+               trip.statusRawValue == previous.statusRawValue,
+               trip.isArchived == previous.isArchived {
+                return nil
+            }
+            let actor = actorName(trip.createdBy)
+            let action: String
+            if trip.isArchived && previous?.isArchived != true {
+                action = "archived"
+            } else if trip.statusRawValue == PackingTripStatus.completed.rawValue,
+                      previous?.statusRawValue != PackingTripStatus.completed.rawValue {
+                action = "completed"
+            } else {
+                action = previous == nil ? "created" : "updated"
+            }
+            return ChangeCandidate(
+                date: trip.updatedAt,
+                priority: 72,
+                notification: FamilySyncActivityNotification(
+                    title: "Trip packing updated",
+                    body: "\(actor) \(action) \(trip.title).",
+                    deepLinkPath: "food/trips/\(trip.id.uuidString)",
+                    category: .trip
+                )
+            )
+        }
+
+        let tripIDs = Set(packingItemsByID.values.map(\.tripID))
+        for tripID in tripIDs {
+            let remoteItems = packingItemsByID.values.filter { $0.tripID == tripID }
+            let changedItems = remoteItems.filter { item in
+                let previous = local.packingItemsByID[item.id]
+                return isNewOrUpdated(remoteDate: item.updatedAt, localDate: previous?.updatedAt)
+                    && (previous == nil
+                        || previous?.stateRawValue != item.stateRawValue
+                        || previous?.title != item.title
+                        || previous?.priorityRawValue != item.priorityRawValue
+                        || previous?.assignedCaregiverName != item.assignedCaregiverName
+                        || previous?.caregiverReminderEnabled != item.caregiverReminderEnabled)
+            }
+            guard !changedItems.isEmpty,
+                  let latest = changedItems.max(by: { $0.updatedAt < $1.updatedAt }) else {
+                continue
+            }
+            let newlyAssignedToCurrent = changedItems.filter { item in
+                CaregiverIdentityService.namesMatch(
+                    item.assignedCaregiverName,
+                    currentCaregiverName
+                ) && !CaregiverIdentityService.namesMatch(
+                    local.packingItemsByID[item.id]?.assignedCaregiverName,
+                    currentCaregiverName
+                )
+            }
+            if let latestAssignment = newlyAssignedToCurrent.max(by: { $0.updatedAt < $1.updatedAt }) {
+                let tripTitle = packingTripsByID[tripID]?.title ?? "a trip"
+                let itemText = newlyAssignedToCurrent.count == 1 ? "item" : "items"
+                candidates.append(ChangeCandidate(
+                    date: latestAssignment.updatedAt,
+                    priority: 78,
+                    notification: FamilySyncActivityNotification(
+                        title: "Packing assigned to you",
+                        body: "You were assigned \(newlyAssignedToCurrent.count) \(itemText) for \(tripTitle).",
+                        deepLinkPath: "food/trips/\(tripID.uuidString)",
+                        category: .trip
+                    )
+                ))
+            }
+            let newlyPacked = changedItems.filter {
+                $0.stateRawValue == PackingItemState.packed.rawValue
+                    && local.packingItemsByID[$0.id]?.stateRawValue != PackingItemState.packed.rawValue
+            }
+            let added = changedItems.filter { local.packingItemsByID[$0.id] == nil }
+            guard !newlyPacked.isEmpty || !added.isEmpty else { continue }
+            let trip = packingTripsByID[tripID]
+            let tripTitle = trip?.title ?? "a trip"
+            let actor = actorName(latest.packedBy ?? latest.addedBy)
+            let remaining = remoteItems.filter { $0.stateRawValue == PackingItemState.needed.rawValue }.count
+            let body: String
+            if !newlyPacked.isEmpty {
+                body = "\(actor) packed \(newlyPacked.count) \(newlyPacked.count == 1 ? "item" : "items") for \(tripTitle). \(remaining) remaining."
+            } else {
+                body = "\(actor) added \(added.count) \(added.count == 1 ? "item" : "items") to \(tripTitle)."
+            }
+            candidates.append(ChangeCandidate(
+                date: latest.updatedAt,
+                priority: 73,
+                notification: FamilySyncActivityNotification(
+                    title: "Trip packing updated",
+                    body: body,
+                    deepLinkPath: "food/trips/\(tripID.uuidString)",
+                    category: .trip
+                )
+            ))
+        }
+        return candidates
     }
 
     private func mealPrepChanges(comparedTo local: FamilySyncDatasetSnapshot) -> [ChangeCandidate] {

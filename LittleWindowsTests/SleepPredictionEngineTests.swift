@@ -5,6 +5,27 @@ import SwiftUI
 @testable import LittleWindows
 
 final class SleepPredictionEngineTests: XCTestCase {
+    func testManualWeatherKitSmoke() async throws {
+        guard Self.smokeConfigurationValue(
+            "LW_WEATHERKIT_SMOKE",
+            environment: ProcessInfo.processInfo.environment
+        ) == "1" else {
+            throw XCTSkip("Set LW_WEATHERKIT_SMOKE=1 to run the signed WeatherKit service smoke test.")
+        }
+
+        let client = LiveTripWeatherForecastClient()
+        let days = try await client.dailyForecast(
+            latitude: 37.3349,
+            longitude: -122.0090
+        )
+        let attribution = try await client.attribution()
+
+        XCTAssertFalse(days.isEmpty)
+        XCTAssertEqual(attribution.legalPageURL.scheme, "https")
+        XCTAssertEqual(attribution.lightMarkURL.scheme, "https")
+        XCTAssertEqual(attribution.darkMarkURL.scheme, "https")
+    }
+
     @MainActor
     func testManualCloudKitSyncSmoke() async throws {
         let environment = ProcessInfo.processInfo.environment
@@ -366,6 +387,145 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         defaults.set(false, forKey: "familySyncActivityNotificationsEnabled")
         XCTAssertFalse(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .general,
+            defaults: defaults
+        ))
+    }
+
+    func testFamilySyncTripPackingDiffSummarizesPackedItems() throws {
+        let tripID = UUID()
+        let itemID = UUID()
+        let trip = """
+        [{
+          "id":"\(tripID.uuidString)",
+          "title":"Sample Trip",
+          "destinationName":"Sample Destination",
+          "startDate":"2026-07-10T00:00:00Z",
+          "endDate":"2026-07-12T00:00:00Z",
+          "statusRawValue":"upcoming",
+          "createdBy":"Caregiver A",
+          "createdAt":"2026-07-01T00:00:00Z",
+          "updatedAt":"2026-07-01T00:00:00Z",
+          "isArchived":false
+        }]
+        """
+        let local = familySyncDatasetJSON(
+            packingTrips: trip,
+            packingItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "tripID":"\(tripID.uuidString)",
+              "title":"Leash",
+              "priorityRawValue":"essential",
+              "stateRawValue":"needed",
+              "addedBy":"Caregiver A",
+              "createdAt":"2026-07-01T00:00:00Z",
+              "updatedAt":"2026-07-01T00:00:00Z"
+            }]
+            """
+        )
+        let remote = familySyncDatasetJSON(
+            packingTrips: trip,
+            packingItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "tripID":"\(tripID.uuidString)",
+              "title":"Leash",
+              "priorityRawValue":"essential",
+              "stateRawValue":"packed",
+              "addedBy":"Caregiver A",
+              "packedBy":"Caregiver B",
+              "packedAt":"2026-07-01T00:05:00Z",
+              "createdAt":"2026-07-01T00:00:00Z",
+              "updatedAt":"2026-07-01T00:05:00Z"
+            }]
+            """
+        )
+
+        let notification = try XCTUnwrap(FamilySyncActivityDiff.notification(
+            localData: local,
+            remoteData: remote
+        ))
+
+        XCTAssertEqual(notification.title, "Trip packing updated")
+        XCTAssertEqual(notification.body, "Caregiver B packed 1 item for Sample Trip. 0 remaining.")
+        XCTAssertEqual(notification.deepLinkPath, "food/trips/\(tripID.uuidString)")
+        XCTAssertEqual(notification.category, .trip)
+    }
+
+    func testFamilySyncTripPackingDiffTargetsNewAssignee() throws {
+        let tripID = UUID()
+        let itemID = UUID()
+        let trip = """
+        [{
+          "id":"\(tripID.uuidString)",
+          "title":"Sample Trip",
+          "startDate":"2026-07-10T00:00:00Z",
+          "endDate":"2026-07-12T00:00:00Z",
+          "statusRawValue":"upcoming",
+          "createdAt":"2026-07-01T00:00:00Z",
+          "updatedAt":"2026-07-01T00:00:00Z",
+          "isArchived":false
+        }]
+        """
+        let local = familySyncDatasetJSON(
+            packingTrips: trip,
+            packingItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "tripID":"\(tripID.uuidString)",
+              "title":"Travel documents",
+              "priorityRawValue":"essential",
+              "stateRawValue":"needed",
+              "createdAt":"2026-07-01T00:00:00Z",
+              "updatedAt":"2026-07-01T00:00:00Z"
+            }]
+            """
+        )
+        let remote = familySyncDatasetJSON(
+            packingTrips: trip,
+            packingItems: """
+            [{
+              "id":"\(itemID.uuidString)",
+              "tripID":"\(tripID.uuidString)",
+              "title":"Travel documents",
+              "priorityRawValue":"essential",
+              "stateRawValue":"needed",
+              "assignedCaregiverName":"Caregiver B",
+              "caregiverReminderEnabled":true,
+              "createdAt":"2026-07-01T00:00:00Z",
+              "updatedAt":"2026-07-01T00:05:00Z"
+            }]
+            """
+        )
+
+        let notification = try XCTUnwrap(FamilySyncActivityDiff.notification(
+            localData: local,
+            remoteData: remote,
+            currentCaregiverName: "caregiver b"
+        ))
+
+        XCTAssertEqual(notification.title, "Packing assigned to you")
+        XCTAssertEqual(notification.body, "You were assigned 1 item for Sample Trip.")
+        XCTAssertEqual(notification.deepLinkPath, "food/trips/\(tripID.uuidString)")
+        XCTAssertEqual(notification.category, .trip)
+    }
+
+    func testFamilySyncTripNotificationToggleCanSuppressOnlyTripAlerts() throws {
+        let suiteName = "FamilySyncTripNotificationToggle-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .trip,
+            defaults: defaults
+        ))
+        defaults.set(false, forKey: "familySyncTripNotificationsEnabled")
+        XCTAssertFalse(NotificationManager.familySyncActivityNotificationsEnabled(
+            for: .trip,
+            defaults: defaults
+        ))
+        XCTAssertTrue(NotificationManager.familySyncActivityNotificationsEnabled(
             for: .general,
             defaults: defaults
         ))
@@ -863,6 +1023,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         shoppingListItems: String = "[]",
         homeTodoLists: String = "[]",
         homeTodoItems: String = "[]",
+        packingTrips: String = "[]",
+        packingItems: String = "[]",
         inventoryItems: String = "[]",
         mealPrepItems: String = "[]",
         foodReminders: String = "[]"
@@ -880,6 +1042,8 @@ final class SleepPredictionEngineTests: XCTestCase {
           "shoppingListItems": \(shoppingListItems),
           "homeTodoLists": \(homeTodoLists),
           "homeTodoItems": \(homeTodoItems),
+          "packingTrips": \(packingTrips),
+          "packingItems": \(packingItems),
           "inventoryItems": \(inventoryItems),
           "mealPrepItems": \(mealPrepItems),
           "foodReminders": \(foodReminders)
@@ -1622,6 +1786,16 @@ final class SleepPredictionEngineTests: XCTestCase {
         solid.solidSensitivityObserved = true
         context.insert(solid)
 
+        let diaper = BabyEvent(
+            profileID: testChild.id,
+            type: .diaper,
+            startDate: Date(timeIntervalSinceReferenceDate: 3_300)
+        )
+        diaper.profileTypeSnapshot = .child
+        diaper.diaperKind = .wet
+        diaper.diaperRash = true
+        context.insert(diaper)
+
         let potty = BabyEvent(
             profileID: testChild.id,
             type: .potty,
@@ -1648,6 +1822,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(importedSolid.solidReaction, .sensitivity)
         XCTAssertEqual(importedSolid.solidAllergenExposure, true)
         XCTAssertEqual(importedSolid.solidSensitivityObserved, true)
+
+        let importedDiaper = try XCTUnwrap(importedEvents.first { $0.type == .diaper })
+        XCTAssertEqual(importedDiaper.diaperKind, .wet)
+        XCTAssertEqual(importedDiaper.diaperRash, true)
 
         let importedPotty = try XCTUnwrap(importedEvents.first { $0.type == .potty })
         XCTAssertEqual(importedPotty.childPottyKind, .both)
@@ -4304,6 +4482,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         source.pooAmount = .little
         source.pooColor = .brown
         source.pooTexture = .soft
+        source.diaperRash = true
 
         let repeated = try XCTUnwrap(EventMutationService.repeatEvent(
             source,
@@ -4325,6 +4504,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(repeated.pooAmount, .little)
         XCTAssertEqual(repeated.pooColor, .brown)
         XCTAssertEqual(repeated.pooTexture, .soft)
+        XCTAssertEqual(repeated.diaperRash, true)
     }
 
     @MainActor
@@ -5150,13 +5330,14 @@ final class SleepPredictionEngineTests: XCTestCase {
         diaper.peeAmount = .big
         diaper.pooAmount = .little
         diaper.pooColor = .brown
+        diaper.diaperRash = true
 
         let medicine = BabyEvent(type: .medicine)
         medicine.medicineName = "Tylenol"
         medicine.dose = 2.5
         medicine.medicineUnit = .milliliters
 
-        XCTAssertEqual(diaper.displayTitle, "Diaper: mixed — pee big, poo little brown")
+        XCTAssertEqual(diaper.displayTitle, "Diaper: mixed — pee big, poo little brown · diaper rash")
         XCTAssertEqual(medicine.displayTitle, "Medicine: Tylenol, 2.5 mL")
     }
 
@@ -6719,6 +6900,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             locations: [],
             inventoryItems: [],
             mealPrepItems: [],
+            packingTrips: [],
             shoppingLists: [],
             shoppingItems: [],
             todoLists: [list, archivedList],
@@ -6732,6 +6914,57 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(metrics.first(where: { $0.title == "Completed To-Dos" })?.value, "1")
         XCTAssertEqual(metrics.first(where: { $0.title == "Returns" })?.value, "2")
         XCTAssertEqual(metrics.first(where: { $0.title == "Returns" })?.detail, "1 need action, 1 ready.")
+    }
+
+    @MainActor
+    func testFoodHomeInsightsSeparatePackingTripsFromShoppingListHistory() {
+        let household = Household(name: "Home")
+        let usedShoppingList = ShoppingList(
+            householdID: household.id,
+            name: "Groceries",
+            lastUsedAt: Date(timeIntervalSince1970: 100)
+        )
+        let unusedShoppingList = ShoppingList(householdID: household.id, name: "Supplies")
+        let completedTrip = PackingTrip(
+            householdID: household.id,
+            title: "Completed Trip",
+            startDate: Date(timeIntervalSince1970: 100),
+            endDate: Date(timeIntervalSince1970: 200),
+            status: .completed,
+            completedAt: Date(timeIntervalSince1970: 300)
+        )
+        let upcomingTrip = PackingTrip(
+            householdID: household.id,
+            title: "Upcoming Trip",
+            startDate: Date(timeIntervalSince1970: 400),
+            endDate: Date(timeIntervalSince1970: 500)
+        )
+
+        let metrics = FoodInsightsService.metrics(
+            householdID: household.id,
+            locations: [],
+            inventoryItems: [],
+            mealPrepItems: [],
+            packingTrips: [completedTrip, upcomingTrip],
+            shoppingLists: [usedShoppingList, unusedShoppingList],
+            shoppingItems: [],
+            todoLists: [],
+            todoItems: [],
+            returnRequests: [],
+            returnPackages: []
+        )
+
+        XCTAssertEqual(metrics.first(where: { $0.title == "Lists Used" })?.value, "1")
+        XCTAssertEqual(
+            metrics.first(where: { $0.title == "Lists Used" })?.detail,
+            "Reusable shopping lists completed at least once."
+        )
+        XCTAssertEqual(metrics.first(where: { $0.title == "Trips" })?.value, "1")
+        XCTAssertEqual(metrics.first(where: { $0.title == "Trips" })?.detail, "Packing trips marked complete.")
+        XCTAssertEqual(
+            metrics.first(where: { $0.title == "Frequent Buy" })?.detail,
+            "Complete a shopping list to build history."
+        )
     }
 
     @MainActor
@@ -7073,6 +7306,61 @@ final class SleepPredictionEngineTests: XCTestCase {
         let records = try DataExportImportService.familySyncEntityPayloads(from: merged)
 
         XCTAssertNil(records["events|\(eventID)"])
+    }
+
+    func testFamilySyncTripMergePreservesConcurrentItemsAndFutureCollections() throws {
+        let localItemID = UUID().uuidString
+        let remoteItemID = UUID().uuidString
+        let futureRecordID = UUID().uuidString
+        let base = Data(
+            #"{"version":16,"exportedAt":"2026-07-26T10:00:00Z","packingItems":[],"futureTripRules":[]}"#.utf8
+        )
+        let local = Data(
+            """
+            {"version":16,"exportedAt":"2026-07-26T10:01:00Z","packingItems":[{"id":"\(localItemID)","title":"Local item","updatedAt":"2026-07-26T10:01:00Z"}],"futureTripRules":[]}
+            """.utf8
+        )
+        let remote = Data(
+            """
+            {"version":17,"exportedAt":"2026-07-26T10:02:00Z","packingItems":[{"id":"\(remoteItemID)","title":"Remote item","updatedAt":"2026-07-26T10:02:00Z"}],"futureTripRules":[{"id":"\(futureRecordID)","updatedAt":"2026-07-26T10:02:00Z"}]}
+            """.utf8
+        )
+
+        let merged = try DataExportImportService.mergeFamilySyncData(
+            base: base,
+            local: local,
+            remote: remote,
+            localChangedAt: Date(timeIntervalSince1970: 100),
+            remoteChangedAt: Date(timeIntervalSince1970: 200)
+        )
+        let records = try DataExportImportService.familySyncEntityPayloads(from: merged)
+
+        XCTAssertNotNil(records["packingItems|\(localItemID)"])
+        XCTAssertNotNil(records["packingItems|\(remoteItemID)"])
+        XCTAssertNotNil(records["futureTripRules|\(futureRecordID)"])
+    }
+
+    func testFamilySyncTripMergeRetainsRemoteItemDeletion() throws {
+        let itemID = UUID().uuidString
+        let baseAndLocal = Data(
+            """
+            {"version":16,"exportedAt":"2026-07-26T10:00:00Z","packingItems":[{"id":"\(itemID)","title":"Removed item","updatedAt":"2026-07-26T10:00:00Z"}]}
+            """.utf8
+        )
+        let remote = Data(
+            #"{"version":16,"exportedAt":"2026-07-26T10:02:00Z","packingItems":[]}"#.utf8
+        )
+
+        let merged = try DataExportImportService.mergeFamilySyncData(
+            base: baseAndLocal,
+            local: baseAndLocal,
+            remote: remote,
+            localChangedAt: Date(timeIntervalSince1970: 100),
+            remoteChangedAt: Date(timeIntervalSince1970: 200)
+        )
+        let records = try DataExportImportService.familySyncEntityPayloads(from: merged)
+
+        XCTAssertNil(records["packingItems|\(itemID)"])
     }
 
     @MainActor
@@ -7605,10 +7893,1036 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(runs.first?.resolutionRecord(for: routineSteps[0].id)?.caregiverName, "Caregiver A")
     }
 
+    @MainActor
+    func testTripPackingSuggestionsScaleForDurationLaundryAndTravelerType() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let startDate = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_900_000_000))
+        let endDate = try XCTUnwrap(calendar.date(byAdding: .day, value: 6, to: startDate))
+        let householdID = UUID()
+        let tripID = UUID()
+        let trip = PackingTrip(
+            id: tripID,
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: startDate,
+            endDate: endDate,
+            travelMode: .plane,
+            laundryAvailable: true,
+            activities: [.swimming]
+        )
+        let adult = TripTraveler(
+            householdID: householdID,
+            tripID: tripID,
+            kind: .adult,
+            displayName: "Adult Traveler"
+        )
+        let child = TripTraveler(
+            householdID: householdID,
+            tripID: tripID,
+            kind: .child,
+            profileID: UUID(),
+            displayName: "Sample Child"
+        )
+        let dog = TripTraveler(
+            householdID: householdID,
+            tripID: tripID,
+            kind: .dog,
+            profileID: UUID(),
+            displayName: "Sample Dog"
+        )
+
+        let suggestions = TripPackingSuggestionEngine.suggestions(
+            for: trip,
+            travelers: [adult, child, dog]
+        )
+
+        XCTAssertEqual(trip.dayCount, 7)
+        XCTAssertEqual(
+            suggestions.first { $0.templateKey == "adult.tops" }?.quantity,
+            4
+        )
+        XCTAssertEqual(
+            suggestions.first { $0.templateKey == "child.diapers" }?.quantity,
+            49
+        )
+        XCTAssertEqual(
+            suggestions.first { $0.templateKey == "dog.food" }?.quantity,
+            7
+        )
+        XCTAssertNotNil(suggestions.first { $0.templateKey == "plane.carry-on-change" })
+        XCTAssertNotNil(suggestions.first { $0.templateKey == "child.swim" })
+    }
+
+    @MainActor
+    func testTripPackingCreationStateAttributionAndDuplicate() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let profileID = UUID()
+        let startDate = Date(timeIntervalSince1970: 1_900_000_000)
+        let endDate = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 2, to: startDate))
+        let input = PackingTripInput(
+            title: "Sample Trip",
+            destination: TripDestinationSelection(name: "Sample Destination"),
+            startDate: startDate,
+            endDate: endDate,
+            travelMode: .car,
+            lodgingType: .home,
+            laundryAvailable: false,
+            activities: [.outdoors],
+            travelers: [
+                TripTravelerInput(kind: .adult, profileID: nil, displayName: "Adult Traveler"),
+                TripTravelerInput(kind: .child, profileID: profileID, displayName: "Sample Child")
+            ],
+            includeStarterList: true,
+            weatherSuggestionsEnabled: true,
+            reminderDate: nil,
+            finalCheckDate: nil,
+            notes: ""
+        )
+
+        let trip = try XCTUnwrap(TripPackingService.createTrip(
+            input: input,
+            householdID: householdID,
+            existingTrips: [],
+            context: context,
+            caregiverName: "Caregiver A",
+            now: startDate
+        ))
+        let travelers = try context.fetch(FetchDescriptor<TripTraveler>())
+        let bags = try context.fetch(FetchDescriptor<PackingBag>())
+        let items = try context.fetch(FetchDescriptor<PackingItem>())
+
+        XCTAssertEqual(travelers.count, 2)
+        XCTAssertEqual(travelers.first { $0.kind == .child }?.profileID, profileID)
+        XCTAssertEqual(bags.map(\.name), ["Shared Bag"])
+        XCTAssertFalse(items.isEmpty)
+
+        let firstItem = try XCTUnwrap(items.first)
+        XCTAssertTrue(TripPackingService.updateItem(
+            firstItem,
+            title: firstItem.title,
+            category: firstItem.category,
+            travelerID: firstItem.travelerID,
+            bagID: firstItem.bagID,
+            quantity: firstItem.quantity,
+            unit: firstItem.unit ?? "",
+            notes: firstItem.notes ?? "",
+            priority: firstItem.priority,
+            needsPurchase: firstItem.needsPurchase,
+            assignedCaregiverName: "  Caregiver A  ",
+            caregiverReminderEnabled: false,
+            trip: trip,
+            context: context,
+            now: startDate.addingTimeInterval(30)
+        ))
+        XCTAssertEqual(firstItem.assignedCaregiverName, "Caregiver A")
+        XCTAssertFalse(firstItem.caregiverReminderEnabled)
+        let packedAt = startDate.addingTimeInterval(60)
+        TripPackingService.setState(
+            firstItem,
+            state: .packed,
+            trip: trip,
+            context: context,
+            caregiverName: "Caregiver B",
+            now: packedAt
+        )
+        XCTAssertEqual(firstItem.state, .packed)
+        XCTAssertEqual(firstItem.packedBy, "Caregiver B")
+        XCTAssertEqual(firstItem.packedAt, packedAt)
+
+        let duplicate = try XCTUnwrap(TripPackingService.duplicateTrip(
+            trip,
+            travelers: travelers,
+            bags: bags,
+            items: items,
+            existingTrips: [trip],
+            context: context,
+            now: startDate.addingTimeInterval(120)
+        ))
+        let copiedItems = try context.fetch(FetchDescriptor<PackingItem>())
+            .filter { $0.tripID == duplicate.id }
+
+        XCTAssertEqual(duplicate.title, "Sample Trip Copy")
+        XCTAssertEqual(duplicate.destinationStops.count, 1)
+        XCTAssertNotEqual(duplicate.destinationStops.first?.id, trip.destinationStops.first?.id)
+        XCTAssertEqual(copiedItems.count, items.count)
+        XCTAssertTrue(copiedItems.allSatisfy { $0.state == .needed })
+        XCTAssertTrue(copiedItems.allSatisfy { $0.packedBy == nil })
+        let copiedAssignedItem = try XCTUnwrap(copiedItems.first {
+            $0.sortOrder == firstItem.sortOrder
+        })
+        XCTAssertEqual(copiedAssignedItem.assignedCaregiverName, "Caregiver A")
+        XCTAssertFalse(copiedAssignedItem.caregiverReminderEnabled)
+
+        TripPackingService.archive(trip, context: context, now: startDate.addingTimeInterval(180))
+        XCTAssertTrue(trip.isArchived)
+        XCTAssertEqual(trip.status, .archived)
+        TripPackingService.restore(trip, context: context, now: startDate.addingTimeInterval(240))
+        XCTAssertFalse(trip.isArchived)
+        XCTAssertEqual(trip.status, .upcoming)
+    }
+
+    @MainActor
+    func testTripPackingRoundTripsThroughBackup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let household = Household(id: householdID, name: "Test Home")
+        let profile = BabyProfile(
+            profileType: .dog,
+            name: "Sample Dog",
+            birthDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let trip = PackingTrip(
+            householdID: householdID,
+            title: "Sample Trip",
+            destinationName: "Sample Destination",
+            destinationDetail: "Sample Region",
+            destinationLatitude: 43.6532,
+            destinationLongitude: -79.3832,
+            destinationTimeZoneIdentifier: "America/Toronto",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_086_400),
+            timeZoneIdentifier: "America/Los_Angeles",
+            travelMode: .train,
+            activities: [.outdoors]
+        )
+        trip.destinationStops = [
+            TripDestinationStop(
+                destination: TripDestinationSelection(
+                    name: "Sample Destination",
+                    detail: "Sample Region",
+                    latitude: 43.6532,
+                    longitude: -79.3832,
+                    timeZoneIdentifier: "America/Toronto"
+                ),
+                startDate: trip.startDate
+            ),
+            TripDestinationStop(
+                destination: TripDestinationSelection(
+                    name: "Second Destination",
+                    latitude: 42.9849,
+                    longitude: -81.2453,
+                    timeZoneIdentifier: "America/Toronto"
+                ),
+                startDate: trip.endDate
+            )
+        ]
+        let traveler = TripTraveler(
+            householdID: householdID,
+            tripID: trip.id,
+            kind: .dog,
+            profileID: profile.id,
+            displayName: "Sample Dog"
+        )
+        let bag = PackingBag(
+            householdID: householdID,
+            tripID: trip.id,
+            travelerID: traveler.id,
+            name: "Dog Bag"
+        )
+        let item = PackingItem(
+            householdID: householdID,
+            tripID: trip.id,
+            travelerID: traveler.id,
+            bagID: bag.id,
+            title: "Leash",
+            category: .dogCare,
+            quantity: 1,
+            priority: .essential,
+            state: .packed,
+            assignedCaregiverName: "Caregiver A",
+            caregiverReminderEnabled: false,
+            packedBy: "Caregiver A"
+        )
+        context.insert(household)
+        context.insert(profile)
+        context.insert(trip)
+        context.insert(traveler)
+        context.insert(bag)
+        context.insert(item)
+        try context.save()
+
+        let backup = try DataExportImportService.exportData(context: context)
+        try DataExportImportService.importData(backup, context: context)
+
+        let restoredTrips = try context.fetch(FetchDescriptor<PackingTrip>())
+        let restoredTravelers = try context.fetch(FetchDescriptor<TripTraveler>())
+        let restoredBags = try context.fetch(FetchDescriptor<PackingBag>())
+        let restoredItems = try context.fetch(FetchDescriptor<PackingItem>())
+        XCTAssertEqual(restoredTrips.map(\.id), [trip.id])
+        XCTAssertEqual(restoredTrips.first?.destinationDetail, "Sample Region")
+        XCTAssertEqual(restoredTrips.first?.destinationLatitude, 43.6532)
+        XCTAssertEqual(restoredTrips.first?.destinationLongitude, -79.3832)
+        XCTAssertEqual(restoredTrips.first?.destinationTimeZoneIdentifier, "America/Toronto")
+        XCTAssertEqual(restoredTrips.first?.destinationStops.count, 2)
+        XCTAssertEqual(restoredTrips.first?.destinationStops.last?.destination.name, "Second Destination")
+        XCTAssertEqual(restoredTrips.first?.timeZoneIdentifier, "America/Los_Angeles")
+        XCTAssertEqual(restoredTravelers.first?.profileID, traveler.profileID)
+        XCTAssertEqual(restoredBags.first?.travelerID, traveler.id)
+        XCTAssertEqual(restoredItems.first?.bagID, bag.id)
+        XCTAssertEqual(restoredItems.first?.state, .packed)
+        XCTAssertEqual(restoredItems.first?.assignedCaregiverName, "Caregiver A")
+        XCTAssertEqual(restoredItems.first?.caregiverReminderEnabled, false)
+        XCTAssertEqual(restoredItems.first?.packedBy, "Caregiver A")
+    }
+
+    @MainActor
+    func testTripDatesRemainDateOnlyInSavedTimeZone() throws {
+        let start = tripDate(2026, 7, 10, timeZoneIdentifier: "Pacific/Kiritimati")
+        let end = tripDate(2026, 7, 12, timeZoneIdentifier: "Pacific/Kiritimati")
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: start,
+            endDate: end,
+            timeZoneIdentifier: "Pacific/Kiritimati"
+        )
+
+        XCTAssertEqual(trip.dayCount, 3)
+        XCTAssertEqual(
+            trip.formattedDate(start, locale: Locale(identifier: "en_US_POSIX")),
+            "Jul 10, 2026"
+        )
+        XCTAssertFalse(trip.isSingleDay)
+    }
+
+    @MainActor
+    func testTripDestinationsCreateSequentialWeatherWindows() throws {
+        let start = tripDate(2026, 7, 1, timeZoneIdentifier: "America/Los_Angeles")
+        let secondStart = tripDate(2026, 7, 8, timeZoneIdentifier: "America/Los_Angeles")
+        let end = tripDate(2026, 7, 14, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            destinationStops: [
+                TripDestinationStop(
+                    destination: TripDestinationSelection(
+                        name: "First Destination",
+                        latitude: 42.3601,
+                        longitude: -71.0589,
+                        timeZoneIdentifier: "America/New_York"
+                    ),
+                    startDate: start
+                ),
+                TripDestinationStop(
+                    destination: TripDestinationSelection(
+                        name: "Second Destination",
+                        latitude: 43.6532,
+                        longitude: -79.3832,
+                        timeZoneIdentifier: "America/Toronto"
+                    ),
+                    startDate: secondStart
+                )
+            ],
+            startDate: start,
+            endDate: end,
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+
+        let windows = trip.destinationWeatherWindows
+        XCTAssertEqual(windows.count, 2)
+        XCTAssertEqual(windows.map(\.destination.name), ["First Destination", "Second Destination"])
+        XCTAssertEqual(
+            TripDayKey(date: windows[0].startDate, timeZone: trip.tripTimeZone).description,
+            "2026-07-01"
+        )
+        XCTAssertEqual(
+            TripDayKey(date: windows[0].endDate, timeZone: trip.tripTimeZone).description,
+            "2026-07-07"
+        )
+        XCTAssertEqual(
+            TripDayKey(date: windows[1].startDate, timeZone: trip.tripTimeZone).description,
+            "2026-07-08"
+        )
+        XCTAssertEqual(
+            TripDayKey(date: windows[1].endDate, timeZone: trip.tripTimeZone).description,
+            "2026-07-14"
+        )
+        XCTAssertEqual(trip.destinationSummary, "First Destination + 1 more")
+        XCTAssertTrue(TripPackingService.destinationStopsAreValid(
+            trip.destinationStops,
+            tripStartDate: trip.startDate,
+            tripEndDate: trip.endDate,
+            timeZoneIdentifier: trip.timeZoneIdentifier
+        ))
+    }
+
+    @MainActor
+    func testTripWeatherFiltersDestinationDaysAndLocalizesUnits() throws {
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            destinationName: "Sample Destination",
+            destinationLatitude: 35.6762,
+            destinationLongitude: 139.6503,
+            destinationTimeZoneIdentifier: "Asia/Tokyo",
+            startDate: tripDate(2026, 7, 10, timeZoneIdentifier: "America/Los_Angeles"),
+            endDate: tripDate(2026, 7, 12, timeZoneIdentifier: "America/Los_Angeles"),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let query = try XCTUnwrap(TripWeatherQuery(trip: trip))
+        let attribution = TripWeatherAttribution(
+            legalPageURL: try XCTUnwrap(URL(string: "https://example.com/legal")),
+            lightMarkURL: try XCTUnwrap(URL(string: "https://example.com/light")),
+            darkMarkURL: try XCTUnwrap(URL(string: "https://example.com/dark")),
+            legalAttributionText: "Sample weather source attribution."
+        )
+        let days = [
+            TripDailyWeather(date: tripDate(2026, 7, 9, timeZoneIdentifier: "Asia/Tokyo"), lowTemperatureCelsius: -20, highTemperatureCelsius: -10, precipitationChance: 1, uvIndex: 10),
+            TripDailyWeather(date: tripDate(2026, 7, 10, timeZoneIdentifier: "Asia/Tokyo"), lowTemperatureCelsius: 5, highTemperatureCelsius: 20, precipitationChance: 0.1, uvIndex: 2),
+            TripDailyWeather(date: tripDate(2026, 7, 11, timeZoneIdentifier: "Asia/Tokyo"), lowTemperatureCelsius: 8, highTemperatureCelsius: 30, precipitationChance: 0.6, uvIndex: 7),
+            TripDailyWeather(date: tripDate(2026, 7, 12, timeZoneIdentifier: "Asia/Tokyo"), lowTemperatureCelsius: 10, highTemperatureCelsius: 25, precipitationChance: 0.1, uvIndex: 3),
+            TripDailyWeather(date: tripDate(2026, 7, 13, timeZoneIdentifier: "Asia/Tokyo"), lowTemperatureCelsius: -20, highTemperatureCelsius: 50, precipitationChance: 1, uvIndex: 10)
+        ]
+
+        let snapshot = try XCTUnwrap(TripWeatherService.makeSnapshot(
+            query: query,
+            days: days,
+            attribution: attribution,
+            locale: Locale(identifier: "en_US")
+        ))
+
+        XCTAssertEqual(snapshot.lowTemperatureCelsius, 5)
+        XCTAssertEqual(snapshot.highTemperatureCelsius, 30)
+        XCTAssertTrue(snapshot.rainLikely)
+        XCTAssertTrue(snapshot.coldWeather)
+        XCTAssertTrue(snapshot.hotOrHighUV)
+        XCTAssertTrue(snapshot.summary.contains("41–86°F"))
+        XCTAssertEqual(snapshot.forecastDayCount, 3)
+        XCTAssertEqual(snapshot.tripDayCount, 3)
+        XCTAssertEqual(snapshot.dailyForecast.count, 3)
+        XCTAssertEqual(snapshot.dailyForecast.map(\.date), Array(days[1...3]).map(\.date))
+        XCTAssertEqual(snapshot.legalAttributionText, "Sample weather source attribution.")
+        XCTAssertFalse(snapshot.hasPartialCoverage)
+        XCTAssertEqual(snapshot.coverageSummary, "Forecast covers all 3 trip days.")
+    }
+
+    @MainActor
+    func testTripWeatherDisclosesPartialForecastCoverage() throws {
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            destinationName: "Sample Destination",
+            destinationLatitude: 43.6532,
+            destinationLongitude: -79.3832,
+            destinationTimeZoneIdentifier: "America/Toronto",
+            startDate: tripDate(2026, 7, 10, timeZoneIdentifier: "America/Los_Angeles"),
+            endDate: tripDate(2026, 7, 14, timeZoneIdentifier: "America/Los_Angeles"),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let query = try XCTUnwrap(TripWeatherQuery(trip: trip))
+        let attribution = TripWeatherAttribution(
+            legalPageURL: try XCTUnwrap(URL(string: "https://example.com/legal")),
+            lightMarkURL: try XCTUnwrap(URL(string: "https://example.com/light")),
+            darkMarkURL: try XCTUnwrap(URL(string: "https://example.com/dark"))
+        )
+        let days = [
+            TripDailyWeather(date: tripDate(2026, 7, 10, timeZoneIdentifier: "America/Toronto"), lowTemperatureCelsius: 15, highTemperatureCelsius: 24, precipitationChance: 0.1, uvIndex: 3),
+            TripDailyWeather(date: tripDate(2026, 7, 11, timeZoneIdentifier: "America/Toronto"), lowTemperatureCelsius: 16, highTemperatureCelsius: 25, precipitationChance: 0.2, uvIndex: 4)
+        ]
+
+        let snapshot = try XCTUnwrap(TripWeatherService.makeSnapshot(
+            query: query,
+            days: days,
+            attribution: attribution,
+            locale: Locale(identifier: "en_US")
+        ))
+
+        XCTAssertEqual(snapshot.forecastDayCount, 2)
+        XCTAssertEqual(snapshot.tripDayCount, 5)
+        XCTAssertTrue(snapshot.hasPartialCoverage)
+        XCTAssertEqual(
+            snapshot.coverageSummary,
+            "Forecast available for 2 of 5 trip days. Suggestions use only the available days."
+        )
+    }
+
+    @MainActor
+    func testTripDestinationForecastAppearsAsDatesApproach() async throws {
+        let start = tripDate(2026, 7, 1, timeZoneIdentifier: "America/Los_Angeles")
+        let secondStart = tripDate(2026, 7, 8, timeZoneIdentifier: "America/Los_Angeles")
+        let end = tripDate(2026, 7, 14, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            destinationStops: [
+                TripDestinationStop(
+                    destination: TripDestinationSelection(
+                        name: "First Destination",
+                        latitude: 42.3601,
+                        longitude: -71.0589,
+                        timeZoneIdentifier: "America/New_York"
+                    ),
+                    startDate: start
+                ),
+                TripDestinationStop(
+                    destination: TripDestinationSelection(
+                        name: "Second Destination",
+                        latitude: 43.6532,
+                        longitude: -79.3832,
+                        timeZoneIdentifier: "America/Toronto"
+                    ),
+                    startDate: secondStart
+                )
+            ],
+            startDate: start,
+            endDate: end,
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let firstWeek = (1...7).map { day in
+            TripDailyWeather(
+                date: tripDate(2026, 7, day, timeZoneIdentifier: "America/New_York"),
+                lowTemperatureCelsius: 16,
+                highTemperatureCelsius: 24,
+                precipitationChance: 0.1,
+                uvIndex: 4
+            )
+        }
+        let secondWeek = (8...14).map { day in
+            TripDailyWeather(
+                date: tripDate(2026, 7, day, timeZoneIdentifier: "America/Toronto"),
+                lowTemperatureCelsius: 17,
+                highTemperatureCelsius: 26,
+                precipitationChance: 0.2,
+                uvIndex: 5
+            )
+        }
+        let client = TestTripWeatherClient(days: firstWeek)
+        let cache = TripWeatherSnapshotCache()
+
+        let earlierForecasts = await TripWeatherService.forecasts(
+            for: trip,
+            client: client,
+            cache: cache,
+            now: tripDate(2026, 6, 30, timeZoneIdentifier: "America/Los_Angeles"),
+            forceRefresh: true
+        )
+        XCTAssertEqual(earlierForecasts.count, 2)
+        XCTAssertEqual(earlierForecasts[0].availability, .available)
+        XCTAssertEqual(earlierForecasts[0].snapshot?.forecastDayCount, 7)
+        XCTAssertEqual(earlierForecasts[1].availability, .notYetAvailable)
+        XCTAssertNil(earlierForecasts[1].snapshot)
+
+        await client.replaceDays(firstWeek + secondWeek)
+        let closerForecasts = await TripWeatherService.forecasts(
+            for: trip,
+            client: client,
+            cache: cache,
+            now: tripDate(2026, 7, 6, timeZoneIdentifier: "America/Los_Angeles"),
+            forceRefresh: true
+        )
+        XCTAssertEqual(closerForecasts.map(\.availability), [.available, .available])
+        XCTAssertEqual(closerForecasts[1].snapshot?.forecastDayCount, 7)
+    }
+
+    @MainActor
+    func testTripWeatherCacheAndForceRefresh() async throws {
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            destinationName: "Sample Destination",
+            destinationLatitude: 35.6762,
+            destinationLongitude: 139.6503,
+            destinationTimeZoneIdentifier: "Asia/Tokyo",
+            startDate: tripDate(2026, 7, 10, timeZoneIdentifier: "America/Los_Angeles"),
+            endDate: tripDate(2026, 7, 10, timeZoneIdentifier: "America/Los_Angeles"),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let client = TestTripWeatherClient(days: [
+            TripDailyWeather(
+                date: tripDate(2026, 7, 10, timeZoneIdentifier: "Asia/Tokyo"),
+                lowTemperatureCelsius: 10,
+                highTemperatureCelsius: 20,
+                precipitationChance: 0,
+                uvIndex: 1
+            )
+        ])
+        let cache = TripWeatherSnapshotCache()
+        let now = Date(timeIntervalSince1970: 1_900_000_000)
+
+        let firstSnapshot = try await TripWeatherService.snapshot(
+            for: trip,
+            client: client,
+            cache: cache,
+            now: now
+        )
+        let cachedSnapshot = try await TripWeatherService.snapshot(
+            for: trip,
+            client: client,
+            cache: cache,
+            now: now.addingTimeInterval(60)
+        )
+        let cachedRequestCount = await client.forecastRequestCount()
+        XCTAssertNotNil(firstSnapshot)
+        XCTAssertNotNil(cachedSnapshot)
+        XCTAssertEqual(cachedRequestCount, 1)
+
+        let refreshedSnapshot = try await TripWeatherService.snapshot(
+            for: trip,
+            client: client,
+            cache: cache,
+            now: now.addingTimeInterval(120),
+            forceRefresh: true
+        )
+        let refreshedRequestCount = await client.forecastRequestCount()
+        XCTAssertNotNil(refreshedSnapshot)
+        XCTAssertEqual(refreshedRequestCount, 2)
+    }
+
+    func testTripWeatherFailureReasonDistinguishesConfigurationConnectionAndService() {
+        XCTAssertEqual(
+            TripWeatherService.failureReason(for: NSError(
+                domain: "WeatherDaemon.WDSJWTAuthenticatorServiceListener.Errors",
+                code: 2
+            )),
+            .appConfiguration
+        )
+        XCTAssertEqual(
+            TripWeatherService.failureReason(for: URLError(.notConnectedToInternet)),
+            .connection
+        )
+        XCTAssertEqual(
+            TripWeatherService.failureReason(for: NSError(
+                domain: "WeatherKit",
+                code: 999
+            )),
+            .serviceUnavailable
+        )
+    }
+
+    func testNavigationRestorationPreservesSelectedTabAndOpenTrip() throws {
+        let suiteName = "NavigationRestoration-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let tripID = UUID()
+
+        AppNavigationRestoration.saveSelectedTab(.food, defaults: defaults)
+        FoodNavigationRestorationState(
+            selectedSection: .trips,
+            path: [.packingTrip(tripID)]
+        ).save(defaults: defaults)
+
+        XCTAssertEqual(AppNavigationRestoration.selectedTab(defaults: defaults), .food)
+        XCTAssertEqual(
+            FoodNavigationRestorationState.load(defaults: defaults),
+            FoodNavigationRestorationState(
+                selectedSection: .trips,
+                path: [.packingTrip(tripID)]
+            )
+        )
+    }
+
+    func testTripCaregiverNamesAreDeduplicatedAndSorted() {
+        XCTAssertEqual(
+            TripPackingService.uniqueCaregiverNames(from: [
+                " Caregiver B ",
+                "caregiver a",
+                nil,
+                "CAREGIVER A",
+                "",
+                "Caregiver C"
+            ]),
+            ["caregiver a", "Caregiver B", "Caregiver C"]
+        )
+    }
+
+    @MainActor
+    func testTripBagLifecycleQuantityAndShoppingHandoffIntegrity() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let trip = PackingTrip(
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let firstBag = PackingBag(householdID: householdID, tripID: trip.id, name: "Carry On")
+        let secondBag = PackingBag(householdID: householdID, tripID: trip.id, name: "Checked Bag")
+        let item = PackingItem(
+            householdID: householdID,
+            tripID: trip.id,
+            bagID: secondBag.id,
+            title: "Sample Item"
+        )
+        let shoppingList = ShoppingList(householdID: householdID, name: "Trip Shopping")
+        context.insert(trip)
+        context.insert(firstBag)
+        context.insert(secondBag)
+        context.insert(item)
+        context.insert(shoppingList)
+        try context.save()
+
+        XCTAssertFalse(TripPackingService.updateBag(
+            secondBag,
+            name: "carry on",
+            travelerID: nil,
+            trip: trip,
+            existingBags: [firstBag, secondBag],
+            context: context
+        ))
+        XCTAssertNil(TripPackingService.addItem(
+            to: trip,
+            title: "Invalid Quantity",
+            category: .other,
+            travelerID: nil,
+            quantity: 0,
+            existingItems: [item],
+            context: context
+        ))
+
+        let firstShoppingItem = try XCTUnwrap(TripPackingService.addToShoppingList(
+            item,
+            trip: trip,
+            shoppingList: shoppingList,
+            existingShoppingItems: [],
+            context: context
+        ))
+        let repeatedShoppingItem = try XCTUnwrap(TripPackingService.addToShoppingList(
+            item,
+            trip: trip,
+            shoppingList: shoppingList,
+            existingShoppingItems: [firstShoppingItem],
+            context: context
+        ))
+        XCTAssertEqual(repeatedShoppingItem.id, firstShoppingItem.id)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ShoppingListItem>()).count, 1)
+
+        XCTAssertTrue(TripPackingService.deleteBag(
+            secondBag,
+            trip: trip,
+            items: [item],
+            context: context
+        ))
+        XCTAssertNil(item.bagID)
+    }
+
+    @MainActor
+    func testTripPackingReordersOnlyVisibleItemsWithinTheirSection() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let trip = PackingTrip(
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_086_400)
+        )
+        let travelerID = UUID()
+        let firstShared = PackingItem(
+            householdID: householdID,
+            tripID: trip.id,
+            title: "First Shared",
+            sortOrder: 0
+        )
+        let hiddenShared = PackingItem(
+            householdID: householdID,
+            tripID: trip.id,
+            title: "Packed Shared",
+            state: .packed,
+            sortOrder: 1
+        )
+        let travelerItem = PackingItem(
+            householdID: householdID,
+            tripID: trip.id,
+            travelerID: travelerID,
+            title: "Traveler Item",
+            sortOrder: 2
+        )
+        let secondShared = PackingItem(
+            householdID: householdID,
+            tripID: trip.id,
+            title: "Second Shared",
+            sortOrder: 3
+        )
+        let allItems = [firstShared, hiddenShared, travelerItem, secondShared]
+        context.insert(trip)
+        allItems.forEach(context.insert)
+        try context.save()
+
+        XCTAssertTrue(TripPackingService.reorderItems(
+            [firstShared, secondShared],
+            from: IndexSet(integer: 0),
+            to: 2,
+            trip: trip,
+            allItems: allItems,
+            context: context,
+            now: Date(timeIntervalSince1970: 1_900_000_100)
+        ))
+
+        let reordered = try context.fetch(FetchDescriptor<PackingItem>())
+            .filter { $0.tripID == trip.id }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        XCTAssertEqual(
+            reordered.map(\.title),
+            ["Second Shared", "Packed Shared", "Traveler Item", "First Shared"]
+        )
+        XCTAssertEqual(reordered.map(\.sortOrder), [0, 1, 2, 3])
+
+        XCTAssertFalse(TripPackingService.reorderItems(
+            [secondShared, travelerItem],
+            from: IndexSet(integer: 0),
+            to: 2,
+            trip: trip,
+            allItems: reordered,
+            context: context
+        ))
+    }
+
+    @MainActor
+    func testTripBackupRejectsCrossTripTravelerReferenceWithoutReplacingData() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Test Home")
+        let firstTrip = PackingTrip(
+            householdID: household.id,
+            title: "First Trip",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let secondTrip = PackingTrip(
+            householdID: household.id,
+            title: "Second Trip",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let firstTraveler = TripTraveler(
+            householdID: household.id,
+            tripID: firstTrip.id,
+            kind: .adult,
+            displayName: "Adult Traveler"
+        )
+        let secondTraveler = TripTraveler(
+            householdID: household.id,
+            tripID: secondTrip.id,
+            kind: .adult,
+            displayName: "Second Adult"
+        )
+        let item = PackingItem(
+            householdID: household.id,
+            tripID: firstTrip.id,
+            travelerID: firstTraveler.id,
+            title: "Sample Item"
+        )
+        context.insert(household)
+        context.insert(firstTrip)
+        context.insert(secondTrip)
+        context.insert(firstTraveler)
+        context.insert(secondTraveler)
+        context.insert(item)
+        try context.save()
+
+        let backup = try DataExportImportService.exportData(context: context)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: backup) as? [String: Any])
+        var packingItems = try XCTUnwrap(object["packingItems"] as? [[String: Any]])
+        packingItems[0]["travelerID"] = secondTraveler.id.uuidString
+        object["packingItems"] = packingItems
+        let corruptBackup = try JSONSerialization.data(withJSONObject: object)
+
+        XCTAssertThrowsError(try DataExportImportService.importData(
+            corruptBackup,
+            context: context,
+            createRecoveryBackup: false
+        ))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PackingTrip>()).count, 2)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<PackingItem>()).first?.travelerID, firstTraveler.id)
+    }
+
+    @MainActor
+    func testTripReminderDatesIncludeOnlyFutureDatesInOrder() {
+        let now = Date(timeIntervalSince1970: 1_900_000_000)
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: now,
+            endDate: now,
+            reminderDate: now.addingTimeInterval(-60),
+            finalCheckDate: now.addingTimeInterval(120)
+        )
+
+        let dates = NotificationManager.packingTripReminderDates(trip: trip, now: now)
+
+        XCTAssertEqual(dates.count, 1)
+        XCTAssertEqual(dates.first?.date, now.addingTimeInterval(120))
+        XCTAssertEqual(dates.first?.finalCheck, true)
+    }
+
+    @MainActor
+    func testTripRemindersTargetOnlyMatchingCaregiverAssignments() {
+        let now = Date(timeIntervalSince1970: 1_900_000_000)
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: now,
+            endDate: now.addingTimeInterval(86_400),
+            reminderDate: now.addingTimeInterval(60),
+            finalCheckDate: now.addingTimeInterval(120)
+        )
+        let assignedItem = PackingItem(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            title: "Travel documents",
+            assignedCaregiverName: "Caregiver A",
+            caregiverReminderEnabled: true
+        )
+        let disabledItem = PackingItem(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            title: "Optional item",
+            assignedCaregiverName: "Caregiver A",
+            caregiverReminderEnabled: false
+        )
+
+        let matching = PackingTripReminderSnapshot(
+            trip: trip,
+            items: [assignedItem, disabledItem],
+            currentCaregiverName: "caregiver a"
+        )
+        XCTAssertTrue(matching.usesTargetedReminders)
+        XCTAssertTrue(matching.isEligibleForCurrentCaregiver)
+        XCTAssertEqual(matching.assignedRemainingCount, 1)
+        XCTAssertEqual(matching.targetCaregiverName, "caregiver a")
+
+        let content = NotificationManager.shared.buildPackingTripNotificationContent(
+            snapshot: matching,
+            finalCheck: false
+        )
+        XCTAssertEqual(content.title, "Your packing reminder")
+        XCTAssertEqual(content.body, "You have 1 assigned item left to pack for Sample Trip.")
+        XCTAssertEqual(content.userInfo["targetCaregiverName"] as? String, "caregiver a")
+
+        let otherCaregiver = PackingTripReminderSnapshot(
+            trip: trip,
+            items: [assignedItem, disabledItem],
+            currentCaregiverName: "Caregiver B"
+        )
+        XCTAssertTrue(otherCaregiver.usesTargetedReminders)
+        XCTAssertFalse(otherCaregiver.isEligibleForCurrentCaregiver)
+        XCTAssertEqual(otherCaregiver.assignedRemainingCount, 0)
+
+        assignedItem.state = .packed
+        let completedAssignment = PackingTripReminderSnapshot(
+            trip: trip,
+            items: [assignedItem, disabledItem],
+            currentCaregiverName: "Caregiver A"
+        )
+        XCTAssertTrue(completedAssignment.usesTargetedReminders)
+        XCTAssertFalse(completedAssignment.isEligibleForCurrentCaregiver)
+    }
+
+    @MainActor
+    func testTripTravelerManagementAddsSuggestionsAndPreservesItemsOnRemoval() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let trip = PackingTrip(
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_172_800)
+        )
+        let adult = TripTraveler(
+            householdID: householdID,
+            tripID: trip.id,
+            kind: .adult,
+            displayName: "Adult Traveler"
+        )
+        context.insert(trip)
+        context.insert(adult)
+        try context.save()
+
+        let child = try XCTUnwrap(TripPackingService.addTraveler(
+            to: trip,
+            kind: .child,
+            profileID: UUID(),
+            displayName: "Sample Child",
+            includeStarterItems: true,
+            existingTravelers: [adult],
+            existingItems: [],
+            context: context,
+            caregiverName: "Caregiver A"
+        ))
+        let childItems = try context.fetch(FetchDescriptor<PackingItem>())
+            .filter { $0.travelerID == child.id }
+        XCTAssertFalse(childItems.isEmpty)
+        XCTAssertNotNil(childItems.first { $0.templateKey == "child.diapers" })
+
+        let childBag = PackingBag(
+            householdID: householdID,
+            tripID: trip.id,
+            travelerID: child.id,
+            name: "Child Bag"
+        )
+        context.insert(childBag)
+        try context.save()
+        XCTAssertTrue(TripPackingService.removeTraveler(
+            child,
+            from: trip,
+            travelers: [adult, child],
+            bags: [childBag],
+            items: childItems,
+            context: context
+        ))
+
+        XCTAssertNil(childBag.travelerID)
+        XCTAssertTrue(childItems.allSatisfy { $0.travelerID == nil })
+        XCTAssertEqual(try context.fetch(FetchDescriptor<TripTraveler>()).map(\.id), [adult.id])
+    }
+
+    @MainActor
+    func testTripPackingDeepLinksOpenTripsAndSelectedTrip() throws {
+        let tripID = UUID()
+        let router = DeepLinkRouter.shared
+        router.pendingFoodCommand = nil
+        router.route(try XCTUnwrap(URL(string: "littlewindows://food/trips")))
+        XCTAssertEqual(router.selectedTab, .food)
+        XCTAssertEqual(router.pendingFoodCommand, .trips)
+
+        router.route(try XCTUnwrap(URL(string: "littlewindows://food/trips/\(tripID.uuidString)")))
+        XCTAssertEqual(router.selectedTab, .food)
+        XCTAssertEqual(router.pendingFoodCommand, .packingTrip(tripID))
+    }
+
+    @MainActor
+    func testTripPackingReminderContentDeepLinksToTrip() {
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_086_400)
+        )
+
+        let content = NotificationManager.shared.buildPackingTripNotificationContent(
+            trip: trip,
+            finalCheck: true
+        )
+
+        XCTAssertEqual(content.title, "Final packing check")
+        XCTAssertEqual(content.body, "Review what is still unpacked for Sample Trip.")
+        XCTAssertEqual(content.categoryIdentifier, NotificationManager.packingTripReminderCategoryID)
+        XCTAssertEqual(
+            content.userInfo["deepLink"] as? String,
+            "littlewindows://food/trips/\(trip.id.uuidString)"
+        )
+    }
+
     private func rmsWindows(_ samples: [Double], windowSize: Int) -> [Double] {
         stride(from: 0, to: samples.count - windowSize, by: windowSize).map { start in
             rms(Array(samples[start..<start + windowSize]))
         }
+    }
+
+    private func tripDate(
+        _ year: Int,
+        _ month: Int,
+        _ day: Int,
+        timeZoneIdentifier: String
+    ) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: timeZoneIdentifier) ?? TimeZone(secondsFromGMT: 0)!
+        return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: 12))!
     }
 
     @MainActor
@@ -7628,5 +8942,35 @@ final class SleepPredictionEngineTests: XCTestCase {
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none
         )
+    }
+}
+
+private actor TestTripWeatherClient: TripWeatherForecastClient {
+    private var days: [TripDailyWeather]
+    private var forecastRequests = 0
+
+    init(days: [TripDailyWeather]) {
+        self.days = days
+    }
+
+    func dailyForecast(latitude: Double, longitude: Double) async throws -> [TripDailyWeather] {
+        forecastRequests += 1
+        return days
+    }
+
+    func attribution() async throws -> TripWeatherAttribution {
+        TripWeatherAttribution(
+            legalPageURL: URL(string: "https://example.com/legal")!,
+            lightMarkURL: URL(string: "https://example.com/light")!,
+            darkMarkURL: URL(string: "https://example.com/dark")!
+        )
+    }
+
+    func forecastRequestCount() -> Int {
+        forecastRequests
+    }
+
+    func replaceDays(_ value: [TripDailyWeather]) {
+        days = value
     }
 }

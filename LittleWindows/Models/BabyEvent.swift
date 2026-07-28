@@ -112,6 +112,7 @@ final class BabyEvent {
     var leftDurationSeconds: Double?
     var rightDurationSeconds: Double?
     var diaperKindRawValue: String?
+    var diaperRash: Bool?
     var childPottyKindRawValue: String?
     var childPottyLocationRawValue: String?
     var childPottyAccident: Bool?
@@ -591,18 +592,22 @@ final class BabyEvent {
     }
 
     private var diaperSummary: String {
-        guard let diaperKind else { return type.displayName }
+        guard let diaperKind else {
+            return diaperRash == true ? "Diaper · diaper rash" : type.displayName
+        }
+        let summary: String
         switch diaperKind {
         case .wet:
             let amount = optionalDiaperAmount(peeAmount)
-            return "Diaper: pee\(amount)"
+            summary = "Diaper: pee\(amount)"
         case .dirty:
-            return "Diaper: poo\(pooDetails)"
+            summary = "Diaper: poo\(pooDetails)"
         case .both:
             let pee = peeAmount.map { "pee \($0.displayName.lowercased())" } ?? "pee"
             let poo = "poo" + (pooDetailWords.isEmpty ? "" : " \(pooDetailWords.joined(separator: " "))")
-            return "Diaper: mixed — \(pee), \(poo)"
+            summary = "Diaper: mixed — \(pee), \(poo)"
         }
+        return diaperRash == true ? "\(summary) · diaper rash" : summary
     }
 
     private var childPottySummary: String {

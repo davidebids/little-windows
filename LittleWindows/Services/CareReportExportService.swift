@@ -455,6 +455,7 @@ enum CareReportExportService {
             parts.appendIfPresent(event.pooAmount.map { "Poo amount: \($0.displayName)" })
             parts.appendIfPresent(event.pooColor.map { "Poo color: \($0.displayName)" })
             parts.appendIfPresent(event.pooTexture.map { "Poo texture: \($0.displayName)" })
+            if event.diaperRash == true { parts.append("Diaper rash") }
         case .potty:
             if event.profileTypeSnapshot == .dog {
                 appendDogPottyDetails(event.dogDetails, to: &parts)

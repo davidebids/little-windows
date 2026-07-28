@@ -53,6 +53,10 @@ private struct BackupEnvelope: Codable {
     var shoppingListItems: [ShoppingListItemDTO]?
     var homeTodoLists: [HomeTodoListDTO]?
     var homeTodoItems: [HomeTodoItemDTO]?
+    var packingTrips: [PackingTripDTO]?
+    var tripTravelers: [TripTravelerDTO]?
+    var packingBags: [PackingBagDTO]?
+    var packingItems: [PackingItemDTO]?
     var foodItems: [FoodItemDTO]?
     var inventoryLocations: [InventoryLocationDTO]?
     var inventoryItems: [InventoryItemDTO]?
@@ -145,6 +149,7 @@ private struct EventDTO: Codable {
     var leftDurationSeconds: Double?
     var rightDurationSeconds: Double?
     var diaperKindRawValue: String?
+    var diaperRash: Bool?
     var childPottyKindRawValue: String?
     var childPottyLocationRawValue: String?
     var childPottyAccident: Bool?
@@ -365,6 +370,86 @@ private struct HomeTodoItemDTO: Codable {
     var sortOrder: Int?
 }
 
+private struct PackingTripDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var title: String
+    var destinationName: String?
+    var destinationDetail: String?
+    var destinationLatitude: Double?
+    var destinationLongitude: Double?
+    var destinationTimeZoneIdentifier: String?
+    var destinationStops: [TripDestinationStop]?
+    var startDate: Date
+    var endDate: Date
+    var timeZoneIdentifier: String?
+    var travelModeRawValue: String
+    var lodgingTypeRawValue: String
+    var laundryAvailable: Bool
+    var activitiesRawValue: String
+    var notes: String?
+    var statusRawValue: String
+    var weatherSuggestionsEnabled: Bool
+    var reminderDate: Date?
+    var finalCheckDate: Date?
+    var createdBy: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var completedAt: Date?
+    var isArchived: Bool
+    var sortOrder: Int?
+}
+
+private struct TripTravelerDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var tripID: UUID
+    var kindRawValue: String
+    var profileID: UUID?
+    var displayName: String
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int
+}
+
+private struct PackingBagDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var tripID: UUID
+    var travelerID: UUID?
+    var name: String
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int
+}
+
+private struct PackingItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var tripID: UUID
+    var travelerID: UUID?
+    var bagID: UUID?
+    var templateKey: String?
+    var title: String
+    var categoryRawValue: String
+    var quantity: Double?
+    var unit: String?
+    var notes: String?
+    var priorityRawValue: String
+    var stateRawValue: String
+    var needsPurchase: Bool
+    var relatedShoppingItemID: UUID?
+    var addedBy: String?
+    var assignedCaregiverName: String?
+    var caregiverReminderEnabled: Bool?
+    var packedBy: String?
+    var packedAt: Date?
+    var lastUnpackedAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int
+}
+
 private struct FoodItemDTO: Codable {
     var id: UUID
     var householdID: UUID
@@ -549,7 +634,7 @@ private struct CareRoutineRunDTO: Codable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 15
+    private static let currentBackupVersion = 16
     private static let recoveryBackupLimit = 3
 
     static func exportData(context: ModelContext) throws -> Data {
@@ -630,6 +715,7 @@ enum DataExportImportService {
                 leftDurationSeconds: $0.leftDurationSeconds,
                 rightDurationSeconds: $0.rightDurationSeconds,
                 diaperKindRawValue: $0.diaperKindRawValue,
+                diaperRash: $0.diaperRash,
                 childPottyKindRawValue: $0.childPottyKindRawValue,
                 childPottyLocationRawValue: $0.childPottyLocationRawValue,
                 childPottyAccident: $0.childPottyAccident,
@@ -838,6 +924,90 @@ enum DataExportImportService {
                 completedBy: $0.completedBy,
                 completedAt: $0.completedAt,
                 lastReopenedAt: $0.lastReopenedAt,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let packingTrips = try context.fetch(FetchDescriptor<PackingTrip>()).map {
+            PackingTripDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                title: $0.title,
+                destinationName: $0.destinationName,
+                destinationDetail: $0.destinationDetail,
+                destinationLatitude: $0.destinationLatitude,
+                destinationLongitude: $0.destinationLongitude,
+                destinationTimeZoneIdentifier: $0.destinationTimeZoneIdentifier,
+                destinationStops: $0.destinationStops,
+                startDate: $0.startDate,
+                endDate: $0.endDate,
+                timeZoneIdentifier: $0.timeZoneIdentifier,
+                travelModeRawValue: $0.travelModeRawValue,
+                lodgingTypeRawValue: $0.lodgingTypeRawValue,
+                laundryAvailable: $0.laundryAvailable,
+                activitiesRawValue: $0.activitiesRawValue,
+                notes: $0.notes,
+                statusRawValue: $0.statusRawValue,
+                weatherSuggestionsEnabled: $0.weatherSuggestionsEnabled,
+                reminderDate: $0.reminderDate,
+                finalCheckDate: $0.finalCheckDate,
+                createdBy: $0.createdBy,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                completedAt: $0.completedAt,
+                isArchived: $0.isArchived,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let tripTravelers = try context.fetch(FetchDescriptor<TripTraveler>()).map {
+            TripTravelerDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                tripID: $0.tripID,
+                kindRawValue: $0.kindRawValue,
+                profileID: $0.profileID,
+                displayName: $0.displayName,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let packingBags = try context.fetch(FetchDescriptor<PackingBag>()).map {
+            PackingBagDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                tripID: $0.tripID,
+                travelerID: $0.travelerID,
+                name: $0.name,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let packingItems = try context.fetch(FetchDescriptor<PackingItem>()).map {
+            PackingItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                tripID: $0.tripID,
+                travelerID: $0.travelerID,
+                bagID: $0.bagID,
+                templateKey: $0.templateKey,
+                title: $0.title,
+                categoryRawValue: $0.categoryRawValue,
+                quantity: $0.quantity,
+                unit: $0.unit,
+                notes: $0.notes,
+                priorityRawValue: $0.priorityRawValue,
+                stateRawValue: $0.stateRawValue,
+                needsPurchase: $0.needsPurchase,
+                relatedShoppingItemID: $0.relatedShoppingItemID,
+                addedBy: $0.addedBy,
+                assignedCaregiverName: $0.assignedCaregiverName,
+                caregiverReminderEnabled: $0.caregiverReminderEnabled,
+                packedBy: $0.packedBy,
+                packedAt: $0.packedAt,
+                lastUnpackedAt: $0.lastUnpackedAt,
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt,
                 sortOrder: $0.sortOrder
@@ -1057,6 +1227,10 @@ enum DataExportImportService {
             shoppingListItems: shoppingListItems,
             homeTodoLists: homeTodoLists,
             homeTodoItems: homeTodoItems,
+            packingTrips: packingTrips,
+            tripTravelers: tripTravelers,
+            packingBags: packingBags,
+            packingItems: packingItems,
             foodItems: foodItems,
             inventoryLocations: inventoryLocations,
             inventoryItems: inventoryItems,
@@ -1180,6 +1354,7 @@ enum DataExportImportService {
             event.leftDurationSeconds = value.leftDurationSeconds
             event.rightDurationSeconds = value.rightDurationSeconds
             event.diaperKindRawValue = value.diaperKindRawValue
+            event.diaperRash = value.diaperRash
             event.childPottyKindRawValue = value.childPottyKindRawValue
             event.childPottyLocationRawValue = value.childPottyLocationRawValue
             event.childPottyAccident = value.childPottyAccident
@@ -1435,6 +1610,104 @@ enum DataExportImportService {
                 sortOrder: value.sortOrder
             ))
         }
+        for value in envelope.packingTrips ?? [] {
+            context.insert(PackingTrip(
+                id: value.id,
+                householdID: value.householdID,
+                title: value.title,
+                destinationName: value.destinationName,
+                destinationDetail: value.destinationDetail,
+                destinationLatitude: value.destinationLatitude,
+                destinationLongitude: value.destinationLongitude,
+                destinationTimeZoneIdentifier: value.destinationTimeZoneIdentifier,
+                destinationStops: value.destinationStops ?? [],
+                startDate: value.startDate,
+                endDate: value.endDate,
+                timeZoneIdentifier: value.timeZoneIdentifier,
+                travelMode: PackingTravelMode(rawValue: value.travelModeRawValue) ?? .other,
+                lodgingType: PackingLodgingType(rawValue: value.lodgingTypeRawValue) ?? .other,
+                laundryAvailable: value.laundryAvailable,
+                activities: Set(value.activitiesRawValue.split(separator: ",").compactMap {
+                    PackingTripActivity(rawValue: String($0))
+                }),
+                notes: value.notes,
+                status: PackingTripStatus(rawValue: value.statusRawValue) ?? .upcoming,
+                weatherSuggestionsEnabled: value.weatherSuggestionsEnabled,
+                reminderDate: value.reminderDate,
+                finalCheckDate: value.finalCheckDate,
+                createdBy: value.createdBy,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                completedAt: value.completedAt,
+                isArchived: value.isArchived,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.tripTravelers ?? [] {
+            context.insert(TripTraveler(
+                id: value.id,
+                householdID: value.householdID,
+                tripID: value.tripID,
+                kind: TripTravelerKind(rawValue: value.kindRawValue) ?? .adult,
+                profileID: value.profileID,
+                displayName: value.displayName,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.packingBags ?? [] {
+            context.insert(PackingBag(
+                id: value.id,
+                householdID: value.householdID,
+                tripID: value.tripID,
+                travelerID: value.travelerID,
+                name: value.name,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
+        let importedShoppingItemsByID = Dictionary(
+            (envelope.shoppingListItems ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for value in envelope.packingItems ?? [] {
+            let relatedShoppingItemID: UUID?
+            if let relatedID = value.relatedShoppingItemID,
+               importedShoppingItemsByID[relatedID]?.householdID == value.householdID {
+                relatedShoppingItemID = relatedID
+            } else {
+                relatedShoppingItemID = nil
+            }
+            context.insert(PackingItem(
+                id: value.id,
+                householdID: value.householdID,
+                tripID: value.tripID,
+                travelerID: value.travelerID,
+                bagID: value.bagID,
+                templateKey: value.templateKey,
+                title: value.title,
+                category: PackingItemCategory(rawValue: value.categoryRawValue) ?? .other,
+                quantity: value.quantity,
+                unit: value.unit,
+                notes: value.notes,
+                priority: PackingItemPriority(rawValue: value.priorityRawValue) ?? .normal,
+                state: PackingItemState(rawValue: value.stateRawValue) ?? .needed,
+                needsPurchase: value.needsPurchase,
+                relatedShoppingItemID: relatedShoppingItemID,
+                addedBy: value.addedBy,
+                assignedCaregiverName: value.assignedCaregiverName?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                caregiverReminderEnabled: value.caregiverReminderEnabled ?? true,
+                packedBy: value.packedBy,
+                packedAt: value.packedAt,
+                lastUnpackedAt: value.lastUnpackedAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
         for value in envelope.foodItems ?? [] {
             context.insert(FoodItem(
                 id: value.id,
@@ -1671,6 +1944,10 @@ enum DataExportImportService {
         try deleteAll(CareRoutineStep.self, context: context)
         try deleteAll(CareRoutine.self, context: context)
         try deleteAll(FoodReminder.self, context: context)
+        try deleteAll(PackingItem.self, context: context)
+        try deleteAll(PackingBag.self, context: context)
+        try deleteAll(TripTraveler.self, context: context)
+        try deleteAll(PackingTrip.self, context: context)
         try deleteAll(ReturnPackage.self, context: context)
         try deleteAll(ReturnItem.self, context: context)
         try deleteAll(ReturnRequest.self, context: context)
@@ -1928,6 +2205,113 @@ enum DataExportImportService {
         }
         if let solidFoods = envelope.solidFoods,
            Set(solidFoods.map(\.id)).count != solidFoods.count {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let packingTrips = envelope.packingTrips ?? []
+        let tripTravelers = envelope.tripTravelers ?? []
+        let packingBags = envelope.packingBags ?? []
+        let packingItems = envelope.packingItems ?? []
+        let householdIDs = Set((envelope.households ?? []).map(\.id))
+        let shoppingItemsByID = Dictionary(
+            (envelope.shoppingListItems ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let tripIDs = Set(packingTrips.map(\.id))
+        let travelerIDs = Set(tripTravelers.map(\.id))
+        let bagIDs = Set(packingBags.map(\.id))
+        let tripsByID = Dictionary(
+            packingTrips.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let travelersByID = Dictionary(
+            tripTravelers.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let bagsByID = Dictionary(
+            packingBags.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let bagNamesAreUnique = Dictionary(grouping: packingBags, by: \.tripID).values.allSatisfy { bags in
+            let normalizedNames = bags.map {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            return !normalizedNames.contains("") && Set(normalizedNames).count == normalizedNames.count
+        }
+        guard tripIDs.count == packingTrips.count,
+              travelerIDs.count == tripTravelers.count,
+              bagIDs.count == packingBags.count,
+              Set(packingItems.map(\.id)).count == packingItems.count,
+              bagNamesAreUnique,
+              packingTrips.allSatisfy({ trip in
+                  let title = trip.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let coordinatesAreValid: Bool
+                  switch (trip.destinationLatitude, trip.destinationLongitude) {
+                  case (nil, nil):
+                      coordinatesAreValid = true
+                  case (let latitude?, let longitude?):
+                      coordinatesAreValid = latitude.isFinite
+                          && longitude.isFinite
+                          && (-90...90).contains(latitude)
+                          && (-180...180).contains(longitude)
+                  default:
+                      coordinatesAreValid = false
+                  }
+                  let timeZonesAreValid = (trip.timeZoneIdentifier.map {
+                      TimeZone(identifier: $0) != nil
+                  } ?? true)
+                      && (trip.destinationTimeZoneIdentifier.map {
+                          TimeZone(identifier: $0) != nil
+                      } ?? true)
+                  let destinationStopsAreValid = TripPackingService.destinationStopsAreValid(
+                      trip.destinationStops ?? [],
+                      tripStartDate: trip.startDate,
+                      tripEndDate: trip.endDate,
+                      timeZoneIdentifier: trip.timeZoneIdentifier
+                  )
+                  return !title.isEmpty
+                      && trip.endDate >= trip.startDate
+                      && coordinatesAreValid
+                      && timeZonesAreValid
+                      && destinationStopsAreValid
+                      && TripPackingService.reminderDatesAreValid(
+                          reminderDate: trip.reminderDate,
+                          finalCheckDate: trip.finalCheckDate
+                      )
+                      && (householdIDs.isEmpty || householdIDs.contains(trip.householdID))
+              }),
+              tripTravelers.allSatisfy({ traveler in
+                  guard let trip = tripsByID[traveler.tripID] else { return false }
+                  return traveler.householdID == trip.householdID
+                      && !traveler.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && traveler.profileID.map(profileIDs.contains) != false
+              }),
+              packingBags.allSatisfy({ bag in
+                  guard let trip = tripsByID[bag.tripID] else { return false }
+                  return bag.householdID == trip.householdID
+                      && bag.travelerID.map { travelerID in
+                          travelersByID[travelerID]?.tripID == bag.tripID
+                      } != false
+              }),
+              packingItems.allSatisfy({ item in
+                  guard let trip = tripsByID[item.tripID] else { return false }
+                  let relatedShoppingItemIsValid = item.relatedShoppingItemID.map { relatedID in
+                      guard let related = shoppingItemsByID[relatedID] else { return true }
+                      return related.householdID == item.householdID
+                  } ?? true
+                  return item.householdID == trip.householdID
+                      && !item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && (item.assignedCaregiverName.map {
+                          !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      } ?? true)
+                      && TripPackingService.isValidQuantity(item.quantity)
+                      && item.travelerID.map { travelerID in
+                          travelersByID[travelerID]?.tripID == item.tripID
+                      } != false
+                      && item.bagID.map { bagID in
+                          bagsByID[bagID]?.tripID == item.tripID
+                      } != false
+                      && relatedShoppingItemIsValid
+              }) else {
             throw CocoaError(.fileReadCorruptFile)
         }
     }

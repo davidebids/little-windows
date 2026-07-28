@@ -36,6 +36,7 @@ struct EventEditorView: View {
     @State private var nursingSide: NursingSide
     @State private var nursingMinutes: Double
     @State private var diaperKind: DiaperKind
+    @State private var diaperRash: Bool
     @State private var childPottyKind: ChildPottyKind
     @State private var childPottyLocation: ChildPottyLocation
     @State private var childPottyAccident: Bool
@@ -144,6 +145,7 @@ struct EventEditorView: View {
         _nursingSide = State(initialValue: event?.nursingSide ?? .left)
         _nursingMinutes = State(initialValue: (event?.totalNursingDurationSeconds ?? 0) / 60)
         _diaperKind = State(initialValue: event?.diaperKind ?? .wet)
+        _diaperRash = State(initialValue: event?.diaperRash == true)
         _childPottyKind = State(initialValue: event?.childPottyKind ?? .pee)
         _childPottyLocation = State(initialValue: event?.childPottyLocation ?? .pottyChair)
         _childPottyAccident = State(initialValue: event?.childPottyAccident ?? false)
@@ -563,6 +565,8 @@ struct EventEditorView: View {
                             ForEach(PooTexture.allCases) { Text($0.displayName).tag($0) }
                         }
                     }
+                    Toggle("Diaper rash", isOn: $diaperRash)
+                        .accessibilityIdentifier("diaper-rash-toggle")
                 }
             }
         case .medicine:
@@ -1024,6 +1028,7 @@ struct EventEditorView: View {
                 : nil
         }
         event.diaperKind = type == .diaper ? diaperKind : nil
+        event.diaperRash = type == .diaper && diaperRash ? true : nil
         event.childPottyKind = type == .potty && !isDogProfile ? childPottyKind : nil
         event.childPottyLocation = type == .potty && !isDogProfile ? childPottyLocation : nil
         event.childPottyAccident = type == .potty && !isDogProfile ? childPottyAccident : nil

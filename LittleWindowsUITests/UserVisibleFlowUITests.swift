@@ -30,14 +30,6 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.terminate()
         app.launchEnvironment = [
             "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
-        ]
-        app.launch()
-        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
-
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
             "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/feed"
         ]
         app.launch()
@@ -77,6 +69,28 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(lovedReaction.exists)
         XCTAssertTrue(app.buttons["solid-allergen.exposure"].exists)
         XCTAssertTrue(app.buttons["solid-allergen.reaction"].exists)
+    }
+
+    func testDiaperEditorOffersOptionalRashDetail() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/diaper"
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 8))
+        let rashToggle = app.switches["diaper-rash-toggle"]
+        XCTAssertTrue(rashToggle.waitForExistence(timeout: 4))
+        XCTAssertEqual(rashToggle.value as? String, "0")
+        rashToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let enabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"),
+            object: rashToggle
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 2), .completed)
     }
 
     func testStoreSectionsHaveVisibleAddReorderAndRemoveControls() {
@@ -382,6 +396,321 @@ final class UserVisibleFlowUITests: XCTestCase {
             name: "16-settings",
             startURL: "littlewindows://settings",
             expectedText: ["Settings"]
+        )
+    }
+
+    func testTripPackingCreationAddItemAndPackFlow() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://food/trips"
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 8)
+        )
+        let newTrip = app.buttons["trips.new"]
+        XCTAssertTrue(newTrip.waitForExistence(timeout: 4))
+        newTrip.tap()
+
+        XCTAssertTrue(app.navigationBars["New Trip"].waitForExistence(timeout: 4))
+        let tripName = app.textFields["trip.create.name"]
+        XCTAssertTrue(tripName.exists)
+        tripName.tap()
+        tripName.typeText("Automation Trip")
+        addOfflineTripDestination(named: "Test City One", index: 1)
+        addOfflineTripDestination(named: "Test City Two", index: 2)
+        app.buttons["trip.create.save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Automation Trip"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.descendants(matching: .any)["trip.detail"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS %@", "Test City One")
+            ).firstMatch.waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS %@", "Test City Two")
+            ).firstMatch.waitForExistence(timeout: 3)
+        )
+
+        app.buttons["trip.actions"].tap()
+        app.buttons["Manage Bags"].tap()
+        XCTAssertTrue(app.navigationBars["Bags"].waitForExistence(timeout: 4))
+
+        let newBagName = app.textFields["trip.bag.new.name"]
+        let addBag = app.buttons["trip.bag.add"]
+        XCTAssertTrue(newBagName.waitForExistence(timeout: 3))
+        XCTAssertTrue(addBag.exists)
+        XCTAssertFalse(addBag.isEnabled)
+
+        newBagName.tap()
+        newBagName.typeText("Carry-on")
+        XCTAssertTrue(addBag.isEnabled)
+        addBag.tap()
+
+        let bagConfirmation = app.descendants(matching: .any)["trip.bag.added"]
+        XCTAssertTrue(bagConfirmation.waitForExistence(timeout: 3))
+        XCTAssertTrue(bagConfirmation.label.contains("Carry-on added"))
+        XCTAssertFalse(addBag.isEnabled, "Adding a bag should reset the form for the next one.")
+
+        newBagName.typeText("Checked bag")
+        XCTAssertTrue(addBag.isEnabled)
+        addBag.tap()
+        XCTAssertTrue(bagConfirmation.label.contains("Checked bag added"))
+        XCTAssertFalse(addBag.isEnabled)
+        XCTAssertFalse(app.buttons["Save Changes"].exists)
+        app.navigationBars["Bags"].buttons["Done"].tap()
+
+        app.buttons["trip.actions"].tap()
+        app.buttons["Manage Bags"].tap()
+        XCTAssertTrue(app.navigationBars["Bags"].waitForExistence(timeout: 4))
+
+        let existingBagName = app.textFields.matching(
+            identifier: "trip.bag.existing.name"
+        ).element(boundBy: 1)
+        for _ in 0..<4 where !existingBagName.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(existingBagName.waitForExistence(timeout: 3))
+        XCTAssertTrue(existingBagName.isHittable)
+        let originalBagName = existingBagName.value as? String ?? "Carry-on"
+        existingBagName.tap()
+        existingBagName.typeText(" Updated")
+        let renamedBagName = (existingBagName.value as? String ?? "Updated Carry-on")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertNotEqual(renamedBagName, originalBagName)
+        app.navigationBars["Bags"].buttons["Done"].tap()
+
+        app.buttons["trip.actions"].tap()
+        app.buttons["Manage Bags"].tap()
+        XCTAssertTrue(app.navigationBars["Bags"].waitForExistence(timeout: 4))
+        let reopenedBagName = app.textFields.matching(
+            identifier: "trip.bag.existing.name"
+        ).element(boundBy: 1)
+        for _ in 0..<4 where !reopenedBagName.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            reopenedBagName.waitForExistence(timeout: 4),
+            "Bag name changes should persist without a separate save action."
+        )
+        XCTAssertEqual(reopenedBagName.value as? String, renamedBagName)
+        app.navigationBars["Bags"].buttons["Done"].tap()
+
+        app.buttons["trip.item.add"].tap()
+
+        XCTAssertTrue(app.navigationBars["Add Packing Item"].waitForExistence(timeout: 4))
+        let itemName = app.textFields["trip.item.name"]
+        itemName.tap()
+        itemName.typeText("Automation Item")
+        let responsibilityChoice = app.buttons["trip.item.caregiver-choice"]
+        for _ in 0..<3 where !responsibilityChoice.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(responsibilityChoice.waitForExistence(timeout: 3))
+        responsibilityChoice.tap()
+        let enterNewName = app.buttons["Enter a new name"]
+        XCTAssertTrue(enterNewName.waitForExistence(timeout: 3))
+        enterNewName.tap()
+
+        let responsiblePersonName = app.textFields["trip.item.caregiver"]
+        XCTAssertTrue(responsiblePersonName.waitForExistence(timeout: 3))
+        responsiblePersonName.tap()
+        responsiblePersonName.typeText("Sample Person")
+        app.buttons["trip.item.save"].tap()
+
+        let createdItem = app.staticTexts["Automation Item"]
+        for _ in 0..<4 {
+            if createdItem.exists { break }
+            app.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(createdItem.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sample Person"].exists)
+        let itemToggle = app.buttons.matching(
+            NSPredicate(format: "identifier ENDSWITH %@", ".toggle")
+        ).firstMatch
+        XCTAssertTrue(itemToggle.waitForExistence(timeout: 3))
+        XCTAssertEqual(itemToggle.label, "Mark packed")
+        let packedToggleIdentifier = itemToggle.identifier
+        itemToggle.tap()
+        XCTAssertTrue(
+            app.buttons[packedToggleIdentifier].waitForNonExistence(timeout: 3),
+            "Packed items should leave the default Remaining filter."
+        )
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "trip-packing-detail"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testEditPackingItemScrollKeepsDraftResponsive() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://food/trips"
+        ]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 8))
+        app.buttons["trips.new"].tap()
+
+        let tripName = app.textFields["trip.create.name"]
+        XCTAssertTrue(tripName.waitForExistence(timeout: 4))
+        tripName.tap()
+        tripName.typeText("Editor Scroll Trip")
+        addOfflineTripDestination(named: "Test Destination", index: 1)
+        app.buttons["trip.create.save"].tap()
+        XCTAssertTrue(app.navigationBars["Editor Scroll Trip"].waitForExistence(timeout: 6))
+
+        let starterItem = app.staticTexts["Identification and travel documents"]
+        XCTAssertTrue(starterItem.waitForExistence(timeout: 5))
+        starterItem.tap()
+        XCTAssertTrue(app.navigationBars["Edit Packing Item"].waitForExistence(timeout: 4))
+        let itemEditor = app.descendants(matching: .any)["trip.item.editor"]
+        XCTAssertTrue(itemEditor.waitForExistence(timeout: 3))
+
+        itemEditor.swipeUp()
+        let responsibilityChoice = app.buttons["trip.item.caregiver-choice"]
+        XCTAssertTrue(responsibilityChoice.waitForExistence(timeout: 3))
+        responsibilityChoice.tap()
+        let enterNewName = app.buttons["Enter a new name"]
+        XCTAssertTrue(enterNewName.waitForExistence(timeout: 3))
+        enterNewName.tap()
+
+        let personNameField = app.textFields["trip.item.caregiver"]
+        XCTAssertTrue(personNameField.waitForExistence(timeout: 3))
+        personNameField.tap()
+        personNameField.typeText("Test Person")
+        itemEditor.swipeDown()
+        itemEditor.swipeUp()
+        itemEditor.swipeDown()
+        itemEditor.swipeUp()
+
+        XCTAssertTrue(app.buttons["trip.item.save"].isEnabled)
+        XCTAssertTrue(personNameField.waitForExistence(timeout: 3))
+        XCTAssertEqual(personNameField.value as? String, "Test Person")
+    }
+
+    func testBackgroundForegroundKeepsOpenHomeDetail() {
+        continueAfterFailure = false
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
+        ]
+        app.launch()
+        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
+
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://food/shopping/00000000-0000-0000-0000-000000000501"
+        ]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Weekly groceries"].waitForExistence(timeout: 8))
+
+        XCUIDevice.shared.press(.home)
+        let backgroundDeadline = Date().addingTimeInterval(4)
+        while app.state == .runningForeground, Date() < backgroundDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertNotEqual(app.state, .runningForeground)
+
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        XCTAssertTrue(
+            app.navigationBars["Weekly groceries"].waitForExistence(timeout: 4),
+            "Foregrounding should return to the open Home detail instead of resetting to Today."
+        )
+        XCTAssertFalse(app.staticTexts["Little Windows is loading"].exists)
+    }
+
+    private func addOfflineTripDestination(named name: String, index: Int) {
+        let returnKey = app.keyboards.buttons["return"]
+        if returnKey.exists {
+            returnKey.tap()
+        }
+        let addDestination = app.buttons["trip.destination.add"]
+        for _ in 0..<4 {
+            if addDestination.exists, addDestination.isHittable { break }
+            app.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(addDestination.waitForExistence(timeout: 3))
+        XCTAssertTrue(addDestination.isHittable)
+        addDestination.tap()
+
+        let destinationLink = app.buttons["trip.destination.select.\(index)"]
+        XCTAssertTrue(destinationLink.waitForExistence(timeout: 3))
+        destinationLink.tap()
+
+        XCTAssertTrue(app.navigationBars["Destination"].waitForExistence(timeout: 3))
+        let searchField = app.searchFields.firstMatch
+        XCTAssertTrue(searchField.waitForExistence(timeout: 3))
+        searchField.tap()
+        searchField.typeText(name)
+
+        let offlineChoice = app.buttons["trip.destination.offline"]
+        XCTAssertTrue(offlineChoice.waitForExistence(timeout: 4))
+        for _ in 0..<3 {
+            if offlineChoice.isHittable { break }
+            app.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(offlineChoice.isHittable)
+        offlineChoice.tap()
+        XCTAssertTrue(
+            app.navigationBars["New Trip"].waitForExistence(timeout: 5),
+            "Expected to return to trip creation after choosing \(name); app state \(app.state.rawValue).\n\(app.debugDescription)"
         )
     }
 

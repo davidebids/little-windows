@@ -10,6 +10,8 @@ struct FamilySyncSettingsView: View {
     private var activityNotificationsEnabled = true
     @AppStorage("familySyncHomeTodoNotificationsEnabled")
     private var homeTodoNotificationsEnabled = true
+    @AppStorage("familySyncTripNotificationsEnabled")
+    private var tripNotificationsEnabled = true
     @State private var confirmLeave = false
     @State private var confirmStopSharing = false
     @State private var confirmDeleteInactiveData = false
@@ -222,6 +224,20 @@ struct FamilySyncSettingsView: View {
                         }
                     }
                     Text("Alert when another caregiver adds, completes, reopens, or edits Home to-do items.")
+                        .foregroundStyle(.secondary)
+
+                    Toggle(
+                        "Trip packing updates",
+                        isOn: $tripNotificationsEnabled
+                    )
+                    .disabled(!activityNotificationsEnabled)
+                    .onChange(of: tripNotificationsEnabled) { _, enabled in
+                        guard enabled else { return }
+                        Task {
+                            _ = await NotificationManager.shared.requestAuthorization()
+                        }
+                    }
+                    Text("Alert for meaningful shared trip changes without notifying for every packed item.")
                         .foregroundStyle(.secondary)
                 }
             }

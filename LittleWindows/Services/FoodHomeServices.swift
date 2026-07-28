@@ -1501,6 +1501,7 @@ enum FoodInsightsService {
         locations: [InventoryLocation],
         inventoryItems: [InventoryItem],
         mealPrepItems: [MealPrepItem],
+        packingTrips: [PackingTrip],
         shoppingLists: [ShoppingList],
         shoppingItems: [ShoppingListItem],
         todoLists: [HomeTodoList],
@@ -1519,8 +1520,11 @@ enum FoodInsightsService {
         let activeShopping = shoppingItems.filter {
             $0.householdID == householdID && !$0.isChecked
         }
-        let finishedTrips = shoppingLists.filter {
+        let usedShoppingLists = shoppingLists.filter {
             $0.householdID == householdID && $0.lastUsedAt != nil
+        }.count
+        let completedPackingTrips = packingTrips.filter {
+            $0.householdID == householdID && ($0.status == .completed || $0.completedAt != nil)
         }.count
         let busiestStore = shoppingItems
             .filter { $0.householdID == householdID }
@@ -1591,15 +1595,21 @@ enum FoodInsightsService {
                 systemImage: "cart.fill"
             ),
             FoodInsightMetric(
-                title: "Trips",
-                value: "\(finishedTrips)",
-                detail: "Shopping lists finished at least once.",
+                title: "Lists Used",
+                value: "\(usedShoppingLists)",
+                detail: "Reusable shopping lists completed at least once.",
                 systemImage: "checkmark.circle.fill"
+            ),
+            FoodInsightMetric(
+                title: "Trips",
+                value: "\(completedPackingTrips)",
+                detail: "Packing trips marked complete.",
+                systemImage: "suitcase.rolling.fill"
             ),
             FoodInsightMetric(
                 title: "Frequent Buy",
                 value: busiestStore?.name ?? "None yet",
-                detail: purchaseText.map { "\($0) recorded." } ?? "Finish a trip to build history.",
+                detail: purchaseText.map { "\($0) recorded." } ?? "Complete a shopping list to build history.",
                 systemImage: "repeat.circle.fill"
             )
         ]

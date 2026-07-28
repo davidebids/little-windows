@@ -1666,8 +1666,13 @@ struct CaregiverNameFields: View {
 
     private func save(currentName: String, primaryName: String) {
         let defaults = UserDefaults.standard
+        let previousEffectiveName = CaregiverIdentityService.currentCaregiverName(defaults: defaults)
         defaults.set(currentName, forKey: CaregiverIdentityService.currentCaregiverNameKey)
         defaults.set(primaryName, forKey: CaregiverIdentityService.primaryCaregiverNameKey)
+        let updatedEffectiveName = CaregiverIdentityService.currentCaregiverName(defaults: defaults)
+        if !CaregiverIdentityService.namesMatch(previousEffectiveName, updatedEffectiveName) {
+            SystemIntegrationReconciler.requestReconciliation()
+        }
         if clearsFamilySyncPrompt,
            !currentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             defaults.set(false, forKey: CaregiverIdentityService.needsLogNamePromptKey)

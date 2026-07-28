@@ -250,6 +250,7 @@ enum EventMutationService {
         event.leftDurationSeconds = source.leftDurationSeconds
         event.rightDurationSeconds = source.rightDurationSeconds
         event.diaperKind = source.diaperKind
+        event.diaperRash = source.diaperRash
         event.childPottyKind = source.childPottyKind
         event.childPottyLocation = source.childPottyLocation
         event.childPottyAccident = source.childPottyAccident

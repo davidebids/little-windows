@@ -5,6 +5,10 @@ import UIKit
 
 @MainActor
 final class PersistenceStartupController: ObservableObject {
+    static let shared = PersistenceStartupController()
+
+    private init() {}
+
     @Published private(set) var modelContainer: ModelContainer?
     @Published private(set) var failure: PersistenceStartupFailure?
     @Published private(set) var recoveryBackups = [AutomaticRecoveryBackup]()
@@ -146,7 +150,7 @@ final class PersistenceStartupController: ObservableObject {
 
 @main
 struct LittleWindowsApp: App {
-    @StateObject private var startupController = PersistenceStartupController()
+    @StateObject private var startupController = PersistenceStartupController.shared
     @UIApplicationDelegateAdaptor(LittleWindowsAppDelegate.self) private var appDelegate
 
     var body: some Scene {

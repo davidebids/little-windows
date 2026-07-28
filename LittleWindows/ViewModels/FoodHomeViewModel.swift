@@ -1,8 +1,9 @@
 import Foundation
 
-enum FoodHomeSection: String, CaseIterable, Identifiable {
+enum FoodHomeSection: String, CaseIterable, Identifiable, Codable {
     case todos
     case shopping
+    case trips
     case returns
     case inventory
     case mealPrep
@@ -15,6 +16,7 @@ enum FoodHomeSection: String, CaseIterable, Identifiable {
         switch self {
         case .todos: "To-Do"
         case .shopping: "Shopping"
+        case .trips: "Trips"
         case .inventory: "Kitchen Inventory"
         case .mealPrep: "Meal Prep"
         case .returns: "Returns"
@@ -27,6 +29,7 @@ enum FoodHomeSection: String, CaseIterable, Identifiable {
         switch self {
         case .todos: "checklist"
         case .shopping: "cart.fill"
+        case .trips: "suitcase.rolling.fill"
         case .inventory: "cabinet.fill"
         case .mealPrep: "takeoutbag.and.cup.and.straw.fill"
         case .returns: "shippingbox.fill"
@@ -83,15 +86,41 @@ enum InventorySort: String, CaseIterable, Identifiable {
     }
 }
 
-enum FoodRoute: Hashable {
+enum FoodRoute: Hashable, Codable {
     case todoList(UUID)
     case shoppingList(UUID)
     case shoppingMode(UUID)
+    case packingTrip(UUID)
     case inventoryItem(UUID)
     case mealPrepItem(UUID)
     case returnRequest(UUID)
     case store(UUID)
     case reminders
+}
+
+struct FoodNavigationRestorationState: Codable, Equatable {
+    static let defaultsKey = "navigation.foodHome"
+
+    var selectedSection: FoodHomeSection
+    var path: [FoodRoute]
+
+    static let initial = FoodNavigationRestorationState(
+        selectedSection: .todos,
+        path: []
+    )
+
+    static func load(defaults: UserDefaults = .standard) -> FoodNavigationRestorationState {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let state = try? JSONDecoder().decode(Self.self, from: data) else {
+            return .initial
+        }
+        return state
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.defaultsKey)
+    }
 }
 
 enum FoodRouteCommand: Equatable {
@@ -101,6 +130,8 @@ enum FoodRouteCommand: Equatable {
     case shopping
     case shoppingList(UUID)
     case shoppingMode(UUID)
+    case trips
+    case packingTrip(UUID)
     case inventory
     case inventoryItem(UUID)
     case mealPrep

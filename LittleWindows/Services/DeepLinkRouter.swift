@@ -1,12 +1,29 @@
 import Foundation
 
-enum LittleWindowsTab: Hashable {
+enum LittleWindowsTab: String, Hashable, Codable {
     case today
     case food
     case reports
     case milestones
     case nightLight
     case medical
+}
+
+enum AppNavigationRestoration {
+    static let selectedTabKey = "navigation.selectedTab"
+
+    static func selectedTab(defaults: UserDefaults = .standard) -> LittleWindowsTab {
+        defaults.string(forKey: selectedTabKey)
+            .flatMap(LittleWindowsTab.init(rawValue:))
+            ?? .today
+    }
+
+    static func saveSelectedTab(
+        _ tab: LittleWindowsTab,
+        defaults: UserDefaults = .standard
+    ) {
+        defaults.set(tab.rawValue, forKey: selectedTabKey)
+    }
 }
 
 enum ReportsDisplayMode: String, CaseIterable, Identifiable {
@@ -76,7 +93,11 @@ enum DeepLinkAction: Equatable {
 final class DeepLinkRouter: ObservableObject {
     static let shared = DeepLinkRouter()
 
-    @Published var selectedTab: LittleWindowsTab = .today
+    @Published var selectedTab: LittleWindowsTab {
+        didSet {
+            AppNavigationRestoration.saveSelectedTab(selectedTab)
+        }
+    }
     @Published var pendingAction: DeepLinkAction?
     @Published var pendingNightLightCommand: NightLightCommand?
     @Published var pendingAppointmentCommand: AppointmentRouteCommand?
@@ -92,7 +113,9 @@ final class DeepLinkRouter: ObservableObject {
     @Published var showingFamilySyncSettings = false
     @Published var isDataReady = false
 
-    private init() {}
+    private init() {
+        selectedTab = AppNavigationRestoration.selectedTab()
+    }
 
     func route(_ url: URL) {
         guard url.scheme == "littlewindows" else { return }
@@ -135,6 +158,15 @@ final class DeepLinkRouter: ObservableObject {
             pendingFoodCommand = components.count >= 4 && components[3] == "mode"
                 ? .shoppingMode(uuid)
                 : .shoppingList(uuid)
+        } else if components == ["food", "trips"] {
+            selectedTab = .food
+            pendingFoodCommand = .trips
+        } else if components.count == 3,
+                  components[0] == "food",
+                  components[1] == "trips",
+                  let uuid = UUID(uuidString: components[2]) {
+            selectedTab = .food
+            pendingFoodCommand = .packingTrip(uuid)
         } else if components == ["food", "inventory"] {
             selectedTab = .food
             pendingFoodCommand = .inventory

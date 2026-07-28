@@ -22,9 +22,14 @@ struct FoodHomeView: View {
     @Query(sort: \ReturnPackage.sortOrder) private var returnPackages: [ReturnPackage]
     @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @Query(sort: \FoodReminder.dateTime) private var reminders: [FoodReminder]
+    @Query(sort: \PackingTrip.startDate) private var packingTrips: [PackingTrip]
+    @Query(sort: \TripTraveler.sortOrder) private var tripTravelers: [TripTraveler]
+    @Query(sort: \PackingBag.sortOrder) private var packingBags: [PackingBag]
+    @Query(sort: \PackingItem.sortOrder) private var packingItems: [PackingItem]
+    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
 
-    @State private var selectedSection: FoodHomeSection = .todos
-    @State private var path = NavigationPath()
+    @State private var selectedSection: FoodHomeSection
+    @State private var path: [FoodRoute]
     @State private var showingQuickAdd = false
     @State private var deferredFoodCommand: FoodRouteCommand?
     @State private var deferredFoodCommandRetryToken = UUID()
@@ -43,9 +48,16 @@ struct FoodHomeView: View {
         + stores.count
         + storeSections.count
         + locations.count
+        + packingTrips.count
+        + tripTravelers.count
+        + packingBags.count
+        + packingItems.count
     }
 
     init() {
+        let restoredNavigation = FoodNavigationRestorationState.load()
+        _selectedSection = State(initialValue: restoredNavigation.selectedSection)
+        _path = State(initialValue: restoredNavigation.path)
         let returnPhotoKind = PhotoAttachmentOwnerKind.returnPhoto.rawValue
         let descriptor = FetchDescriptor<PhotoAttachment>(
             predicate: #Predicate<PhotoAttachment> { attachment in
@@ -94,6 +106,12 @@ struct FoodHomeView: View {
             .onChange(of: foodRouteDataVersion) { _, _ in
                 retryDeferredFoodCommandIfPossible()
             }
+            .onChange(of: selectedSection) { _, _ in
+                saveNavigationState()
+            }
+            .onChange(of: path) { _, _ in
+                saveNavigationState()
+            }
             .sheet(isPresented: $showingQuickAdd) {
                 if let household {
                     QuickAddShoppingItemView(
@@ -104,6 +122,13 @@ struct FoodHomeView: View {
                 }
             }
         }
+    }
+
+    private func saveNavigationState() {
+        FoodNavigationRestorationState(
+            selectedSection: selectedSection,
+            path: path
+        ).save()
     }
 
     @ViewBuilder
@@ -134,6 +159,18 @@ struct FoodHomeView: View {
                     shoppingItems: householdShoppingItems,
                     stores: householdStores,
                     openList: { path.append(FoodRoute.shoppingList($0.id)) }
+                )
+            case .trips:
+                TripsHomeView(
+                    household: household,
+                    trips: householdPackingTrips,
+                    travelers: householdTripTravelers,
+                    bags: householdPackingBags,
+                    items: householdPackingItems,
+                    profiles: profiles,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    openTrip: { path.append(FoodRoute.packingTrip($0)) }
                 )
             case .inventory:
                 InventoryHomeView(
@@ -179,6 +216,7 @@ struct FoodHomeView: View {
                     locations: householdLocations,
                     inventoryItems: householdInventoryItems,
                     mealPrepItems: householdMealPrepItems,
+                    packingTrips: householdPackingTrips,
                     shoppingLists: householdShoppingLists,
                     shoppingItems: householdShoppingItems,
                     mealPrepUsages: householdMealPrepUsages
@@ -227,6 +265,21 @@ struct FoodHomeView: View {
                     items: householdShoppingItems.filter { $0.shoppingListID == list.id },
                     sections: householdStoreSections.filter { $0.storeID == list.storeID },
                     locations: householdLocations
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .packingTrip(let id):
+            if let trip = householdPackingTrips.first(where: { $0.id == id }) {
+                PackingTripDetailView(
+                    trip: trip,
+                    allTrips: householdPackingTrips,
+                    allTravelers: householdTripTravelers,
+                    allBags: householdPackingBags,
+                    allItems: householdPackingItems,
+                    profiles: profiles.filter { !$0.isArchived },
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems
                 )
             } else {
                 MissingFoodRouteView()
@@ -321,6 +374,15 @@ struct FoodHomeView: View {
             selectedSection = .shopping
             path.removeLast(path.count)
             path.append(FoodRoute.shoppingMode(id))
+        case .trips:
+            deferredFoodCommand = nil
+            selectedSection = .trips
+            path.removeLast(path.count)
+        case .packingTrip(let id):
+            deferredFoodCommand = nil
+            selectedSection = .trips
+            path.removeLast(path.count)
+            path.append(FoodRoute.packingTrip(id))
         case .inventory:
             deferredFoodCommand = nil
             selectedSection = .inventory
@@ -363,12 +425,14 @@ struct FoodHomeView: View {
     private func shouldDefer(_ command: FoodRouteCommand) -> Bool {
         guard household != nil else { return true }
         switch command {
-        case .food, .todos, .shopping, .inventory, .mealPrep, .returns, .quickAdd:
+        case .food, .todos, .shopping, .trips, .inventory, .mealPrep, .returns, .quickAdd:
             return false
         case .todoList(let id):
             return !householdTodoLists.contains { $0.id == id }
         case .shoppingList(let id), .shoppingMode(let id):
             return !householdShoppingLists.contains { $0.id == id }
+        case .packingTrip(let id):
+            return !householdPackingTrips.contains { $0.id == id }
         case .inventoryItem(let id):
             return !householdInventoryItems.contains { $0.id == id }
         case .mealPrepItem(let id):
@@ -407,6 +471,8 @@ struct FoodHomeView: View {
             return .todos
         case .shopping, .shoppingList, .shoppingMode, .quickAdd:
             return .shopping
+        case .trips, .packingTrip:
+            return .trips
         case .inventory, .inventoryItem:
             return .inventory
         case .mealPrep, .mealPrepItem:
@@ -440,6 +506,26 @@ struct FoodHomeView: View {
     private var householdShoppingItems: [ShoppingListItem] {
         guard let household else { return [] }
         return shoppingItems.filter { $0.householdID == household.id }
+    }
+
+    private var householdPackingTrips: [PackingTrip] {
+        guard let household else { return [] }
+        return packingTrips.filter { $0.householdID == household.id }
+    }
+
+    private var householdTripTravelers: [TripTraveler] {
+        guard let household else { return [] }
+        return tripTravelers.filter { $0.householdID == household.id }
+    }
+
+    private var householdPackingBags: [PackingBag] {
+        guard let household else { return [] }
+        return packingBags.filter { $0.householdID == household.id }
+    }
+
+    private var householdPackingItems: [PackingItem] {
+        guard let household else { return [] }
+        return packingItems.filter { $0.householdID == household.id }
     }
 
     private var householdStores: [FoodStore] {
@@ -645,6 +731,7 @@ private struct FoodHomeSectionButton: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityLabel(section.title)
+        .accessibilityIdentifier("home-area.\(section.rawValue)")
     }
 }
 
@@ -653,6 +740,7 @@ private extension FoodHomeSection {
         switch self {
         case .todos: "To-Do"
         case .shopping: "Shopping"
+        case .trips: "Trips"
         case .returns: "Returns"
         case .inventory: "Inventory"
         case .mealPrep: "Meal Prep"
@@ -665,6 +753,7 @@ private extension FoodHomeSection {
         switch self {
         case .todos: .indigo
         case .shopping: .blue
+        case .trips: .cyan
         case .returns: .orange
         case .inventory: .brown
         case .mealPrep: .green
@@ -3784,6 +3873,7 @@ private struct FoodInsightsView: View {
     let locations: [InventoryLocation]
     let inventoryItems: [InventoryItem]
     let mealPrepItems: [MealPrepItem]
+    let packingTrips: [PackingTrip]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
     let mealPrepUsages: [MealPrepUsage]
@@ -3816,6 +3906,7 @@ private struct FoodInsightsView: View {
             locations: locations,
             inventoryItems: inventoryItems,
             mealPrepItems: mealPrepItems,
+            packingTrips: packingTrips,
             shoppingLists: shoppingLists,
             shoppingItems: shoppingItems,
             todoLists: todoLists,
