@@ -316,6 +316,7 @@ struct FoodHomeView: View {
                     plans: plannedSolidMeals,
                     profileState: selectedSolidsState,
                     openFood: { path.append(.solidFood($0)) },
+                    openRecipe: { path.append(.solidsRecipe($0)) },
                     openPlan: { path.append(.plannedSolidMeal($0)) }
                 )
             } else {

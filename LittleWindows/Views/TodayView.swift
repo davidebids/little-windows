@@ -1331,7 +1331,7 @@ struct TodayView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("Plan the first solids meal")
                                         .font(.headline)
-                                    Text("Start a paced first-100-food path or browse the complete food database.")
+                                    Text("Build a paced first-100-food path with an age-aware first week.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }

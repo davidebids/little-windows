@@ -1907,14 +1907,11 @@ enum SolidsTrackingService {
             guard let primary else { break }
             remainingNewFoods.removeAll { $0.id == primary.id }
 
-            var mealFoods = [primary]
-            if let familiar = familiarFoods.first(where: { candidate in
+            let familiar = familiarFoods.first(where: { candidate in
                 candidate.id != primary.id
                     && (targetAllergen.map { !candidate.allergenIDs.contains($0) } ?? true)
                     && candidate.allergenIDs.allSatisfy { (allergenCounts[$0] ?? 0) > 0 }
-            }) {
-                mealFoods.append(familiar)
-            }
+            })
             let recipe = bestRecipe(
                 containing: primary,
                 ageMonths: age,
@@ -1923,8 +1920,17 @@ enum SolidsTrackingService {
                     .union(toleratedAllergens)
                     .union(targetAllergen.map { [$0] } ?? [])
             )
-            // Each selected primary is removed from the new-food pool, so the
-            // result count is also the number of new foods already planned.
+            let mealFoods: [SolidsReferenceFood]
+            if let recipe {
+                let recipeFoods = recipe.foodNames.compactMap(SolidsReferenceCatalog.food(named:))
+                mealFoods = [primary] + recipeFoods.filter { $0.id != primary.id }
+            } else if let familiar {
+                mealFoods = [primary, familiar]
+            } else {
+                mealFoods = [primary]
+            }
+            // Advance the guided stage by each deliberately selected primary
+            // food; a linked recipe may also include companion ingredients.
             let plannedTriedCount = min(100, triedIDs.count + results.count)
             let scheduledAt = calendar.date(bySettingHour: 11, minute: 30, second: 0, of: scheduledDay)
                 ?? scheduledDay

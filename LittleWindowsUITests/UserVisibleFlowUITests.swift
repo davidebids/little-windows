@@ -72,6 +72,22 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
         XCTAssertTrue(reviewStep.waitForExistence(timeout: 3))
 
+        let recipeLink = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "solids.guided.recipe.")
+        ).firstMatch
+        for _ in 0..<8 where !recipeLink.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(recipeLink.waitForExistence(timeout: 4))
+        let recipeTitle = recipeLink.label
+        recipeLink.tap()
+        XCTAssertTrue(
+            app.navigationBars[recipeTitle].waitForExistence(timeout: 4),
+            "A guided recipe title should open the recipe, not its first ingredient."
+        )
+        app.navigationBars[recipeTitle].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["Guided Solids"].waitForExistence(timeout: 4))
+
         let buildJourney = app.buttons["solids.guided.build-journey"]
         for _ in 0..<15 where !buildJourney.exists {
             app.swipeUp()
@@ -547,6 +563,39 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
         XCTAssertTrue(app.staticTexts["Avocado bean mash"].waitForExistence(timeout: 4))
         XCTAssertFalse(app.staticTexts["0 meal ideas"].exists)
+    }
+
+    func testFoodRecipeAndIngredientLinksOpenThePageTheyName() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 5) {
+            activate.tap()
+        }
+
+        launch(
+            startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/foods/avocado"
+        )
+        XCTAssertTrue(app.navigationBars["Avocado"].waitForExistence(timeout: 8))
+
+        let recipe = app.buttons["solids.food.recipe.avocado-bean-mash"]
+        for _ in 0..<16 where !recipe.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(recipe.waitForExistence(timeout: 4))
+        recipe.tap()
+        XCTAssertTrue(app.navigationBars["Avocado bean mash"].waitForExistence(timeout: 5))
+
+        let ingredient = app.buttons["solids.recipe.ingredient.avocado"]
+        XCTAssertTrue(ingredient.waitForExistence(timeout: 4))
+        ingredient.tap()
+        XCTAssertTrue(
+            app.navigationBars["Avocado"].waitForExistence(timeout: 5),
+            "A recipe ingredient row should open that ingredient's food page."
+        )
     }
 
     func testSolidsMultiOptionActionsUseAppDrawers() {

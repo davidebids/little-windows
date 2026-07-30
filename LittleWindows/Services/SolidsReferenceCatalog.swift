@@ -963,6 +963,22 @@ struct SolidsGuidedMealSuggestion: Identifiable, Hashable, @unchecked Sendable {
     var id: String {
         "\(dayOffset)-\(foods.map(\.id).joined(separator: "-"))"
     }
+
+    var primaryDestination: SolidsGuidedMealDestination? {
+        if let recipe {
+            return .recipe(recipe.id)
+        }
+        return foods.first.map { .food($0.id) }
+    }
+
+    var primaryDestinationTitle: String? {
+        recipe?.title ?? foods.first?.name
+    }
+}
+
+enum SolidsGuidedMealDestination: Equatable {
+    case recipe(String)
+    case food(String)
 }
 
 enum SolidsDietaryTag: String, CaseIterable, Identifiable, Hashable {
@@ -1028,6 +1044,8 @@ enum SolidsSourceLibrary {
         let source = url.absoluteString.lowercased()
         if url == cdcIntroduction { return "CDC — Starting solid foods" }
         if url == cdcChoking { return "CDC — Choking prevention" }
+        if url == aapFruitJuice { return "AAP — Fruit juice guidance" }
+        if url == aapAllergenIntroduction { return "AAP — Allergen introduction guidance" }
         if url.host?.contains("healthychildren") == true { return "American Academy of Pediatrics" }
         if url.host?.contains("nccih") == true { return "NIH NCCIH — Açaí safety" }
         if source.contains("10.1034/j.1398-9995.1999.00116.x") {

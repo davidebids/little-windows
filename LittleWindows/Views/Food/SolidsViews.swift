@@ -197,7 +197,7 @@ struct SolidsHomeView: View {
                 destinationCard("Guided solids", "A practical next step", "point.forward.to.point.capsulepath", .solidsGuided)
                 destinationCard("Food database", "400+ foods", "books.vertical.fill", .solidsDatabase)
                 destinationCard("Plan meals", visiblePlans.isEmpty ? "Build the next plate" : "\(visiblePlans.count) upcoming", "calendar.badge.plus", .solidsPlan)
-                destinationCard("Food tracker", "Favorites and history", "checklist", .solidsTracker)
+                destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker)
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
                 destinationCard("Recipes", "400+ simple ideas", "fork.knife", .solidsRecipes)
             }
@@ -338,6 +338,7 @@ struct SolidsGuidedPathView: View {
     let plans: [PlannedSolidMeal]
     let profileState: SolidsProfileState?
     let openFood: (String) -> Void
+    let openRecipe: (String) -> Void
     let openPlan: (UUID) -> Void
 
     @State private var selectedStartDate = Date()
@@ -498,7 +499,7 @@ struct SolidsGuidedPathView: View {
 
                     Label("2. Review the first week", systemImage: "calendar.badge.clock")
                         .font(.headline)
-                    Text("The preview adapts to \(profile.name)'s age, foods already tried, feeding skills, and allergen status. Tap a meal to review its food and full preparation guidance.")
+                    Text("The preview adapts to \(profile.name)'s age, foods already tried, feeding skills, and allergen status. Tap a meal name to open its recipe. When no recipe is attached, the linked ingredient name opens that food's preparation guidance.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -684,13 +685,15 @@ struct SolidsGuidedPathView: View {
             Text(suggestion.scheduledAt.formatted(.dateTime.weekday(.wide).month().day()))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.orange)
-            if let primaryFood = suggestion.foods.first {
-                Button { openFood(primaryFood.id) } label: {
-                    Text(suggestion.recipe?.title
-                        ?? suggestion.foods.map(\.name).joined(separator: " + "))
+            if let destination = suggestion.primaryDestination {
+                Button { open(destination) } label: {
+                    Text(suggestion.primaryDestinationTitle ?? "Meal guidance")
                         .font(.subheadline.weight(.semibold))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(suggestion.recipe.map {
+                    "solids.guided.recipe.\($0.id)"
+                } ?? "solids.guided.food.\(suggestion.foods.first?.id ?? "unknown")")
             }
             Text(suggestion.foods.map(\.name).joined(separator: " • "))
                 .font(.caption)
@@ -712,6 +715,15 @@ struct SolidsGuidedPathView: View {
                 profileState: profileState
             )
             .lineLimit(2)
+        }
+    }
+
+    private func open(_ destination: SolidsGuidedMealDestination) {
+        switch destination {
+        case .recipe(let id):
+            openRecipe(id)
+        case .food(let id):
+            openFood(id)
         }
     }
 
@@ -1710,6 +1722,8 @@ struct SolidsFoodDetailView: View {
                                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                             }
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("solids.food.recipe.\(recipe.id)")
                     }
                 }
             }
@@ -3095,10 +3109,29 @@ struct PlannedSolidMealDetailView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                if let recipeID = plan.recipeID {
+                if let recipeID = plan.recipeID,
+                   let recipe = SolidsReferenceCatalog.recipe(id: recipeID) {
                     Button { openRecipe(recipeID) } label: {
-                        Label("Open recipe", systemImage: "fork.knife")
+                        HStack {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Recipe")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(recipe.title)
+                                        .foregroundStyle(.primary)
+                                }
+                            } icon: {
+                                Image(systemName: "fork.knife")
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("solids.plan.recipe.\(recipeID)")
                 }
                 if let allergenID = plan.allergenID,
                    let allergen = SolidsAllergen(rawValue: allergenID) {
@@ -3774,6 +3807,7 @@ struct SolidsAllergenDetailView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("solids.allergen.recipe.\(recipe.id)")
                     }
                     Button { Task { await buildAllergenPlan() } } label: {
                         Label(
@@ -3827,7 +3861,12 @@ struct SolidsAllergenDetailView: View {
             }
             Section("Sources") {
                 ForEach(visibleGuidance.sourceURLs, id: \.absoluteString) { url in
-                    Link(url.host?.contains("niaid") == true ? "NIAID peanut guidance" : "AAP allergen introduction guidance", destination: url)
+                    Link(destination: url) {
+                        Label(
+                            SolidsSourceLibrary.displayName(for: url),
+                            systemImage: "arrow.up.right.square"
+                        )
+                    }
                 }
             }
         }
@@ -4237,6 +4276,7 @@ struct SolidsRecipesView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("solids.recipes.recipe.\(recipe.id)")
                     }
                 }
             }
@@ -4554,19 +4594,21 @@ struct SolidsRecipeDetailView: View {
             Section("Ingredients") {
                 ForEach(Array(recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack {
+                        if let food = SolidsReferenceCatalog.food(named: selectedFoodNames[index]) {
                             Button {
-                                if let food = SolidsReferenceCatalog.food(named: selectedFoodNames[index]) {
-                                    openFood(food.id)
-                                }
+                                openFood(food.id)
                             } label: {
-                                Label(selectedFoodNames[index], systemImage: "circle.fill")
-                                    .foregroundStyle(.primary)
+                                HStack {
+                                    Label(selectedFoodNames[index], systemImage: "circle.fill")
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Text(ingredient.quantity).font(.caption).foregroundStyle(.secondary)
+                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.borderless)
-                            Spacer()
-                            Text(ingredient.quantity).font(.caption).foregroundStyle(.secondary)
-                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("solids.recipe.ingredient.\(food.id)")
                         }
                         if !ingredient.substitutionNames.isEmpty {
                             Button {

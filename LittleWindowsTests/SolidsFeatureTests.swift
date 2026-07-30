@@ -165,13 +165,35 @@ final class SolidsFeatureTests: XCTestCase {
         })
     }
 
-    func testCDCSourceLabelsDescribeTheirDistinctGuidance() {
+    func testSourceLabelsDescribeTheirDistinctGuidance() {
         let introduction = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.cdcIntroduction)
         let choking = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.cdcChoking)
+        let fruitJuice = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.aapFruitJuice)
+        let allergens = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.aapAllergenIntroduction)
 
         XCTAssertEqual(introduction, "CDC — Starting solid foods")
         XCTAssertEqual(choking, "CDC — Choking prevention")
         XCTAssertNotEqual(introduction, choking)
+        XCTAssertEqual(fruitJuice, "AAP — Fruit juice guidance")
+        XCTAssertEqual(allergens, "AAP — Allergen introduction guidance")
+        XCTAssertNotEqual(fruitJuice, allergens)
+    }
+
+    func testAllergenSourceLabelsMatchEveryLinkedDestination() {
+        for allergen in SolidsAllergen.allCases {
+            let guidance = SolidsReferenceCatalog.allergenGuidance(allergen)
+            for url in guidance.sourceURLs {
+                let label = SolidsSourceLibrary.displayName(for: url)
+                XCTAssertNotEqual(label, "Reference source", "Missing source label for \(url)")
+                if url == SolidsSourceLibrary.aapAllergenIntroduction {
+                    XCTAssertEqual(label, "AAP — Allergen introduction guidance")
+                } else if url == SolidsSourceLibrary.fdaAllergens {
+                    XCTAssertEqual(label, "FDA major allergens")
+                } else if url == SolidsSourceLibrary.niaidPeanutGuidance {
+                    XCTAssertEqual(label, "NIAID peanut introduction guidance")
+                }
+            }
+        }
     }
 
     func testPreparationWalkthroughAddsOperationalStepsInsteadOfRepeatingTheOverview() {
@@ -454,13 +476,72 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertTrue(recipes.allSatisfy { !$0.ingredients.isEmpty })
         XCTAssertTrue(recipes.allSatisfy { !$0.instructions.isEmpty })
         XCTAssertTrue(recipes.allSatisfy { $0.servings > 0 })
-        let missingIngredients = Set(recipes.flatMap(\.foodNames).filter {
+        let linkedIngredientNames = recipes.flatMap { recipe in
+            recipe.ingredients.flatMap { [$0.foodName] + $0.substitutionNames }
+        }
+        let missingIngredients = Set(linkedIngredientNames.filter {
             SolidsReferenceCatalog.food(named: $0) == nil
         }).sorted()
         XCTAssertTrue(
             missingIngredients.isEmpty,
-            "Every recipe ingredient must deep-link, plan, and log as a catalog food. Missing: \(missingIngredients)"
+            "Every recipe ingredient and substitution must deep-link, plan, and log as a catalog food. Missing: \(missingIngredients)"
         )
+    }
+
+    func testGuidedMealLinksPreferRecipesOverIngredientDetails() throws {
+        let food = try XCTUnwrap(SolidsReferenceCatalog.guidedFoods.first)
+        let recipe = try XCTUnwrap(SolidsReferenceCatalog.recipes.first)
+        let date = Date(timeIntervalSince1970: 2_000_000_000)
+
+        let recipeSuggestion = SolidsGuidedMealSuggestion(
+            dayOffset: 0,
+            scheduledAt: date,
+            foods: [food],
+            recipe: recipe,
+            stage: .firstBites
+        )
+        XCTAssertEqual(recipeSuggestion.primaryDestination, .recipe(recipe.id))
+        XCTAssertEqual(recipeSuggestion.primaryDestinationTitle, recipe.title)
+
+        let singleFoodSuggestion = SolidsGuidedMealSuggestion(
+            dayOffset: 1,
+            scheduledAt: date,
+            foods: [food],
+            recipe: nil,
+            stage: .firstBites
+        )
+        XCTAssertEqual(singleFoodSuggestion.primaryDestination, .food(food.id))
+        XCTAssertEqual(singleFoodSuggestion.primaryDestinationTitle, food.name)
+    }
+
+    @MainActor
+    func testGuidedRecipeSuggestionsContainTheFoodsInTheirLinkedRecipe() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: Calendar.current.date(byAdding: .month, value: -12, to: now)!
+        )
+        let suggestions = SolidsTrackingService.guidedSuggestions(
+            for: profile,
+            progress: [],
+            eventItems: [],
+            allergenProgress: [],
+            plans: [],
+            startingAt: now,
+            count: 100
+        )
+
+        for suggestion in suggestions {
+            guard let recipe = suggestion.recipe else { continue }
+            let linkedFoodIDs = Set(recipe.foodNames.compactMap {
+                SolidsReferenceCatalog.food(named: $0)?.id
+            })
+            XCTAssertEqual(
+                Set(suggestion.foods.map(\.id)),
+                linkedFoodIDs,
+                "\(recipe.title) should display and plan the same foods as its linked recipe."
+            )
+        }
     }
 
     func testCatalogIndexesPreserveFoodRecipeAndSearchResults() throws {

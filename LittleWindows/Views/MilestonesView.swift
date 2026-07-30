@@ -302,6 +302,7 @@ struct CareView: View {
                     plans: plannedSolidMeals,
                     profileState: solidsProfileState,
                     openFood: { path.append(.solidFood($0)) },
+                    openRecipe: { path.append(.solidsRecipe($0)) },
                     openPlan: { path.append(.plannedSolidMeal($0)) }
                 )
             } else {
