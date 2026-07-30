@@ -9,21 +9,24 @@ enum LittleWindowsTab: String, Hashable, Codable {
     case medical
 }
 
-enum AppNavigationRestoration {
-    static let selectedTabKey = "navigation.selectedTab"
+struct SolidsNavigationOrigin: Equatable {
+    var tab: LittleWindowsTab
+    var insightsSection: InsightsSection?
+    var feedingInsightsMode: FeedingInsightsMode?
 
-    static func selectedTab(defaults: UserDefaults = .standard) -> LittleWindowsTab {
-        defaults.string(forKey: selectedTabKey)
-            .flatMap(LittleWindowsTab.init(rawValue:))
-            ?? .today
-    }
-
-    static func saveSelectedTab(
-        _ tab: LittleWindowsTab,
-        defaults: UserDefaults = .standard
+    init(
+        tab: LittleWindowsTab,
+        insightsSection: InsightsSection? = nil,
+        feedingInsightsMode: FeedingInsightsMode? = nil
     ) {
-        defaults.set(tab.rawValue, forKey: selectedTabKey)
+        self.tab = tab
+        self.insightsSection = insightsSection
+        self.feedingInsightsMode = feedingInsightsMode
     }
+}
+
+enum AppNavigationLaunchPolicy {
+    static let initialTab = LittleWindowsTab.today
 }
 
 enum ReportsDisplayMode: String, CaseIterable, Identifiable {
@@ -86,6 +89,7 @@ enum DeepLinkAction: Equatable {
     case startActivity(ActivityType)
     case logDiaper
     case logEvent(EventType)
+    case logSolidFeed(SolidFeedEditorPreset)
     case repeatLast
 }
 
@@ -93,18 +97,18 @@ enum DeepLinkAction: Equatable {
 final class DeepLinkRouter: ObservableObject {
     static let shared = DeepLinkRouter()
 
-    @Published var selectedTab: LittleWindowsTab {
-        didSet {
-            AppNavigationRestoration.saveSelectedTab(selectedTab)
-        }
-    }
+    @Published var selectedTab: LittleWindowsTab
     @Published var pendingAction: DeepLinkAction?
     @Published var pendingNightLightCommand: NightLightCommand?
     @Published var pendingAppointmentCommand: AppointmentRouteCommand?
     @Published var pendingAgeGuideCommand: AgeGuideRouteCommand?
     @Published var pendingPuppyGuideCommand: PuppyGuideRouteCommand?
     @Published var pendingRoutineCommand: RoutineRouteCommand?
+    @Published var pendingSolidsCommand: FoodRouteCommand?
+    @Published var pendingSolidsOrigin: SolidsNavigationOrigin?
     @Published var pendingFoodCommand: FoodRouteCommand?
+    @Published var pendingInsightsSection: InsightsSection?
+    @Published var pendingFeedingInsightsMode: FeedingInsightsMode?
     @Published var pendingProfileID: UUID?
     @Published var selectedReportsMode: ReportsDisplayMode = ReportsDisplayMode(
         rawValue: UserDefaults.standard.string(forKey: "reportsDisplayMode") ?? ""
@@ -114,11 +118,37 @@ final class DeepLinkRouter: ObservableObject {
     @Published var isDataReady = false
 
     private init() {
-        selectedTab = AppNavigationRestoration.selectedTab()
+        selectedTab = AppNavigationLaunchPolicy.initialTab
+    }
+
+    func openSolids(
+        _ command: FoodRouteCommand,
+        profileID: UUID? = nil,
+        returningTo returnTab: LittleWindowsTab?,
+        insightsSection: InsightsSection? = nil,
+        feedingInsightsMode: FeedingInsightsMode? = nil
+    ) {
+        if let profileID { pendingProfileID = profileID }
+        pendingSolidsOrigin = returnTab.map {
+            SolidsNavigationOrigin(
+                tab: $0,
+                insightsSection: insightsSection,
+                feedingInsightsMode: feedingInsightsMode
+            )
+        }
+        pendingSolidsCommand = command
+        selectedTab = .milestones
+    }
+
+    func consumeSolidsOrigin() -> SolidsNavigationOrigin? {
+        defer { pendingSolidsOrigin = nil }
+        return pendingSolidsOrigin
     }
 
     func route(_ url: URL) {
         guard url.scheme == "littlewindows" else { return }
+        pendingSolidsOrigin = nil
+        pendingFeedingInsightsMode = nil
         var components = [url.host].compactMap { $0 } + url.pathComponents.filter { $0 != "/" }
         if components.count >= 2,
            components[0] == "profile",
@@ -130,11 +160,86 @@ final class DeepLinkRouter: ObservableObject {
             }
         }
 
+        // Keep the original Food & Home URLs working while moving the workspace
+        // to the profile-scoped Care tab.
+        if components.count >= 2,
+           components[0] == "care",
+           components[1] == "solids" {
+            components[0] = "food"
+        }
+
         if components == ["today"] {
             selectedTab = .today
         } else if components == ["food"] {
             selectedTab = .food
             pendingFoodCommand = .food
+        } else if components == ["food", "solids"] {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solids
+        } else if components == ["food", "solids", "database"] {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidsDatabase
+        } else if components == ["food", "solids", "guided"] {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidsGuided
+        } else if components.count == 4,
+                  components[0] == "food",
+                  components[1] == "solids",
+                  components[2] == "foods" {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidFood(components[3])
+        } else if components.count == 4,
+                  components[0] == "food",
+                  components[1] == "solids",
+                  components[2] == "custom",
+                  let uuid = UUID(uuidString: components[3]) {
+            selectedTab = .milestones
+            pendingSolidsCommand = .customSolidFood(uuid)
+        } else if components == ["food", "solids", "plan"] {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidsPlan
+        } else if components.count >= 4,
+                  components[0] == "food",
+                  components[1] == "solids",
+                  components[2] == "plan",
+                  let uuid = UUID(uuidString: components[3]) {
+            if components.count == 5, components[4] == "log" {
+                selectedTab = .today
+                pendingAction = .logSolidFeed(
+                    SolidFeedEditorPreset(plannedMealID: uuid)
+                )
+            } else {
+                selectedTab = .milestones
+                pendingSolidsCommand = .plannedSolidMeal(uuid)
+            }
+        } else if components == ["food", "solids", "tracker"] {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidsTracker
+        } else if components.count == 4,
+                  components[0] == "food",
+                  components[1] == "solids",
+                  components[2] == "tracker",
+                  let uuid = UUID(uuidString: components[3]) {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidMeal(uuid)
+        } else if components == ["food", "solids", "allergens"] {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidsAllergens
+        } else if components.count == 4,
+                  components[0] == "food",
+                  components[1] == "solids",
+                  components[2] == "allergens" {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidAllergen(components[3])
+        } else if components == ["food", "solids", "recipes"] {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidsRecipes
+        } else if components.count == 4,
+                  components[0] == "food",
+                  components[1] == "solids",
+                  components[2] == "recipes" {
+            selectedTab = .milestones
+            pendingSolidsCommand = .solidsRecipe(components[3])
         } else if components == ["food", "todos"] {
             selectedTab = .food
             pendingFoodCommand = .todos
@@ -209,6 +314,10 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["reports"] || components == ["calendar"] {
             selectedReportsMode = .day
             selectedTab = .reports
+        } else if components == ["reports", "feeding"] || components == ["insights", "feeding"] {
+            selectedReportsMode = .summary
+            pendingInsightsSection = .feeding
+            selectedTab = .reports
         } else if components.count == 2,
                   components[0] == "reports",
                   let mode = ReportsDisplayMode(rawValue: components[1]) {
@@ -219,7 +328,9 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["settings", "family-sync"] {
             showingSettings = true
             showingFamilySyncSettings = true
-        } else if components == ["milestones"] || components == ["memories"] {
+        } else if components == ["care"]
+                    || components == ["milestones"]
+                    || components == ["memories"] {
             selectedTab = .milestones
         } else if components == ["age-guides"] {
             selectedTab = .milestones
@@ -288,6 +399,9 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["quick-log", "feed"] {
             selectedTab = .today
             pendingAction = .logEvent(.feed)
+        } else if components == ["quick-log", "solids"] {
+            selectedTab = .today
+            pendingAction = .logSolidFeed(.empty)
         } else if components == ["quick-log", "pumping"] {
             selectedTab = .today
             pendingAction = .startTimer(.pumping, nil)

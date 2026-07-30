@@ -79,11 +79,14 @@ enum WidgetSnapshotService {
     static func refresh(
         profile: BabyProfile?,
         events: [BabyEvent],
-        prediction: SleepPrediction?
+        prediction: SleepPrediction?,
+        solidsState: SolidsProfileState? = nil
     ) {
         let snapshot = makeSnapshot(
             profileID: profile?.id,
             profileType: profile?.profileType ?? .child,
+            profileBirthDate: profile?.birthDate,
+            solidsWorkspaceActivated: solidsState?.isActivated == true,
             babyName: profile?.name ?? "Baby",
             events: events,
             prediction: prediction
@@ -115,6 +118,8 @@ enum WidgetSnapshotService {
     static func makeSnapshot(
         profileID: UUID? = nil,
         profileType: CareProfileType = .child,
+        profileBirthDate: Date? = nil,
+        solidsWorkspaceActivated: Bool = false,
         babyName: String,
         events: [BabyEvent],
         prediction: SleepPrediction?,
@@ -138,6 +143,15 @@ enum WidgetSnapshotService {
         }
         let daily = DailySummaryService.summary(for: todayEvents)
         let careSessions = groupedCareSessions(todayEvents).count
+        let hasSolidHistory = events.contains {
+            $0.profileID == profileID && $0.type == .feed && $0.feedKind == .solid
+        }
+        let ageMonths = profileBirthDate.map {
+            calendar.dateComponents([.month], from: $0, to: now).month ?? 0
+        } ?? -1
+        let allowsSolids = profileID != nil
+            && profileType == .child
+            && (solidsWorkspaceActivated || hasSolidHistory || ageMonths >= 6)
 
         return WidgetSnapshot(
             generatedAt: now,
@@ -168,6 +182,10 @@ enum WidgetSnapshotService {
                 pumpingSeconds: daily.pumpingTotal,
                 solidFeedCount: daily.solidFeedCount,
                 solidSensitivityCount: daily.solidSensitivityObservations,
+                allowsSolids: allowsSolids,
+                profileBirthDate: profileBirthDate,
+                solidsWorkspaceActivated: solidsWorkspaceActivated,
+                hasSolidHistory: hasSolidHistory,
                 childPottyCount: daily.childPottyCount,
                 childPottyAccidentCount: daily.childPottyAccidents,
                 dogFoodCount: daily.dogFoodCount,

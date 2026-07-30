@@ -7,6 +7,10 @@ enum SolidFoodCatalogService {
     static func create(
         name: String,
         photoDraft: PhotoAttachmentDraft?,
+        allergenIDs: [String] = [],
+        minimumAgeMonths: Int = 6,
+        preparationNotes: String = "",
+        safetyNotes: String = "",
         existingItems: [SolidFoodCatalogItem],
         context: ModelContext,
         now: Date = Date()
@@ -25,6 +29,10 @@ enum SolidFoodCatalogService {
         let item = SolidFoodCatalogItem(
             name: cleanedName,
             photoAttachmentID: photoDraft?.id,
+            allergenIDs: allergenIDs,
+            minimumAgeMonths: minimumAgeMonths,
+            preparationNotes: preparationNotes.trimmingCharacters(in: .whitespacesAndNewlines),
+            safetyNotes: safetyNotes.trimmingCharacters(in: .whitespacesAndNewlines),
             createdAt: now,
             updatedAt: now
         )
@@ -39,6 +47,10 @@ enum SolidFoodCatalogService {
         name: String,
         photoDraft: PhotoAttachmentDraft?,
         removeExistingPhoto: Bool,
+        allergenIDs: [String]? = nil,
+        minimumAgeMonths: Int? = nil,
+        preparationNotes: String? = nil,
+        safetyNotes: String? = nil,
         context: ModelContext,
         now: Date = Date()
     ) -> Bool {
@@ -59,6 +71,14 @@ enum SolidFoodCatalogService {
 
         item.name = cleanedName
         item.normalizedName = normalizedName
+        if let allergenIDs { item.allergenIDs = allergenIDs }
+        if let minimumAgeMonths { item.minimumAgeMonths = minimumAgeMonths }
+        if let preparationNotes {
+            item.preparationNotes = preparationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let safetyNotes {
+            item.safetyNotes = safetyNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         item.updatedAt = now
         return PersistenceService.save(context: context)
     }

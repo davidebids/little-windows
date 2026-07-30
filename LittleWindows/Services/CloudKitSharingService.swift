@@ -655,7 +655,9 @@ final class CloudKitSharingService {
         WidgetSnapshotService.refresh(
             profile: profile,
             events: events,
-            prediction: prediction
+            prediction: prediction,
+            solidsState: ((try? context.fetch(FetchDescriptor<SolidsProfileState>())) ?? [])
+                .first { $0.profileID == profile?.id }
         )
         await LiveActivityManager.shared.synchronize(profile: profile, events: events)
     }

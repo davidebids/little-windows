@@ -61,6 +61,14 @@ enum InsightsSection: String, CaseIterable, Identifiable {
     }
 }
 
+enum FeedingInsightsMode: String, Identifiable {
+    case milk = "Milk feeds"
+    case solids = "Solids"
+    case patterns = "Patterns"
+
+    var id: String { rawValue }
+}
+
 @MainActor
 final class InsightsViewModel: ObservableObject {
     @Published var selectedRange: InsightsDateRange = .sevenDays

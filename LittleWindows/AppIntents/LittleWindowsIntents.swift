@@ -105,6 +105,18 @@ struct LogFeedIntent: LittleWindowsURLIntent {
     var destinationURL: URL { URL(string: "littlewindows://quick-log/feed")! }
 }
 
+struct LogSolidsIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Log Solids"
+    static let description = IntentDescription("Opens a solids meal when a child profile is active.")
+    var destinationURL: URL { URL(string: "littlewindows://quick-log/solids")! }
+}
+
+struct OpenSolidsIntent: LittleWindowsURLIntent {
+    static let title: LocalizedStringResource = "Open Solids"
+    static let description = IntentDescription("Opens the solids food database, plans, and tracker when a child profile is active.")
+    var destinationURL: URL { URL(string: "littlewindows://care/solids")! }
+}
+
 struct LogMedicineIntent: LittleWindowsURLIntent {
     static let title: LocalizedStringResource = "Log Medicine"
     var destinationURL: URL { URL(string: "littlewindows://quick-log/medicine")! }
@@ -235,10 +247,10 @@ struct LittleWindowsShortcuts: AppShortcutsProvider {
             systemImageName: "arrow.clockwise"
         )
         AppShortcut(
-            intent: LogFeedIntent(),
-            phrases: ["Log a feed in \(.applicationName)"],
-            shortTitle: "Log Feed",
-            systemImageName: "waterbottle.fill"
+            intent: LogSolidsIntent(),
+            phrases: ["Log solids in \(.applicationName)"],
+            shortTitle: "Log Solids",
+            systemImageName: "carrot.fill"
         )
         AppShortcut(
             intent: LogMedicineIntent(),

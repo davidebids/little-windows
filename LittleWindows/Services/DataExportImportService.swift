@@ -40,6 +40,11 @@ private struct BackupEnvelope: Codable {
     var profiles: [ProfileDTO]
     var photoAttachments: [PhotoAttachmentDTO]?
     var solidFoods: [SolidFoodCatalogItemDTO]?
+    var solidsProfileStates: [SolidsProfileStateDTO]?
+    var solidFoodProgress: [SolidFoodProgressDTO]?
+    var solidFoodEventItems: [SolidFoodEventItemDTO]?
+    var solidAllergenProgress: [SolidAllergenProgressDTO]?
+    var plannedSolidMeals: [PlannedSolidMealDTO]?
     var events: [EventDTO]
     var predictionRecords: [PredictionRecordDTO]
     var milestones: [MilestoneDTO]?
@@ -114,6 +119,102 @@ private struct SolidFoodCatalogItemDTO: Codable {
     var id: UUID
     var name: String
     var photoAttachmentID: UUID?
+    var allergenIDsJSON: String?
+    var minimumAgeMonths: Int?
+    var preparationNotes: String?
+    var safetyNotes: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct SolidsProfileStateDTO: Codable {
+    var id: UUID
+    var profileID: UUID
+    var isActivated: Bool
+    var startedAt: Date?
+    var readinessNotes: String
+    var guidedStartDate: Date?
+    var favoriteRecipeIDsJSON: String?
+    var wantToTryRecipeIDsJSON: String?
+    var recipeCollectionsJSON: String?
+    var completedFeedingSkillIDsJSON: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct SolidFoodProgressDTO: Codable {
+    var id: UUID
+    var profileID: UUID
+    var foodID: String
+    var foodNameSnapshot: String
+    var statusRawValue: String
+    var isFavorite: Bool
+    var firstTriedAt: Date?
+    var lastTriedAt: Date?
+    var exposureCount: Int
+    var lastReactionRawValue: String?
+    var notes: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct SolidFoodEventItemDTO: Codable {
+    var id: UUID
+    var eventID: UUID
+    var profileID: UUID
+    var foodID: String
+    var foodNameSnapshot: String
+    var allergenIDsJSON: String
+    var confirmedAllergenPortionIDsJSON: String?
+    var reactionRawValue: String?
+    var servingAmount: String?
+    var notes: String?
+    var suspectedReaction: Bool?
+    var symptomIDsJSON: String?
+    var severityRawValue: String?
+    var onsetMinutes: Int?
+    var durationMinutes: Int?
+    var responseNotes: String?
+    var followUpRawValue: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct SolidAllergenProgressDTO: Codable {
+    var id: UUID
+    var profileID: UUID
+    var allergenID: String
+    var statusRawValue: String
+    var statusOverrideRawValue: String?
+    var introductionStep: Int
+    var exposureMealCount: Int
+    var firstIntroducedAt: Date?
+    var lastExposureAt: Date?
+    var nextExposureDueAt: Date?
+    var reminderEnabled: Bool
+    var notes: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct PlannedSolidMealDTO: Codable {
+    var id: UUID
+    var profileID: UUID
+    var scheduledAt: Date
+    var title: String
+    var foodIDsJSON: String
+    var foodNamesJSON: String
+    var notes: String
+    var completedEventID: UUID?
+    var recipeID: String?
+    var isGuided: Bool?
+    var guidedPosition: Int?
+    var allergenID: String?
+    var allergenIntroductionStep: Int?
+    var allergenServingGuidance: String?
+    var allergenObservationMinutes: Int?
+    var reminderEnabled: Bool?
+    var reminderOffsetMinutes: Int?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -141,6 +242,7 @@ private struct EventDTO: Codable {
     var solidFeedingStyleRawValue: String?
     var solidAllergenExposure: Bool?
     var solidSensitivityObserved: Bool?
+    var solidFoodDetailsJSON: String?
     var nursingSideRawValue: String?
     var activeNursingSideRawValue: String?
     var timerStateRawValue: String?
@@ -454,6 +556,7 @@ private struct FoodItemDTO: Codable {
     var id: UUID
     var householdID: UUID
     var canonicalName: String
+    var foodReferenceID: String?
     var aliasesJSON: String?
     var defaultUnit: String?
     var defaultStoreSectionByStoreJSON: String?
@@ -634,7 +737,7 @@ private struct CareRoutineRunDTO: Codable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 16
+    private static let currentBackupVersion = 19
     private static let recoveryBackupLimit = 3
 
     static func exportData(context: ModelContext) throws -> Data {
@@ -683,6 +786,107 @@ enum DataExportImportService {
                 id: $0.id,
                 name: $0.name,
                 photoAttachmentID: $0.photoAttachmentID,
+                allergenIDsJSON: $0.allergenIDsJSON,
+                minimumAgeMonths: $0.minimumAgeMonths,
+                preparationNotes: $0.preparationNotes,
+                safetyNotes: $0.safetyNotes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let solidsProfileStates = try context.fetch(FetchDescriptor<SolidsProfileState>()).map {
+            SolidsProfileStateDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                isActivated: $0.isActivated,
+                startedAt: $0.startedAt,
+                readinessNotes: $0.readinessNotes,
+                guidedStartDate: $0.guidedStartDate,
+                favoriteRecipeIDsJSON: $0.favoriteRecipeIDsJSON,
+                wantToTryRecipeIDsJSON: $0.wantToTryRecipeIDsJSON,
+                recipeCollectionsJSON: $0.recipeCollectionsJSON,
+                completedFeedingSkillIDsJSON: $0.completedFeedingSkillIDsJSON,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let solidFoodProgress = try context.fetch(FetchDescriptor<SolidFoodProgress>()).map {
+            SolidFoodProgressDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                foodID: $0.foodID,
+                foodNameSnapshot: $0.foodNameSnapshot,
+                statusRawValue: $0.statusRawValue,
+                isFavorite: $0.isFavorite,
+                firstTriedAt: $0.firstTriedAt,
+                lastTriedAt: $0.lastTriedAt,
+                exposureCount: $0.exposureCount,
+                lastReactionRawValue: $0.lastReactionRawValue,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let solidFoodEventItems = try context.fetch(FetchDescriptor<SolidFoodEventItem>()).map {
+            SolidFoodEventItemDTO(
+                id: $0.id,
+                eventID: $0.eventID,
+                profileID: $0.profileID,
+                foodID: $0.foodID,
+                foodNameSnapshot: $0.foodNameSnapshot,
+                allergenIDsJSON: $0.allergenIDsJSON,
+                confirmedAllergenPortionIDsJSON: $0.confirmedAllergenPortionIDsJSON,
+                reactionRawValue: $0.reactionRawValue,
+                servingAmount: $0.servingAmount,
+                notes: $0.notes,
+                suspectedReaction: $0.suspectedReaction,
+                symptomIDsJSON: $0.symptomIDsJSON,
+                severityRawValue: $0.severityRawValue,
+                onsetMinutes: $0.onsetMinutes,
+                durationMinutes: $0.durationMinutes,
+                responseNotes: $0.responseNotes,
+                followUpRawValue: $0.followUpRawValue,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let solidAllergenProgress = try context.fetch(FetchDescriptor<SolidAllergenProgress>()).map {
+            SolidAllergenProgressDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                allergenID: $0.allergenID,
+                statusRawValue: $0.statusRawValue,
+                statusOverrideRawValue: $0.statusOverrideRawValue,
+                introductionStep: $0.introductionStep,
+                exposureMealCount: $0.exposureMealCount,
+                firstIntroducedAt: $0.firstIntroducedAt,
+                lastExposureAt: $0.lastExposureAt,
+                nextExposureDueAt: $0.nextExposureDueAt,
+                reminderEnabled: $0.reminderEnabled,
+                notes: $0.notes,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let plannedSolidMeals = try context.fetch(FetchDescriptor<PlannedSolidMeal>()).map {
+            PlannedSolidMealDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                scheduledAt: $0.scheduledAt,
+                title: $0.title,
+                foodIDsJSON: $0.foodIDsJSON,
+                foodNamesJSON: $0.foodNamesJSON,
+                notes: $0.notes,
+                completedEventID: $0.completedEventID,
+                recipeID: $0.recipeID,
+                isGuided: $0.isGuided,
+                guidedPosition: $0.guidedPosition,
+                allergenID: $0.allergenID,
+                allergenIntroductionStep: $0.allergenIntroductionStep,
+                allergenServingGuidance: $0.allergenServingGuidance,
+                allergenObservationMinutes: $0.allergenObservationMinutes,
+                reminderEnabled: $0.reminderEnabled,
+                reminderOffsetMinutes: $0.reminderOffsetMinutes,
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt
             )
@@ -707,6 +911,7 @@ enum DataExportImportService {
                 solidFeedingStyleRawValue: $0.solidFeedingStyleRawValue,
                 solidAllergenExposure: $0.solidAllergenExposure,
                 solidSensitivityObserved: $0.solidSensitivityObserved,
+                solidFoodDetailsJSON: $0.solidFoodDetailsJSON,
                 nursingSideRawValue: $0.nursingSideRawValue,
                 activeNursingSideRawValue: $0.activeNursingSideRawValue,
                 timerStateRawValue: $0.timerStateRawValue,
@@ -1018,6 +1223,7 @@ enum DataExportImportService {
                 id: $0.id,
                 householdID: $0.householdID,
                 canonicalName: $0.canonicalName,
+                foodReferenceID: $0.foodReferenceID,
                 aliasesJSON: $0.aliasesJSON,
                 defaultUnit: $0.defaultUnit,
                 defaultStoreSectionByStoreJSON: $0.defaultStoreSectionByStoreJSON,
@@ -1214,6 +1420,11 @@ enum DataExportImportService {
             profiles: profiles,
             photoAttachments: photoAttachments,
             solidFoods: solidFoods,
+            solidsProfileStates: solidsProfileStates,
+            solidFoodProgress: solidFoodProgress,
+            solidFoodEventItems: solidFoodEventItems,
+            solidAllergenProgress: solidAllergenProgress,
+            plannedSolidMeals: plannedSolidMeals,
             events: events,
             predictionRecords: records,
             milestones: milestones,
@@ -1316,9 +1527,138 @@ enum DataExportImportService {
                 id: value.id,
                 name: value.name,
                 photoAttachmentID: value.photoAttachmentID,
+                allergenIDs: value.allergenIDsJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode([String].self, from: $0)
+                    }
+                } ?? [],
+                minimumAgeMonths: value.minimumAgeMonths ?? 6,
+                preparationNotes: value.preparationNotes ?? "",
+                safetyNotes: value.safetyNotes ?? "",
                 createdAt: value.createdAt,
                 updatedAt: value.updatedAt
             ))
+        }
+        for value in envelope.solidsProfileStates ?? [] {
+            context.insert(SolidsProfileState(
+                id: value.id,
+                profileID: value.profileID,
+                isActivated: value.isActivated,
+                startedAt: value.startedAt,
+                readinessNotes: value.readinessNotes,
+                guidedStartDate: value.guidedStartDate,
+                favoriteRecipeIDs: value.favoriteRecipeIDsJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode([String].self, from: $0)
+                    }
+                } ?? [],
+                wantToTryRecipeIDs: value.wantToTryRecipeIDsJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode([String].self, from: $0)
+                    }
+                } ?? [],
+                recipeCollections: value.recipeCollectionsJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode([SolidRecipeCollection].self, from: $0)
+                    }
+                } ?? [],
+                completedFeedingSkillIDs: value.completedFeedingSkillIDsJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode([String].self, from: $0)
+                    }
+                } ?? [],
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.solidFoodProgress ?? [] {
+            context.insert(SolidFoodProgress(
+                id: value.id,
+                profileID: value.profileID,
+                foodID: value.foodID,
+                foodNameSnapshot: value.foodNameSnapshot,
+                status: SolidsFoodStatus(rawValue: value.statusRawValue) ?? .notTried,
+                isFavorite: value.isFavorite,
+                firstTriedAt: value.firstTriedAt,
+                lastTriedAt: value.lastTriedAt,
+                exposureCount: value.exposureCount,
+                lastReactionRawValue: value.lastReactionRawValue,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.solidFoodEventItems ?? [] {
+            let item = SolidFoodEventItem(
+                id: value.id,
+                eventID: value.eventID,
+                profileID: value.profileID,
+                foodID: value.foodID,
+                foodNameSnapshot: value.foodNameSnapshot,
+                confirmedAllergenPortionIDs: value.confirmedAllergenPortionIDsJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode([String].self, from: $0)
+                    }
+                },
+                reactionRawValue: value.reactionRawValue,
+                servingAmount: value.servingAmount ?? "",
+                notes: value.notes ?? "",
+                suspectedReaction: value.suspectedReaction ?? false,
+                severity: SolidReactionSeverity(rawValue: value.severityRawValue ?? "") ?? .unknown,
+                onsetMinutes: value.onsetMinutes,
+                durationMinutes: value.durationMinutes,
+                responseNotes: value.responseNotes ?? "",
+                followUp: SolidReactionFollowUp(rawValue: value.followUpRawValue ?? "") ?? .none,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+            item.allergenIDsJSON = value.allergenIDsJSON
+            item.symptomIDsJSON = value.symptomIDsJSON ?? "[]"
+            context.insert(item)
+        }
+        for value in envelope.solidAllergenProgress ?? [] {
+            context.insert(SolidAllergenProgress(
+                id: value.id,
+                profileID: value.profileID,
+                allergenID: value.allergenID,
+                status: SolidAllergenStatus(rawValue: value.statusRawValue) ?? .notStarted,
+                statusOverride: value.statusOverrideRawValue.flatMap(SolidAllergenStatus.init(rawValue:)),
+                introductionStep: value.introductionStep,
+                exposureMealCount: value.exposureMealCount,
+                firstIntroducedAt: value.firstIntroducedAt,
+                lastExposureAt: value.lastExposureAt,
+                nextExposureDueAt: value.nextExposureDueAt,
+                reminderEnabled: value.reminderEnabled,
+                notes: value.notes,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.plannedSolidMeals ?? [] {
+            let plan = PlannedSolidMeal(
+                id: value.id,
+                profileID: value.profileID,
+                scheduledAt: value.scheduledAt,
+                title: value.title,
+                foodIDs: [],
+                foodNames: [],
+                notes: value.notes,
+                completedEventID: value.completedEventID,
+                recipeID: value.recipeID,
+                isGuided: value.isGuided ?? false,
+                guidedPosition: value.guidedPosition,
+                allergenID: value.allergenID,
+                allergenIntroductionStep: value.allergenIntroductionStep,
+                allergenServingGuidance: value.allergenServingGuidance,
+                allergenObservationMinutes: value.allergenObservationMinutes,
+                reminderEnabled: value.reminderEnabled ?? false,
+                reminderOffsetMinutes: value.reminderOffsetMinutes ?? 30,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+            plan.foodIDsJSON = value.foodIDsJSON
+            plan.foodNamesJSON = value.foodNamesJSON
+            context.insert(plan)
         }
         let fallbackProfileID = envelope.profiles.first?.id
         for value in envelope.events {
@@ -1346,6 +1686,7 @@ enum DataExportImportService {
             event.solidFeedingStyleRawValue = value.solidFeedingStyleRawValue
             event.solidAllergenExposure = value.solidAllergenExposure
             event.solidSensitivityObserved = value.solidSensitivityObserved
+            event.solidFoodDetailsJSON = value.solidFoodDetailsJSON
             event.nursingSideRawValue = value.nursingSideRawValue
             event.activeNursingSideRawValue = value.activeNursingSideRawValue
             event.timerStateRawValue = value.timerStateRawValue
@@ -1713,6 +2054,7 @@ enum DataExportImportService {
                 id: value.id,
                 householdID: value.householdID,
                 canonicalName: value.canonicalName,
+                foodReferenceID: value.foodReferenceID,
                 aliasesJSON: value.aliasesJSON,
                 defaultUnit: value.defaultUnit,
                 defaultStoreSectionByStoreJSON: value.defaultStoreSectionByStoreJSON,
@@ -1963,6 +2305,11 @@ enum DataExportImportService {
         try deleteAll(FoodStoreSection.self, context: context)
         try deleteAll(FoodStore.self, context: context)
         try deleteAll(Household.self, context: context)
+        try deleteAll(PlannedSolidMeal.self, context: context)
+        try deleteAll(SolidAllergenProgress.self, context: context)
+        try deleteAll(SolidFoodEventItem.self, context: context)
+        try deleteAll(SolidFoodProgress.self, context: context)
+        try deleteAll(SolidsProfileState.self, context: context)
         try deleteAll(SolidFoodCatalogItem.self, context: context)
         try deleteAll(PhotoAttachment.self, context: context)
         try deleteAll(PredictionFactor.self, context: context)
@@ -2205,6 +2552,33 @@ enum DataExportImportService {
         }
         if let solidFoods = envelope.solidFoods,
            Set(solidFoods.map(\.id)).count != solidFoods.count {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let solidsProfileStates = envelope.solidsProfileStates ?? []
+        let solidFoodProgress = envelope.solidFoodProgress ?? []
+        let solidFoodEventItems = envelope.solidFoodEventItems ?? []
+        let solidAllergenProgress = envelope.solidAllergenProgress ?? []
+        let plannedSolidMeals = envelope.plannedSolidMeals ?? []
+        let eventIDs = Set(envelope.events.map(\.id))
+        guard Set(solidsProfileStates.map(\.id)).count == solidsProfileStates.count,
+              Set(solidFoodProgress.map(\.id)).count == solidFoodProgress.count,
+              Set(solidFoodEventItems.map(\.id)).count == solidFoodEventItems.count,
+              Set(solidAllergenProgress.map(\.id)).count == solidAllergenProgress.count,
+              Set(plannedSolidMeals.map(\.id)).count == plannedSolidMeals.count,
+              solidsProfileStates.allSatisfy({ profileIDs.contains($0.profileID) }),
+              solidFoodProgress.allSatisfy({ profileIDs.contains($0.profileID) && !$0.foodID.isEmpty }),
+              solidFoodEventItems.allSatisfy({
+                  profileIDs.contains($0.profileID) && eventIDs.contains($0.eventID) && !$0.foodID.isEmpty
+              }),
+              solidAllergenProgress.allSatisfy({
+                  profileIDs.contains($0.profileID) && SolidsAllergen(rawValue: $0.allergenID) != nil
+              }),
+              plannedSolidMeals.allSatisfy({
+                  profileIDs.contains($0.profileID)
+                      && ($0.completedEventID.map(eventIDs.contains) ?? true)
+                      && ($0.allergenID.map { SolidsAllergen(rawValue: $0) != nil } ?? true)
+                      && ($0.allergenIntroductionStep.map { (1...3).contains($0) } ?? true)
+              }) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let packingTrips = envelope.packingTrips ?? []

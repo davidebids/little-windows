@@ -5,7 +5,12 @@ import SwiftUI
 struct InsightsDashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query private var solidFoodEventItems: [SolidFoodEventItem]
+    @Query private var solidFoodProgress: [SolidFoodProgress]
+    @Query private var solidsProfileStates: [SolidsProfileState]
+    @Query private var plannedSolidMeals: [PlannedSolidMeal]
     let navigationTitle: String
+    @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var viewModel = InsightsViewModel()
     @StateObject private var profileService = ProfileService.shared
     @State private var events: [BabyEvent] = []
@@ -30,6 +35,31 @@ struct InsightsDashboardView: View {
     }
     private var scopedRecords: [SleepPredictionRecord] {
         records.filter { $0.matchesProfile(profile?.id) }
+    }
+    private var scopedSolidFoodEventItems: [SolidFoodEventItem] {
+        guard let profileID = profile?.id else { return [] }
+        return solidFoodEventItems.filter { $0.profileID == profileID }
+    }
+    private var scopedSolidFoodProgress: [SolidFoodProgress] {
+        guard let profileID = profile?.id else { return [] }
+        return solidFoodProgress.filter { $0.profileID == profileID }
+    }
+    private var solidsAccessLevel: SolidsAccessLevel {
+        SolidsTrackingService.accessLevel(
+            for: profile,
+            events: scopedEvents,
+            state: solidsProfileStates.first { $0.profileID == profile?.id }
+        )
+    }
+    private var solidsReport: SolidsReportSnapshot? {
+        guard let profile, solidsAccessLevel == .full else { return nil }
+        return SolidsReportingService.snapshot(
+            profileID: profile.id,
+            events: scopedEvents,
+            eventItems: scopedSolidFoodEventItems,
+            progress: scopedSolidFoodProgress,
+            period: viewModel.selectedPeriodRange
+        )
     }
 
     private var refreshToken: String {
@@ -63,7 +93,12 @@ struct InsightsDashboardView: View {
                     case .wakeWindows:
                         WakeWindowInsightsView(snapshot: viewModel.snapshot)
                     case .feeding:
-                        FeedingInsightsView(snapshot: viewModel.snapshot)
+                        FeedingInsightsView(
+                            snapshot: viewModel.snapshot,
+                            solids: solidsReport,
+                            openSolidsTracker: { openSolids(.solidsTracker) },
+                            openAllergens: { openSolids(.solidsAllergens) }
+                        )
                     case .diapers:
                         DiaperInsightsView(snapshot: viewModel.snapshot)
                     case .activities:
@@ -100,6 +135,7 @@ struct InsightsDashboardView: View {
         .background(AppTheme.background)
         .navigationTitle(navigationTitle)
         .task(id: refreshToken) {
+            applyPendingInsightsSection()
             if let sectionName = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_INSIGHTS_SECTION"],
                let section = InsightsSection.allCases.first(where: {
                    $0.rawValue.caseInsensitiveCompare(sectionName) == .orderedSame
@@ -107,6 +143,9 @@ struct InsightsDashboardView: View {
                 viewModel.selectedSection = section
             }
             refreshInsightsData()
+        }
+        .onReceive(router.$pendingInsightsSection.compactMap { $0 }) { _ in
+            applyPendingInsightsSection()
         }
     }
 
@@ -173,25 +212,33 @@ struct InsightsDashboardView: View {
             }
 
             if !isDogProfile {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(InsightsSection.allCases) { section in
-                            Button {
-                                withAnimation(.snappy) {
-                                    viewModel.selectedSection = section
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(InsightsSection.allCases) { section in
+                                Button {
+                                    withAnimation(.snappy) {
+                                        viewModel.selectedSection = section
+                                    }
+                                } label: {
+                                    Text(section.rawValue)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(viewModel.selectedSection == section ? .white : .primary)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 9)
+                                        .background(
+                                            viewModel.selectedSection == section ? Color.indigo : Color.primary.opacity(0.06),
+                                            in: Capsule()
+                                        )
                                 }
-                            } label: {
-                                Text(section.rawValue)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(viewModel.selectedSection == section ? .white : .primary)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 9)
-                                    .background(
-                                        viewModel.selectedSection == section ? Color.indigo : Color.primary.opacity(0.06),
-                                        in: Capsule()
-                                    )
+                                .buttonStyle(.plain)
+                                .id(section)
                             }
-                            .buttonStyle(.plain)
+                        }
+                    }
+                    .onChange(of: viewModel.selectedSection) { _, section in
+                        withAnimation(.snappy) {
+                            proxy.scrollTo(section, anchor: .center)
                         }
                     }
                 }
@@ -275,7 +322,17 @@ struct InsightsDashboardView: View {
         let eventFetchEnd = rangeEnd.addingTimeInterval(30 * 60 * 60)
 
         do {
-            if let selectedProfileID, viewModel.selectedSection == .growth {
+            if let selectedProfileID, viewModel.selectedSection == .feeding {
+                // Feeding reports also need earlier solids history so imported
+                // legacy meals can be derived before first-food counts render.
+                let descriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.profileID == selectedProfileID
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
+                )
+                events = try modelContext.fetch(descriptor)
+            } else if let selectedProfileID, viewModel.selectedSection == .growth {
                 let descriptor = FetchDescriptor<BabyEvent>(
                     predicate: #Predicate<BabyEvent> { event in
                         event.profileID == selectedProfileID && event.typeRawValue == "growth"
@@ -369,12 +426,44 @@ struct InsightsDashboardView: View {
             records = []
         }
 
+        if viewModel.selectedSection == .feeding,
+           let profile,
+           profile.profileType == .child {
+            SolidsTrackingService.backfillProgress(
+                profileID: profile.id,
+                events: scopedEvents,
+                eventItems: solidFoodEventItems,
+                progress: solidFoodProgress,
+                plans: plannedSolidMeals,
+                profileStates: solidsProfileStates,
+                context: modelContext
+            )
+        }
+
         viewModel.refresh(
             profileName: profile?.name ?? "Baby",
             profile: profile,
             events: scopedEvents.filter { !$0.isTimerDraft },
             records: scopedRecords,
             now: now
+        )
+    }
+
+    private func applyPendingInsightsSection() {
+        guard let section = router.pendingInsightsSection else { return }
+        router.pendingInsightsSection = nil
+        guard !isDogProfile else { return }
+        viewModel.selectedSection = section
+    }
+
+    private func openSolids(_ command: FoodRouteCommand) {
+        guard let profile, profile.profileType == .child, solidsAccessLevel == .full else { return }
+        router.openSolids(
+            command,
+            profileID: profile.id,
+            returningTo: .reports,
+            insightsSection: viewModel.selectedSection,
+            feedingInsightsMode: .solids
         )
     }
 

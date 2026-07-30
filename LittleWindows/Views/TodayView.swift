@@ -6,6 +6,7 @@ struct EventEditorRoute: Identifiable {
     let id = UUID()
     var type: EventType
     var event: BabyEvent?
+    var solidPreset: SolidFeedEditorPreset? = nil
 }
 
 private enum TodayScrollAnchor {
@@ -130,6 +131,11 @@ struct TodayView: View {
     @Query(sort: \CareRoutineStep.sortOrder) private var careRoutineSteps: [CareRoutineStep]
     @Query(sort: \CareRoutineRun.startedAt, order: .reverse) private var careRoutineRuns: [CareRoutineRun]
     @Query(sort: \Household.createdAt) private var households: [Household]
+    @Query(sort: \SolidFoodEventItem.createdAt, order: .reverse) private var solidFoodEventItems: [SolidFoodEventItem]
+    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
+    @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
+    @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
+    @Query(sort: \SolidAllergenProgress.updatedAt, order: .reverse) private var solidAllergenProgress: [SolidAllergenProgress]
 
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
     @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
@@ -676,6 +682,8 @@ struct TodayView: View {
                 } else {
                     activeTimersSection(activeEvents)
 
+                    solidsTodaySection(state)
+
                     if state.isDogProfile {
                         dogTodaySummarySection(state)
                         puppyStageGuideSection(state)
@@ -767,6 +775,9 @@ struct TodayView: View {
 
         listContent
         .navigationTitle("Today")
+        .navigationDestination(for: FoodRoute.self) { route in
+            todaySolidsDestination(route, state: state)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -787,9 +798,13 @@ struct TodayView: View {
         }
         .sheet(item: $editorRoute) { route in
             NavigationStack {
-                EventEditorView(type: route.type, event: route.event) { savedEvent in
+                EventEditorView(
+                    type: route.type,
+                    event: route.event,
+                    solidPreset: route.solidPreset
+                ) { savedEvent in
                     Task {
-                        await eventChanged(savedEvent)
+                        await eventChanged(savedEvent, solidPreset: route.solidPreset)
                         completePendingRoutineStepIfNeeded()
                     }
                 }
@@ -1194,6 +1209,216 @@ struct TodayView: View {
             } header: {
                 AppSectionHeader(title: "Puppy Stage Guides", subtitle: guide.title)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func solidsTodaySection(_ state: TodayRenderState) -> some View {
+        if let profile = state.profile, profile.profileType == .child {
+            let profileState = solidsProfileStates.first { $0.profileID == profile.id }
+            let accessLevel = SolidsTrackingService.accessLevel(
+                for: profile,
+                events: state.scopedEvents,
+                state: profileState
+            )
+            let calendar = Calendar.current
+            let endOfToday = calendar.date(
+                byAdding: DateComponents(day: 1, second: -1),
+                to: calendar.startOfDay(for: Date())
+            ) ?? Date()
+            let nextPlan = plannedSolidMeals.first {
+                $0.profileID == profile.id && !$0.isCompleted && $0.scheduledAt <= endOfToday
+            }
+            let dueAllergen = solidAllergenProgress
+                .filter {
+                    $0.profileID == profile.id &&
+                        $0.nextExposureDueAt.map { $0 <= endOfToday } == true &&
+                        $0.status != .suspectedReaction &&
+                        $0.status != .avoidPendingAdvice
+                }
+                .sorted {
+                    ($0.nextExposureDueAt ?? .distantFuture) < ($1.nextExposureDueAt ?? .distantFuture)
+                }
+                .first
+            let hasSolidHistory = state.scopedEvents.contains {
+                $0.type == .feed && $0.feedKind == .solid
+            }
+
+            if accessLevel == .readinessPreview {
+                Section {
+                    NavigationLink(value: FoodRoute.solidsHome) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Starting solids soon")
+                                    .font(.headline)
+                                Text("Review readiness signs and age-appropriate preparation before the first meal.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "carrot.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("today.solids-readiness")
+                }
+            } else if accessLevel == .full,
+                      nextPlan != nil || dueAllergen != nil || !hasSolidHistory {
+                Section {
+                    if let nextPlan {
+                        Button {
+                            deepLinkRouter.openSolids(
+                                .plannedSolidMeal(nextPlan.id),
+                                profileID: profile.id,
+                                returningTo: .today
+                            )
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(nextPlan.title)
+                                        .font(.headline)
+                                    Text(nextPlan.scheduledAt < calendar.startOfDay(for: Date())
+                                        ? "Planned meal is overdue"
+                                        : "Planned for \(nextPlan.scheduledAt.formatted(date: .omitted, time: .shortened))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "calendar.badge.clock")
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("today.solids.next-plan")
+                    }
+
+                    if let dueAllergen,
+                       let allergen = SolidsAllergen(rawValue: dueAllergen.allergenID) {
+                        Button {
+                            deepLinkRouter.openSolids(
+                                .solidAllergen(allergen.rawValue),
+                                profileID: profile.id,
+                                returningTo: .today
+                            )
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Continue \(allergen.displayName)")
+                                        .font(.headline)
+                                    Text("A follow-up exposure is due. Review the introduction steps before serving.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "checklist")
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("today.solids.due-allergen")
+                    }
+
+                    if nextPlan == nil, dueAllergen == nil, !hasSolidHistory {
+                        Button {
+                            deepLinkRouter.openSolids(
+                                .solidsGuided,
+                                profileID: profile.id,
+                                returningTo: .today
+                            )
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Plan the first solids meal")
+                                        .font(.headline)
+                                    Text("Start a paced first-100-food path or browse the complete food database.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "fork.knife.circle.fill")
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("today.solids.guided")
+                    }
+                } header: {
+                    AppSectionHeader(title: "Solids")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func todaySolidsDestination(
+        _ route: FoodRoute,
+        state: TodayRenderState
+    ) -> some View {
+        if route == .solidsHome,
+           let profile = state.profile,
+           profile.profileType == .child {
+            let profileState = solidsProfileStates.first { $0.profileID == profile.id }
+            let accessLevel = SolidsTrackingService.accessLevel(
+                for: profile,
+                events: state.scopedEvents,
+                state: profileState
+            )
+            if accessLevel != .hidden {
+                SolidsHomeView(
+                    profile: profile,
+                    accessLevel: accessLevel,
+                    events: state.scopedEvents,
+                    eventItems: solidFoodEventItems,
+                    progress: solidFoodProgress,
+                    plans: plannedSolidMeals,
+                    profileState: profileState,
+                    open: openSolidsInCare
+                )
+            } else {
+                todaySolidsUnavailable
+            }
+        } else {
+            todaySolidsUnavailable
+        }
+    }
+
+    private var todaySolidsUnavailable: some View {
+        ContentUnavailableView(
+            "Unavailable",
+            systemImage: "person.crop.circle.badge.exclamationmark",
+            description: Text("Solids is not available for the selected profile.")
+        )
+    }
+
+    private func openSolidsInCare(_ route: FoodRoute) {
+        guard let command = solidsCommand(for: route) else { return }
+        deepLinkRouter.openSolids(
+            command,
+            profileID: profile?.id,
+            returningTo: .today
+        )
+    }
+
+    private func solidsCommand(for route: FoodRoute) -> FoodRouteCommand? {
+        switch route {
+        case .solidsHome: .solids
+        case .solidsDatabase: .solidsDatabase
+        case .solidsGuided: .solidsGuided
+        case .solidFood(let id): .solidFood(id)
+        case .customSolidFood(let id): .customSolidFood(id)
+        case .solidsPlan: .solidsPlan
+        case .plannedSolidMeal(let id): .plannedSolidMeal(id)
+        case .solidsTracker: .solidsTracker
+        case .solidMeal(let id): .solidMeal(id)
+        case .solidsAllergens: .solidsAllergens
+        case .solidAllergen(let id): .solidAllergen(id)
+        case .solidsRecipes: .solidsRecipes
+        case .solidsRecipe(let id): .solidsRecipe(id)
+        case .solidFoodHistory, .todoList, .shoppingList, .shoppingMode,
+             .packingTrip, .inventoryItem, .mealPrepItem, .returnRequest,
+             .store, .reminders:
+            nil
         }
     }
 
@@ -2191,7 +2416,8 @@ struct TodayView: View {
         WidgetSnapshotService.refresh(
             profile: profile,
             events: scopedEvents,
-            prediction: prediction
+            prediction: prediction,
+            solidsState: solidsProfileStates.first { $0.profileID == profile?.id }
         )
     }
 
@@ -2403,6 +2629,10 @@ struct TodayView: View {
 
     private func handlePendingDeepLink() {
         guard deepLinkRouter.isDataReady else { return }
+        // Profile-scoped actions publish the profile and action together. Apply
+        // the explicit profile before consuming the action so child-only logs
+        // are not dropped when a dog was previously selected.
+        handlePendingProfileSwitch()
         guard let action = deepLinkRouter.consumeAction() else { return }
         switch action {
         case .showActiveTimer:
@@ -2448,7 +2678,30 @@ struct TodayView: View {
         case .logDiaper:
             editorRoute = EventEditorRoute(type: .diaper)
         case .logEvent(let type):
-            editorRoute = EventEditorRoute(type: type)
+            editorRoute = EventEditorRoute(
+                type: profile?.profileType == .dog && type == .feed ? .food : type
+            )
+        case .logSolidFeed(let preset):
+            guard let profile, profile.profileType == .child else { return }
+            let state = solidsProfileStates.first { $0.profileID == profile.id }
+            guard SolidsTrackingService.accessLevel(
+                for: profile,
+                events: scopedEvents,
+                state: state
+            ) == .full else { return }
+            let resolvedPreset: SolidFeedEditorPreset
+            if let plannedMealID = preset.plannedMealID {
+                guard let plan = plannedSolidMeals.first(where: {
+                    $0.id == plannedMealID && $0.profileID == profile.id && !$0.isCompleted
+                }) else { return }
+                resolvedPreset = SolidsTrackingService.preset(for: plan)
+            } else {
+                resolvedPreset = preset
+            }
+            editorRoute = EventEditorRoute(
+                type: .feed,
+                solidPreset: resolvedPreset
+            )
         case .repeatLast:
             repeatLastEvent()
         }
@@ -2513,7 +2766,8 @@ struct TodayView: View {
     private func eventChanged(
         _ event: BabyEvent,
         refreshPrediction: Bool = true,
-        waitForSystemIntegrations: Bool = false
+        waitForSystemIntegrations: Bool = false,
+        solidPreset: SolidFeedEditorPreset? = nil
     ) async {
         event.profileID = event.profileID ?? selectedProfileID
         let currentEvents = scopedEvents.contains(where: { $0.id == event.id })
@@ -2529,7 +2783,8 @@ struct TodayView: View {
             notificationsEnabled: notificationsEnabled,
             notificationLeadMinutes: notificationLeadMinutes,
             refreshPrediction: refreshPrediction,
-            waitForSystemIntegrations: waitForSystemIntegrations
+            waitForSystemIntegrations: waitForSystemIntegrations,
+            solidPreset: solidPreset
         )
     }
 

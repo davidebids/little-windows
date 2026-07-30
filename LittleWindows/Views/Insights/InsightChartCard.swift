@@ -49,11 +49,23 @@ struct InsightChartCard<Content: View>: View {
 }
 
 struct InsightObservationsCard: View {
+    let title: String
+    let systemImage: String
     let trends: [InsightTrend]
+
+    init(
+        title: String = "What changed",
+        systemImage: String = "sparkles",
+        trends: [InsightTrend]
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.trends = trends
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("What changed", systemImage: "sparkles")
+            Label(title, systemImage: systemImage)
                 .font(.headline)
                 .foregroundStyle(.indigo)
 

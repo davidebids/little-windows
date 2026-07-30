@@ -1,10 +1,72 @@
 import CloudKit
+import CoreData
 import XCTest
 import SwiftData
 import SwiftUI
 @testable import LittleWindows
 
 final class SleepPredictionEngineTests: XCTestCase {
+    func testManualCloudKitDevelopmentSchemaInitialization() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard Self.smokeConfigurationValue(
+            "LW_CLOUDKIT_SCHEMA_INIT",
+            environment: environment
+        ) == "1" else {
+            throw XCTSkip(
+                "Set LW_CLOUDKIT_SCHEMA_INIT=1 to initialize the CloudKit development schema."
+            )
+        }
+
+        let storeDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LittleWindowsCloudKitSchema", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: storeDirectory,
+            withIntermediateDirectories: true
+        )
+        let storeURL = storeDirectory.appendingPathComponent("Schema.sqlite")
+
+        let configuration = ModelConfiguration(
+            "CloudKitSchemaInitialization",
+            schema: PersistenceService.schema,
+            url: storeURL,
+            cloudKitDatabase: .private(PersistenceService.iCloudContainerIdentifier)
+        )
+        let description = NSPersistentStoreDescription(url: configuration.url)
+        description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
+            containerIdentifier: PersistenceService.iCloudContainerIdentifier
+        )
+        description.shouldAddStoreAsynchronously = false
+
+        guard let managedObjectModel = NSManagedObjectModel.makeManagedObjectModel(
+            for: PersistenceService.modelTypes
+        ) else {
+            XCTFail("Could not create the Core Data model used for CloudKit schema initialization.")
+            return
+        }
+
+        let container = NSPersistentCloudKitContainer(
+            name: "LittleWindowsCloudKitSchema",
+            managedObjectModel: managedObjectModel
+        )
+        container.persistentStoreDescriptions = [description]
+
+        var persistentStoreLoadError: Error?
+        container.loadPersistentStores { _, error in
+            persistentStoreLoadError = error
+        }
+        if let persistentStoreLoadError {
+            throw persistentStoreLoadError
+        }
+
+        try container.initializeCloudKitSchema()
+
+        if let store = container.persistentStoreCoordinator.persistentStores.first {
+            try container.persistentStoreCoordinator.remove(store)
+        }
+        print("LW_CLOUDKIT_SCHEMA_INIT initialized development schema")
+    }
+
     func testManualWeatherKitSmoke() async throws {
         guard Self.smokeConfigurationValue(
             "LW_WEATHERKIT_SMOKE",
@@ -1348,9 +1410,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         let context = container.mainContext
         let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
         let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        let solidEvent = BabyEvent(profileID: testChild.id, type: .feed, startDate: Date())
+        solidEvent.feedKind = .solid
         context.insert(testChild)
         context.insert(sibling)
-        context.insert(BabyEvent(profileID: testChild.id, type: .feed, startDate: Date()))
+        context.insert(solidEvent)
         context.insert(BabyEvent(profileID: sibling.id, type: .diaper, startDate: Date()))
         context.insert(SleepPredictionRecord(
             prediction: makeLittleWindowPrediction(),
@@ -1370,6 +1434,28 @@ final class SleepPredictionEngineTests: XCTestCase {
         ))
         context.insert(AgeGuideReadState(profileID: testChild.id, guideID: "month-1"))
         context.insert(PuppyStageGuideReadState(profileID: testChild.id, guideID: "puppy-1"))
+        context.insert(SolidsProfileState(profileID: testChild.id, isActivated: true))
+        context.insert(SolidFoodProgress(
+            profileID: testChild.id,
+            foodID: "avocado",
+            foodNameSnapshot: "Avocado"
+        ))
+        context.insert(SolidFoodEventItem(
+            eventID: solidEvent.id,
+            profileID: testChild.id,
+            foodID: "avocado",
+            foodNameSnapshot: "Avocado"
+        ))
+        context.insert(SolidAllergenProgress(
+            profileID: testChild.id,
+            allergenID: SolidsAllergen.egg.rawValue
+        ))
+        context.insert(PlannedSolidMeal(
+            profileID: testChild.id,
+            scheduledAt: Date(),
+            foodIDs: ["avocado"],
+            foodNames: ["Avocado"]
+        ))
         try context.save()
 
         ProfileService.shared.switchProfile(testChild)
@@ -1386,6 +1472,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         let appointments = try context.fetch(FetchDescriptor<DoctorAppointment>())
         let ageGuideStates = try context.fetch(FetchDescriptor<AgeGuideReadState>())
         let puppyGuideStates = try context.fetch(FetchDescriptor<PuppyStageGuideReadState>())
+        let solidsProfileStates = try context.fetch(FetchDescriptor<SolidsProfileState>())
+        let solidFoodProgress = try context.fetch(FetchDescriptor<SolidFoodProgress>())
+        let solidFoodEventItems = try context.fetch(FetchDescriptor<SolidFoodEventItem>())
+        let solidAllergenProgress = try context.fetch(FetchDescriptor<SolidAllergenProgress>())
+        let plannedSolidMeals = try context.fetch(FetchDescriptor<PlannedSolidMeal>())
 
         XCTAssertEqual(profiles.map(\.id), [sibling.id])
         XCTAssertEqual(events.map(\.profileID), [sibling.id])
@@ -1394,6 +1485,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(appointments.isEmpty)
         XCTAssertTrue(ageGuideStates.isEmpty)
         XCTAssertTrue(puppyGuideStates.isEmpty)
+        XCTAssertTrue(solidsProfileStates.isEmpty)
+        XCTAssertTrue(solidFoodProgress.isEmpty)
+        XCTAssertTrue(solidFoodEventItems.isEmpty)
+        XCTAssertTrue(solidAllergenProgress.isEmpty)
+        XCTAssertTrue(plannedSolidMeals.isEmpty)
         XCTAssertEqual(ProfileService.shared.selectedProfileID, sibling.id)
     }
 
@@ -8058,9 +8154,133 @@ final class SleepPredictionEngineTests: XCTestCase {
         TripPackingService.archive(trip, context: context, now: startDate.addingTimeInterval(180))
         XCTAssertTrue(trip.isArchived)
         XCTAssertEqual(trip.status, .archived)
+
+        let archivedItemTitle = firstItem.title
+        XCTAssertFalse(TripPackingService.setState(
+            firstItem,
+            state: .needed,
+            trip: trip,
+            context: context,
+            now: startDate.addingTimeInterval(190)
+        ))
+        XCTAssertEqual(firstItem.state, .packed)
+        XCTAssertFalse(TripPackingService.updateItem(
+            firstItem,
+            title: "Changed Archived Item",
+            category: firstItem.category,
+            travelerID: firstItem.travelerID,
+            bagID: firstItem.bagID,
+            quantity: firstItem.quantity,
+            unit: firstItem.unit ?? "",
+            notes: firstItem.notes ?? "",
+            priority: firstItem.priority,
+            needsPurchase: firstItem.needsPurchase,
+            assignedCaregiverName: firstItem.assignedCaregiverName,
+            caregiverReminderEnabled: firstItem.caregiverReminderEnabled,
+            trip: trip,
+            context: context,
+            now: startDate.addingTimeInterval(200)
+        ))
+        XCTAssertEqual(firstItem.title, archivedItemTitle)
+        XCTAssertNil(TripPackingService.addItem(
+            to: trip,
+            title: "New Archived Item",
+            category: .clothing,
+            travelerID: nil,
+            existingItems: items,
+            context: context,
+            now: startDate.addingTimeInterval(210)
+        ))
+        XCTAssertNil(TripPackingService.addBag(
+            to: trip,
+            name: "Archived Bag",
+            travelerID: nil,
+            existingBags: bags,
+            context: context,
+            now: startDate.addingTimeInterval(220)
+        ))
+        XCTAssertFalse(TripPackingService.deleteItem(
+            firstItem,
+            trip: trip,
+            context: context,
+            now: startDate.addingTimeInterval(230)
+        ))
+        XCTAssertFalse(TripPackingService.setCompleted(
+            trip,
+            completed: true,
+            context: context,
+            now: startDate.addingTimeInterval(235)
+        ))
+        XCTAssertEqual(trip.status, .archived)
+
         TripPackingService.restore(trip, context: context, now: startDate.addingTimeInterval(240))
         XCTAssertFalse(trip.isArchived)
         XCTAssertEqual(trip.status, .upcoming)
+        XCTAssertTrue(TripPackingService.setState(
+            firstItem,
+            state: .needed,
+            trip: trip,
+            context: context,
+            now: startDate.addingTimeInterval(250)
+        ))
+        XCTAssertEqual(firstItem.state, .needed)
+    }
+
+    @MainActor
+    func testTripPackingDeleteRemovesTripScopedRecordsAndPreservesShoppingItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let trip = PackingTrip(
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: Date(timeIntervalSince1970: 1_900_000_000),
+            endDate: Date(timeIntervalSince1970: 1_900_086_400)
+        )
+        let traveler = TripTraveler(
+            householdID: householdID,
+            tripID: trip.id,
+            kind: .adult,
+            displayName: "Adult Traveler"
+        )
+        let bag = PackingBag(
+            householdID: householdID,
+            tripID: trip.id,
+            travelerID: traveler.id,
+            name: "Carry On"
+        )
+        let shoppingList = ShoppingList(
+            householdID: householdID,
+            name: "Trip Shopping"
+        )
+        let shoppingItem = ShoppingListItem(
+            householdID: householdID,
+            shoppingListID: shoppingList.id,
+            name: "Sample Item"
+        )
+        let packingItem = PackingItem(
+            householdID: householdID,
+            tripID: trip.id,
+            travelerID: traveler.id,
+            bagID: bag.id,
+            title: "Sample Item",
+            relatedShoppingItemID: shoppingItem.id
+        )
+        context.insert(trip)
+        context.insert(traveler)
+        context.insert(bag)
+        context.insert(packingItem)
+        context.insert(shoppingList)
+        context.insert(shoppingItem)
+        try context.save()
+
+        XCTAssertTrue(TripPackingService.deleteTrip(trip, context: context))
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PackingTrip>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<TripTraveler>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PackingBag>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<PackingItem>()).isEmpty)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ShoppingList>()).map(\.id), [shoppingList.id])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ShoppingListItem>()).map(\.id), [shoppingItem.id])
     }
 
     @MainActor
@@ -8276,14 +8496,17 @@ final class SleepPredictionEngineTests: XCTestCase {
             TripDailyWeather(date: tripDate(2026, 7, 12, timeZoneIdentifier: "Asia/Tokyo"), lowTemperatureCelsius: 10, highTemperatureCelsius: 25, precipitationChance: 0.1, uvIndex: 3),
             TripDailyWeather(date: tripDate(2026, 7, 13, timeZoneIdentifier: "Asia/Tokyo"), lowTemperatureCelsius: -20, highTemperatureCelsius: 50, precipitationChance: 1, uvIndex: 10)
         ]
+        let fetchedAt = Date(timeIntervalSince1970: 1_900_000_000)
 
         let snapshot = try XCTUnwrap(TripWeatherService.makeSnapshot(
             query: query,
             days: days,
             attribution: attribution,
-            locale: Locale(identifier: "en_US")
+            locale: Locale(identifier: "en_US"),
+            fetchedAt: fetchedAt
         ))
 
+        XCTAssertEqual(snapshot.fetchedAt, fetchedAt)
         XCTAssertEqual(snapshot.lowTemperatureCelsius, 5)
         XCTAssertEqual(snapshot.highTemperatureCelsius, 30)
         XCTAssertTrue(snapshot.rainLikely)
@@ -8457,6 +8680,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         let cachedRequestCount = await client.forecastRequestCount()
         XCTAssertNotNil(firstSnapshot)
         XCTAssertNotNil(cachedSnapshot)
+        XCTAssertEqual(firstSnapshot?.fetchedAt, now)
+        XCTAssertEqual(cachedSnapshot?.fetchedAt, now)
         XCTAssertEqual(cachedRequestCount, 1)
 
         let refreshedSnapshot = try await TripWeatherService.snapshot(
@@ -8468,6 +8693,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         let refreshedRequestCount = await client.forecastRequestCount()
         XCTAssertNotNil(refreshedSnapshot)
+        XCTAssertEqual(refreshedSnapshot?.fetchedAt, now.addingTimeInterval(120))
         XCTAssertEqual(refreshedRequestCount, 2)
     }
 
@@ -8492,19 +8718,18 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
     }
 
-    func testNavigationRestorationPreservesSelectedTabAndOpenTrip() throws {
+    func testColdLaunchStartsOnTodayWhileFoodNavigationCanRestoreInProcess() throws {
         let suiteName = "NavigationRestoration-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let tripID = UUID()
 
-        AppNavigationRestoration.saveSelectedTab(.food, defaults: defaults)
         FoodNavigationRestorationState(
             selectedSection: .trips,
             path: [.packingTrip(tripID)]
         ).save(defaults: defaults)
 
-        XCTAssertEqual(AppNavigationRestoration.selectedTab(defaults: defaults), .food)
+        XCTAssertEqual(AppNavigationLaunchPolicy.initialTab, .today)
         XCTAssertEqual(
             FoodNavigationRestorationState.load(defaults: defaults),
             FoodNavigationRestorationState(

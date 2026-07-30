@@ -124,6 +124,80 @@ struct FamilySyncActivityNotification: Equatable {
     var category: FamilySyncActivityNotificationCategory = .general
 }
 
+struct SolidMealReminderSnapshot: Sendable {
+    var id: UUID
+    var profileID: UUID
+    var scheduledAt: Date
+    var title: String
+    var reminderEnabled: Bool
+    var reminderOffsetMinutes: Int
+    var isCompleted: Bool
+
+    init(
+        id: UUID,
+        profileID: UUID,
+        scheduledAt: Date,
+        title: String,
+        reminderEnabled: Bool,
+        reminderOffsetMinutes: Int,
+        isCompleted: Bool
+    ) {
+        self.id = id
+        self.profileID = profileID
+        self.scheduledAt = scheduledAt
+        self.title = title
+        self.reminderEnabled = reminderEnabled
+        self.reminderOffsetMinutes = reminderOffsetMinutes
+        self.isCompleted = isCompleted
+    }
+
+    @MainActor
+    init(plan: PlannedSolidMeal) {
+        self.init(
+            id: plan.id,
+            profileID: plan.profileID,
+            scheduledAt: plan.scheduledAt,
+            title: plan.title,
+            reminderEnabled: plan.reminderEnabled,
+            reminderOffsetMinutes: plan.reminderOffsetMinutes,
+            isCompleted: plan.isCompleted
+        )
+    }
+}
+
+struct SolidAllergenReminderSnapshot: Sendable {
+    var profileID: UUID
+    var allergenID: String
+    var statusRawValue: String
+    var nextExposureDueAt: Date?
+    var reminderEnabled: Bool
+
+    init(
+        profileID: UUID,
+        allergenID: String,
+        statusRawValue: String,
+        nextExposureDueAt: Date?,
+        reminderEnabled: Bool
+    ) {
+        self.profileID = profileID
+        self.allergenID = allergenID
+        self.statusRawValue = statusRawValue
+        self.nextExposureDueAt = nextExposureDueAt
+        self.reminderEnabled = reminderEnabled
+    }
+
+    @MainActor
+    init(progress: SolidAllergenProgress) {
+        self.init(
+            profileID: progress.profileID,
+            allergenID: progress.allergenID,
+            statusRawValue: progress.statusRawValue,
+            nextExposureDueAt: progress.nextExposureDueAt,
+            reminderEnabled: progress.reminderEnabled
+        )
+    }
+}
+
 enum PackingTripReminderScheduleResult: Equatable {
     case notEligible
     case permissionRequired
@@ -255,6 +329,21 @@ final class NotificationManager: NSObject, ObservableObject {
             return granted
         } catch {
             await refreshAuthorizationStatus()
+            return false
+        }
+    }
+
+    func ensureAuthorization() async -> Bool {
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .notDetermined:
+            return await requestAuthorization()
+        case .denied:
+            return false
+        @unknown default:
             return false
         }
     }
@@ -859,6 +948,110 @@ final class NotificationManager: NSObject, ObservableObject {
         )
     }
 
+    func scheduleSolidMealReminder(plan: PlannedSolidMeal, now: Date = Date()) async {
+        await scheduleSolidMealReminder(snapshot: SolidMealReminderSnapshot(plan: plan), now: now)
+    }
+
+    func scheduleSolidMealReminder(
+        snapshot: SolidMealReminderSnapshot,
+        now: Date = Date()
+    ) async {
+        await cancelSolidMealReminder(planID: snapshot.id)
+        guard snapshot.reminderEnabled, !snapshot.isCompleted else { return }
+        let fireDate = snapshot.scheduledAt.addingTimeInterval(
+            Double(-snapshot.reminderOffsetMinutes) * 60
+        )
+        guard fireDate > now else { return }
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Solids meal coming up"
+        content.body = snapshot.title
+        content.sound = .default
+        content.categoryIdentifier = Self.foodReminderCategoryID
+        content.userInfo = [
+            "profileID": snapshot.profileID.uuidString,
+            "plannedSolidMealID": snapshot.id.uuidString,
+            "deepLink": Self.deepLink(
+                path: "food/solids/plan/\(snapshot.id.uuidString)",
+                profileID: snapshot.profileID
+            )
+        ]
+        let request = UNNotificationRequest(
+            identifier: Self.solidMealReminderNotificationID(planID: snapshot.id),
+            content: content,
+            trigger: Self.oneShotTrigger(at: fireDate, now: now)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelSolidMealReminder(planID: UUID) async {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.solidMealReminderNotificationID(planID: planID)]
+        )
+    }
+
+    func scheduleSolidAllergenReminder(
+        progress: SolidAllergenProgress,
+        now: Date = Date()
+    ) async {
+        await scheduleSolidAllergenReminder(
+            snapshot: SolidAllergenReminderSnapshot(progress: progress),
+            now: now
+        )
+    }
+
+    func scheduleSolidAllergenReminder(
+        snapshot: SolidAllergenReminderSnapshot,
+        now: Date = Date()
+    ) async {
+        await cancelSolidAllergenReminder(
+            profileID: snapshot.profileID,
+            allergenID: snapshot.allergenID
+        )
+        guard snapshot.reminderEnabled,
+              snapshot.statusRawValue != SolidAllergenStatus.suspectedReaction.rawValue,
+              snapshot.statusRawValue != SolidAllergenStatus.avoidPendingAdvice.rawValue,
+              let fireDate = snapshot.nextExposureDueAt,
+              fireDate > now else { return }
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else { return }
+        let name = SolidsAllergen(rawValue: snapshot.allergenID)?.displayName ?? snapshot.allergenID
+        let content = UNMutableNotificationContent()
+        content.title = "Keep \(name) in rotation"
+        content.body = "Plan an age-appropriate \(name.lowercased()) food if it remains tolerated."
+        content.sound = .default
+        content.categoryIdentifier = Self.foodReminderCategoryID
+        content.userInfo = [
+            "profileID": snapshot.profileID.uuidString,
+            "allergenID": snapshot.allergenID,
+            "deepLink": Self.deepLink(
+                path: "food/solids/allergens/\(snapshot.allergenID)",
+                profileID: snapshot.profileID
+            )
+        ]
+        let request = UNNotificationRequest(
+            identifier: Self.solidAllergenReminderNotificationID(
+                profileID: snapshot.profileID,
+                allergenID: snapshot.allergenID
+            ),
+            content: content,
+            trigger: Self.oneShotTrigger(at: fireDate, now: now)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelSolidAllergenReminder(profileID: UUID, allergenID: String) async {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.solidAllergenReminderNotificationID(
+                profileID: profileID,
+                allergenID: allergenID
+            )]
+        )
+    }
+
     @discardableResult
     func reschedulePackingTripReminders(
         trip: PackingTrip,
@@ -1119,6 +1312,8 @@ final class NotificationManager: NSObject, ObservableObject {
         predictionRecords: [SleepPredictionRecord],
         appointments: [DoctorAppointment],
         foodReminders: [FoodReminder],
+        plannedSolidMeals: [PlannedSolidMeal],
+        solidAllergenProgress: [SolidAllergenProgress],
         packingTrips: [PackingTrip],
         packingItems: [PackingItem],
         routines: [CareRoutine],
@@ -1137,6 +1332,21 @@ final class NotificationManager: NSObject, ObservableObject {
         let foodIDs = Set(foodReminders.filter {
             $0.isEnabled && $0.dateTime > Date()
         }.map { Self.foodReminderNotificationID(reminderID: $0.id) })
+        let solidMealIDs = Set(plannedSolidMeals.filter {
+            $0.reminderEnabled && !$0.isCompleted &&
+                $0.scheduledAt.addingTimeInterval(Double(-$0.reminderOffsetMinutes) * 60) > Date()
+        }.map { Self.solidMealReminderNotificationID(planID: $0.id) })
+        let solidAllergenIDs = Set(solidAllergenProgress.filter {
+            $0.reminderEnabled &&
+                $0.status != .suspectedReaction &&
+                $0.status != .avoidPendingAdvice &&
+                $0.nextExposureDueAt.map { $0 > Date() } == true
+        }.map {
+            Self.solidAllergenReminderNotificationID(
+                profileID: $0.profileID,
+                allergenID: $0.allergenID
+            )
+        })
         let routineIDs = Set(routines.filter {
             !$0.isArchived && $0.reminderEnabled
         }.map { Self.routineReminderNotificationID(routineID: $0.id) })
@@ -1161,6 +1371,12 @@ final class NotificationManager: NSObject, ObservableObject {
             }
             if identifier.hasPrefix("food.reminder.") {
                 return !foodIDs.contains(identifier)
+            }
+            if identifier.hasPrefix("solids.meal.") {
+                return !solidMealIDs.contains(identifier)
+            }
+            if identifier.hasPrefix("solids.allergen.") {
+                return !solidAllergenIDs.contains(identifier)
             }
             if identifier.hasPrefix("routine.reminder.") {
                 return !routineIDs.contains(identifier)
@@ -1248,6 +1464,12 @@ final class NotificationManager: NSObject, ObservableObject {
             } else {
                 await cancelFoodReminder(reminderID: reminder.id)
             }
+        }
+        for plan in plannedSolidMeals {
+            await scheduleSolidMealReminder(plan: plan)
+        }
+        for progress in solidAllergenProgress {
+            await scheduleSolidAllergenReminder(progress: progress)
         }
         for trip in packingTrips {
             await reschedulePackingTripReminders(
@@ -1779,6 +2001,14 @@ final class NotificationManager: NSObject, ObservableObject {
         "food.reminder.\(reminderID.uuidString)"
     }
 
+    static func solidMealReminderNotificationID(planID: UUID) -> String {
+        "solids.meal.\(planID.uuidString)"
+    }
+
+    static func solidAllergenReminderNotificationID(profileID: UUID, allergenID: String) -> String {
+        "solids.allergen.\(profileID.uuidString).\(allergenID)"
+    }
+
     static func routineReminderNotificationID(routineID: UUID) -> String {
         "routine.reminder.\(routineID.uuidString)"
     }
@@ -1958,6 +2188,11 @@ enum SystemIntegrationReconciler {
         await Task.yield()
         let appointments = (try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? []
         let foodReminders = (try? context.fetch(FetchDescriptor<FoodReminder>())) ?? []
+        let plannedSolidMeals = (try? context.fetch(FetchDescriptor<PlannedSolidMeal>())) ?? []
+        let solidAllergenProgress = (try? context.fetch(
+            FetchDescriptor<SolidAllergenProgress>()
+        )) ?? []
+        let solidsProfileStates = (try? context.fetch(FetchDescriptor<SolidsProfileState>())) ?? []
         let packingTrips = (try? context.fetch(FetchDescriptor<PackingTrip>())) ?? []
         let packingItems = (try? context.fetch(FetchDescriptor<PackingItem>())) ?? []
         let routines = (try? context.fetch(FetchDescriptor<CareRoutine>())) ?? []
@@ -1988,7 +2223,8 @@ enum SystemIntegrationReconciler {
         WidgetSnapshotService.refresh(
             profile: profile,
             events: scopedEvents,
-            prediction: prediction
+            prediction: prediction,
+            solidsState: solidsProfileStates.first { $0.profileID == profile?.id }
         )
         await Task.yield()
         WidgetSnapshotService.refreshFood(context: context)
@@ -2001,6 +2237,8 @@ enum SystemIntegrationReconciler {
             predictionRecords: predictionRecords,
             appointments: appointments,
             foodReminders: foodReminders,
+            plannedSolidMeals: plannedSolidMeals,
+            solidAllergenProgress: solidAllergenProgress,
             packingTrips: packingTrips,
             packingItems: packingItems,
             routines: routines,

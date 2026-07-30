@@ -1,0 +1,28 @@
+# Solids Content Sources
+
+The version 8 solids catalog is an English (United States), release-bundled reference catalog. It contains 535 stable food identifiers, a stable first-100-food guided sequence, and 424 filterable recipes. It does not fetch editorial content at runtime.
+
+## Source policy
+
+- [USDA FoodData Central](https://fdc.nal.usda.gov/api-guide/) supplies the public-domain/CC0 food vocabulary reference.
+- [CDC: When, What, and How to Introduce Solid Foods](https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/when-what-and-how-to-introduce-solid-foods.html) supplies the age and readiness baseline.
+- [CDC: Choking Hazards](https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/choking-hazards.html) supplies shape, texture, upright-seating, and supervision safety principles. CDC material is reusable under the agency's public-domain policy unless a page says otherwise.
+- [FDA: Major Food Allergens](https://www.fda.gov/industry/fda-basics-industry/what-major-food-allergen) supplies the nine U.S. major-allergen groups.
+- [FDA/EPA: Advice about Eating Fish](https://www.fda.gov/food/consumers/advice-about-eating-fish) supplies lower-mercury choice and fish-to-avoid guidance for young children.
+- [American Academy of Pediatrics: Introducing Common Food Allergens](https://www.healthychildren.org/English/healthy-living/nutrition/Pages/when-to-introduce-egg-peanut-butter-and-other-common-food-allergens-to-your-baby-food-allergy-prevention-tips.aspx) supplies the early-introduction, developmentally appropriate form, and continued-inclusion baseline.
+- [NIAID: Peanut Allergy Prevention Guidelines](https://www.niaid.nih.gov/sites/default/files/peanut-allergy-prevention-guidelines-parent-summary.pdf) supplies the peanut risk-screening and clinician-discussion baseline.
+- [NHS: Preparing Food Safely](https://www.nhs.uk/best-start-in-life/baby/weaning/safe-weaning/preparing-food-safely/) supplies additional preparation and food-safety principles under the Open Government Licence described in the [NHS terms](https://www.nhs.uk/our-policies/terms-and-conditions/).
+- [American Academy of Pediatrics: Fruit Juice for Children](https://www.healthychildren.org/English/healthy-living/nutrition/Pages/Where-We-Stand-Fruit-Juice.aspx) supplies the baseline that fruit juice should not be offered before 12 months and should remain limited afterward.
+- [NIH NCCIH: Açaí—Usefulness and Safety](https://www.nccih.nih.gov/health/acai) supplies the evidence boundary for promoted health claims, the caution around supplement products, and the contamination risk associated with raw açaí fruit and juice.
+- [Kwaasi et al.: Allergy to Date Fruits](https://doi.org/10.1034/j.1398-9995.1999.00116.x) documents IgE-mediated allergy to date fruit. It supports acknowledging that another palm-family food can be allergenic; it does not establish cross-reactivity with açaí.
+- [Mayoral et al.: Anaphylactic Reaction Following Ingestion of Fresh Heart of Palm](https://doi.org/10.1111/j.1398-9995.2006.01051.x) is a case report of allergy to another palm-family food. It does not establish that heart-of-palm allergy predicts açaí allergy.
+- [WHO: Guideline for Complementary Feeding of Infants and Young Children 6–23 Months](https://www.who.int/publications/i/item/9789240081864) supplies the broader complementary-feeding, dietary-diversity, and limited-fruit-juice baseline.
+- [ESPGHAN: Sugar in Infants, Children and Adolescents](https://doi.org/10.1097/MPG.0000000000001733) supplies the position-paper baseline on free sugars and sugar-containing beverages during childhood.
+
+All in-app preparation, safety, nutrition, allergen-step, choosing, storage, common-question, and recipe text is original summary copy based on those principles. Every bundled food includes an offline background section, ingredient-aware nutrient summary, product-selection and storage guidance, at least two practical questions, and age-based preparation guidance. Version 8 classifies the food's actual physical form—such as pulp, berry, aril, leaf, floret, root, tuber, kernel, pod, stalk, pulse, tofu, spread, meat cut, organ, crustacean, mollusk, fish fillet, cheese, seed, seasoning, patty, or spoon dish—before assigning a progression, so a spoon food does not incorrectly become slices merely because a child gets older. The separate guided-prep checklist is operational rather than a duplicate slideshow: for the selected age stage it provides six interactive checks covering ingredient selection, washing or raw-food setup, cooking or softening, shape, hands-on texture verification, and safe serving. It uses original, release-bundled technique photography paired with food-specific instructions; the photos illustrate technique and are not portion measurements. No third-party photographs, videos, app copy, or website content are bundled in the catalog.
+
+## Release process
+
+The catalog version is declared in `SolidsReferenceCatalog.version`. Catalog edits ship through normal app review and release; stable food and recipe IDs must not be reassigned. Automated tests require at least 400 unique foods, exactly 100 stable guided foods, at least 400 recipes with distinct preparation copy, and food-specific background, questions, preparation, technique-media, and source metadata for every food. Tests also prevent retired one-size-fits-all copy from returning and spot-check foods whose physical form demands a distinct progression.
+
+Food pages are educational, not individualized medical assessment. Product copy should continue to recommend upright seating, active supervision, developmentally appropriate texture and shape, and individualized clinical advice when a caregiver has concerns.

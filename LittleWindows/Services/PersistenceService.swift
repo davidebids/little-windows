@@ -34,11 +34,15 @@ enum PersistenceService {
         syncModeAtStartup.requiresICloudAccount
     }
 
-    static var schema: Schema {
-        Schema([
+    static let modelTypes: [any PersistentModel.Type] = [
             BabyProfile.self,
             PhotoAttachment.self,
             SolidFoodCatalogItem.self,
+            SolidsProfileState.self,
+            SolidFoodProgress.self,
+            SolidFoodEventItem.self,
+            SolidAllergenProgress.self,
+            PlannedSolidMeal.self,
             BabyEvent.self,
             DoctorAppointment.self,
             MilestoneEntry.self,
@@ -69,7 +73,10 @@ enum PersistenceService {
             CareRoutine.self,
             CareRoutineStep.self,
             CareRoutineRun.self
-        ])
+    ]
+
+    static var schema: Schema {
+        Schema(modelTypes)
     }
 
     static func makeModelContainer() throws -> ModelContainer {
@@ -284,6 +291,19 @@ enum PersistenceService {
     }
 
     @MainActor
+    static func recordLocalSaveFailure(
+        _ description: String,
+        defaults: UserDefaults = .standard
+    ) {
+        defaults.set(description, forKey: localSaveErrorKey)
+        NotificationCenter.default.post(
+            name: localSaveDidFailNotification,
+            object: nil,
+            userInfo: ["message": description]
+        )
+    }
+
+    @MainActor
     @discardableResult
     static func save(
         context: ModelContext,
@@ -298,12 +318,7 @@ enum PersistenceService {
             return true
         } catch {
             context.rollback()
-            defaults.set(error.localizedDescription, forKey: localSaveErrorKey)
-            NotificationCenter.default.post(
-                name: localSaveDidFailNotification,
-                object: nil,
-                userInfo: ["message": error.localizedDescription]
-            )
+            recordLocalSaveFailure(error.localizedDescription, defaults: defaults)
             return false
         }
     }

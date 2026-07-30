@@ -420,7 +420,9 @@ enum TripPackingService {
         now: Date = Date()
     ) -> PackingItem? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, isValidQuantity(quantity) else { return nil }
+        guard !trip.isArchived,
+              !trimmed.isEmpty,
+              isValidQuantity(quantity) else { return nil }
         let nextOrder = (existingItems.filter { $0.tripID == trip.id }.map(\.sortOrder).max() ?? -1) + 1
         let item = PackingItem(
             householdID: trip.householdID,
@@ -457,6 +459,7 @@ enum TripPackingService {
         caregiverName: String = CaregiverIdentityService.currentCaregiverName(),
         now: Date = Date()
     ) -> Int {
+        guard !trip.isArchived else { return 0 }
         let existingKeys = Set(existingItems.filter { $0.tripID == trip.id }.compactMap { item -> String? in
             guard let templateKey = item.templateKey else { return nil }
             return "\(item.travelerID?.uuidString ?? "shared").\(templateKey)"
@@ -503,7 +506,7 @@ enum TripPackingService {
         now: Date = Date()
     ) -> TripTraveler? {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return nil }
+        guard !trip.isArchived, !name.isEmpty else { return nil }
         let tripTravelers = existingTravelers.filter { $0.tripID == trip.id }
         if let profileID,
            tripTravelers.contains(where: { $0.profileID == profileID }) {
@@ -559,7 +562,9 @@ enum TripPackingService {
         now: Date = Date()
     ) -> Bool {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard traveler.kind == .adult, !name.isEmpty else { return false }
+        guard !trip.isArchived,
+              traveler.kind == .adult,
+              !name.isEmpty else { return false }
         traveler.displayName = name
         traveler.updatedAt = now
         trip.updatedAt = now
@@ -576,7 +581,9 @@ enum TripPackingService {
         now: Date = Date()
     ) -> Bool {
         let tripTravelers = travelers.filter { $0.tripID == trip.id }
-        guard traveler.tripID == trip.id, tripTravelers.count > 1 else { return false }
+        guard !trip.isArchived,
+              traveler.tripID == trip.id,
+              tripTravelers.count > 1 else { return false }
         for item in items where item.tripID == trip.id && item.travelerID == traveler.id {
             item.travelerID = nil
             item.updatedAt = now
@@ -599,6 +606,7 @@ enum TripPackingService {
         caregiverName: String = CaregiverIdentityService.currentCaregiverName(),
         now: Date = Date()
     ) -> Bool {
+        guard !trip.isArchived else { return false }
         guard item.state != state else { return true }
         let previousState = item.state
         item.state = state
@@ -635,7 +643,9 @@ enum TripPackingService {
         now: Date = Date()
     ) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, isValidQuantity(quantity) else { return false }
+        guard !trip.isArchived,
+              !trimmed.isEmpty,
+              isValidQuantity(quantity) else { return false }
         item.title = trimmed
         item.category = category
         item.travelerID = travelerID
@@ -665,7 +675,8 @@ enum TripPackingService {
         context: ModelContext,
         now: Date = Date()
     ) -> Bool {
-        guard sectionItems.count > 1,
+        guard !trip.isArchived,
+              sectionItems.count > 1,
               let firstItem = sectionItems.first else {
             return false
         }
@@ -730,7 +741,8 @@ enum TripPackingService {
             destinationStops: destinationStops ?? [],
             startDate: startDate
         )
-        guard !trimmedTitle.isEmpty,
+        guard !trip.isArchived,
+              !trimmedTitle.isEmpty,
               endDate >= startDate,
               destinationStopsAreValid(
                   resolvedStops,
@@ -772,6 +784,7 @@ enum TripPackingService {
         context: ModelContext,
         now: Date = Date()
     ) -> Bool {
+        guard !trip.isArchived else { return false }
         context.delete(item)
         trip.updatedAt = now
         guard PersistenceService.save(context: context) else { return false }
@@ -788,7 +801,8 @@ enum TripPackingService {
         now: Date = Date()
     ) -> PackingBag? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
+        guard !trip.isArchived,
+              !trimmed.isEmpty,
               !existingBags.contains(where: {
                   $0.tripID == trip.id
                       && $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
@@ -818,7 +832,8 @@ enum TripPackingService {
         now: Date = Date()
     ) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard bag.tripID == trip.id,
+        guard !trip.isArchived,
+              bag.tripID == trip.id,
               !trimmed.isEmpty,
               !existingBags.contains(where: {
                   $0.tripID == trip.id
@@ -839,7 +854,7 @@ enum TripPackingService {
         context: ModelContext,
         now: Date = Date()
     ) -> Bool {
-        guard bag.tripID == trip.id else { return false }
+        guard !trip.isArchived, bag.tripID == trip.id else { return false }
         for item in items where item.tripID == trip.id && item.bagID == bag.id {
             item.bagID = nil
             item.updatedAt = now
@@ -857,7 +872,8 @@ enum TripPackingService {
         context: ModelContext,
         now: Date = Date()
     ) -> ShoppingListItem? {
-        guard item.householdID == shoppingList.householdID else { return nil }
+        guard !trip.isArchived,
+              item.householdID == shoppingList.householdID else { return nil }
         if let relatedID = item.relatedShoppingItemID,
            let existing = existingShoppingItems.first(where: { $0.id == relatedID }) {
             return existing
@@ -999,6 +1015,7 @@ enum TripPackingService {
         context: ModelContext,
         now: Date = Date()
     ) -> Bool {
+        guard !trip.isArchived else { return false }
         trip.status = completed ? .completed : .upcoming
         trip.completedAt = completed ? now : nil
         trip.updatedAt = now
@@ -1035,6 +1052,38 @@ enum TripPackingService {
         guard PersistenceService.save(context: context) else { return false }
         scheduleReminders(for: trip, context: context)
         return true
+    }
+
+    @discardableResult
+    static func deleteTrip(
+        _ trip: PackingTrip,
+        context: ModelContext
+    ) -> Bool {
+        let tripID = trip.id
+        do {
+            let travelers = try context.fetch(FetchDescriptor<TripTraveler>(
+                predicate: #Predicate { $0.tripID == tripID }
+            ))
+            let bags = try context.fetch(FetchDescriptor<PackingBag>(
+                predicate: #Predicate { $0.tripID == tripID }
+            ))
+            let items = try context.fetch(FetchDescriptor<PackingItem>(
+                predicate: #Predicate { $0.tripID == tripID }
+            ))
+
+            for item in items { context.delete(item) }
+            for bag in bags { context.delete(bag) }
+            for traveler in travelers { context.delete(traveler) }
+            context.delete(trip)
+
+            guard PersistenceService.save(context: context) else { return false }
+            Task {
+                await NotificationManager.shared.cancelPackingTripReminders(tripID: tripID)
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     private static func scheduleReminders(for trip: PackingTrip, context: ModelContext) {

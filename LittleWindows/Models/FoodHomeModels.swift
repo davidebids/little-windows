@@ -533,6 +533,7 @@ final class FoodItem {
     var id: UUID = UUID()
     var householdID: UUID = UUID()
     var canonicalName: String = ""
+    var foodReferenceID: String?
     var aliasesJSON: String?
     var defaultUnit: String?
     var defaultStoreSectionByStoreJSON: String?
@@ -546,6 +547,7 @@ final class FoodItem {
         id: UUID = UUID(),
         householdID: UUID,
         canonicalName: String,
+        foodReferenceID: String? = nil,
         aliasesJSON: String? = nil,
         defaultUnit: String? = nil,
         defaultStoreSectionByStoreJSON: String? = nil,
@@ -558,6 +560,7 @@ final class FoodItem {
         self.id = id
         self.householdID = householdID
         self.canonicalName = canonicalName
+        self.foodReferenceID = foodReferenceID
         self.aliasesJSON = aliasesJSON
         self.defaultUnit = defaultUnit
         self.defaultStoreSectionByStoreJSON = defaultStoreSectionByStoreJSON

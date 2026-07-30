@@ -4,6 +4,7 @@ import MapKit
 import WeatherKit
 
 struct TripWeatherSnapshot: Equatable, Sendable {
+    var fetchedAt: Date
     var summary: String
     var forecastDayCount: Int
     var tripDayCount: Int
@@ -337,7 +338,8 @@ enum TripWeatherService {
             query: query,
             days: days,
             attribution: attributionValue,
-            locale: locale
+            locale: locale,
+            fetchedAt: now
         ) else {
             return nil
         }
@@ -349,7 +351,8 @@ enum TripWeatherService {
         query: TripWeatherQuery,
         days: [TripDailyWeather],
         attribution: TripWeatherAttribution,
-        locale: Locale
+        locale: Locale,
+        fetchedAt: Date = Date()
     ) -> TripWeatherSnapshot? {
         let relevantDays = days
             .filter {
@@ -373,6 +376,7 @@ enum TripWeatherService {
         let temperatureRange = "\(Int(displayedLow.rounded()))–\(Int(displayedHigh.rounded()))\(unit.symbol)"
         let rainText = rain ? " Rain is possible." : ""
         return TripWeatherSnapshot(
+            fetchedAt: fetchedAt,
             summary: "Forecast range \(temperatureRange).\(rainText)",
             forecastDayCount: forecastDayCount,
             tripDayCount: query.tripDayCount,

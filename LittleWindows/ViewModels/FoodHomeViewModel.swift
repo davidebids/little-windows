@@ -2,6 +2,7 @@ import Foundation
 
 enum FoodHomeSection: String, CaseIterable, Identifiable, Codable {
     case todos
+    case solids
     case shopping
     case trips
     case returns
@@ -15,6 +16,7 @@ enum FoodHomeSection: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .todos: "To-Do"
+        case .solids: "Solids"
         case .shopping: "Shopping"
         case .trips: "Trips"
         case .inventory: "Kitchen Inventory"
@@ -28,6 +30,7 @@ enum FoodHomeSection: String, CaseIterable, Identifiable, Codable {
     var systemImage: String {
         switch self {
         case .todos: "checklist"
+        case .solids: "carrot.fill"
         case .shopping: "cart.fill"
         case .trips: "suitcase.rolling.fill"
         case .inventory: "cabinet.fill"
@@ -87,6 +90,20 @@ enum InventorySort: String, CaseIterable, Identifiable {
 }
 
 enum FoodRoute: Hashable, Codable {
+    case solidsHome
+    case solidsDatabase
+    case solidsGuided
+    case solidFood(String)
+    case customSolidFood(UUID)
+    case solidsPlan
+    case plannedSolidMeal(UUID)
+    case solidsTracker
+    case solidFoodHistory(String, String)
+    case solidMeal(UUID)
+    case solidsAllergens
+    case solidAllergen(String)
+    case solidsRecipes
+    case solidsRecipe(String)
     case todoList(UUID)
     case shoppingList(UUID)
     case shoppingMode(UUID)
@@ -96,6 +113,18 @@ enum FoodRoute: Hashable, Codable {
     case returnRequest(UUID)
     case store(UUID)
     case reminders
+
+    var isSolidsWorkspaceRoute: Bool {
+        switch self {
+        case .solidsHome, .solidsDatabase, .solidsGuided, .solidFood, .customSolidFood,
+             .solidsPlan, .plannedSolidMeal, .solidsTracker, .solidFoodHistory, .solidMeal,
+             .solidsAllergens, .solidAllergen, .solidsRecipes, .solidsRecipe:
+            true
+        case .todoList, .shoppingList, .shoppingMode, .packingTrip, .inventoryItem,
+             .mealPrepItem, .returnRequest, .store, .reminders:
+            false
+        }
+    }
 }
 
 struct FoodNavigationRestorationState: Codable, Equatable {
@@ -125,6 +154,19 @@ struct FoodNavigationRestorationState: Codable, Equatable {
 
 enum FoodRouteCommand: Equatable {
     case food
+    case solids
+    case solidsDatabase
+    case solidsGuided
+    case solidFood(String)
+    case customSolidFood(UUID)
+    case solidsPlan
+    case plannedSolidMeal(UUID)
+    case solidsTracker
+    case solidMeal(UUID)
+    case solidsAllergens
+    case solidAllergen(String)
+    case solidsRecipes
+    case solidsRecipe(String)
     case todos
     case todoList(UUID)
     case shopping

@@ -217,7 +217,7 @@ final class PhotoAttachment {
     }
 }
 
-struct PhotoAttachmentDraft: Identifiable, Hashable {
+struct PhotoAttachmentDraft: Identifiable, Hashable, Sendable {
     var id: UUID = UUID()
     var imageData: Data
     var thumbnailData: Data?

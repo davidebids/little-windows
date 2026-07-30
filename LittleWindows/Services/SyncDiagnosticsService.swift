@@ -40,6 +40,11 @@ enum SyncDiagnosticsService {
         let appointments = (try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? []
         let ageGuideStates = (try? context.fetch(FetchDescriptor<AgeGuideReadState>())) ?? []
         let puppyGuideStates = (try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? []
+        let solidsProfileStates = (try? context.fetch(FetchDescriptor<SolidsProfileState>())) ?? []
+        let solidFoodProgress = (try? context.fetch(FetchDescriptor<SolidFoodProgress>())) ?? []
+        let solidFoodEventItems = (try? context.fetch(FetchDescriptor<SolidFoodEventItem>())) ?? []
+        let solidAllergenProgress = (try? context.fetch(FetchDescriptor<SolidAllergenProgress>())) ?? []
+        let plannedSolidMeals = (try? context.fetch(FetchDescriptor<PlannedSolidMeal>())) ?? []
         let households = (try? context.fetch(FetchDescriptor<Household>())) ?? []
         let foodStores = (try? context.fetch(FetchDescriptor<FoodStore>())) ?? []
         let foodStoreSections = (try? context.fetch(FetchDescriptor<FoodStoreSection>())) ?? []
@@ -59,6 +64,11 @@ enum SyncDiagnosticsService {
             + appointments.orphanedCount(profileIDs: profileIDs)
             + ageGuideStates.orphanedCount(profileIDs: profileIDs)
             + puppyGuideStates.orphanedCount(profileIDs: profileIDs)
+            + solidsProfileStates.filter { !profileIDs.contains($0.profileID) }.count
+            + solidFoodProgress.filter { !profileIDs.contains($0.profileID) }.count
+            + solidFoodEventItems.filter { !profileIDs.contains($0.profileID) }.count
+            + solidAllergenProgress.filter { !profileIDs.contains($0.profileID) }.count
+            + plannedSolidMeals.filter { !profileIDs.contains($0.profileID) }.count
 
         let duplicateChildProfiles = Dictionary(grouping: profiles.filter {
             !$0.isArchived
@@ -80,6 +90,11 @@ enum SyncDiagnosticsService {
                 SyncDiagnosticCount(name: "Appointments", count: appointments.count),
                 SyncDiagnosticCount(name: "Age guide states", count: ageGuideStates.count),
                 SyncDiagnosticCount(name: "Puppy guide states", count: puppyGuideStates.count),
+                SyncDiagnosticCount(name: "Solids profile states", count: solidsProfileStates.count),
+                SyncDiagnosticCount(name: "Solid food progress", count: solidFoodProgress.count),
+                SyncDiagnosticCount(name: "Solid food event items", count: solidFoodEventItems.count),
+                SyncDiagnosticCount(name: "Solid allergen progress", count: solidAllergenProgress.count),
+                SyncDiagnosticCount(name: "Planned solid meals", count: plannedSolidMeals.count),
                 SyncDiagnosticCount(name: "Households", count: households.count),
                 SyncDiagnosticCount(name: "Food stores", count: foodStores.count),
                 SyncDiagnosticCount(name: "Store sections", count: foodStoreSections.count),

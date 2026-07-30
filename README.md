@@ -17,7 +17,7 @@ First launch presents onboarding for a new empty store. It does not create defau
 - Today: profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep day-ahead planning, and system integration refresh.
 - Profiles: child and dog profiles with switching, colors, archival support, dog-specific details, and optional profile photos.
 - History and Reports: day and list history, event editing, filtering, summaries, charts, and prediction accuracy review.
-- Milestones and Memories: profile-scoped entries, age prompts, categories, photo attachments, and backup support.
+- Milestones, Memories, and Solids: profile-scoped entries and age prompts, plus a child-only solids workspace for preparation, planning, allergens, recipes, and tracking.
 - Appointments and Visits: questions, notes, summaries, follow-up instructions, medications, vaccines, measurements, and reminders.
 - Guides: monthly child age guides, source-backed Sleep Basics lessons, and puppy-stage guide content with read state and reminder support.
 - Food & Home: household to-do lists, shopping lists, trip packing, store layouts and sections, shopping mode, recurring staples, inventory locations, meal prep tracking, return tracking, and reminders.
@@ -27,13 +27,13 @@ First launch presents onboarding for a new empty store. It does not create defau
 
 ## Care Logging
 
-Child logs cover sleep, night wakings, feed, nursing, pumping, diaper, potty, medicine, growth, temperature, activity, and custom events. Feed logs distinguish bottle, solids, and other feeds; bottle and pumping entries support optional ounce amounts; and solid-food feed logs include a visual multi-food picker, recent foods, a grouped 50-food starter library, reusable custom foods with optional photos, feeding style, texture, general reaction, common-allergen exposure, and sensitivity notes.
+Child logs cover sleep, night wakings, feed, nursing, pumping, diaper, potty, medicine, growth, temperature, activity, and custom events. Feed logs distinguish bottle, solids, and other feeds; bottle and pumping entries support optional ounce amounts. Solid feeds use the same event history while attaching per-food amounts, preferences, notes, confirmed allergen-introduction portions, and reaction details. A separate child-only Solids workspace in Care provides a bundled 535-food database, age-specific preparation photography and instructions, an adaptable First 100 path, nine-allergen planning and rotation, 424 recipes, custom foods with optional photos, meal planning, inventory-aware shopping handoff, tracking, and feeding-report links.
 
 The child care form keeps pumping, solids, potty, and the rest of the child activity set in the same event editing surface. Structured details include:
 
 - Sleep kind, feed kind, nursing side, diaper kind, child potty kind/location, medicine dose/unit, temperature/unit/method, growth measurements, and activity type.
 - Solid-food style options for puree/spoon-fed, baby-led weaning, combination, other, and unknown.
-- Solid texture, reaction, allergen exposure, sensitivity notes, and general notes.
+- Solid-meal texture and feeding style, plus per-food preference, serving amount, preparation notes, allergens actually served, confirmed introduction portions, and reaction symptoms, timing, response, and follow-up.
 - Child potty pee/poo/both details with location, amount, color, texture, and notes where relevant.
 
 Dog logs cover food, water, treat, potty, walk, rest, training, grooming, medicine, symptoms, growth, temperature, vaccines, glucose, and custom events.

@@ -104,6 +104,7 @@ final class BabyEvent {
     var solidFeedingStyleRawValue: String?
     var solidAllergenExposure: Bool?
     var solidSensitivityObserved: Bool?
+    var solidFoodDetailsJSON: String?
     var nursingSideRawValue: String?
     var activeNursingSideRawValue: String?
     var timerStateRawValue: String?

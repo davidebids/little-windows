@@ -457,11 +457,11 @@ struct PackingTripCreationView: View {
             }
 
             Section("Notes") {
-                LabeledContent("Notes") {
-                    TextField("Optional", text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
-                        .multilineTextAlignment(.trailing)
-                }
+                PackingNotesField(
+                    text: $notes,
+                    lineLimit: 3...6,
+                    accessibilityIdentifier: "trip.create.notes"
+                )
             }
 
             if saveAttempted && !canSave {
@@ -570,6 +570,7 @@ private enum PackingListFilter: String, CaseIterable, Identifiable {
 }
 
 struct PackingTripDetailView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(CaregiverIdentityService.currentCaregiverNameKey) private var currentCaregiverName = ""
@@ -597,6 +598,9 @@ struct PackingTripDetailView: View {
     @State private var weatherSuggestionMessage: String?
     @State private var showingWeatherDetails = false
     @State private var showingWeatherAttribution = false
+    @State private var showingDeleteConfirmation = false
+    @State private var actionFailureMessage: String?
+    @State private var itemEditMode = EditMode.inactive
 
     private var travelers: [TripTraveler] {
         allTravelers.filter { $0.tripID == trip.id }.sorted { $0.sortOrder < $1.sortOrder }
@@ -643,8 +647,19 @@ struct PackingTripDetailView: View {
         }
     }
 
+    private var emptyListDescription: String {
+        if trip.isArchived {
+            return filter == .remaining
+                ? "Review the full archived list."
+                : "Choose another filter to review this archived list."
+        }
+        return filter == .remaining
+            ? "Review the full list or mark the trip complete."
+            : "Choose another filter or add an item."
+    }
+
     private var canReorderVisibleItems: Bool {
-        travelerSections.contains { $0.items.count > 1 }
+        !trip.isArchived && travelerSections.contains { $0.items.count > 1 }
     }
 
     private var combinedWeatherSuggestions: [PackingSuggestion] {
@@ -660,10 +675,20 @@ struct PackingTripDetailView: View {
         weatherForecasts.compactMap(\.snapshot).first
     }
 
+    private var weatherLastUpdatedAt: Date? {
+        weatherForecasts.compactMap { $0.snapshot?.fetchedAt }.min()
+    }
+
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
+                    if trip.isArchived {
+                        Label("Archived · Read only", systemImage: "archivebox.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("trip.archived.read-only")
+                    }
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(dateText)
@@ -724,7 +749,7 @@ struct PackingTripDetailView: View {
                 ContentUnavailableView(
                     filter == .remaining ? "Everything Is Packed" : "No Matching Items",
                     systemImage: filter == .remaining ? "checkmark.seal.fill" : "line.3.horizontal.decrease.circle",
-                    description: Text(filter == .remaining ? "Review the full list or mark the trip complete." : "Choose another filter or add an item.")
+                    description: Text(emptyListDescription)
                 )
             } else {
                 ForEach(travelerSections, id: \.key) { section in
@@ -733,7 +758,9 @@ struct PackingTripDetailView: View {
                             PackingItemRow(
                                 item: item,
                                 bag: item.bagID.flatMap { id in bags.first { $0.id == id } },
+                                isReadOnly: trip.isArchived,
                                 toggle: {
+                                    guard !trip.isArchived else { return }
                                     TripPackingService.setState(
                                         item,
                                         state: item.state == .packed ? .needed : .packed,
@@ -743,35 +770,43 @@ struct PackingTripDetailView: View {
                                 }
                             )
                             .contentShape(Rectangle())
-                            .onTapGesture { editingItem = item }
+                            .onTapGesture {
+                                guard !trip.isArchived else { return }
+                                editingItem = item
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    TripPackingService.deleteItem(item, trip: trip, context: modelContext)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                                if !trip.isArchived {
+                                    Button(role: .destructive) {
+                                        TripPackingService.deleteItem(item, trip: trip, context: modelContext)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    Button {
+                                        TripPackingService.setState(item, state: .notNeeded, trip: trip, context: modelContext)
+                                    } label: {
+                                        Label("Not Needed", systemImage: "minus.circle")
+                                    }
+                                    .tint(.gray)
                                 }
-                                Button {
-                                    TripPackingService.setState(item, state: .notNeeded, trip: trip, context: modelContext)
-                                } label: {
-                                    Label("Not Needed", systemImage: "minus.circle")
-                                }
-                                .tint(.gray)
                             }
                             .contextMenu {
-                                Button("Edit", systemImage: "pencil") { editingItem = item }
-                                if item.relatedShoppingItemID.map({ relatedID in
-                                    shoppingItems.contains { $0.id == relatedID }
-                                }) != true {
-                                    Button("Add to Shopping", systemImage: "cart.badge.plus") {
-                                        shoppingItem = item
+                                if !trip.isArchived {
+                                    Button("Edit", systemImage: "pencil") { editingItem = item }
+                                    if item.relatedShoppingItemID.map({ relatedID in
+                                        shoppingItems.contains { $0.id == relatedID }
+                                    }) != true {
+                                        Button("Add to Shopping", systemImage: "cart.badge.plus") {
+                                            shoppingItem = item
+                                        }
                                     }
-                                }
-                                Button("Mark Not Needed", systemImage: "minus.circle") {
-                                    TripPackingService.setState(item, state: .notNeeded, trip: trip, context: modelContext)
+                                    Button("Mark Not Needed", systemImage: "minus.circle") {
+                                        TripPackingService.setState(item, state: .notNeeded, trip: trip, context: modelContext)
+                                    }
                                 }
                             }
                         }
                         .onMove { source, destination in
+                            guard !trip.isArchived else { return }
                             TripPackingService.reorderItems(
                                 section.items,
                                 from: source,
@@ -786,57 +821,99 @@ struct PackingTripDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .environment(\.editMode, $itemEditMode)
         .accessibilityIdentifier("trip.detail")
         .navigationTitle(trip.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if canReorderVisibleItems {
-                    EditButton()
-                }
-                Button {
-                    showingNewItem = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityIdentifier("trip.item.add")
-                Menu {
-                    Button("Edit Trip", systemImage: "pencil") { showingTripEditor = true }
-                    Button("Manage Travelers", systemImage: "person.2") { showingTravelers = true }
-                    Button("Manage Bags", systemImage: "bag") { showingBags = true }
-                    Button("Duplicate", systemImage: "plus.square.on.square") {
-                        _ = TripPackingService.duplicateTrip(
-                            trip,
-                            travelers: allTravelers,
-                            bags: allBags,
-                            items: allItems,
-                            existingTrips: allTrips,
-                            context: modelContext
-                        )
-                    }
-                    if trip.isArchived {
-                        Button("Restore", systemImage: "arrow.uturn.backward") {
-                            TripPackingService.restore(trip, context: modelContext)
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 0) {
+                    if canReorderVisibleItems {
+                        Button {
+                            withAnimation {
+                                itemEditMode = itemEditMode.isEditing ? .inactive : .active
+                            }
+                        } label: {
+                            Image(systemName: itemEditMode.isEditing ? "checkmark" : "arrow.up.arrow.down")
+                                .frame(width: 44, height: 36)
+                                .contentShape(Rectangle())
                         }
-                    } else if trip.status == .completed {
-                        Button("Reopen Trip", systemImage: "arrow.uturn.backward") {
-                            TripPackingService.setCompleted(trip, completed: false, context: modelContext)
-                        }
-                    } else {
-                        Button("Mark Complete", systemImage: "checkmark.circle") {
-                            TripPackingService.setCompleted(trip, completed: true, context: modelContext)
-                        }
+                        .accessibilityLabel(itemEditMode.isEditing ? "Done" : "Reorder")
+                        .accessibilityIdentifier("trip.items.reorder-mode")
                     }
                     if !trip.isArchived {
-                        Divider()
-                        Button("Archive", systemImage: "archivebox", role: .destructive) {
-                            TripPackingService.archive(trip, context: modelContext)
+                        Button {
+                            guard !showingNewItem else { return }
+                            showingNewItem = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .frame(width: 44, height: 36)
+                                .contentShape(Rectangle())
                         }
+                        .accessibilityLabel("Add Packing Item")
+                        .accessibilityIdentifier("trip.item.add")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Menu {
+                        if !trip.isArchived {
+                            Button("Edit Trip", systemImage: "pencil") { showingTripEditor = true }
+                            Button("Manage Travelers", systemImage: "person.2") { showingTravelers = true }
+                            Button("Manage Bags", systemImage: "bag") { showingBags = true }
+                        }
+                        Button("Duplicate", systemImage: "plus.square.on.square") {
+                            if TripPackingService.duplicateTrip(
+                                trip,
+                                travelers: allTravelers,
+                                bags: allBags,
+                                items: allItems,
+                                existingTrips: allTrips,
+                                context: modelContext
+                            ) != nil {
+                                dismiss()
+                            } else {
+                                actionFailureMessage = "The trip couldn’t be duplicated. Please try again."
+                            }
+                        }
+                        if trip.isArchived {
+                            Button("Restore", systemImage: "arrow.uturn.backward") {
+                                TripPackingService.restore(trip, context: modelContext)
+                            }
+                        } else if trip.status == .completed {
+                            Button("Reopen Trip", systemImage: "arrow.uturn.backward") {
+                                TripPackingService.setCompleted(trip, completed: false, context: modelContext)
+                            }
+                        } else {
+                            Button("Mark Complete", systemImage: "checkmark.circle") {
+                                TripPackingService.setCompleted(trip, completed: true, context: modelContext)
+                            }
+                        }
+                        if !trip.isArchived {
+                            Divider()
+                            Button("Archive", systemImage: "archivebox", role: .destructive) {
+                                if TripPackingService.archive(trip, context: modelContext) {
+                                    dismiss()
+                                } else {
+                                    actionFailureMessage = "The trip couldn’t be archived. Please try again."
+                                }
+                            }
+                        }
+                        Divider()
+                        Button("Delete Trip", systemImage: "trash", role: .destructive) {
+                            showingDeleteConfirmation = true
+                        }
+                        .accessibilityIdentifier("trip.delete")
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .frame(width: 44, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityIdentifier("trip.actions")
                 }
-                .accessibilityIdentifier("trip.actions")
+                .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .onChange(of: canReorderVisibleItems) { _, canReorder in
+            if !canReorder {
+                itemEditMode = .inactive
             }
         }
         .sheet(isPresented: $showingNewItem) {
@@ -940,6 +1017,36 @@ struct PackingTripDetailView: View {
         } message: {
             Text(weatherSuggestionMessage ?? "")
         }
+        .appActionSheet(
+            isPresented: $showingDeleteConfirmation,
+            title: "Delete Trip?",
+            message: "This permanently removes the trip, its packing list, bags, and traveler assignments. Items already added to Shopping will remain.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete Trip",
+                    subtitle: trip.title,
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    if TripPackingService.deleteTrip(trip, context: modelContext) {
+                        dismiss()
+                    } else {
+                        actionFailureMessage = "The trip couldn’t be deleted. Please try again."
+                    }
+                }
+            ]
+        )
+        .alert("Couldn’t Update Trip", isPresented: Binding(
+            get: { actionFailureMessage != nil },
+            set: { if !$0 { actionFailureMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(actionFailureMessage ?? "Please try again.")
+        }
     }
 
     @ViewBuilder
@@ -965,6 +1072,17 @@ struct PackingTripDetailView: View {
                         Text("Open a destination for the daily forecast.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if let weatherLastUpdatedAt {
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock")
+                                Text(TripWeatherFormatting.lastUpdated(weatherLastUpdatedAt))
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 2)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("trip.weather.summary-last-updated")
+                        }
                     }
                     Spacer()
                     Button(action: refreshWeather) {
@@ -988,26 +1106,34 @@ struct PackingTripDetailView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Button {
-                            let added = TripPackingService.addSuggestions(
-                                combinedWeatherSuggestions,
-                                to: trip,
-                                existingItems: items,
-                                context: modelContext
-                            )
-                            weatherSuggestionMessage = added == 0
-                                ? "Those weather items are already on this trip."
-                                : "Added \(added) weather \(added == 1 ? "item" : "items") to the shared list."
-                        } label: {
-                            Label(
-                                "Add \(combinedWeatherSuggestions.count) to Packing List",
-                                systemImage: "plus.circle.fill"
-                            )
-                            .frame(maxWidth: .infinity)
+                        if !trip.isArchived {
+                            Button {
+                                let added = TripPackingService.addSuggestions(
+                                    combinedWeatherSuggestions,
+                                    to: trip,
+                                    existingItems: items,
+                                    context: modelContext
+                                )
+                                weatherSuggestionMessage = added == 0
+                                    ? "Those weather items are already on this trip."
+                                    : "Added \(added) weather \(added == 1 ? "item" : "items") to the shared list."
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .symbolRenderingMode(.monochrome)
+                                        .foregroundStyle(.white)
+                                    Text("Add \(combinedWeatherSuggestions.count) to Packing List")
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
                         }
-                        .buttonStyle(.borderedProminent)
                     }
                     .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
                 } else if weatherForecasts.contains(where: { $0.snapshot != nil }) {
                     Label("No weather-specific additions suggested", systemImage: "checkmark.circle.fill")
@@ -1023,8 +1149,12 @@ struct PackingTripDetailView: View {
                         Button {
                             showingWeatherAttribution = true
                         } label: {
-                            Label("About weather data", systemImage: "info.circle")
-                                .font(.caption.weight(.semibold))
+                            HStack(spacing: 6) {
+                                Image(systemName: "info.circle")
+                                Text("About weather data")
+                            }
+                            .font(.caption.weight(.semibold))
+                            .fixedSize(horizontal: true, vertical: false)
                         }
                         .buttonStyle(.borderless)
                     }
@@ -1191,6 +1321,10 @@ private struct TripWeatherDetailSheet: View {
         forecasts.compactMap(\.snapshot).first
     }
 
+    private var lastUpdatedAt: Date? {
+        forecasts.compactMap { $0.snapshot?.fetchedAt }.min()
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1201,6 +1335,17 @@ private struct TripWeatherDetailSheet: View {
                         Text("Forecasts are matched to each destination’s dates and update as the trip gets closer.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if let lastUpdatedAt {
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock")
+                                Text(TripWeatherFormatting.lastUpdated(lastUpdatedAt))
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("trip.weather.last-updated")
+                        }
                     }
 
                     ForEach(forecasts) { forecast in
@@ -1214,8 +1359,12 @@ private struct TripWeatherDetailSheet: View {
                             Button {
                                 showingAttribution = true
                             } label: {
-                                Label("About weather data", systemImage: "info.circle")
-                                    .font(.caption.weight(.semibold))
+                                HStack(spacing: 6) {
+                                    Image(systemName: "info.circle")
+                                    Text("About weather data")
+                                }
+                                .font(.caption.weight(.semibold))
+                                .fixedSize(horizontal: true, vertical: false)
                             }
                         }
                         .padding(.top, 4)
@@ -1491,9 +1640,11 @@ private struct TripWeatherAttributionMark: View {
             image.resizable().scaledToFit()
         } placeholder: {
             Label("Apple Weather", systemImage: "cloud.sun.fill")
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 8, weight: .semibold))
+                .minimumScaleFactor(0.6)
         }
-        .frame(width: 118, height: 24, alignment: .leading)
+        .frame(width: 58, height: 12, alignment: .leading)
+        .clipped()
         .accessibilityLabel("Apple Weather")
     }
 }
@@ -1555,6 +1706,10 @@ private enum TripWeatherFormatting {
         "\(Int((value * 100).rounded()))%"
     }
 
+    static func lastUpdated(_ date: Date) -> String {
+        "Last updated \(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
     static func day(_ date: Date, timeZoneIdentifier: String) -> String {
         let formatter = DateFormatter()
         formatter.locale = .current
@@ -1564,27 +1719,54 @@ private enum TripWeatherFormatting {
     }
 }
 
+private struct PackingNotesField: View {
+    @Binding var text: String
+    let lineLimit: ClosedRange<Int>
+    let accessibilityIdentifier: String
+
+    var body: some View {
+        TextField("Optional notes", text: $text, axis: .vertical)
+            .lineLimit(lineLimit)
+            .multilineTextAlignment(.leading)
+            .textInputAutocapitalization(.sentences)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .textFieldStyle(.roundedBorder)
+            .accessibilityIdentifier(accessibilityIdentifier)
+    }
+}
+
 private struct PackingItemRow: View {
     let item: PackingItem
     let bag: PackingBag?
+    let isReadOnly: Bool
     let toggle: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Button(action: toggle) {
+            if isReadOnly {
                 Image(systemName: stateImage)
                     .font(.title3)
                     .foregroundStyle(stateColor)
                     .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    .accessibilityHidden(true)
+            } else {
+                Button(action: toggle) {
+                    Image(systemName: stateImage)
+                        .font(.title3)
+                        .foregroundStyle(stateColor)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.state == .packed ? "Mark unpacked" : "Mark packed")
+                .accessibilityIdentifier("trip.item.\(item.id.uuidString).toggle")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(item.state == .packed ? "Mark unpacked" : "Mark packed")
-            .accessibilityIdentifier("trip.item.\(item.id.uuidString).toggle")
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(item.title)
+                        .font(.body.weight(.medium))
                         .strikethrough(item.state == .packed)
                         .foregroundStyle(item.state == .notNeeded ? .secondary : .primary)
                     if item.priority == .essential {
@@ -1594,29 +1776,55 @@ private struct PackingItemRow: View {
                             .accessibilityLabel("Essential")
                     }
                 }
-                HStack(spacing: 7) {
-                    Label(item.category.displayName, systemImage: item.category.systemImage)
-                    if !item.quantityText.isEmpty { Text(item.quantityText) }
-                    if let bag { Label(bag.name, systemImage: "bag.fill") }
-                    if item.needsPurchase { Label("Buy", systemImage: "cart") }
+
+                PackingItemFlowLayout(spacing: 6) {
+                    PackingItemMetadataBadge(
+                        title: item.category.displayName,
+                        systemImage: item.category.systemImage,
+                        tint: .secondary
+                    )
+                    if !item.quantityText.isEmpty {
+                        PackingItemMetadataBadge(
+                            title: item.quantityText,
+                            systemImage: "number",
+                            tint: .secondary
+                        )
+                    }
+                    if let bag {
+                        PackingItemMetadataBadge(
+                            title: bag.name,
+                            systemImage: "bag.fill",
+                            tint: .secondary
+                        )
+                    }
+                    if item.needsPurchase {
+                        PackingItemMetadataBadge(
+                            title: "Buy",
+                            systemImage: "cart.fill",
+                            tint: .orange
+                        )
+                    }
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                if let packedBy = item.packedBy, item.state == .packed {
-                    Text("Packed by \(packedBy)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if let assignedCaregiverName = item.assignedCaregiverName {
-                    HStack(spacing: 5) {
-                        Label(assignedCaregiverName, systemImage: "person.crop.circle")
-                        if item.caregiverReminderEnabled {
-                            Image(systemName: "bell.fill")
-                                .accessibilityLabel("Targeted reminder enabled")
+
+                if item.assignedCaregiverName != nil
+                    || (item.packedBy != nil && item.state == .packed) {
+                    PackingItemFlowLayout(spacing: 6) {
+                        if let assignedCaregiverName = item.assignedCaregiverName {
+                            PackingItemMetadataBadge(
+                                title: "Assigned to \(assignedCaregiverName)",
+                                systemImage: "person.crop.circle.fill",
+                                tint: .blue,
+                                trailingSystemImage: item.caregiverReminderEnabled ? "bell.fill" : nil
+                            )
+                        }
+                        if let packedBy = item.packedBy, item.state == .packed {
+                            PackingItemMetadataBadge(
+                                title: packedByMatchesAssignee(packedBy) ? "Packed" : "Packed by \(packedBy)",
+                                systemImage: "checkmark.circle.fill",
+                                tint: .green
+                            )
                         }
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.blue)
                 }
             }
             Spacer(minLength: 0)
@@ -1637,6 +1845,99 @@ private struct PackingItemRow: View {
         case .needed: .secondary
         case .packed: .green
         case .notNeeded: .gray
+        }
+    }
+
+    private func packedByMatchesAssignee(_ packedBy: String) -> Bool {
+        guard let assignedCaregiverName = item.assignedCaregiverName else { return false }
+        return CaregiverIdentityService.namesMatch(assignedCaregiverName, packedBy)
+    }
+}
+
+private struct PackingItemMetadataBadge: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var trailingSystemImage: String? = nil
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+            Text(title)
+                .lineLimit(1)
+            if let trailingSystemImage {
+                Image(systemName: trailingSystemImage)
+                    .accessibilityLabel("Reminder enabled")
+            }
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(tint.opacity(0.11), in: Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct PackingItemFlowLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let availableWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var usedWidth: CGFloat = 0
+        var usedHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let proposedWidth = rowWidth == 0 ? size.width : rowWidth + spacing + size.width
+            if rowWidth > 0, proposedWidth > availableWidth {
+                usedWidth = max(usedWidth, rowWidth)
+                usedHeight += rowHeight + spacing
+                rowWidth = size.width
+                rowHeight = size.height
+            } else {
+                rowWidth = proposedWidth
+                rowHeight = max(rowHeight, size.height)
+            }
+        }
+
+        usedWidth = max(usedWidth, rowWidth)
+        usedHeight += rowHeight
+        return CGSize(
+            width: proposal.width ?? usedWidth,
+            height: usedHeight
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var point = CGPoint(x: bounds.minX, y: bounds.minY)
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if point.x > bounds.minX, point.x + size.width > bounds.maxX {
+                point.x = bounds.minX
+                point.y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(
+                at: point,
+                anchor: .topLeading,
+                proposal: ProposedViewSize(size)
+            )
+            point.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }
@@ -2000,11 +2301,13 @@ private struct PackingItemEditorView: View {
                     }
                 }
                 Toggle("Need to buy", isOn: $needsPurchase)
-                LabeledContent("Notes") {
-                    TextField("Optional", text: $notes, axis: .vertical)
-                        .lineLimit(2...5)
-                        .multilineTextAlignment(.trailing)
-                }
+            }
+            Section("Notes") {
+                PackingNotesField(
+                    text: $notes,
+                    lineLimit: 2...5,
+                    accessibilityIdentifier: "trip.item.notes"
+                )
             }
             Section {
                 Text("Choose who is responsible for this item, or leave it shared. Select a name or enter a new one.")
@@ -2598,11 +2901,11 @@ private struct PackingTripEditorView: View {
                 )
             }
             Section("Notes") {
-                LabeledContent("Notes") {
-                    TextField("Optional", text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
-                        .multilineTextAlignment(.trailing)
-                }
+                PackingNotesField(
+                    text: $notes,
+                    lineLimit: 3...6,
+                    accessibilityIdentifier: "trip.edit.notes"
+                )
             }
         }
         .navigationTitle("Edit Trip")

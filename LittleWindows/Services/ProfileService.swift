@@ -208,6 +208,36 @@ final class ProfileService: ObservableObject {
         deleteProfileScopedRecords(of: DoctorAppointment.self, profileID: profileID, context: context)
         deleteProfileScopedRecords(of: AgeGuideReadState.self, profileID: profileID, context: context)
         deleteProfileScopedRecords(of: PuppyStageGuideReadState.self, profileID: profileID, context: context)
+        deleteRequiredProfileScopedRecords(
+            of: SolidsProfileState.self,
+            profileID: profileID,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        deleteRequiredProfileScopedRecords(
+            of: SolidFoodProgress.self,
+            profileID: profileID,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        deleteRequiredProfileScopedRecords(
+            of: SolidFoodEventItem.self,
+            profileID: profileID,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        deleteRequiredProfileScopedRecords(
+            of: SolidAllergenProgress.self,
+            profileID: profileID,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        deleteRequiredProfileScopedRecords(
+            of: PlannedSolidMeal.self,
+            profileID: profileID,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
     }
 
     private func deleteProfileScopedRecords<Record: PersistentModel & ProfileScopedRecord>(
@@ -217,6 +247,17 @@ final class ProfileService: ObservableObject {
     ) {
         ((try? context.fetch(FetchDescriptor<Record>())) ?? [])
             .filter { $0.profileID == profileID }
+            .forEach { context.delete($0) }
+    }
+
+    private func deleteRequiredProfileScopedRecords<Record: PersistentModel>(
+        of type: Record.Type,
+        profileID: UUID,
+        profileIDKeyPath: KeyPath<Record, UUID>,
+        context: ModelContext
+    ) {
+        ((try? context.fetch(FetchDescriptor<Record>())) ?? [])
+            .filter { $0[keyPath: profileIDKeyPath] == profileID }
             .forEach { context.delete($0) }
     }
 }
@@ -272,6 +313,36 @@ enum ProfileMigrationService {
             || hasOrphanedAppointments(context: context, validProfileIDs: validProfileIDs)
             || hasOrphanedAgeGuideStates(context: context, validProfileIDs: validProfileIDs)
             || hasOrphanedPuppyGuideStates(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedRequiredRecords(
+                SolidsProfileState.self,
+                profileIDKeyPath: \.profileID,
+                context: context,
+                validProfileIDs: validProfileIDs
+            )
+            || hasOrphanedRequiredRecords(
+                SolidFoodProgress.self,
+                profileIDKeyPath: \.profileID,
+                context: context,
+                validProfileIDs: validProfileIDs
+            )
+            || hasOrphanedRequiredRecords(
+                SolidFoodEventItem.self,
+                profileIDKeyPath: \.profileID,
+                context: context,
+                validProfileIDs: validProfileIDs
+            )
+            || hasOrphanedRequiredRecords(
+                SolidAllergenProgress.self,
+                profileIDKeyPath: \.profileID,
+                context: context,
+                validProfileIDs: validProfileIDs
+            )
+            || hasOrphanedRequiredRecords(
+                PlannedSolidMeal.self,
+                profileIDKeyPath: \.profileID,
+                context: context,
+                validProfileIDs: validProfileIDs
+            )
     }
 
     private static func hasOrphanedBabyEvents(
@@ -370,6 +441,17 @@ enum ProfileMigrationService {
         return validCount != total
     }
 
+    private static func hasOrphanedRequiredRecords<Record: PersistentModel>(
+        _ type: Record.Type,
+        profileIDKeyPath: KeyPath<Record, UUID>,
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        ((try? context.fetch(FetchDescriptor<Record>())) ?? []).contains {
+            !validProfileIDs.contains($0[keyPath: profileIDKeyPath])
+        }
+    }
+
     static func assignOrphanedProfileIDs(
         to profileID: UUID,
         validProfileIDs: Set<UUID>,
@@ -396,6 +478,53 @@ enum ProfileMigrationService {
         ((try? context.fetch(FetchDescriptor<PuppyStageGuideReadState>())) ?? [])
             .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach { $0.profileID = profileID }
+        assignOrphanedRequiredProfileIDs(
+            SolidsProfileState.self,
+            to: profileID,
+            validProfileIDs: validProfileIDs,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        assignOrphanedRequiredProfileIDs(
+            SolidFoodProgress.self,
+            to: profileID,
+            validProfileIDs: validProfileIDs,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        assignOrphanedRequiredProfileIDs(
+            SolidFoodEventItem.self,
+            to: profileID,
+            validProfileIDs: validProfileIDs,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        assignOrphanedRequiredProfileIDs(
+            SolidAllergenProgress.self,
+            to: profileID,
+            validProfileIDs: validProfileIDs,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+        assignOrphanedRequiredProfileIDs(
+            PlannedSolidMeal.self,
+            to: profileID,
+            validProfileIDs: validProfileIDs,
+            profileIDKeyPath: \.profileID,
+            context: context
+        )
+    }
+
+    private static func assignOrphanedRequiredProfileIDs<Record: PersistentModel & AnyObject>(
+        _ type: Record.Type,
+        to profileID: UUID,
+        validProfileIDs: Set<UUID>,
+        profileIDKeyPath: ReferenceWritableKeyPath<Record, UUID>,
+        context: ModelContext
+    ) {
+        ((try? context.fetch(FetchDescriptor<Record>())) ?? [])
+            .filter { !validProfileIDs.contains($0[keyPath: profileIDKeyPath]) }
+            .forEach { $0[keyPath: profileIDKeyPath] = profileID }
     }
 }
 

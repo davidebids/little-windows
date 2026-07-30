@@ -167,6 +167,10 @@ struct TodaySummarySnapshot: Codable, Hashable {
     var pumpingSeconds: TimeInterval?
     var solidFeedCount: Int?
     var solidSensitivityCount: Int?
+    var allowsSolids: Bool? = nil
+    var profileBirthDate: Date? = nil
+    var solidsWorkspaceActivated: Bool? = nil
+    var hasSolidHistory: Bool? = nil
     var childPottyCount: Int?
     var childPottyAccidentCount: Int?
     var dogFoodCount: Int?
@@ -177,6 +181,23 @@ struct TodaySummarySnapshot: Codable, Hashable {
 
     var isDog: Bool {
         profileTypeRawValue == "dog"
+    }
+
+    var resolvedAllowsSolids: Bool {
+        allowsSolids ?? allowsSolids(at: Date())
+    }
+
+    func allowsSolids(
+        at date: Date,
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard !isDog, profileID != nil else { return false }
+        if solidsWorkspaceActivated == true || hasSolidHistory == true { return true }
+        if let profileBirthDate {
+            let ageMonths = calendar.dateComponents([.month], from: profileBirthDate, to: date).month ?? 0
+            return ageMonths >= 6
+        }
+        return allowsSolids ?? false
     }
 }
 

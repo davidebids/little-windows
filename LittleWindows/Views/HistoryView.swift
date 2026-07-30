@@ -656,6 +656,15 @@ struct HistoryView: View {
     }
 
     private func open(_ event: BabyEvent) {
+        if event.type == .feed, event.feedKind == .solid {
+            let router = DeepLinkRouter.shared
+            router.openSolids(
+                .solidMeal(event.id),
+                profileID: event.profileID,
+                returningTo: .reports
+            )
+            return
+        }
         if event.isTimerDraft {
             activeTimerToEdit = event
         } else {

@@ -45,6 +45,484 @@ private enum MilestoneTimelineItem: Identifiable {
     }
 }
 
+struct CareView: View {
+    @Environment(\.modelContext) private var modelContext
+    @ObservedObject private var router = DeepLinkRouter.shared
+    @StateObject private var profileService = ProfileService.shared
+
+    @Query(sort: \Household.createdAt) private var households: [Household]
+    @Query(sort: \ShoppingList.sortOrder) private var shoppingLists: [ShoppingList]
+    @Query(sort: \ShoppingListItem.sortOrder) private var shoppingItems: [ShoppingListItem]
+    @Query(sort: \InventoryLocation.sortOrder) private var locations: [InventoryLocation]
+    @Query(sort: \InventoryItem.updatedAt, order: .reverse) private var inventoryItems: [InventoryItem]
+    @Query(sort: \FoodItem.canonicalName) private var foodItems: [FoodItem]
+    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \BabyEvent.startDate, order: .reverse) private var careEvents: [BabyEvent]
+    @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
+    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
+    @Query(sort: \SolidFoodEventItem.createdAt, order: .reverse) private var solidFoodEventItems: [SolidFoodEventItem]
+    @Query(sort: \SolidAllergenProgress.updatedAt, order: .reverse) private var solidAllergenProgress: [SolidAllergenProgress]
+    @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
+    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
+    @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
+
+    @State private var path: [FoodRoute] = []
+    @State private var returnOriginAfterSolids: SolidsNavigationOrigin?
+
+    private var profile: BabyProfile? {
+        profileService.selectedProfile(in: profiles)
+    }
+
+    private var solidsProfileState: SolidsProfileState? {
+        guard let profile else { return nil }
+        return solidsProfileStates.first { $0.profileID == profile.id }
+    }
+
+    private var solidsAccessLevel: SolidsAccessLevel {
+        SolidsTrackingService.accessLevel(
+            for: profile,
+            events: careEvents,
+            state: solidsProfileState
+        )
+    }
+
+    private var household: Household? { households.first }
+
+    private var householdShoppingLists: [ShoppingList] {
+        guard let household else { return [] }
+        return shoppingLists.filter { $0.householdID == household.id && !$0.isArchived }
+    }
+
+    private var householdShoppingItems: [ShoppingListItem] {
+        guard let household else { return [] }
+        return shoppingItems.filter { $0.householdID == household.id }
+    }
+
+    private var householdLocations: [InventoryLocation] {
+        guard let household else { return [] }
+        return locations.filter { $0.householdID == household.id && !$0.isArchived }
+    }
+
+    private var householdInventoryItems: [InventoryItem] {
+        guard let household else { return [] }
+        return inventoryItems.filter { $0.householdID == household.id }
+    }
+
+    private var householdFoodItems: [FoodItem] {
+        guard let household else { return [] }
+        return foodItems.filter { $0.householdID == household.id && !$0.isArchived }
+    }
+
+    private var solidFoodPhotos: [PhotoAttachment] {
+        photoAttachments.filter { $0.ownerKind == .solidFood }
+    }
+
+    private var routeDataVersion: Int {
+        profiles.count + careEvents.count + solidsProfileStates.count
+            + solidFoodProgress.count + solidFoodEventItems.count
+            + solidAllergenProgress.count + customSolidFoods.count
+            + plannedSolidMeals.count + households.count
+    }
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            MilestonesView(openSolids: openSolids)
+                .navigationDestination(for: FoodRoute.self) { route in
+                    destination(for: route)
+                        .navigationBarBackButtonHidden(shouldShowOriginBackButton)
+                        .toolbar {
+                            if shouldShowOriginBackButton,
+                               let returnOriginAfterSolids {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button {
+                                        returnToOrigin()
+                                    } label: {
+                                        Label(
+                                            returnTitle(for: returnOriginAfterSolids.tab),
+                                            systemImage: "chevron.left"
+                                        )
+                                    }
+                                    .accessibilityIdentifier("solids.return-to-origin")
+                                }
+                            }
+                        }
+                }
+                .task {
+                    FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
+                    _ = profileService.ensureSelection(in: profiles)
+                    handlePendingProfileSwitch()
+                    handlePendingSolidsCommand()
+                }
+                .onReceive(router.$pendingSolidsCommand.compactMap { $0 }) { command in
+                    handle(command)
+                }
+                .onChange(of: router.pendingProfileID) { _, _ in
+                    handlePendingProfileSwitch()
+                    handlePendingSolidsCommand()
+                }
+                .onChange(of: profileService.selectedProfileID) { _, _ in
+                    correctUnavailableRoute()
+                }
+                .onChange(of: routeDataVersion) { _, _ in
+                    handlePendingSolidsCommand()
+                    correctUnavailableRoute()
+                }
+                .onChange(of: path) { previousPath, currentPath in
+                    if !previousPath.isEmpty && currentPath.isEmpty {
+                        returnToOrigin()
+                    }
+                }
+        }
+    }
+
+    private func openSolids(_ route: FoodRoute) {
+        guard profile?.profileType == .child, solidsAccessLevel != .hidden else { return }
+        returnOriginAfterSolids = nil
+        path = [route]
+    }
+
+    private func handlePendingProfileSwitch() {
+        guard let profileID = router.pendingProfileID else { return }
+        profileService.switchProfile(id: profileID, profiles: profiles)
+        router.pendingProfileID = nil
+    }
+
+    private func handlePendingSolidsCommand() {
+        guard let command = router.pendingSolidsCommand else { return }
+        handle(command)
+    }
+
+    private func handle(_ command: FoodRouteCommand) {
+        let requestedOrigin = router.consumeSolidsOrigin()
+        guard let route = solidsRoute(for: command) else {
+            router.pendingSolidsCommand = nil
+            returnOriginAfterSolids = requestedOrigin
+            returnToOrigin()
+            return
+        }
+        // Profile-scoped links publish the target profile and route together.
+        // Apply that explicit selection before deciding whether Solids is
+        // available, so a child link still works when a dog is currently open.
+        handlePendingProfileSwitch()
+        router.pendingSolidsCommand = nil
+        returnOriginAfterSolids = requestedOrigin
+        guard profile?.profileType == .child, solidsAccessLevel != .hidden else {
+            path = []
+            returnToOrigin()
+            return
+        }
+        path = [solidsAccessLevel == .readinessPreview ? .solidsHome : route]
+    }
+
+    private var shouldShowOriginBackButton: Bool {
+        returnOriginAfterSolids != nil && path.count == 1
+    }
+
+    private func returnToOrigin() {
+        guard let returnOriginAfterSolids else { return }
+        self.returnOriginAfterSolids = nil
+        path = []
+        if let insightsSection = returnOriginAfterSolids.insightsSection {
+            router.pendingInsightsSection = insightsSection
+        }
+        if let feedingInsightsMode = returnOriginAfterSolids.feedingInsightsMode {
+            router.pendingFeedingInsightsMode = feedingInsightsMode
+        }
+        router.selectedTab = returnOriginAfterSolids.tab
+    }
+
+    private func returnTitle(for tab: LittleWindowsTab) -> String {
+        switch tab {
+        case .today: "Today"
+        case .food: "Home"
+        case .reports: "Reports"
+        case .milestones: "Care"
+        case .nightLight: "Night Light"
+        case .medical: "Medical"
+        }
+    }
+
+    private func solidsRoute(for command: FoodRouteCommand) -> FoodRoute? {
+        switch command {
+        case .solids: .solidsHome
+        case .solidsDatabase: .solidsDatabase
+        case .solidsGuided: .solidsGuided
+        case .solidFood(let id): .solidFood(id)
+        case .customSolidFood(let id): .customSolidFood(id)
+        case .solidsPlan: .solidsPlan
+        case .plannedSolidMeal(let id): .plannedSolidMeal(id)
+        case .solidsTracker: .solidsTracker
+        case .solidMeal(let id): .solidMeal(id)
+        case .solidsAllergens: .solidsAllergens
+        case .solidAllergen(let id): .solidAllergen(id)
+        case .solidsRecipes: .solidsRecipes
+        case .solidsRecipe(let id): .solidsRecipe(id)
+        case .food, .todos, .todoList, .shopping, .shoppingList, .shoppingMode,
+             .trips, .packingTrip, .inventory, .inventoryItem, .mealPrep,
+             .mealPrepItem, .returns, .returnRequest, .store, .quickAdd:
+            nil
+        }
+    }
+
+    private func correctUnavailableRoute() {
+        guard path.contains(where: { $0.isSolidsWorkspaceRoute }) else { return }
+        if solidsAccessLevel == .hidden || profile?.profileType != .child {
+            path.removeLast(path.count)
+        } else if solidsAccessLevel == .readinessPreview,
+                  path != [.solidsHome] {
+            path = [.solidsHome]
+        }
+    }
+
+    @ViewBuilder
+    private func destination(for route: FoodRoute) -> some View {
+        switch route {
+        case .solidsHome:
+            if let profile, profile.profileType == .child, solidsAccessLevel != .hidden {
+                SolidsHomeView(
+                    profile: profile,
+                    accessLevel: solidsAccessLevel,
+                    events: careEvents,
+                    eventItems: solidFoodEventItems,
+                    progress: solidFoodProgress,
+                    plans: plannedSolidMeals,
+                    profileState: solidsProfileState,
+                    open: { path.append($0) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsGuided:
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidsGuidedPathView(
+                    profile: profile,
+                    progress: solidFoodProgress,
+                    eventItems: solidFoodEventItems,
+                    allergenProgress: solidAllergenProgress,
+                    plans: plannedSolidMeals,
+                    profileState: solidsProfileState,
+                    openFood: { path.append(.solidFood($0)) },
+                    openPlan: { path.append(.plannedSolidMeal($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsDatabase:
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidsFoodDatabaseView(
+                    profile: profile,
+                    progress: solidFoodProgress,
+                    customFoods: customSolidFoods,
+                    photoAttachments: solidFoodPhotos,
+                    openFood: { path.append(.solidFood($0)) },
+                    openCustomFood: { path.append(.customSolidFood($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidFood(let id):
+            if let profile,
+               profile.profileType == .child,
+               solidsAccessLevel == .full,
+               let food = SolidsReferenceCatalog.food(id: id) {
+                SolidsFoodDetailView(
+                    food: food,
+                    profile: profile,
+                    progress: solidFoodProgress,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    openHistory: { path.append(.solidFoodHistory($0, $1)) },
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .customSolidFood(let id):
+            if let profile,
+               profile.profileType == .child,
+               solidsAccessLevel == .full,
+               let food = customSolidFoods.first(where: { $0.id == id }) {
+                CustomSolidFoodDetailView(
+                    food: food,
+                    profile: profile,
+                    photo: food.photoAttachmentID.flatMap { photoID in
+                        solidFoodPhotos.first { $0.id == photoID }
+                    },
+                    allFoods: customSolidFoods,
+                    progress: solidFoodProgress,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    openHistory: { path.append(.solidFoodHistory($0, $1)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsPlan:
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidsPlannerView(
+                    profile: profile,
+                    plans: plannedSolidMeals,
+                    openPlan: { path.append(.plannedSolidMeal($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .plannedSolidMeal(let id):
+            if let profile,
+               profile.profileType == .child,
+               solidsAccessLevel == .full,
+               let plan = plannedSolidMeals.first(where: {
+                   $0.id == id && $0.profileID == profile.id
+               }) {
+                PlannedSolidMealDetailView(
+                    plan: plan,
+                    profile: profile,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    openFood: { foodID, foodName in
+                        if SolidsReferenceCatalog.food(id: foodID) != nil {
+                            path.append(.solidFood(foodID))
+                        } else if foodID.hasPrefix("custom-"),
+                                  let customID = UUID(uuidString: String(foodID.dropFirst("custom-".count))),
+                                  customSolidFoods.contains(where: { $0.id == customID }) {
+                            path.append(.customSolidFood(customID))
+                        } else {
+                            path.append(.solidFoodHistory(foodID, foodName))
+                        }
+                    },
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsTracker:
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidsTrackerView(
+                    profile: profile,
+                    events: careEvents,
+                    progress: solidFoodProgress,
+                    eventItems: solidFoodEventItems,
+                    openFoodHistory: { path.append(.solidFoodHistory($0, $1)) },
+                    openMeal: { path.append(.solidMeal($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidFoodHistory(let foodID, let foodName):
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidFoodHistoryView(
+                    profile: profile,
+                    foodID: foodID,
+                    foodName: foodName,
+                    events: careEvents,
+                    eventItems: solidFoodEventItems,
+                    openMeal: { path.append(.solidMeal($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidMeal(let id):
+            if let profile,
+               profile.profileType == .child,
+               solidsAccessLevel == .full,
+               let event = careEvents.first(where: {
+                   $0.id == id && $0.profileID == profile.id
+               }) {
+                SolidMealDetailView(
+                    event: event,
+                    items: solidFoodEventItems,
+                    editEvent: {
+                        router.pendingProfileID = profile.id
+                        router.selectedTab = .today
+                        router.pendingAction = .showEvent(event.id)
+                    }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsAllergens:
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidsAllergensView(
+                    profile: profile,
+                    eventItems: solidFoodEventItems,
+                    progress: solidAllergenProgress,
+                    openAllergen: { path.append(.solidAllergen($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidAllergen(let id):
+            if let profile,
+               profile.profileType == .child,
+               solidsAccessLevel == .full,
+               let allergen = SolidsAllergen(rawValue: id) {
+                SolidsAllergenDetailView(
+                    allergen: allergen,
+                    profile: profile,
+                    eventItems: solidFoodEventItems,
+                    progress: solidAllergenProgress.first {
+                        $0.profileID == profile.id && $0.allergenID == id
+                    },
+                    allProgress: solidAllergenProgress,
+                    plans: plannedSolidMeals,
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsRecipes:
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidsRecipesView(
+                    profile: profile,
+                    profileState: solidsProfileState,
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsRecipe(let id):
+            if let profile,
+               profile.profileType == .child,
+               solidsAccessLevel == .full,
+               let recipe = SolidsReferenceCatalog.recipe(id: id) {
+                SolidsRecipeDetailView(
+                    recipe: recipe,
+                    profile: profile,
+                    profileState: solidsProfileState,
+                    household: household,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    locations: householdLocations,
+                    openFood: { path.append(.solidFood($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .todoList, .shoppingList, .shoppingMode, .packingTrip, .inventoryItem,
+             .mealPrepItem, .returnRequest, .store, .reminders:
+            CareUnavailableView()
+        }
+    }
+}
+
+private struct CareUnavailableView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "Unavailable",
+            systemImage: "person.crop.circle.badge.exclamationmark",
+            description: Text("This Care item is not available for the selected profile.")
+        )
+    }
+}
+
 struct MilestonesView: View {
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
@@ -52,6 +530,11 @@ struct MilestonesView: View {
     @Query(sort: \MilestoneEntry.date, order: .reverse) private var allMilestones: [MilestoneEntry]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
+    @Query(sort: \BabyEvent.startDate, order: .reverse) private var careEvents: [BabyEvent]
+    @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
+    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
+    @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
+    let openSolids: (FoodRoute) -> Void
     @State private var searchText = ""
     @State private var selectedCategory: MilestoneCategory?
     @State private var favoritesOnly = false
@@ -69,6 +552,10 @@ struct MilestonesView: View {
     @State private var milestonePendingDelete: MilestoneEntry?
     @State private var showingDeleteConfirmation = false
     @StateObject private var profileService = ProfileService.shared
+
+    init(openSolids: @escaping (FoodRoute) -> Void = { _ in }) {
+        self.openSolids = openSolids
+    }
 
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
     private var selectedProfileID: UUID? { profile?.id }
@@ -97,6 +584,29 @@ struct MilestonesView: View {
     private var currentPuppyStageGuide: PuppyStageGuide? {
         guard isDogProfile, let profile else { return nil }
         return PuppyStageGuideService.shared.currentGuide(for: profile)
+    }
+    private var solidsProfileState: SolidsProfileState? {
+        guard let selectedProfileID else { return nil }
+        return solidsProfileStates.first { $0.profileID == selectedProfileID }
+    }
+    private var solidsAccessLevel: SolidsAccessLevel {
+        SolidsTrackingService.accessLevel(
+            for: profile,
+            events: careEvents,
+            state: solidsProfileState
+        )
+    }
+    private var foodsTriedCount: Int {
+        guard let selectedProfileID else { return 0 }
+        return solidFoodProgress.filter {
+            $0.profileID == selectedProfileID && $0.status == .tried
+        }.count
+    }
+    private var upcomingSolidsPlanCount: Int {
+        guard let selectedProfileID else { return 0 }
+        return plannedSolidMeals.filter {
+            $0.profileID == selectedProfileID && !$0.isCompleted
+        }.count
     }
 
     private var timelineItems: [MilestoneTimelineItem] {
@@ -154,6 +664,8 @@ struct MilestonesView: View {
     var body: some View {
         let timelineItems = self.timelineItems
         List {
+            solidsSection
+
             Section {
                 memoryHeader
                     .listRowInsets(EdgeInsets())
@@ -177,7 +689,7 @@ struct MilestonesView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(MilestonePalette.background)
-        .navigationTitle("Milestones")
+        .navigationTitle("Care")
         .searchable(text: $searchText, prompt: "Search memories")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -264,6 +776,56 @@ struct MilestonesView: View {
                 AppSectionHeader(title: "This Month", subtitle: guide.ageLabel)
             }
         }
+    }
+
+    @ViewBuilder
+    private var solidsSection: some View {
+        if let profile,
+           profile.profileType == .child,
+           solidsAccessLevel != .hidden {
+            Section {
+                Button {
+                    openSolids(.solidsHome)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "carrot.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(Color.orange.gradient, in: RoundedRectangle(cornerRadius: 13))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(solidsAccessLevel == .readinessPreview ? "Starting solids soon" : "Solids")
+                                .font(.subheadline.weight(.semibold))
+                            Text(solidsSubtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("care.solids")
+            } header: {
+                AppSectionHeader(title: "Feeding", subtitle: profile.name)
+            }
+        }
+    }
+
+    private var solidsSubtitle: String {
+        if solidsAccessLevel == .readinessPreview {
+            return "Review readiness signs and age-appropriate preparation for the months ahead."
+        }
+        if foodsTriedCount == 0, upcomingSolidsPlanCount == 0 {
+            return "Prepare, plan, and track foods, allergens, and meals."
+        }
+        let foods = foodsTriedCount == 1 ? "1 food tried" : "\(foodsTriedCount) foods tried"
+        let plans = upcomingSolidsPlanCount == 1 ? "1 meal planned" : "\(upcomingSolidsPlanCount) meals planned"
+        return "\(foods) · \(plans)"
     }
 
     @ViewBuilder

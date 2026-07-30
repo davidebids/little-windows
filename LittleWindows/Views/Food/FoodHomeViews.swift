@@ -15,6 +15,7 @@ struct FoodHomeView: View {
     @Query(sort: \HomeTodoItem.sortOrder) private var todoItems: [HomeTodoItem]
     @Query(sort: \InventoryLocation.sortOrder) private var locations: [InventoryLocation]
     @Query(sort: \InventoryItem.updatedAt, order: .reverse) private var inventoryItems: [InventoryItem]
+    @Query(sort: \FoodItem.canonicalName) private var foodItems: [FoodItem]
     @Query(sort: \MealPrepItem.updatedAt, order: .reverse) private var mealPrepItems: [MealPrepItem]
     @Query(sort: \MealPrepUsage.dateTime, order: .reverse) private var mealPrepUsages: [MealPrepUsage]
     @Query(sort: \ReturnRequest.updatedAt, order: .reverse) private var returnRequests: [ReturnRequest]
@@ -27,6 +28,16 @@ struct FoodHomeView: View {
     @Query(sort: \PackingBag.sortOrder) private var packingBags: [PackingBag]
     @Query(sort: \PackingItem.sortOrder) private var packingItems: [PackingItem]
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \BabyEvent.startDate, order: .reverse) private var careEvents: [BabyEvent]
+    @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
+    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
+    @Query(sort: \SolidFoodEventItem.createdAt, order: .reverse) private var solidFoodEventItems: [SolidFoodEventItem]
+    @Query(sort: \SolidAllergenProgress.updatedAt, order: .reverse) private var solidAllergenProgress: [SolidAllergenProgress]
+    @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
+    @Query(sort: \PhotoAttachment.createdAt) private var solidFoodPhotos: [PhotoAttachment]
+    @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
+
+    @StateObject private var profileService = ProfileService.shared
 
     @State private var selectedSection: FoodHomeSection
     @State private var path: [FoodRoute]
@@ -35,29 +46,46 @@ struct FoodHomeView: View {
     @State private var deferredFoodCommandRetryToken = UUID()
 
     private var household: Household? { households.first }
+    private var selectedProfile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var selectedSolidsState: SolidsProfileState? {
+        guard let selectedProfile else { return nil }
+        return solidsProfileStates.first { $0.profileID == selectedProfile.id }
+    }
+    private var solidsAccessLevel: SolidsAccessLevel {
+        SolidsTrackingService.accessLevel(
+            for: selectedProfile,
+            events: careEvents,
+            state: selectedSolidsState
+        )
+    }
+    private var availableSections: [FoodHomeSection] {
+        FoodHomeSection.allCases.filter { $0 != .solids }
+    }
     private var foodRouteDataVersion: Int {
-        households.count
-        + shoppingLists.count
-        + inventoryItems.count
-        + mealPrepItems.count
-        + returnRequests.count
-        + returnItems.count
-        + returnPackages.count
-        + todoLists.count
-        + todoItems.count
-        + stores.count
-        + storeSections.count
-        + locations.count
-        + packingTrips.count
-        + tripTravelers.count
-        + packingBags.count
-        + packingItems.count
+        let shoppingVersion = households.count + shoppingLists.count
+            + inventoryItems.count + mealPrepItems.count
+        let returnsVersion = returnRequests.count + returnItems.count + returnPackages.count
+        let todoVersion = todoLists.count + todoItems.count
+        let storeVersion = stores.count + storeSections.count + locations.count
+        let tripVersion = packingTrips.count + tripTravelers.count
+            + packingBags.count + packingItems.count
+        let solidsVersion = careEvents.count + solidsProfileStates.count
+            + solidFoodProgress.count + solidFoodEventItems.count + solidAllergenProgress.count
+            + customSolidFoods.count + plannedSolidMeals.count
+        return shoppingVersion + returnsVersion + todoVersion
+            + storeVersion + tripVersion + solidsVersion
     }
 
     init() {
         let restoredNavigation = FoodNavigationRestorationState.load()
-        _selectedSection = State(initialValue: restoredNavigation.selectedSection)
-        _path = State(initialValue: restoredNavigation.path)
+        let restoredSection: FoodHomeSection = restoredNavigation.selectedSection == .solids
+            ? .todos
+            : restoredNavigation.selectedSection
+        let restoredPath = restoredNavigation.path.contains { $0.isSolidsWorkspaceRoute }
+            ? []
+            : restoredNavigation.path
+        _selectedSection = State(initialValue: restoredSection)
+        _path = State(initialValue: restoredPath)
         let returnPhotoKind = PhotoAttachmentOwnerKind.returnPhoto.rawValue
         let descriptor = FetchDescriptor<PhotoAttachment>(
             predicate: #Predicate<PhotoAttachment> { attachment in
@@ -66,6 +94,13 @@ struct FoodHomeView: View {
             sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
         )
         _photoAttachments = Query(descriptor)
+        let solidFoodPhotoKind = PhotoAttachmentOwnerKind.solidFood.rawValue
+        _solidFoodPhotos = Query(FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate<PhotoAttachment> { attachment in
+                attachment.ownerKindRawValue == solidFoodPhotoKind
+            },
+            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
+        ))
     }
 
     var body: some View {
@@ -81,7 +116,7 @@ struct FoodHomeView: View {
                 }
             }
             .navigationTitle("Home")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(AppTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
@@ -97,6 +132,9 @@ struct FoodHomeView: View {
             }
             .task {
                 FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
+                _ = profileService.ensureSelection(in: profiles)
+                correctUnavailableSolidsRoute()
+                handlePendingProfileSwitch()
                 retryDeferredFoodCommandIfPossible()
             }
             .onReceive(router.$pendingFoodCommand.compactMap { $0 }) { command in
@@ -104,7 +142,14 @@ struct FoodHomeView: View {
                 router.pendingFoodCommand = nil
             }
             .onChange(of: foodRouteDataVersion) { _, _ in
+                correctUnavailableSolidsRoute()
                 retryDeferredFoodCommandIfPossible()
+            }
+            .onChange(of: profileService.selectedProfileID) { _, _ in
+                correctUnavailableSolidsRoute()
+            }
+            .onChange(of: router.pendingProfileID) { _, _ in
+                handlePendingProfileSwitch()
             }
             .onChange(of: selectedSection) { _, _ in
                 saveNavigationState()
@@ -134,7 +179,7 @@ struct FoodHomeView: View {
     @ViewBuilder
     private func content(household: Household) -> some View {
         VStack(spacing: 0) {
-            FoodHomeSectionPicker(selectedSection: selectedSection) { section in
+            FoodHomeSectionPicker(sections: availableSections, selectedSection: selectedSection) { section in
                 guard selectedSection != section else { return }
                 withAnimation(.snappy(duration: 0.24)) {
                     selectedSection = section
@@ -152,6 +197,21 @@ struct FoodHomeView: View {
                     items: householdTodoItems,
                     openList: { path.append(FoodRoute.todoList($0.id)) }
                 )
+            case .solids:
+                if let selectedProfile,
+                   selectedProfile.profileType == .child,
+                   solidsAccessLevel != .hidden {
+                    SolidsHomeView(
+                        profile: selectedProfile,
+                        accessLevel: solidsAccessLevel,
+                        events: careEvents,
+                        eventItems: solidFoodEventItems,
+                        progress: solidFoodProgress,
+                        plans: plannedSolidMeals,
+                        profileState: selectedSolidsState,
+                        open: { path.append($0) }
+                    )
+                }
             case .shopping:
                 ShoppingListsView(
                     household: household,
@@ -229,6 +289,235 @@ struct FoodHomeView: View {
     @ViewBuilder
     private func destination(for route: FoodRoute) -> some View {
         switch route {
+        case .solidsHome:
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel != .hidden {
+                SolidsHomeView(
+                    profile: selectedProfile,
+                    accessLevel: solidsAccessLevel,
+                    events: careEvents,
+                    eventItems: solidFoodEventItems,
+                    progress: solidFoodProgress,
+                    plans: plannedSolidMeals,
+                    profileState: selectedSolidsState,
+                    open: { path.append($0) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsGuided:
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidsGuidedPathView(
+                    profile: selectedProfile,
+                    progress: solidFoodProgress,
+                    eventItems: solidFoodEventItems,
+                    allergenProgress: solidAllergenProgress,
+                    plans: plannedSolidMeals,
+                    profileState: selectedSolidsState,
+                    openFood: { path.append(.solidFood($0)) },
+                    openPlan: { path.append(.plannedSolidMeal($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsDatabase:
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidsFoodDatabaseView(
+                    profile: selectedProfile,
+                    progress: solidFoodProgress,
+                    customFoods: customSolidFoods,
+                    photoAttachments: solidFoodPhotos,
+                    openFood: { path.append(.solidFood($0)) },
+                    openCustomFood: { path.append(.customSolidFood($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidFood(let id):
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               let food = SolidsReferenceCatalog.food(id: id) {
+                SolidsFoodDetailView(
+                    food: food,
+                    profile: selectedProfile,
+                    progress: solidFoodProgress,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    openHistory: { path.append(.solidFoodHistory($0, $1)) },
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .customSolidFood(let id):
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               let food = customSolidFoods.first(where: { $0.id == id }) {
+                CustomSolidFoodDetailView(
+                    food: food,
+                    profile: selectedProfile,
+                    photo: food.photoAttachmentID.flatMap { photoID in
+                        solidFoodPhotos.first { $0.id == photoID }
+                    },
+                    allFoods: customSolidFoods,
+                    progress: solidFoodProgress,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    openHistory: { path.append(.solidFoodHistory($0, $1)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsPlan:
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidsPlannerView(
+                    profile: selectedProfile,
+                    plans: plannedSolidMeals,
+                    openPlan: { path.append(.plannedSolidMeal($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .plannedSolidMeal(let id):
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               let plan = plannedSolidMeals.first(where: {
+                   $0.id == id && $0.profileID == selectedProfile.id
+               }) {
+                PlannedSolidMealDetailView(
+                    plan: plan,
+                    profile: selectedProfile,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    openFood: { foodID, foodName in
+                        if SolidsReferenceCatalog.food(id: foodID) != nil {
+                            path.append(.solidFood(foodID))
+                        } else if foodID.hasPrefix("custom-"),
+                                  let customID = UUID(uuidString: String(foodID.dropFirst("custom-".count))),
+                                  customSolidFoods.contains(where: { $0.id == customID }) {
+                            path.append(.customSolidFood(customID))
+                        } else {
+                            path.append(.solidFoodHistory(foodID, foodName))
+                        }
+                    },
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsTracker:
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidsTrackerView(
+                    profile: selectedProfile,
+                    events: careEvents,
+                    progress: solidFoodProgress,
+                    eventItems: solidFoodEventItems,
+                    openFoodHistory: { path.append(.solidFoodHistory($0, $1)) },
+                    openMeal: { path.append(.solidMeal($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidFoodHistory(let foodID, let foodName):
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidFoodHistoryView(
+                    profile: selectedProfile,
+                    foodID: foodID,
+                    foodName: foodName,
+                    events: careEvents,
+                    eventItems: solidFoodEventItems,
+                    openMeal: { path.append(.solidMeal($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidMeal(let id):
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               let event = careEvents.first(where: { $0.id == id && $0.profileID == selectedProfile.id }) {
+                SolidMealDetailView(
+                    event: event,
+                    items: solidFoodEventItems,
+                    editEvent: {
+                        router.pendingProfileID = selectedProfile.id
+                        router.selectedTab = .today
+                        router.pendingAction = .showEvent(event.id)
+                    }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsAllergens:
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidsAllergensView(
+                    profile: selectedProfile,
+                    eventItems: solidFoodEventItems,
+                    progress: solidAllergenProgress,
+                    openAllergen: { path.append(.solidAllergen($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidAllergen(let id):
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               let allergen = SolidsAllergen(rawValue: id) {
+                SolidsAllergenDetailView(
+                    allergen: allergen,
+                    profile: selectedProfile,
+                    eventItems: solidFoodEventItems,
+                    progress: solidAllergenProgress.first {
+                        $0.profileID == selectedProfile.id && $0.allergenID == id
+                    },
+                    allProgress: solidAllergenProgress,
+                    plans: plannedSolidMeals,
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsRecipes:
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidsRecipesView(
+                    profile: selectedProfile,
+                    profileState: selectedSolidsState,
+                    openRecipe: { path.append(.solidsRecipe($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsRecipe(let id):
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               let recipe = SolidsReferenceCatalog.recipe(id: id) {
+                SolidsRecipeDetailView(
+                    recipe: recipe,
+                    profile: selectedProfile,
+                    profileState: selectedSolidsState,
+                    household: household,
+                    shoppingLists: householdShoppingLists,
+                    shoppingItems: householdShoppingItems,
+                    inventoryItems: householdInventoryItems,
+                    foodItems: householdFoodItems,
+                    locations: householdLocations,
+                    openFood: { path.append(.solidFood($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
         case .todoList(let id):
             if let list = householdTodoLists.first(where: { $0.id == id }) {
                 HomeTodoListDetailView(
@@ -341,6 +630,42 @@ struct FoodHomeView: View {
     }
 
     private func handle(_ command: FoodRouteCommand, allowDeferral: Bool = true) {
+        if section(for: command) == .solids {
+            deferredFoodCommand = nil
+            selectedSection = .todos
+            path.removeLast(path.count)
+            router.openSolids(
+                command,
+                profileID: selectedProfile?.id,
+                returningTo: .food
+            )
+            return
+        }
+
+        if section(for: command) == .solids,
+           selectedProfile?.profileType != .child {
+            deferredFoodCommand = nil
+            correctUnavailableSolidsRoute()
+            return
+        }
+
+        if section(for: command) == .solids,
+           selectedProfile != nil,
+           solidsAccessLevel == .hidden {
+            deferredFoodCommand = nil
+            correctUnavailableSolidsRoute()
+            return
+        }
+
+        if section(for: command) == .solids,
+           solidsAccessLevel == .readinessPreview,
+           command != .solids {
+            deferredFoodCommand = nil
+            selectedSection = .solids
+            path.removeLast(path.count)
+            return
+        }
+
         if allowDeferral && shouldDefer(command) {
             deferFoodCommand(command)
             return
@@ -351,6 +676,34 @@ struct FoodHomeView: View {
             deferredFoodCommand = nil
             selectedSection = .todos
             path.removeLast(path.count)
+        case .solids:
+            deferredFoodCommand = nil
+            selectedSection = .solids
+            path.removeLast(path.count)
+        case .solidsDatabase:
+            openSolidsRoute(.solidsDatabase)
+        case .solidsGuided:
+            openSolidsRoute(.solidsGuided)
+        case .solidFood(let id):
+            openSolidsRoute(.solidFood(id))
+        case .customSolidFood(let id):
+            openSolidsRoute(.customSolidFood(id))
+        case .solidsPlan:
+            openSolidsRoute(.solidsPlan)
+        case .plannedSolidMeal(let id):
+            openSolidsRoute(.plannedSolidMeal(id))
+        case .solidsTracker:
+            openSolidsRoute(.solidsTracker)
+        case .solidMeal(let id):
+            openSolidsRoute(.solidMeal(id))
+        case .solidsAllergens:
+            openSolidsRoute(.solidsAllergens)
+        case .solidAllergen(let id):
+            openSolidsRoute(.solidAllergen(id))
+        case .solidsRecipes:
+            openSolidsRoute(.solidsRecipes)
+        case .solidsRecipe(let id):
+            openSolidsRoute(.solidsRecipe(id))
         case .todos:
             deferredFoodCommand = nil
             selectedSection = .todos
@@ -427,6 +780,24 @@ struct FoodHomeView: View {
         switch command {
         case .food, .todos, .shopping, .trips, .inventory, .mealPrep, .returns, .quickAdd:
             return false
+        case .solids, .solidsDatabase, .solidsGuided, .solidsPlan, .solidsTracker, .solidsAllergens, .solidsRecipes:
+            return solidsAccessLevel == .hidden
+        case .solidFood(let id):
+            return solidsAccessLevel == .hidden || SolidsReferenceCatalog.food(id: id) == nil
+        case .customSolidFood(let id):
+            return solidsAccessLevel == .hidden || !customSolidFoods.contains { $0.id == id }
+        case .plannedSolidMeal(let id):
+            return solidsAccessLevel == .hidden || !plannedSolidMeals.contains {
+                $0.id == id && $0.profileID == selectedProfile?.id
+            }
+        case .solidMeal(let id):
+            return solidsAccessLevel == .hidden || !careEvents.contains {
+                $0.id == id && $0.profileID == selectedProfile?.id && $0.feedKind == .solid
+            }
+        case .solidAllergen(let id):
+            return solidsAccessLevel == .hidden || SolidsAllergen(rawValue: id) == nil
+        case .solidsRecipe(let id):
+            return solidsAccessLevel == .hidden || !SolidsReferenceCatalog.recipes.contains { $0.id == id }
         case .todoList(let id):
             return !householdTodoLists.contains { $0.id == id }
         case .shoppingList(let id), .shoppingMode(let id):
@@ -460,6 +831,11 @@ struct FoodHomeView: View {
 
     private func retryDeferredFoodCommandIfPossible(force: Bool = false) {
         guard let command = deferredFoodCommand else { return }
+        if force, shouldDefer(command), section(for: command) == .solids {
+            deferredFoodCommand = nil
+            correctUnavailableSolidsRoute()
+            return
+        }
         if force || !shouldDefer(command) {
             handle(command, allowDeferral: !force)
         }
@@ -469,6 +845,10 @@ struct FoodHomeView: View {
         switch command {
         case .food, .todos, .todoList:
             return .todos
+        case .solids, .solidsDatabase, .solidsGuided, .solidFood, .customSolidFood,
+             .solidsPlan, .plannedSolidMeal, .solidsTracker, .solidMeal,
+             .solidsAllergens, .solidAllergen, .solidsRecipes, .solidsRecipe:
+            return .solids
         case .shopping, .shoppingList, .shoppingMode, .quickAdd:
             return .shopping
         case .trips, .packingTrip:
@@ -481,6 +861,27 @@ struct FoodHomeView: View {
             return .returns
         case .store:
             return .stores
+        }
+    }
+
+    private func openSolidsRoute(_ route: FoodRoute) {
+        deferredFoodCommand = nil
+        selectedSection = .solids
+        path.removeLast(path.count)
+        path.append(route)
+    }
+
+    private func handlePendingProfileSwitch() {
+        guard let id = router.pendingProfileID else { return }
+        profileService.switchProfile(id: id, profiles: profiles)
+        router.pendingProfileID = nil
+        correctUnavailableSolidsRoute()
+    }
+
+    private func correctUnavailableSolidsRoute() {
+        if selectedSection == .solids || path.contains(where: { $0.isSolidsWorkspaceRoute }) {
+            selectedSection = .todos
+            path.removeLast(path.count)
         }
     }
 
@@ -552,6 +953,11 @@ struct FoodHomeView: View {
     private var householdInventoryItems: [InventoryItem] {
         guard let household else { return [] }
         return inventoryItems.filter { $0.householdID == household.id }
+    }
+
+    private var householdFoodItems: [FoodItem] {
+        guard let household else { return [] }
+        return foodItems.filter { $0.householdID == household.id && !$0.isArchived }
     }
 
     private var householdMealPrepItems: [MealPrepItem] {
@@ -646,6 +1052,7 @@ struct FoodHomeView: View {
 
 private struct FoodHomeSectionPicker: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let sections: [FoodHomeSection]
     let selectedSection: FoodHomeSection
     let select: (FoodHomeSection) -> Void
 
@@ -661,6 +1068,7 @@ private struct FoodHomeSectionPicker: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Home areas")
                     .font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("home.areas.title")
                 Spacer()
                 Text(selectedSection.title)
                     .font(.caption)
@@ -668,7 +1076,7 @@ private struct FoodHomeSectionPicker: View {
             }
 
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(FoodHomeSection.allCases) { section in
+                ForEach(sections) { section in
                     FoodHomeSectionButton(
                         section: section,
                         isSelected: selectedSection == section
@@ -739,6 +1147,7 @@ private extension FoodHomeSection {
     var selectorTitle: String {
         switch self {
         case .todos: "To-Do"
+        case .solids: "Solids"
         case .shopping: "Shopping"
         case .trips: "Trips"
         case .returns: "Returns"
@@ -752,6 +1161,7 @@ private extension FoodHomeSection {
     var tint: Color {
         switch self {
         case .todos: .indigo
+        case .solids: .orange
         case .shopping: .blue
         case .trips: .cyan
         case .returns: .orange

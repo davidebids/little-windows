@@ -9,10 +9,10 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - Today Summary widget: medium, including unified child care summary metrics for sleep, feeding, nursing, pumping, diapers, potty, medicine, temperature, growth, and activities when present.
 - Quick Log widget: medium, backed by profile-scoped ranked smart actions, hidden-category preferences, and user-pinned actions from Today.
 - Shopping List widget: small and medium, backed by the Food & Home shopping snapshot.
-- Food Quick Add widget: medium, opens quick add and usual shopping lists in the app.
+- Food Quick Add widget: medium, opens grocery quick add, solids logging, and usual shopping lists in the app.
 - Live Activity with Lock Screen, Dynamic Island compact, Dynamic Island minimal, and Dynamic Island expanded presentations.
 - App Intents for timer control, quick logging, app navigation, and night-light presets.
-- App Shortcuts for repeat-last logging, high-frequency quick logging, timer control, and dog care.
+- App Shortcuts for repeat-last logging, solids and other high-frequency quick logging, timer control, and dog care.
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
 - Local notifications for sleep windows, routine reminders, appointment reminders, monthly guide reminders, trip packing and final-check reminders, and user-created Food & Home reminders.
 - WeatherKit forecasts and Apple Weather attribution for trip packing suggestions.
@@ -75,7 +75,9 @@ The extension target includes:
 
 ## Action behavior
 
-Timer data, event history, appointments, profiles, predictions, routines, category preferences, and settings remain in the app's SwiftData store. Widgets and Live Activities receive lightweight snapshots through the App Group.
+Timer data, event history, appointments, profiles, predictions, routines, solids progress, allergen introduction state, guided meal plans, named recipe lists, category preferences, and settings remain in the app's SwiftData store. Widgets and Live Activities receive lightweight snapshots through the App Group. A logged solids meal is always a normal `BabyEvent` with type `feed` and feed kind `solid`; linked per-food records add stable bundled-catalog identifiers, optional serving amounts, preference and reaction details, and allergen rollups without creating a second event history. The tracker provides status/reaction filters, multiple sorts, and a per-food chronological timeline that remains usable even after a custom catalog entry is deleted. Reports -> Summary -> Feeding provides date-range totals for solid meals, unique and newly introduced foods, allergen-meal observations, and suspected-reaction notes, with links back to the tracker and allergen workspace. Solid events in Reports day/list views open the solid meal detail rather than a generic feeding editor. Solids content is English-only and ships in the app rather than being fetched live.
+
+Solids is child-only. It is hidden for dog profiles and children younger than four months unless prior solids history or explicit activation exists, shows a readiness preview from four through five months, and becomes fully available from six months. Today surfaces readiness, a due or overdue meal plan, and due allergen follow-up exposures only for the active eligible child. Generic solids actions are ignored when a dog profile is active; they never switch profiles or present dog-specific solids UI.
 
 When Family Sync is enabled, SwiftData remains the local cache and `CloudKitSharingService` synchronizes versioned `FamilyEntity` records in one shared CloudKit zone. Each care event, profile, appointment, custom solid food, photo attachment, reminder, list item, and related object has an independent asset record plus an update timestamp; deletions are uploaded as tombstones. A lightweight root record carries the dataset checksum and schema version. Accepted caregivers read and write the same shared data, while widgets and Live Activities continue to refresh from each device's local cache.
 
@@ -87,7 +89,7 @@ If neither the configured CloudKit store nor its local fallback can open, the ap
 
 Local Family Sync mutations are serialized so newer timer states cannot be overtaken by an older upload. Synchronization uses a saved common baseline and a three-way, per-record merge, so offline changes to different objects are preserved and the newest `updatedAt` wins when two devices edit the same object. Initial share creation normally uploads one baseline snapshot; `FamilyEntity` assets then store only changed, new, or deleted records and are overlaid on that snapshot when another caregiver syncs. A snapshot above the safe CloudKit asset size falls back to small record- and byte-limited entity batches. Creation reports progress in Settings, applies explicit request/resource time limits, and removes its newly created zone if setup fails. Push-subscription verification continues after the invitation sheet is ready and is retried by launch/manual sync, so a slow push setup cannot block inviting a caregiver. Automatic launch checks compare lightweight root metadata before querying entities. While the app is active in shared mode, it checks that metadata every five seconds as a fallback for delayed CloudKit pushes. Foreground polling waits until the initial UI is usable and backs off after connection failures or when another sync is already running.
 
-Family Sync schema version 3 requires the `FamilyEntity` record type to be created in the CloudKit development environment with `collection` (String), `entityID` (String), `payloadAsset` (Asset), `payloadChecksum` (String), `isDeleted` (Int(64)), and `entityUpdatedAt` (Date/Time), then deployed to production before a release build is distributed. Pre-release version-1 and version-2 shares should be stopped and recreated; there is intentionally no legacy share migration because the app has no production users. Private SwiftData CloudKit schema initialization must also include `CD_SolidFoodCatalogItem`, `CD_PackingTrip`, `CD_TripTraveler`, `CD_PackingBag`, and `CD_PackingItem`; `CD_BabyEvent` includes `CD_diaperRash` (Int(64)), `CD_PackingTrip` includes `CD_destinationStopsRawValue` (String), and `CD_PackingItem` includes `CD_assignedCaregiverName` (String) and `CD_caregiverReminderEnabled` (Int(64)). Deploy the complete development schema before release.
+Family Sync schema version 3 requires the `FamilyEntity` record type to be created in the CloudKit development environment with `collection` (String), `entityID` (String), `payloadAsset` (Asset), `payloadChecksum` (String), `isDeleted` (Int(64)), and `entityUpdatedAt` (Date/Time), then deployed to production before a release build is distributed. Pre-release version-1 and version-2 shares should be stopped and recreated; there is intentionally no legacy share migration because the app has no production users. Private SwiftData CloudKit schema initialization must also include `CD_SolidFoodCatalogItem`, `CD_SolidsProfileState`, `CD_SolidFoodProgress`, `CD_SolidFoodEventItem`, `CD_SolidAllergenProgress`, `CD_PlannedSolidMeal`, `CD_PackingTrip`, `CD_TripTraveler`, `CD_PackingBag`, and `CD_PackingItem`; `CD_BabyEvent` includes `CD_diaperRash` (Int(64)) and `CD_solidFoodDetailsJSON` (String); `CD_SolidsProfileState` includes `CD_recipeCollectionsJSON` (String) and `CD_completedFeedingSkillIDsJSON` (String); `CD_SolidFoodEventItem` includes `CD_servingAmount` (String), `CD_notes` (String), and `CD_confirmedAllergenPortionIDsJSON` (String); `CD_SolidAllergenProgress` includes `CD_statusOverrideRawValue` (String), in addition to the allergen, reaction, recipe, guided-path, and reminder fields; `CD_PlannedSolidMeal` includes `CD_allergenID` (String), `CD_allergenIntroductionStep` (Int(64)), `CD_allergenServingGuidance` (String), and `CD_allergenObservationMinutes` (Int(64)); `CD_FoodItem` includes `CD_foodReferenceID` (String), `CD_PackingTrip` includes `CD_destinationStopsRawValue` (String), and `CD_PackingItem` includes `CD_assignedCaregiverName` (String) and `CD_caregiverReminderEnabled` (Int(64)). Deploy the complete development schema before release.
 
 Today action customization is stored per profile. Hidden care categories are excluded from Today quick actions and the Quick Log widget, but existing events remain in history, reports, backup/import, and summary snapshots.
 
@@ -119,9 +121,11 @@ littlewindows://today
 littlewindows://history
 littlewindows://settings
 littlewindows://insights
+littlewindows://reports/feeding
 littlewindows://medical
 littlewindows://milestones
 littlewindows://memories
+littlewindows://care
 littlewindows://age-guides
 littlewindows://age-guide/{month}
 littlewindows://puppy-guide
@@ -135,6 +139,20 @@ littlewindows://active-timer
 littlewindows://prediction
 littlewindows://event/{UUID}
 littlewindows://food
+littlewindows://care/solids
+littlewindows://care/solids/guided
+littlewindows://care/solids/database
+littlewindows://care/solids/foods/{foodID}
+littlewindows://care/solids/custom/{UUID}
+littlewindows://care/solids/plan
+littlewindows://care/solids/plan/{UUID}
+littlewindows://care/solids/plan/{UUID}/log
+littlewindows://care/solids/tracker
+littlewindows://care/solids/tracker/{eventUUID}
+littlewindows://care/solids/allergens
+littlewindows://care/solids/allergens/{allergenID}
+littlewindows://care/solids/recipes
+littlewindows://care/solids/recipes/{recipeID}
 littlewindows://food/todos
 littlewindows://food/todos/{UUID}
 littlewindows://food/quick-add
@@ -152,12 +170,16 @@ littlewindows://food/returns/{UUID}
 littlewindows://food/stores/{UUID}
 ```
 
+The earlier `littlewindows://food/solids/...` routes remain supported and redirect to the profile-scoped Care tab. Solids never appears for a selected dog profile, and unscoped routes do not automatically switch away from a dog. A `profile/{profileUUID}/...` route applies that explicit profile first, but still refuses Solids when the target is a dog or a child below the age gate.
+
 Profile-scoped routes can prefix another route with a profile identifier:
 
 ```text
 littlewindows://profile/{profileUUID}/today
 littlewindows://profile/{profileUUID}/insights
 littlewindows://profile/{profileUUID}/appointments
+littlewindows://profile/{profileUUID}/food/solids
+littlewindows://profile/{profileUUID}/food/solids/database
 ```
 
 Timer/action routes:
@@ -174,6 +196,7 @@ Quick-log routes:
 ```text
 littlewindows://quick-log/sleep
 littlewindows://quick-log/feed
+littlewindows://quick-log/solids
 littlewindows://quick-log/pumping
 littlewindows://quick-log/child-potty
 littlewindows://quick-log/repeat-last
@@ -193,7 +216,7 @@ littlewindows://quick-log/training
 littlewindows://quick-log/medicine
 ```
 
-Child quick-log routes use the active child profile when possible. `quick-log/pumping` starts a pumping timer, `quick-log/child-potty` creates a child potty log, and `quick-log/repeat-last` ignores hidden categories for the active profile.
+Child quick-log routes use the active child profile when possible. Unscoped `quick-log/solids` does nothing for a dog or a child below the age gate; a profile-scoped version opens only for the explicitly targeted eligible child. Generic `quick-log/feed` becomes the dog Food editor when a dog is selected. `quick-log/pumping` starts a pumping timer, `quick-log/child-potty` creates a child potty log, and `quick-log/repeat-last` ignores hidden categories for the active profile.
 
 Night-light routes:
 
@@ -239,7 +262,7 @@ Night-light and navigation intents:
 - `StopNightLightIntent`
 - `OpenLittleWindowsIntent`
 
-The `LittleWindowsShortcuts` provider exposes the iOS maximum of 10 promoted shortcuts to Shortcuts/Siri: start sleep, nurse left, nurse right, stop timer, repeat last, log feed, log medicine, log diaper, log dog food, and start dog walk. Other intents remain available to widgets, controls, deep links, and future shortcut curation.
+The `LittleWindowsShortcuts` provider exposes the iOS maximum of 10 promoted shortcuts to Shortcuts/Siri: start sleep, nurse left, nurse right, stop timer, repeat last, log solids, log medicine, log diaper, log dog food, and start dog walk. The generic Log Feed and Open Solids intents remain available in Shortcuts along with other unpromoted intents.
 
 ## Notifications
 
@@ -256,7 +279,7 @@ Little Windows uses local notifications for:
 - Family Sync trip packing alerts can be toggled separately from the broader shared activity alerts, including a targeted alert when an item is newly assigned to the current device caregiver.
 - Family Sync access-ended alerts when CloudKit confirms that a participant was removed or the share is no longer available. These lifecycle alerts are not suppressed by the shared-activity preference.
 
-One-shot sleep, appointment, guide, and Food & Home alerts use absolute fire dates, so travel does not reinterpret an already-scheduled alert in the device's new zone. Per-profile sleep-alert state prevents one child's alert from suppressing another's. After the initial interaction window, and after an import, sync download, profile lifecycle change, or permission change, a coalesced central reconciler rebuilds widget snapshots, Live Activities, predictions, and all enabled notification categories while removing orphan requests. Foreground reconciliation is skipped when the last pass is recent and no local data changed. Food & Home shopping-list widgets refresh from lightweight App Group snapshots; the widget extension opens the app for edits rather than writing SwiftData directly.
+One-shot sleep, appointment, guide, planned-solids-meal, allergen-follow-up, and Food & Home alerts use absolute fire dates, so travel does not reinterpret an already-scheduled alert in the device's new zone. Solids meal alerts open the plan and allergen alerts open the relevant introduction detail. Per-profile sleep-alert state prevents one child's alert from suppressing another's. After the initial interaction window, and after an import, sync download, profile lifecycle change, or permission change, a coalesced central reconciler rebuilds widget snapshots, Live Activities, predictions, and all enabled notification categories while removing orphan requests. Foreground reconciliation is skipped when the last pass is recent and no local data changed. Food & Home shopping-list widgets refresh from lightweight App Group snapshots; the widget extension opens the app for edits rather than writing SwiftData directly.
 
 Family Sync creates a CloudKit record-zone subscription for the shared family zone when a share is created or accepted. On the first shared sync of each app launch, it verifies the expected subscription still exists on the server and recreates missing or stale subscriptions. The CloudKit push itself is silent; Little Windows posts a local shared-activity notification only after the remote dataset imports and the local diff identifies a user-facing change. Push registration status and the most recent registration error are visible in **Settings -> iCloud & Sync -> Sync Diagnostics**. Shared activity alerts can be disabled from **Settings -> Family Sync -> Shared activity alerts**.
 
@@ -283,16 +306,17 @@ Family Sync creates a CloudKit record-zone subscription for the shared family zo
 19. Create an appointment and verify selected reminder lead times.
 20. Enable monthly guide reminders and verify scheduling after guide state changes.
 21. Create a Food & Home reminder and verify it opens the relevant Food screen or item.
-22. Create a trip from Home > Trips with an adult and linked sample child or dog. Confirm the generated list reflects the duration, laundry, travel mode, activities, and traveler types. Assign items to bags and different caregivers, confirm each device's Settings caregiver name sees its own remaining count and receives only its own enabled reminders, then pack from both devices and verify packed-by attribution, progress, duplication, shopping handoff, and JSON backup/import.
-23. On a signed WeatherKit-enabled device, create a multi-destination trip with one stop inside the forecast window and a later stop outside it. Verify the first destination opens an in-app daily forecast with high/low temperature, rain chance, UV, coverage, and packing considerations. Verify the later stop explains that its forecast will appear automatically, and foregrounding or manually refreshing after its dates enter the window loads that forecast. Confirm suggestions can be added without duplication. Confirm tapping the Apple Weather mark does nothing and **About weather data** presents the supplied legal attribution inside the app.
+22. Create a trip from Home > Trips with an adult and linked sample child or dog. Confirm the generated list reflects the duration, laundry, travel mode, activities, and traveler types. Assign items to bags and different caregivers, confirm each device's Settings caregiver name sees its own remaining count and receives only its own enabled reminders, then pack from both devices and verify packed-by attribution, progress, shopping handoff, and JSON backup/import. Duplicate the trip and confirm the app returns to Trips with the new copy visible. Archive a trip and confirm the app returns to Trips with the trip under Archived. Finally, delete the trip, confirm it returns to Trips and cancels its pending reminders, and verify items already handed off to Shopping remain available.
+23. On a signed WeatherKit-enabled device, create a multi-destination trip with one stop inside the forecast window and a later stop outside it. Verify the first destination opens an in-app daily forecast with high/low temperature, rain chance, UV, coverage, packing considerations, and a visible last-updated timestamp. Verify the later stop explains that its forecast will appear automatically, and foregrounding or manually refreshing after its dates enter the window loads that forecast. Confirm suggestions can be added without duplication and the add button's plus icon remains visible in light and dark appearance. Confirm the compact Apple Weather mark is legible, tapping it does nothing, and **About weather data** presents the supplied legal attribution inside the app.
 24. With two signed devices in the same Family Sync share, keep both apps open, then start, stop, and save a timer on one device. Verify the other device reflects each state within one foreground refresh cycle (normally about five seconds, plus CloudKit network time). Then background the second device, make a shared care, packing, or shopping-list change, and verify its shared-activity alert opens the relevant Little Windows screen.
 25. With Family Sync enabled, launch the app on a throttled or unreliable connection. Confirm Today and Night Light remain immediately scrollable and tappable while the sync status updates later; restore connectivity and confirm pending changes eventually sync.
 26. In Settings > Time Zone, confirm Automatic shows the detected zone and that Manual override can search for and select another zone. Start a one-hour timer in one zone, switch the simulator/device zone, then stop and save it. Confirm the duration remains one hour, both zone abbreviations appear when appropriate, and the entry remains on its recorded local calendar day. Edit both zones and verify JSON backup/import and CSV care report export preserve them.
-27. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app.
+27. Add the Shopping List and Food Quick Add widgets, then verify item counts update after checking, reactivating, or adding shopping-list items in the app. With a child selected, use **Log Solids** from Food Quick Add and confirm it opens the solids editor. Select a dog and confirm the widget no longer displays **Log Solids**.
 28. With two signed devices using different Apple Accounts, remove the participant from the owner's iCloud share sheet. Verify the participant stops syncing, receives the access-ended alert, and can keep or delete its downloaded local copy. Repeat with **Stop Sharing for Everyone**, and verify the owner returns to private iCloud Sync while each participant enters the same recovery flow. Also verify **Turn Off on This Device** leaves the owner's CloudKit share active for other caregivers.
 29. In each sync mode, open Settings > Data and verify import/full-deletion copy identifies the actual scope. Confirm a Family Sync participant cannot perform either bulk action. As an owner, confirm the standard alert offers Cancel and the correctly scoped destructive action, and that an automatic recovery backup is retained before the change syncs.
 30. On a disposable simulator store, make the SwiftData store unreadable and relaunch. Verify Data Recovery appears without terminating, Retry does not alter the files, and restore/start-empty preserves the store artifacts before opening a local-only copy. Do not perform this test on a physical device containing personal data.
-31. Add a solid feeding, select several visual food tiles, and verify general reaction, common-allergen exposure, and observed sensitivity can be recorded independently. Create a custom food with a photo, reuse it in another feeding, edit or delete it from its tile menu, and verify JSON backup/import plus Family Sync preserve the custom food and photo.
+31. With a six-month-or-older child selected, open Solids and verify the 535-food database, stage-based first-100 path, seven-day guided schedule, swap/shift controls, 424-recipe library, recipe filters and named lists, food-to-recipe links, technique photography and auto-playing preparation walkthroughs, meal plan reminders, inventory-aware shopping handoff, tracker filters, and per-food chronological history. Log two foods in one meal with a serving amount and preference on each and a suspected reaction on only one; verify the meal detail and allergen screen keep amount, symptoms, severity, timing, response, and follow-up attached to the correct food. From an allergen page, plan the remaining introduction portions, verify the precise step and serving guidance reach the log editor, and confirm only explicitly checked portions advance the three-step introduction. Complete three separate tolerated exposures and verify unique-meal counts, safe recipe suggestions, rotation planning, and the Today follow-up prompt. Open **View feeding report** and verify Reports -> Summary -> Feeding shows period-correct solid meals, unique foods, new foods, allergen exposures, and reaction notes; verify its tracker/allergen links and that tapping a solid event in Day/List returns to solid meal detail. Create a custom food with age, preparation, safety, allergen, and photo metadata; mark it want-to-try/favorite, plan it, add it to shopping and inventory flows, log its allergen metadata, reuse it, delete the catalog entry, and confirm its historical timeline remains accessible. Verify JSON backup/import plus Family Sync preserve all solids data and named recipe lists.
+32. Select a dog and confirm Solids is absent from Food & Home. Confirm generic solids links and **Log Solids** from Shortcuts do nothing and do not change profiles. Select a one-month-old child and confirm Solids remains absent. At four to five months verify only the readiness preview appears; at six months verify the full section and Today prompt. With a child selected, run **Log Solids** from Shortcuts and confirm it opens the child solids editor.
 
 Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit sync, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
 

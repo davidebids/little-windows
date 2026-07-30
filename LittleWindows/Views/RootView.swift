@@ -406,12 +406,12 @@ struct RootView: View {
 
             Group {
                 if router.selectedTab == .milestones {
-                    NavigationStack { MilestonesView() }
+                    CareView()
                 } else {
                     Color.clear
                 }
             }
-                .tabItem { Label("Milestones", systemImage: "heart.text.clipboard.fill") }
+                .tabItem { Label("Care", systemImage: "heart.text.clipboard.fill") }
                 .tag(LittleWindowsTab.milestones)
 
             Group {

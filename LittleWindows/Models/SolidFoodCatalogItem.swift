@@ -7,6 +7,10 @@ final class SolidFoodCatalogItem {
     var name: String = ""
     var normalizedName: String = ""
     var photoAttachmentID: UUID?
+    var allergenIDsJSON: String = "[]"
+    var minimumAgeMonths: Int = 6
+    var preparationNotes: String = ""
+    var safetyNotes: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -14,6 +18,10 @@ final class SolidFoodCatalogItem {
         id: UUID = UUID(),
         name: String,
         photoAttachmentID: UUID? = nil,
+        allergenIDs: [String] = [],
+        minimumAgeMonths: Int = 6,
+        preparationNotes: String = "",
+        safetyNotes: String = "",
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -22,8 +30,28 @@ final class SolidFoodCatalogItem {
         self.name = cleanedName
         self.normalizedName = SolidFoodSelection.normalizedName(cleanedName)
         self.photoAttachmentID = photoAttachmentID
+        self.allergenIDsJSON = Self.encode(allergenIDs)
+        self.minimumAgeMonths = minimumAgeMonths
+        self.preparationNotes = preparationNotes
+        self.safetyNotes = safetyNotes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    var allergenIDs: [String] {
+        get { Self.decode(allergenIDsJSON) }
+        set { allergenIDsJSON = Self.encode(newValue) }
+    }
+
+    private static func encode(_ values: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(values),
+              let string = String(data: data, encoding: .utf8) else { return "[]" }
+        return string
+    }
+
+    private static func decode(_ value: String) -> [String] {
+        guard let data = value.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
     }
 }
 

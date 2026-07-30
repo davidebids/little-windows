@@ -128,6 +128,17 @@ enum EventMutationService {
                 record.updatedAt = Date()
             }
         }
+        if (event.type == .feed && event.feedKind == .solid)
+            || SolidsTrackingService.hasTrackedSolidFeedRecords(
+                eventID: event.id,
+                context: context
+            ) {
+            SolidsTrackingService.removeSolidFeedRecords(
+                eventID: event.id,
+                context: context,
+                persist: false
+            )
+        }
         context.delete(event)
         let remainingEvents = events.filter { $0.id != event.id }
         let prediction = affectsSleepPredictionRefresh(event)
@@ -140,7 +151,8 @@ enum EventMutationService {
             )
             : currentPrediction(in: records)
         guard PersistenceService.save(context: context) else { return }
-        Task { @MainActor in
+        let container = context.container
+        Task { @MainActor [container] in
             await refreshSystemIntegrations(
                 profile: profile,
                 events: remainingEvents,
@@ -150,6 +162,7 @@ enum EventMutationService {
                 notificationLeadMinutes: notificationLeadMinutes,
                 settings: settings
             )
+            _ = container
         }
     }
 
@@ -163,9 +176,22 @@ enum EventMutationService {
         notificationsEnabled: Bool,
         notificationLeadMinutes: Int,
         refreshPrediction: Bool = true,
-        waitForSystemIntegrations: Bool = false
+        waitForSystemIntegrations: Bool = false,
+        solidPreset: SolidFeedEditorPreset? = nil
     ) async {
         event.updatedAt = Date()
+        if event.type == .feed
+            || SolidsTrackingService.hasTrackedSolidFeedRecords(
+                eventID: event.id,
+                context: context
+            ) {
+            SolidsTrackingService.reconcileSolidFeed(
+                event: event,
+                preset: solidPreset,
+                context: context,
+                persist: false
+            )
+        }
         if event.isSleepBlock, !event.isTimerDraft {
             PredictionTuningService.resolveLatestPrediction(with: event, records: records)
         }
@@ -192,7 +218,8 @@ enum EventMutationService {
                 settings: settings
             )
         } else {
-            Task { @MainActor in
+            let container = context.container
+            Task { @MainActor [container] in
                 await refreshSystemIntegrations(
                     profile: profile,
                     events: events,
@@ -202,6 +229,7 @@ enum EventMutationService {
                     notificationLeadMinutes: notificationLeadMinutes,
                     settings: settings
                 )
+                _ = container
             }
         }
     }
@@ -223,7 +251,8 @@ enum EventMutationService {
             settings: settings
         )
         guard PersistenceService.save(context: context) else { return }
-        Task { @MainActor in
+        let container = context.container
+        Task { @MainActor [container] in
             await refreshSystemIntegrations(
                 profile: profile,
                 events: events,
@@ -233,6 +262,7 @@ enum EventMutationService {
                 notificationLeadMinutes: notificationLeadMinutes,
                 settings: settings
             )
+            _ = container
         }
     }
 
@@ -246,6 +276,7 @@ enum EventMutationService {
         event.solidFeedingStyle = source.solidFeedingStyle
         event.solidAllergenExposure = source.solidAllergenExposure
         event.solidSensitivityObserved = source.solidSensitivityObserved
+        event.solidFoodDetails = source.solidFoodDetails
         event.nursingSide = source.nursingSide
         event.leftDurationSeconds = source.leftDurationSeconds
         event.rightDurationSeconds = source.rightDurationSeconds

@@ -39,6 +39,82 @@ struct DailyFeedingSummary: Identifiable, Hashable {
     var bottleOunces: Double
 }
 
+struct DailySolidsReportSummary: Identifiable, Hashable {
+    var id: Date { date }
+    var date: Date
+    var meals: Int
+    var newFoods: Int
+}
+
+struct SolidsReportSnapshot: Hashable {
+    var mealCount: Int
+    var uniqueFoodCount: Int
+    var newFoodCount: Int
+    var allergenExposureCount: Int
+    var reactionObservationCount: Int
+    var daily: [DailySolidsReportSummary]
+}
+
+enum SolidsReportingService {
+    static func snapshot(
+        profileID: UUID,
+        events: [BabyEvent],
+        eventItems: [SolidFoodEventItem],
+        progress: [SolidFoodProgress],
+        period: ClosedRange<Date>,
+        calendar: Calendar = .current
+    ) -> SolidsReportSnapshot {
+        let firstDay = calendar.startOfDay(for: period.lowerBound)
+        let lastDay = calendar.startOfDay(for: period.upperBound)
+        var days = [Date]()
+        var day = firstDay
+        while day <= lastDay {
+            days.append(day)
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        let includedDays = Set(days)
+        let solidEvents = events.filter {
+            $0.profileID == profileID &&
+                $0.type == .feed &&
+                $0.feedKind == .solid &&
+                includedDays.contains($0.localStartDay(calendar: calendar))
+        }
+        let eventIDs = Set(solidEvents.map(\.id))
+        let items = eventItems.filter {
+            $0.profileID == profileID && eventIDs.contains($0.eventID)
+        }
+        let newFoodProgress = progress.filter {
+            guard $0.profileID == profileID, let firstTriedAt = $0.firstTriedAt else { return false }
+            return includedDays.contains(calendar.startOfDay(for: firstTriedAt))
+        }
+        let allergenExposures = Set(items.flatMap { item in
+            item.allergenIDs.map { "\(item.eventID.uuidString)|\($0)" }
+        })
+        let mealsByDay = Dictionary(grouping: solidEvents) {
+            $0.localStartDay(calendar: calendar)
+        }.mapValues(\.count)
+        let newFoodsByDay = Dictionary(grouping: newFoodProgress) {
+            calendar.startOfDay(for: $0.firstTriedAt ?? firstDay)
+        }.mapValues(\.count)
+
+        return SolidsReportSnapshot(
+            mealCount: solidEvents.count,
+            uniqueFoodCount: Set(items.map(\.foodID)).count,
+            newFoodCount: newFoodProgress.count,
+            allergenExposureCount: allergenExposures.count,
+            reactionObservationCount: items.filter(\.suspectedReaction).count,
+            daily: days.map {
+                DailySolidsReportSummary(
+                    date: $0,
+                    meals: mealsByDay[$0] ?? 0,
+                    newFoods: newFoodsByDay[$0] ?? 0
+                )
+            }
+        )
+    }
+}
+
 struct DailyDiaperSummary: Identifiable, Hashable {
     var id: Date { date }
     var date: Date
@@ -507,15 +583,15 @@ enum InsightsAnalyticsService {
         )
         let beforeSleepCount = feedSleepIntervals.filter { $0 <= 30 }.count
         let feedingMetrics = [
-            metric("Care sessions / day", average(dailyFeeding.map { Double($0.careSessions) }), average(previousFeeding.map { Double($0.careSessions) }), compare: compareToPrevious, format: oneDecimal, icon: "fork.knife", interpretation: "Bottle, solids, and grouped nursing sessions."),
+            metric("All feeding sessions / day", average(dailyFeeding.map { Double($0.careSessions) }), average(previousFeeding.map { Double($0.careSessions) }), compare: compareToPrevious, format: oneDecimal, icon: "fork.knife", interpretation: "Bottle, solids, and nursing combined; logs within 45 minutes are grouped."),
             metric("Bottle ounces", bottleOunces, previousBottleOunces, compare: compareToPrevious, format: ounces, icon: "waterbottle.fill", interpretation: "Logged bottle volume in this period."),
             metric("Average bottle", average(bottleEvents.compactMap(\.amountOz)), average(previousBottles.compactMap(\.amountOz)), compare: compareToPrevious, format: ounces, icon: "waterbottle", interpretation: "Average amount per bottle log."),
             metric("Nursing sessions / day", average(dailyFeeding.map { Double($0.nursingSessions) }), average(previousFeeding.map { Double($0.nursingSessions) }), compare: compareToPrevious, format: oneDecimal, icon: "figure.and.child.holdinghands", interpretation: "Split Left/Right logs are combined into sessions."),
             metric("Nursing time", nursingTotal, previousNursingTotal, compare: compareToPrevious, format: duration, icon: "timer", interpretation: "Total logged nursing duration."),
             InsightMetric(title: "Left nursing", value: duration(leftMinutes), interpretation: "Logged Left-side time.", systemImage: "l.circle.fill"),
             InsightMetric(title: "Right nursing", value: duration(rightMinutes), interpretation: "Logged Right-side time.", systemImage: "r.circle.fill"),
-            metric("Time between care", median(careIntervals), nil, format: duration, icon: "arrow.left.and.right", interpretation: "Median interval between grouped care sessions."),
-            InsightMetric(title: "Within 30m of sleep", value: "\(beforeSleepCount)", interpretation: "Sleep starts following care in this period.", systemImage: "moon.circle.fill")
+            metric("Time between feeding sessions", median(careIntervals), nil, format: duration, icon: "arrow.left.and.right", interpretation: "Median interval between combined feeding sessions."),
+            InsightMetric(title: "Feeds followed by sleep", value: "\(beforeSleepCount)", interpretation: "Sleep starts within 30 minutes after any feeding session.", systemImage: "moon.circle.fill")
         ]
 
         let totalDiapers = dailyDiapers.reduce(0) { $0 + $1.total }
@@ -740,7 +816,7 @@ enum InsightsAnalyticsService {
             ]),
             wakeTrends: wakeObservations(profileName: profileName, current: wakeWindows, previous: previousWake),
             feedingTrends: compactTrends([
-                makeTrend(name: "Care sessions", current: average(dailyFeeding.map { Double($0.careSessions) }), previous: average(previousFeeding.map { Double($0.careSessions) }), format: oneDecimal, subject: "Daily feed and nursing sessions"),
+                makeTrend(name: "All feeding sessions", current: average(dailyFeeding.map { Double($0.careSessions) }), previous: average(previousFeeding.map { Double($0.careSessions) }), format: oneDecimal, subject: "Daily bottle, nursing, and solids sessions"),
                 makeTrend(name: "Bottle intake", current: bottleOunces, previous: previousBottleOunces, format: ounces, subject: "Logged bottle intake"),
                 sideBalanceTrend(profileName: profileName, left: leftMinutes, right: rightMinutes),
                 feedSleepTrend(profileName: profileName, intervals: feedSleepIntervals)
@@ -1505,10 +1581,10 @@ enum InsightsAnalyticsService {
         let buckets = intervalBuckets(intervals)
         guard let common = buckets.max(by: { $0.value < $1.value }) else { return nil }
         return InsightTrend(
-            metricName: "Care before sleep",
+            metricName: "Feeding before sleep",
             currentValueDescription: common.category,
             direction: .flat,
-            interpretation: "\(profileName) most often falls asleep \(common.category) after a feed or nursing session in this period.",
+            interpretation: "\(profileName) most often falls asleep \(common.category) after a feeding session in this period.",
             significance: .medium
         )
     }

@@ -43,7 +43,10 @@ struct FoodQuickAddWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: FoodWidgetProvider()) { entry in
-            FoodQuickAddWidgetView(food: entry.snapshot.resolvedFood)
+            FoodQuickAddWidgetView(
+                food: entry.snapshot.resolvedFood,
+                allowsSolids: entry.snapshot.todaySummary.allowsSolids(at: entry.date)
+            )
                 .containerBackground(for: .widget) {
                     LittleWindowsWidgetStyle.background
                 }
@@ -174,6 +177,7 @@ private struct ShoppingListWidgetView: View {
 
 private struct FoodQuickAddWidgetView: View {
     let food: FoodWidgetSnapshot
+    let allowsSolids: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -194,7 +198,15 @@ private struct FoodQuickAddWidgetView: View {
                     tint: .orange,
                     destination: "food/quick-add"
                 )
-                ForEach(food.lists.prefix(3)) { list in
+                if allowsSolids {
+                    action(
+                        title: "Log Solids",
+                        icon: "carrot.fill",
+                        tint: LittleWindowsWidgetStyle.lavender,
+                        destination: "quick-log/solids"
+                    )
+                }
+                ForEach(food.lists.prefix(allowsSolids ? 2 : 3)) { list in
                     action(
                         title: shortTitle(for: list.name),
                         icon: icon(for: list.name),
@@ -208,7 +220,9 @@ private struct FoodQuickAddWidgetView: View {
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.66))
             } else {
-                Text("Quick add opens a list picker in the app.")
+                Text(allowsSolids
+                    ? "Add groceries, log a solids meal, or open a usual list."
+                    : "Add groceries or open a usual shopping list.")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.52))
             }
