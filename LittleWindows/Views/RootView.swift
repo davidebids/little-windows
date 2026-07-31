@@ -4,19 +4,31 @@ import SwiftUI
 @MainActor
 enum AppInteractionMonitor {
     private static var lastInteractionAt = Date()
+    private static var interactionIsActive = false
 
     static func noteInteraction(at date: Date = Date()) {
         lastInteractionAt = date
     }
 
+    static func beginInteraction(at date: Date = Date()) {
+        interactionIsActive = true
+        lastInteractionAt = date
+    }
+
+    static func endInteraction(at date: Date = Date()) {
+        interactionIsActive = false
+        lastInteractionAt = date
+    }
+
     static func waitUntilIdle(
-        for idleDuration: TimeInterval = 1.5
+        for idleDuration: TimeInterval = 3
     ) async {
         while !Task.isCancelled {
             let remaining = idleDuration - Date().timeIntervalSince(lastInteractionAt)
-            guard remaining > 0 else { return }
+            guard interactionIsActive || remaining > 0 else { return }
             do {
-                try await Task.sleep(for: .milliseconds(min(500, remaining * 1_000)))
+                let delay = interactionIsActive ? 100 : min(500, remaining * 1_000)
+                try await Task.sleep(for: .milliseconds(max(1, delay)))
             } catch {
                 return
             }
@@ -29,6 +41,10 @@ enum AppTheme {
     static let background = Color(uiColor: .systemGroupedBackground)
     static let surface = Color(uiColor: .secondarySystemGroupedBackground)
     static let line = Color.primary.opacity(0.08)
+}
+
+private final class RootScrollInteractionState {
+    var isDragging = false
 }
 
 extension EventType {
@@ -355,6 +371,8 @@ struct RootView: View {
     @State private var showingFamilySyncAcceptanceStatus = false
     @State private var showingFamilySyncAccessEndedStatus = false
     @State private var localSaveErrorMessage: String?
+    @State private var scrollInteractionState = RootScrollInteractionState()
+    @State private var reconciliationRequestTask: Task<Void, Never>?
     @AppStorage(CloudKitSharingService.acceptanceStatusMessageKey)
     private var familySyncAcceptanceMessage = ""
     @AppStorage(PersistenceService.familySyncModeKey)
@@ -372,11 +390,11 @@ struct RootView: View {
         profileService.selectedProfile(in: profiles)
     }
 
-    var body: some View {
+    private var primaryTabs: some View {
         TabView(selection: $router.selectedTab) {
             Group {
                 if router.selectedTab == .today {
-                    NavigationStack { TodayView() }
+                    NavigationStack { TodayView(profileID: selectedProfile?.id) }
                 } else {
                     Color.clear
                 }
@@ -396,7 +414,7 @@ struct RootView: View {
 
             Group {
                 if router.selectedTab == .reports {
-                    NavigationStack { ReportsView() }
+                    NavigationStack { ReportsView(profileID: selectedProfile?.id) }
                 } else {
                     Color.clear
                 }
@@ -406,7 +424,7 @@ struct RootView: View {
 
             Group {
                 if router.selectedTab == .milestones {
-                    CareView()
+                    CareView(profileID: selectedProfile?.id)
                 } else {
                     Color.clear
                 }
@@ -424,6 +442,30 @@ struct RootView: View {
                 .tabItem { Label("Night Light", systemImage: "lightbulb.fill") }
                 .tag(LittleWindowsTab.nightLight)
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { _ in
+                    guard !scrollInteractionState.isDragging else { return }
+                    scrollInteractionState.isDragging = true
+                    AppInteractionMonitor.beginInteraction()
+                }
+                .onEnded { _ in
+                    scrollInteractionState.isDragging = false
+                    AppInteractionMonitor.endInteraction()
+                }
+        )
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                AppInteractionMonitor.noteInteraction()
+            }
+        )
+        .onChange(of: router.selectedTab) { _, _ in
+            AppInteractionMonitor.noteInteraction()
+        }
+    }
+
+    var body: some View {
+        primaryTabs
         .tint(AppTheme.accent)
         .environmentObject(router)
         .fullScreenCover(
@@ -583,7 +625,10 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: SystemIntegrationReconciler.reconciliationRequestedNotification
         )) { _ in
-            Task {
+            reconciliationRequestTask?.cancel()
+            reconciliationRequestTask = Task {
+                await AppInteractionMonitor.waitUntilIdle()
+                guard !Task.isCancelled else { return }
                 await SystemIntegrationReconciler.reconcile(context: modelContext)
             }
         }
@@ -642,6 +687,13 @@ struct RootView: View {
             DebugSimulatorSmokeSeedService.resetEmpty(context: modelContext)
             hasCompletedInitialOnboarding = false
             hasCheckedInitialOnboardingState = true
+            router.selectedTab = .today
+            return
+        }
+        if DebugSimulatorSmokeSeedService.isPerformanceSeed(url),
+           DebugSimulatorSmokeSeedService.isEnabled {
+            DebugSimulatorSmokeSeedService.seedPerformanceDataIfNeeded(context: modelContext)
+            hasCompletedInitialOnboarding = true
             router.selectedTab = .today
             return
         }
@@ -988,6 +1040,7 @@ private struct FirstRunOnboardingView: View {
 
 #if DEBUG
 enum DebugSimulatorSmokeSeedService {
+    private static let performanceSeededKey = "debug.performanceSeeded.v2"
     static var isEnabled: Bool {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
@@ -1023,6 +1076,13 @@ enum DebugSimulatorSmokeSeedService {
         return components == ["debug", "reset-empty"]
     }
 
+    static func isPerformanceSeed(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = [url.host].compactMap { $0 }
+            + url.pathComponents.filter { $0 != "/" }
+        return components == ["debug", "seed-performance"]
+    }
+
     @MainActor
     static func resetEmpty(context: ModelContext) {
         try? DataExportImportService.deleteAll(context: context)
@@ -1031,7 +1091,133 @@ enum DebugSimulatorSmokeSeedService {
         UserDefaults.standard.removeObject(forKey: CaregiverIdentityService.currentCaregiverNameKey)
         UserDefaults.standard.removeObject(forKey: CaregiverIdentityService.needsLogNamePromptKey)
         UserDefaults.standard.removeObject(forKey: "selectedCareProfileID")
+        UserDefaults.standard.removeObject(forKey: FoodNavigationRestorationState.defaultsKey)
+        UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v1")
+        UserDefaults.standard.removeObject(forKey: performanceSeededKey)
         PersistenceService.setICloudSyncEnabled(false)
+    }
+
+    @MainActor
+    static func seedPerformanceDataIfNeeded(
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        seedIfNeeded(context: context, now: now)
+        guard !UserDefaults.standard.bool(forKey: performanceSeededKey) else { return }
+        guard let profile = fetch(CareProfile.self, id: childProfileID, context: context) else {
+            return
+        }
+        let household = HouseholdService.ensureDefaultHousehold(context: context)
+        let calendar = Calendar.current
+        let solidsState = SolidsTrackingService.activate(
+            profileID: profile.id,
+            existingState: nil,
+            context: context,
+            now: now,
+            persist: false
+        )
+        solidsState.guidedStartDate = calendar.startOfDay(for: now)
+
+        for index in 0..<3_000 {
+            let date = calendar.date(byAdding: .hour, value: -index * 5, to: now) ?? now
+            let type: EventType = switch index % 4 {
+            case 0: .sleep
+            case 1: .feed
+            case 2: .diaper
+            default: .activity
+            }
+            let event = BabyEvent(
+                profileID: profile.id,
+                type: type,
+                startDate: date,
+                endDate: type == .sleep ? date.addingTimeInterval(45 * 60) : nil,
+                caregiverName: "Sample Caregiver"
+            )
+            event.profileTypeSnapshot = .child
+            if type == .feed {
+                event.feedKind = index % 20 == 1 ? .solid : .bottle
+                event.amountOz = event.feedKind == .bottle ? 4 : nil
+            } else if type == .diaper {
+                event.diaperKind = .wet
+            } else if type == .activity {
+                event.activityType = .tummyTime
+            }
+            context.insert(event)
+
+            if type == .feed, event.feedKind == .solid {
+                let foodIndex = index % 400
+                let foodID = "performance-food-\(foodIndex)"
+                let foodName = "Performance Food \(foodIndex + 1)"
+                event.foodDescription = foodName
+                event.solidFoodDetails = [
+                    SolidFoodLogDetail(foodID: foodID, foodName: foodName)
+                ]
+                context.insert(SolidFoodEventItem(
+                    eventID: event.id,
+                    profileID: profile.id,
+                    foodID: foodID,
+                    foodNameSnapshot: foodName,
+                    createdAt: date,
+                    updatedAt: date
+                ))
+            }
+        }
+
+        for index in 0..<400 {
+            context.insert(SolidFoodProgress(
+                profileID: profile.id,
+                foodID: "performance-food-\(index)",
+                foodNameSnapshot: "Performance Food \(index + 1)",
+                status: .tried,
+                lastTriedAt: now.addingTimeInterval(Double(-index) * 86_400),
+                exposureCount: 1
+            ))
+        }
+
+        for index in 0..<120 {
+            context.insert(PlannedSolidMeal(
+                profileID: profile.id,
+                scheduledAt: now.addingTimeInterval(Double(index - 30) * 86_400),
+                title: "Performance Meal \(index + 1)",
+                foodIDs: ["performance-food-\(index % 400)"],
+                foodNames: ["Performance Food \((index % 400) + 1)"],
+                completedEventID: index < 60 ? UUID() : nil
+            ))
+        }
+
+        for tripIndex in 0..<30 {
+            let trip = PackingTrip(
+                householdID: household.id,
+                title: "Performance Trip \(tripIndex + 1)",
+                startDate: now.addingTimeInterval(Double(tripIndex + 1) * 86_400),
+                endDate: now.addingTimeInterval(Double(tripIndex + 3) * 86_400),
+                status: tripIndex < 20 ? .upcoming : .completed
+            )
+            context.insert(trip)
+            let traveler = TripTraveler(
+                householdID: household.id,
+                tripID: trip.id,
+                kind: .child,
+                profileID: profile.id,
+                displayName: "Sample Child"
+            )
+            context.insert(traveler)
+            for itemIndex in 0..<60 {
+                context.insert(PackingItem(
+                    householdID: household.id,
+                    tripID: trip.id,
+                    travelerID: traveler.id,
+                    title: "Packing Item \(itemIndex + 1)",
+                    category: PackingItemCategory.allCases[itemIndex % PackingItemCategory.allCases.count],
+                    state: itemIndex.isMultiple(of: 3) ? .packed : .needed,
+                    sortOrder: itemIndex
+                ))
+            }
+        }
+
+        if PersistenceService.save(context: context) {
+            UserDefaults.standard.set(true, forKey: performanceSeededKey)
+        }
     }
 
     @MainActor

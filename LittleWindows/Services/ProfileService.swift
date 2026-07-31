@@ -313,36 +313,11 @@ enum ProfileMigrationService {
             || hasOrphanedAppointments(context: context, validProfileIDs: validProfileIDs)
             || hasOrphanedAgeGuideStates(context: context, validProfileIDs: validProfileIDs)
             || hasOrphanedPuppyGuideStates(context: context, validProfileIDs: validProfileIDs)
-            || hasOrphanedRequiredRecords(
-                SolidsProfileState.self,
-                profileIDKeyPath: \.profileID,
-                context: context,
-                validProfileIDs: validProfileIDs
-            )
-            || hasOrphanedRequiredRecords(
-                SolidFoodProgress.self,
-                profileIDKeyPath: \.profileID,
-                context: context,
-                validProfileIDs: validProfileIDs
-            )
-            || hasOrphanedRequiredRecords(
-                SolidFoodEventItem.self,
-                profileIDKeyPath: \.profileID,
-                context: context,
-                validProfileIDs: validProfileIDs
-            )
-            || hasOrphanedRequiredRecords(
-                SolidAllergenProgress.self,
-                profileIDKeyPath: \.profileID,
-                context: context,
-                validProfileIDs: validProfileIDs
-            )
-            || hasOrphanedRequiredRecords(
-                PlannedSolidMeal.self,
-                profileIDKeyPath: \.profileID,
-                context: context,
-                validProfileIDs: validProfileIDs
-            )
+            || hasOrphanedSolidsProfileStates(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedSolidFoodProgress(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedSolidFoodEventItems(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedSolidAllergenProgress(context: context, validProfileIDs: validProfileIDs)
+            || hasOrphanedPlannedSolidMeals(context: context, validProfileIDs: validProfileIDs)
     }
 
     private static func hasOrphanedBabyEvents(
@@ -441,15 +416,89 @@ enum ProfileMigrationService {
         return validCount != total
     }
 
-    private static func hasOrphanedRequiredRecords<Record: PersistentModel>(
-        _ type: Record.Type,
-        profileIDKeyPath: KeyPath<Record, UUID>,
+    private static func hasOrphanedSolidsProfileStates(
         context: ModelContext,
         validProfileIDs: Set<UUID>
     ) -> Bool {
-        ((try? context.fetch(FetchDescriptor<Record>())) ?? []).contains {
-            !validProfileIDs.contains($0[keyPath: profileIDKeyPath])
+        hasOrphanedRequiredRecords(
+            total: (try? context.fetchCount(FetchDescriptor<SolidsProfileState>())) ?? 0,
+            validProfileIDs: validProfileIDs
+        ) { profileID in
+            let descriptor = FetchDescriptor<SolidsProfileState>(
+                predicate: #Predicate { $0.profileID == profileID }
+            )
+            return (try? context.fetchCount(descriptor)) ?? 0
         }
+    }
+
+    private static func hasOrphanedSolidFoodProgress(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        hasOrphanedRequiredRecords(
+            total: (try? context.fetchCount(FetchDescriptor<SolidFoodProgress>())) ?? 0,
+            validProfileIDs: validProfileIDs
+        ) { profileID in
+            let descriptor = FetchDescriptor<SolidFoodProgress>(
+                predicate: #Predicate { $0.profileID == profileID }
+            )
+            return (try? context.fetchCount(descriptor)) ?? 0
+        }
+    }
+
+    private static func hasOrphanedSolidFoodEventItems(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        hasOrphanedRequiredRecords(
+            total: (try? context.fetchCount(FetchDescriptor<SolidFoodEventItem>())) ?? 0,
+            validProfileIDs: validProfileIDs
+        ) { profileID in
+            let descriptor = FetchDescriptor<SolidFoodEventItem>(
+                predicate: #Predicate { $0.profileID == profileID }
+            )
+            return (try? context.fetchCount(descriptor)) ?? 0
+        }
+    }
+
+    private static func hasOrphanedSolidAllergenProgress(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        hasOrphanedRequiredRecords(
+            total: (try? context.fetchCount(FetchDescriptor<SolidAllergenProgress>())) ?? 0,
+            validProfileIDs: validProfileIDs
+        ) { profileID in
+            let descriptor = FetchDescriptor<SolidAllergenProgress>(
+                predicate: #Predicate { $0.profileID == profileID }
+            )
+            return (try? context.fetchCount(descriptor)) ?? 0
+        }
+    }
+
+    private static func hasOrphanedPlannedSolidMeals(
+        context: ModelContext,
+        validProfileIDs: Set<UUID>
+    ) -> Bool {
+        hasOrphanedRequiredRecords(
+            total: (try? context.fetchCount(FetchDescriptor<PlannedSolidMeal>())) ?? 0,
+            validProfileIDs: validProfileIDs
+        ) { profileID in
+            let descriptor = FetchDescriptor<PlannedSolidMeal>(
+                predicate: #Predicate { $0.profileID == profileID }
+            )
+            return (try? context.fetchCount(descriptor)) ?? 0
+        }
+    }
+
+    private static func hasOrphanedRequiredRecords(
+        total: Int,
+        validProfileIDs: Set<UUID>,
+        countForProfile: (UUID) -> Int
+    ) -> Bool {
+        guard total > 0 else { return false }
+        guard !validProfileIDs.isEmpty else { return true }
+        return validProfileIDs.reduce(0) { $0 + countForProfile($1) } != total
     }
 
     static func assignOrphanedProfileIDs(

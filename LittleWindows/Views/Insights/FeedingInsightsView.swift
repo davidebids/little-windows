@@ -63,6 +63,8 @@ struct FeedingInsightsView: View {
         .onChange(of: solids == nil) { _, solidsUnavailable in
             if solidsUnavailable && selectedMode == .solids {
                 selectedMode = .milk
+            } else if !solidsUnavailable {
+                applyPendingMode()
             }
         }
         .onAppear(perform: applyPendingMode)
@@ -73,8 +75,8 @@ struct FeedingInsightsView: View {
 
     private func applyPendingMode() {
         guard let mode = router.pendingFeedingInsightsMode else { return }
-        router.pendingFeedingInsightsMode = nil
         guard availableModes.contains(mode) else { return }
+        router.pendingFeedingInsightsMode = nil
         selectedMode = mode
     }
 

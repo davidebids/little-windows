@@ -52,7 +52,7 @@ extension View {
 }
 
 @MainActor
-enum SolidFoodThumbnailCache {
+enum ThumbnailImageCache {
     private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
         cache.countLimit = 120
@@ -182,9 +182,43 @@ struct EventEditorView: View {
         solidPreset: SolidFeedEditorPreset? = nil,
         onSave: @escaping (BabyEvent) -> Void
     ) {
+        let selectedType = event?.type ?? type
+        let selectedProfileID = event?.profileID
+            ?? ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let unloadedID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let loadsSolidData = selectedType == .feed
+            || event?.feedKind == .solid
+            || solidPreset != nil
+        let solidProfileID = loadsSolidData ? selectedProfileID : unloadedID
+        let feedRawValue = EventType.feed.rawValue
+        let solidRawValue = FeedKind.solid.rawValue
+        var recentSolidEventDescriptor = FetchDescriptor<BabyEvent>(
+            predicate: #Predicate<BabyEvent> { event in
+                event.profileID == solidProfileID
+                    && event.typeRawValue == feedRawValue
+                    && event.feedKindRawValue == solidRawValue
+            },
+            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+        )
+        recentSolidEventDescriptor.fetchLimit = 120
+        _allEvents = Query(recentSolidEventDescriptor)
+        _solidsProfileStates = Query(FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == solidProfileID },
+            sortBy: [SortDescriptor(\SolidsProfileState.updatedAt, order: .reverse)]
+        ))
+        if loadsSolidData {
+            _customSolidFoods = Query(FetchDescriptor<SolidFoodCatalogItem>(
+                sortBy: [SortDescriptor(\SolidFoodCatalogItem.name)]
+            ))
+        } else {
+            _customSolidFoods = Query(FetchDescriptor<SolidFoodCatalogItem>(
+                predicate: #Predicate { $0.normalizedName == "__unloaded_custom_food__" },
+                sortBy: [SortDescriptor(\SolidFoodCatalogItem.name)]
+            ))
+        }
         existingEvent = event
         self.onSave = onSave
-        let selectedType = event?.type ?? type
         _type = State(initialValue: selectedType)
         _title = State(initialValue: event?.title ?? "")
         _startDate = State(initialValue: event?.startDate ?? Date())
@@ -2333,6 +2367,11 @@ private struct SolidFoodPickerView: View {
     ) {
         self.recentFoodNames = recentFoodNames
         self.onDone = onDone
+        let solidFoodPhotoKind = PhotoAttachmentOwnerKind.solidFood.rawValue
+        _photoAttachments = Query(FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { $0.ownerKindRawValue == solidFoodPhotoKind },
+            sortBy: [SortDescriptor(\PhotoAttachment.createdAt, order: .reverse)]
+        ))
         _selection = State(initialValue: SolidFoodPickerSelection(initialSelection))
     }
 
@@ -2868,7 +2907,7 @@ private struct SolidFoodPickerTile: View {
     private var visual: some View {
         if let photoAttachmentID,
            let photoData,
-           let image = SolidFoodThumbnailCache.image(
+           let image = ThumbnailImageCache.image(
                attachmentID: photoAttachmentID,
                data: photoData
            ) {
@@ -2992,7 +3031,7 @@ struct CustomSolidFoodEditorView: View {
             Section {
                 if let previewAttachmentID,
                    let previewData,
-                   let image = SolidFoodThumbnailCache.image(
+                   let image = ThumbnailImageCache.image(
                     attachmentID: previewAttachmentID,
                     data: previewData
                    ) {

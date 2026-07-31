@@ -10,6 +10,15 @@ struct AppointmentsListView: View {
     @State private var showingDeleteConfirmation = false
     @StateObject private var profileService = ProfileService.shared
 
+    init(profileID: UUID? = nil) {
+        let selectedProfileID = profileID ?? ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        _appointments = Query(FetchDescriptor<DoctorAppointment>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\DoctorAppointment.startDate)]
+        ))
+    }
+
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
     private var scopedAppointments: [DoctorAppointment] {
         appointments.filter { $0.matchesProfile(profile?.id) }

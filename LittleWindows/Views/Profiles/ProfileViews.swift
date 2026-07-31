@@ -33,8 +33,12 @@ struct ProfileAvatarView: View {
 
     var body: some View {
         ZStack {
-            if let profilePhotoData,
-               let image = UIImage(data: profilePhotoData) {
+            if let attachmentID = profile.profilePhotoAttachmentID,
+               let profilePhotoData,
+               let image = ThumbnailImageCache.image(
+                attachmentID: attachmentID,
+                data: profilePhotoData
+               ) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -223,6 +227,13 @@ struct ProfileEditorView: View {
 
     init(profile: CareProfile? = nil, defaultType: CareProfileType = .child) {
         self.profile = profile
+        let attachmentID = profile?.profilePhotoAttachmentID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        var photoDescriptor = FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { $0.id == attachmentID }
+        )
+        photoDescriptor.fetchLimit = 1
+        _photoAttachments = Query(photoDescriptor)
         _profileType = State(initialValue: profile?.profileType ?? defaultType)
         _name = State(initialValue: profile?.name ?? "")
         _birthDate = State(initialValue: profile?.birthDate ?? Date())

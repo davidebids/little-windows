@@ -27,11 +27,10 @@ enum CloudMigrationService {
         }
 
         do {
-            let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
-            ProfileMigrationService.ensureProfilesAndAssignments(
-                context: context,
-                profiles: profiles
-            )
+            // Profile-scoped legacy migration is already performed by
+            // SampleData.seedIfNeeded immediately before this call. Repeating
+            // it here forced a second full-store audit on a fresh TestFlight
+            // install while CloudKit records were still materializing.
             try context.save()
 
             let completedAt = Date()

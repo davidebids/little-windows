@@ -13,29 +13,6 @@ private enum TodayScrollAnchor {
     case timeline
 }
 
-private final class TodayScrollInteractionState {
-    var isDragging = false
-}
-
-private struct TodayScrollInteractionModifier: ViewModifier {
-    @State private var interactionState = TodayScrollInteractionState()
-
-    func body(content: Content) -> some View {
-        content.simultaneousGesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { _ in
-                    guard !interactionState.isDragging else { return }
-                    interactionState.isDragging = true
-                    AppInteractionMonitor.noteInteraction()
-                }
-                .onEnded { _ in
-                    interactionState.isDragging = false
-                    AppInteractionMonitor.noteInteraction()
-                }
-        )
-    }
-}
-
 private struct DogPottySubtitleKey: Hashable {
     var pottyType: DogPottyType
     var accident: Bool?
@@ -51,8 +28,8 @@ private struct TodayRenderState {
     var scopedPuppyGuideReadStates: [PuppyStageGuideReadState]
     var todayEvents: [BabyEvent]
     var activeEvents: [BabyEvent]
-    var sleepPressureEvents: [BabyEvent]
     var prediction: SleepPrediction?
+    var sleepPressure: SleepPressure?
     var isDogProfile: Bool
     var currentHouseholdID: UUID?
     var visibleCareRoutines: [CareRoutine]
@@ -73,6 +50,11 @@ private struct TodayRenderState {
     var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date]
     var smartQuickActions: [QuickLogActionSnapshot]
     var visibleCareTypes: Set<EventType>
+    var solidsProfileState: SolidsProfileState?
+    var solidsAccessLevel: SolidsAccessLevel
+    var nextPlannedSolidMeal: PlannedSolidMeal?
+    var dueSolidAllergenProgress: SolidAllergenProgress?
+    var hasSolidHistory: Bool
 
     func shows(_ type: EventType) -> Bool {
         visibleCareTypes.contains(type)
@@ -80,6 +62,10 @@ private struct TodayRenderState {
 
     func hasActiveTimer(of type: EventType) -> Bool {
         activeEvents.contains { $0.type == type && $0.isTimerDraft }
+    }
+
+    func activeTimer(of type: EventType) -> BabyEvent? {
+        activeEvents.first { $0.type == type && $0.isTimerDraft }
     }
 
     static let empty = TodayRenderState(
@@ -92,8 +78,8 @@ private struct TodayRenderState {
         scopedPuppyGuideReadStates: [],
         todayEvents: [],
         activeEvents: [],
-        sleepPressureEvents: [],
         prediction: nil,
+        sleepPressure: nil,
         isDogProfile: false,
         currentHouseholdID: nil,
         visibleCareRoutines: [],
@@ -113,8 +99,26 @@ private struct TodayRenderState {
         lastLoggedDates: [:],
         dogPottyLastLoggedDates: [:],
         smartQuickActions: [],
-        visibleCareTypes: []
+        visibleCareTypes: [],
+        solidsProfileState: nil,
+        solidsAccessLevel: .hidden,
+        nextPlannedSolidMeal: nil,
+        dueSolidAllergenProgress: nil,
+        hasSolidHistory: false
     )
+}
+
+private struct TodayPreferenceRevision: Equatable {
+    var selectedProfileID: UUID?
+    var caregiverOne: String
+    var currentCaregiverName: String
+    var feedAdjustmentEnabled: Bool
+    var nursingAdjustmentEnabled: Bool
+    var bedtimePredictionEnabled: Bool
+    var customWakeMinimum: Double
+    var customWakeMaximum: Double
+    var pinnedQuickActionRevision: Int
+    var categoryPreferenceRevision: Int
 }
 
 struct TodayView: View {
@@ -131,8 +135,6 @@ struct TodayView: View {
     @Query(sort: \CareRoutineStep.sortOrder) private var careRoutineSteps: [CareRoutineStep]
     @Query(sort: \CareRoutineRun.startedAt, order: .reverse) private var careRoutineRuns: [CareRoutineRun]
     @Query(sort: \Household.createdAt) private var households: [Household]
-    @Query(sort: \SolidFoodEventItem.createdAt, order: .reverse) private var solidFoodEventItems: [SolidFoodEventItem]
-    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
     @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
     @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
     @Query(sort: \SolidAllergenProgress.updatedAt, order: .reverse) private var solidAllergenProgress: [SolidAllergenProgress]
@@ -172,20 +174,22 @@ struct TodayView: View {
     @State private var categoryPreferenceRevision = 0
     @State private var repeatFeedback: RepeatFeedback?
     @State private var showingCareCustomization = false
-    @State private var cachedRenderState: TodayRenderState?
+    @State private var cachedRenderState = TodayRenderState.empty
     @State private var hasCompletedInitialSetup = false
     @State private var renderStateRefreshTask: Task<Void, Never>?
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
-    init() {
+    init(profileID: UUID? = nil) {
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
         let recentCutoff = calendar.date(byAdding: .day, value: -45, to: todayStart) ?? todayStart
+        let selectedProfileID = profileID ?? ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
         var eventDescriptor = FetchDescriptor<BabyEvent>(
             predicate: #Predicate<BabyEvent> { event in
-                event.startDate >= recentCutoff
+                event.profileID == selectedProfileID && event.startDate >= recentCutoff
             },
             sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
         )
@@ -196,7 +200,8 @@ struct TodayView: View {
             ?? todayStart.addingTimeInterval(3 * 24 * 60 * 60)
         let appointmentDescriptor = FetchDescriptor<DoctorAppointment>(
             predicate: #Predicate<DoctorAppointment> { appointment in
-                appointment.isCompleted == false &&
+                appointment.profileID == selectedProfileID &&
+                    appointment.isCompleted == false &&
                     appointment.startDate >= todayStart &&
                     appointment.startDate <= appointmentEnd
             },
@@ -206,7 +211,8 @@ struct TodayView: View {
 
         var recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
             predicate: #Predicate<SleepPredictionRecord> { record in
-                record.actualSleepEventID == nil || record.generatedAt >= recentCutoff
+                record.profileID == selectedProfileID &&
+                    (record.actualSleepEventID == nil || record.generatedAt >= recentCutoff)
             },
             sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
         )
@@ -215,102 +221,76 @@ struct TodayView: View {
 
         let routineRunCutoff = calendar.date(byAdding: .day, value: -14, to: todayStart) ?? todayStart
         let activeRoutineRunState = CareRoutineRunState.active.rawValue
-        var routineRunDescriptor = FetchDescriptor<CareRoutineRun>(
-            predicate: #Predicate<CareRoutineRun> { run in
-                run.stateRawValue == activeRoutineRunState || run.startedAt >= routineRunCutoff
+        _careRoutines = Query(FetchDescriptor<CareRoutine>(
+            predicate: #Predicate { routine in
+                !routine.isArchived
+                    && (routine.profileID == selectedProfileID || routine.profileID == nil)
+            },
+            sortBy: [SortDescriptor(\CareRoutine.sortOrder)]
+        ))
+        var scopedRoutineRunDescriptor = FetchDescriptor<CareRoutineRun>(
+            predicate: #Predicate { run in
+                (run.profileID == selectedProfileID || run.profileID == nil)
+                    && (run.stateRawValue == activeRoutineRunState || run.startedAt >= routineRunCutoff)
             },
             sortBy: [SortDescriptor(\CareRoutineRun.startedAt, order: .reverse)]
         )
-        routineRunDescriptor.fetchLimit = 120
-        _careRoutineRuns = Query(routineRunDescriptor)
+        scopedRoutineRunDescriptor.fetchLimit = 120
+        _careRoutineRuns = Query(scopedRoutineRunDescriptor)
+
+        _ageGuideReadStates = Query(FetchDescriptor<AgeGuideReadState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\AgeGuideReadState.updatedAt)]
+        ))
+        _puppyStageGuideReadStates = Query(FetchDescriptor<PuppyStageGuideReadState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\PuppyStageGuideReadState.updatedAt)]
+        ))
+        _plannedSolidMeals = Query(FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate {
+                $0.profileID == selectedProfileID && $0.completedEventID == nil
+            },
+            sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
+        ))
+        _solidsProfileStates = Query(FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\SolidsProfileState.updatedAt, order: .reverse)]
+        ))
+        _solidAllergenProgress = Query(FetchDescriptor<SolidAllergenProgress>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\SolidAllergenProgress.updatedAt, order: .reverse)]
+        ))
     }
     private var profile: BabyProfile? {
-        profileService.selectedProfile(in: profiles)
+        cachedRenderState.profile
     }
-    private var selectedProfileID: UUID? { profile?.id }
+    private var selectedProfileID: UUID? { cachedRenderState.profileID }
     private var scopedEvents: [BabyEvent] {
-        allEvents.filter { $0.matchesProfile(selectedProfileID) }
+        cachedRenderState.scopedEvents
     }
     private var scopedRecords: [SleepPredictionRecord] {
-        records.filter { $0.matchesProfile(selectedProfileID) }
+        cachedRenderState.scopedRecords
     }
     private var scopedAppointments: [DoctorAppointment] {
-        appointments.filter { $0.matchesProfile(selectedProfileID) }
-    }
-    private var scopedAgeGuideReadStates: [AgeGuideReadState] {
-        ageGuideReadStates.filter { $0.matchesProfile(selectedProfileID) }
-    }
-    private var scopedPuppyGuideReadStates: [PuppyStageGuideReadState] {
-        puppyStageGuideReadStates.filter { $0.matchesProfile(selectedProfileID) }
+        cachedRenderState.scopedAppointments
     }
     private var currentHouseholdID: UUID? {
-        households.first?.id
+        cachedRenderState.currentHouseholdID
     }
     private var visibleCareRoutines: [CareRoutine] {
-        CareRoutineService.visibleRoutines(
-            routines: careRoutines,
-            profileID: selectedProfileID,
-            profileType: profile?.profileType,
-            householdID: currentHouseholdID
-        )
-    }
-    private var suggestedRoutineTemplates: [CareRoutineTemplate] {
-        let existingKinds = Set(visibleCareRoutines.compactMap(\.templateKind))
-        return CareRoutineService.templates(for: profile?.profileType).filter {
-            !existingKinds.contains($0.kind)
-        }
-    }
-    private var currentAgeGuide: AgeGuide? {
-        profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
-    }
-    private var shouldShowAgeGuideCard: Bool {
-        guard let profile, let guide = currentAgeGuide else { return false }
-        let state = scopedAgeGuideReadStates.first { $0.guideID == guide.id }
-        return AgeGuideService.shared.shouldShowMonthlyCard(
-            profile: profile,
-            readState: state
-        )
-    }
-    private var currentPuppyGuide: PuppyStageGuide? {
-        profile.flatMap { PuppyStageGuideService.shared.currentGuide(for: $0) }
-    }
-    private var shouldShowPuppyGuideCard: Bool {
-        guard let profile, let guide = currentPuppyGuide else { return false }
-        let state = scopedPuppyGuideReadStates.first { $0.guideID == guide.id }
-        return PuppyStageGuideService.shared.shouldShowStageCard(
-            profile: profile,
-            readState: state
-        )
-    }
-    private var todayEvents: [BabyEvent] {
-        scopedEvents.filter {
-            !$0.isTimerDraft && $0.occursOnLocalDay(Date())
-        }
+        cachedRenderState.visibleCareRoutines
     }
     private var activeEvents: [BabyEvent] {
-        scopedEvents.filter(\.isTimerDraft).sorted { $0.startDate < $1.startDate }
+        cachedRenderState.activeEvents
     }
     private var prediction: SleepPrediction? {
-        PredictionTuningService.currentPrediction(
-            profile: profile,
-            events: scopedEvents,
-            records: scopedRecords,
-            settings: predictionSettings
-        )
+        cachedRenderState.prediction
     }
-    private var isDogProfile: Bool { profile?.profileType == .dog }
     private var activeCaregiverName: String {
         CaregiverIdentityService.currentCaregiverName(
             currentName: currentCaregiverName,
             primaryName: caregiverOne
         )
-    }
-    private var relevantAppointments: [DoctorAppointment] {
-        let now = Date()
-        let soon = now.addingTimeInterval(3 * 24 * 60 * 60)
-        return scopedAppointments
-            .filter { !$0.isCompleted && $0.startDate >= Calendar.current.startOfDay(for: now) && $0.startDate <= soon }
-            .sorted { $0.startDate < $1.startDate }
     }
     private var predictionSettings: PredictionSettings {
         PredictionSettings(
@@ -322,58 +302,21 @@ struct TodayView: View {
         )
     }
     private var runningSleepTimer: BabyEvent? {
-        activeEvents.first {
-            $0.isSleepBlock && $0.isTimerRunning
-        }
+        cachedRenderState.runningSleepTimer
     }
-    private var awakeSinceDate: Date? {
-        guard runningSleepTimer == nil else { return nil }
-        let now = Date()
-        let completedSleepEnd = scopedEvents
-            .filter { $0.isSleepBlock && !$0.isTimerDraft }
-            .compactMap(\.endDate)
-            .filter { $0 <= now }
-            .max()
-        let stoppedDraftSleepEnd = activeEvents
-            .filter { $0.isSleepBlock && !$0.isTimerRunning }
-            .map(\.updatedAt)
-            .filter { $0 <= now }
-            .max()
-        return [completedSleepEnd, stoppedDraftSleepEnd]
-            .compactMap { $0 }
-            .max()
-    }
-    private var renderRefreshToken: String {
-        [
-            collectionVersion(profiles, updatedAt: \.updatedAt),
-            profileService.selectedProfile(in: profiles)?.id.uuidString ?? "no-profile",
-            collectionVersion(allEvents, updatedAt: \.updatedAt),
-            collectionVersion(records, updatedAt: \.updatedAt),
-            collectionVersion(appointments, updatedAt: \.updatedAt),
-            collectionVersion(ageGuideReadStates, updatedAt: \.updatedAt),
-            collectionVersion(puppyStageGuideReadStates, updatedAt: \.updatedAt),
-            collectionVersion(careRoutines, updatedAt: \.updatedAt),
-            collectionVersion(careRoutineSteps, updatedAt: \.updatedAt),
-            collectionVersion(careRoutineRuns, updatedAt: \.updatedAt),
-            collectionVersion(households, updatedAt: \.updatedAt),
-            caregiverOne,
-            currentCaregiverName,
-            feedAdjustmentEnabled.description,
-            nursingAdjustmentEnabled.description,
-            bedtimePredictionEnabled.description,
-            customWakeMinimum.description,
-            customWakeMaximum.description,
-            pinnedQuickActionRevision.description,
-            categoryPreferenceRevision.description
-        ].joined(separator: "|")
-    }
-
-    private func collectionVersion<Value>(
-        _ values: [Value],
-        updatedAt: KeyPath<Value, Date>
-    ) -> String {
-        let latest = values.lazy.map { $0[keyPath: updatedAt].timeIntervalSinceReferenceDate }.max() ?? 0
-        return "\(values.count):\(latest)"
+    private var preferenceRevision: TodayPreferenceRevision {
+        TodayPreferenceRevision(
+            selectedProfileID: profileService.selectedProfileID,
+            caregiverOne: caregiverOne,
+            currentCaregiverName: currentCaregiverName,
+            feedAdjustmentEnabled: feedAdjustmentEnabled,
+            nursingAdjustmentEnabled: nursingAdjustmentEnabled,
+            bedtimePredictionEnabled: bedtimePredictionEnabled,
+            customWakeMinimum: customWakeMinimum,
+            customWakeMaximum: customWakeMaximum,
+            pinnedQuickActionRevision: pinnedQuickActionRevision,
+            categoryPreferenceRevision: categoryPreferenceRevision
+        )
     }
 
     private func refreshCachedRenderState() {
@@ -381,16 +324,18 @@ struct TodayView: View {
     }
 
     private func makeRenderState() -> TodayRenderState {
-        let profile = profile
+        let profile = profileService.selectedProfile(in: profiles)
         let profileID = profile?.id
         let now = Date()
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: now)
-        let scopedEvents = allEvents.filter { $0.matchesProfile(profileID) }
-        let scopedRecords = records.filter { $0.matchesProfile(profileID) }
-        let scopedAppointments = appointments.filter { $0.matchesProfile(profileID) }
-        let scopedAgeGuideReadStates = ageGuideReadStates.filter { $0.matchesProfile(profileID) }
-        let scopedPuppyGuideReadStates = puppyStageGuideReadStates.filter { $0.matchesProfile(profileID) }
+        // Every query owned by TodayView is already scoped to the selected profile.
+        // Do not re-read every SwiftData property just to apply the same filter.
+        let scopedEvents = allEvents
+        let scopedRecords = records
+        let scopedAppointments = appointments
+        let scopedAgeGuideReadStates = ageGuideReadStates
+        let scopedPuppyGuideReadStates = puppyStageGuideReadStates
         let currentHouseholdID = households.first?.id
         let visibleCareRoutines = CareRoutineService.visibleRoutines(
             routines: careRoutines,
@@ -442,6 +387,7 @@ struct TodayView: View {
         var latestPoopEvent: BabyEvent?
         var lastLoggedDates: [EventType: Date] = [:]
         var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date] = [:]
+        var hasSolidHistory = false
 
         for event in scopedEvents {
             if event.isTimerDraft {
@@ -456,6 +402,9 @@ struct TodayView: View {
             }
 
             let logDate = event.endDate ?? event.startDate
+            if event.type == .feed, event.feedKind == .solid {
+                hasSolidHistory = true
+            }
             if logDate <= now, lastLoggedDates[event.type].map({ logDate > $0 }) ?? true {
                 lastLoggedDates[event.type] = logDate
             }
@@ -533,6 +482,13 @@ struct TodayView: View {
             records: scopedRecords,
             settings: predictionSettings
         )
+        let sleepPressure = SleepPredictionEngine.sleepPressure(
+            profile: profile,
+            events: sleepPressureEvents,
+            records: scopedRecords,
+            now: now,
+            settings: predictionSettings
+        )
         let soon = now.addingTimeInterval(3 * 24 * 60 * 60)
         let relevantAppointments = scopedAppointments
             .filter { !$0.isCompleted && $0.startDate >= todayStart && $0.startDate <= soon }
@@ -576,6 +532,38 @@ struct TodayView: View {
             pinnedActionIDs: pinnedQuickActionIDs,
             now: now
         )
+        let solidsProfileState = profileID.flatMap { targetProfileID in
+            solidsProfileStates.first { $0.profileID == targetProfileID }
+        }
+        let solidsAccessLevel = profile.map {
+            SolidsTrackingService.accessLevel(
+                for: $0,
+                events: scopedEvents,
+                state: solidsProfileState
+            )
+        } ?? .hidden
+        let endOfToday = calendar.date(
+            byAdding: DateComponents(day: 1, second: -1),
+            to: todayStart
+        ) ?? now
+        let nextPlannedSolidMeal = profileID.flatMap { targetProfileID in
+            plannedSolidMeals.first {
+                $0.profileID == targetProfileID && !$0.isCompleted && $0.scheduledAt <= endOfToday
+            }
+        }
+        let dueSolidAllergenProgress = profileID.flatMap { targetProfileID in
+            solidAllergenProgress
+                .lazy
+                .filter {
+                    $0.profileID == targetProfileID &&
+                        $0.nextExposureDueAt.map { $0 <= endOfToday } == true &&
+                        $0.status != .suspectedReaction &&
+                        $0.status != .avoidPendingAdvice
+                }
+                .min {
+                    ($0.nextExposureDueAt ?? .distantFuture) < ($1.nextExposureDueAt ?? .distantFuture)
+                }
+        }
         return TodayRenderState(
             profile: profile,
             profileID: profileID,
@@ -586,8 +574,8 @@ struct TodayView: View {
             scopedPuppyGuideReadStates: scopedPuppyGuideReadStates,
             todayEvents: todayEvents,
             activeEvents: activeEvents,
-            sleepPressureEvents: sleepPressureEvents,
             prediction: prediction,
+            sleepPressure: sleepPressure,
             isDogProfile: profile?.profileType == .dog,
             currentHouseholdID: currentHouseholdID,
             visibleCareRoutines: visibleCareRoutines,
@@ -607,7 +595,12 @@ struct TodayView: View {
             lastLoggedDates: lastLoggedDates,
             dogPottyLastLoggedDates: dogPottyLastLoggedDates,
             smartQuickActions: smartQuickActions,
-            visibleCareTypes: visibleCareTypes
+            visibleCareTypes: visibleCareTypes,
+            solidsProfileState: solidsProfileState,
+            solidsAccessLevel: solidsAccessLevel,
+            nextPlannedSolidMeal: nextPlannedSolidMeal,
+            dueSolidAllergenProgress: dueSolidAllergenProgress,
+            hasSolidHistory: hasSolidHistory
         )
     }
 
@@ -624,7 +617,7 @@ struct TodayView: View {
     }
 
     var body: some View {
-        let state = cachedRenderState ?? makeRenderState()
+        let state = cachedRenderState
         let todayEvents = state.todayEvents
         let activeEvents = state.activeEvents
         let prediction = state.prediction
@@ -695,9 +688,7 @@ struct TodayView: View {
                                 prediction: prediction,
                                 babyName: profile?.name ?? "Baby",
                                 awakeSinceDate: state.awakeSinceDate,
-                                sleepPressure: { now in
-                                    sleepPressure(at: now, state: state)
-                                },
+                                sleepPressure: state.sleepPressure,
                                 alertStatusText: notificationManager.statusText(
                                     prediction: prediction,
                                     settings: .current,
@@ -770,7 +761,6 @@ struct TodayView: View {
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.background)
-            .modifier(TodayScrollInteractionModifier())
         }
 
         listContent
@@ -844,7 +834,7 @@ struct TodayView: View {
                         cancel: { cancelRoutineRun(run) },
                         canPerform: { step in
                             step.action != .startTimer
-                                || activeTimer(of: step.eventType ?? .custom) == nil
+                                || state.activeTimer(of: step.eventType ?? .custom) == nil
                         }
                     )
                 }
@@ -883,7 +873,7 @@ struct TodayView: View {
         .sheet(isPresented: $showingCareCustomization) {
             NavigationStack {
                 CareCategoryCustomizationView(
-                    profileID: selectedProfileID,
+                    profileID: state.profileID,
                     profileType: profile?.profileType ?? .child
                 ) {
                     categoryPreferenceRevision += 1
@@ -895,7 +885,7 @@ struct TodayView: View {
             NavigationStack {
                 PredictionExplanationView(
                     prediction: prediction,
-                    sleepPressure: sleepPressure(at: Date(), state: state)
+                    sleepPressure: state.sleepPressure
                 )
             }
         }
@@ -983,7 +973,7 @@ struct TodayView: View {
             message: "Pick a common activity timer or open a custom activity entry.",
             systemImage: "figure.play",
             tint: .green,
-            options: activityOptions
+            options: showingActivityChooser ? activityOptions(state: state) : []
         )
         .confirmationDialog(
             "Turn on Little Window Alerts?",
@@ -1018,7 +1008,10 @@ struct TodayView: View {
         .onChange(of: deepLinkRouter.pendingAction) { _, _ in
             handlePendingDeepLink()
         }
-        .onChange(of: renderRefreshToken) { _, _ in
+        .onChange(of: preferenceRevision) { _, _ in
+            scheduleRenderStateRefresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
             scheduleRenderStateRefresh()
         }
         .onChange(of: deepLinkRouter.pendingProfileID) { _, _ in
@@ -1048,6 +1041,7 @@ struct TodayView: View {
             hasCompletedInitialSetup = true
             _ = HouseholdService.ensureDefaultHousehold(context: modelContext)
             _ = profileService.ensureSelection(in: profiles)
+            refreshCachedRenderState()
             refreshActiveSleepPlan()
             handlePendingProfileSwitch()
             handlePendingDeepLink()
@@ -1059,8 +1053,19 @@ struct TodayView: View {
                 hasCompletedInitialSetup = false
                 return
             }
-            refreshCachedRenderState()
             await syncActiveSleepPlanWakeAlert()
+        }
+        .task(id: state.profileID) {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    return
+                }
+                await AppInteractionMonitor.waitUntilIdle()
+                guard !Task.isCancelled else { return }
+                refreshCachedRenderState()
+            }
         }
     }
 
@@ -1215,34 +1220,11 @@ struct TodayView: View {
     @ViewBuilder
     private func solidsTodaySection(_ state: TodayRenderState) -> some View {
         if let profile = state.profile, profile.profileType == .child {
-            let profileState = solidsProfileStates.first { $0.profileID == profile.id }
-            let accessLevel = SolidsTrackingService.accessLevel(
-                for: profile,
-                events: state.scopedEvents,
-                state: profileState
-            )
             let calendar = Calendar.current
-            let endOfToday = calendar.date(
-                byAdding: DateComponents(day: 1, second: -1),
-                to: calendar.startOfDay(for: Date())
-            ) ?? Date()
-            let nextPlan = plannedSolidMeals.first {
-                $0.profileID == profile.id && !$0.isCompleted && $0.scheduledAt <= endOfToday
-            }
-            let dueAllergen = solidAllergenProgress
-                .filter {
-                    $0.profileID == profile.id &&
-                        $0.nextExposureDueAt.map { $0 <= endOfToday } == true &&
-                        $0.status != .suspectedReaction &&
-                        $0.status != .avoidPendingAdvice
-                }
-                .sorted {
-                    ($0.nextExposureDueAt ?? .distantFuture) < ($1.nextExposureDueAt ?? .distantFuture)
-                }
-                .first
-            let hasSolidHistory = state.scopedEvents.contains {
-                $0.type == .feed && $0.feedKind == .solid
-            }
+            let accessLevel = state.solidsAccessLevel
+            let nextPlan = state.nextPlannedSolidMeal
+            let dueAllergen = state.dueSolidAllergenProgress
+            let hasSolidHistory = state.hasSolidHistory
 
             if accessLevel == .readinessPreview {
                 Section {
@@ -1358,19 +1340,15 @@ struct TodayView: View {
         if route == .solidsHome,
            let profile = state.profile,
            profile.profileType == .child {
-            let profileState = solidsProfileStates.first { $0.profileID == profile.id }
-            let accessLevel = SolidsTrackingService.accessLevel(
-                for: profile,
-                events: state.scopedEvents,
-                state: profileState
-            )
+            let profileState = state.solidsProfileState
+            let accessLevel = state.solidsAccessLevel
             if accessLevel != .hidden {
                 SolidsHomeView(
                     profile: profile,
                     accessLevel: accessLevel,
                     events: state.scopedEvents,
-                    eventItems: solidFoodEventItems,
-                    progress: solidFoodProgress,
+                    eventItems: [],
+                    progress: [],
                     plans: plannedSolidMeals,
                     profileState: profileState,
                     open: openSolidsInCare
@@ -1395,7 +1373,7 @@ struct TodayView: View {
         guard let command = solidsCommand(for: route) else { return }
         deepLinkRouter.openSolids(
             command,
-            profileID: profile?.id,
+            profileID: cachedRenderState.profileID,
             returningTo: .today
         )
     }
@@ -1429,7 +1407,7 @@ struct TodayView: View {
 
                 if state.shows(.sleep) {
                     Button {
-                        if let activeSleep = activeTimer(of: .sleep) {
+                        if let activeSleep = state.activeTimer(of: .sleep) {
                             activeTimerToEdit = activeSleep
                         } else {
                             showingSleepChooser = true
@@ -2013,7 +1991,7 @@ struct TodayView: View {
     }
 
     private func activeTimer(of type: EventType) -> BabyEvent? {
-        scopedEvents.first { $0.type == type && $0.isTimerDraft }
+        cachedRenderState.activeTimer(of: type)
     }
 
     private func logDogPotty(_ pottyType: DogPottyType, accident: Bool) {
@@ -2358,13 +2336,6 @@ struct TodayView: View {
         }
     }
 
-    private func lastEventTitle(_ type: EventType) -> String {
-        scopedEvents
-            .filter { $0.type == type && !$0.isTimerDraft }
-            .max { $0.startDate < $1.startDate }?
-            .displayTitle ?? "Not logged"
-    }
-
     private func lastEventSubtitle(_ type: EventType, state: TodayRenderState) -> String {
         lastLoggedSubtitle(date: state.lastLoggedDates[type])
     }
@@ -2387,17 +2358,6 @@ struct TodayView: View {
             return "Not logged"
         }
         return "Last \(DurationFormatting.string(seconds: now.timeIntervalSince(date))) ago"
-    }
-
-    private func lastDogPottyTitle(_ pottyType: DogPottyType) -> String {
-        scopedEvents
-            .filter {
-                $0.type == .potty
-                    && !$0.isTimerDraft
-                    && ($0.dogDetails.pottyType == pottyType || $0.dogDetails.pottyType == .both)
-            }
-            .max { $0.startDate < $1.startDate }?
-            .displayTitle ?? "Not logged"
     }
 
     private func dogLastEventTitle(_ type: EventType, state: TodayRenderState) -> String {
@@ -2424,7 +2384,7 @@ struct TodayView: View {
     private func scheduleRenderStateRefresh() {
         renderStateRefreshTask?.cancel()
         renderStateRefreshTask = Task { @MainActor in
-            await AppInteractionMonitor.waitUntilIdle()
+            await AppInteractionMonitor.waitUntilIdle(for: 0.35)
             guard !Task.isCancelled else { return }
             refreshCachedRenderState()
         }
@@ -2929,29 +2889,9 @@ struct TodayView: View {
         )
     }
 
-    private func sleepPressure(at now: Date) -> SleepPressure? {
-        SleepPredictionEngine.sleepPressure(
-            profile: profile,
-            events: scopedEvents,
-            records: scopedRecords,
-            now: now,
-            settings: predictionSettings
-        )
-    }
-
-    private func sleepPressure(at now: Date, state: TodayRenderState) -> SleepPressure? {
-        SleepPredictionEngine.sleepPressure(
-            profile: state.profile,
-            events: state.sleepPressureEvents,
-            records: state.scopedRecords,
-            now: now,
-            settings: predictionSettings
-        )
-    }
-
-    private var activityOptions: [AppActionSheetOption] {
+    private func activityOptions(state: TodayRenderState) -> [AppActionSheetOption] {
         ActivityType.allCases.map { activity in
-            let timerAlreadyActive = activity != .custom && activeTimer(of: .activity) != nil
+            let timerAlreadyActive = activity != .custom && state.hasActiveTimer(of: .activity)
             return AppActionSheetOption(
                 title: activity.displayName,
                 subtitle: timerAlreadyActive

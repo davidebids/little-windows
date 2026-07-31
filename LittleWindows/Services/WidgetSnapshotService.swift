@@ -76,6 +76,8 @@ enum CareCategoryPreferenceStore {
 
 @MainActor
 enum WidgetSnapshotService {
+    private static var pendingFoodRefreshTask: Task<Void, Never>?
+
     static func refresh(
         profile: BabyProfile?,
         events: [BabyEvent],
@@ -413,6 +415,24 @@ enum WidgetSnapshotService {
         snapshot.generatedAt = now
         snapshot.food = makeFoodSnapshot(context: context, now: now)
         write(snapshot)
+    }
+
+    /// Food mutations should finish their UI update before rebuilding widget
+    /// data. Coalescing also prevents a run of check-offs or reorders from
+    /// repeating the same bounded database reads for every tap.
+    static func scheduleFoodRefresh(context: ModelContext) {
+        pendingFoodRefreshTask?.cancel()
+        pendingFoodRefreshTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            await AppInteractionMonitor.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            refreshFood(context: context)
+            pendingFoodRefreshTask = nil
+        }
     }
 
     static func makeFoodSnapshot(

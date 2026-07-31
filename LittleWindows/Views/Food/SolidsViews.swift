@@ -88,6 +88,8 @@ struct SolidsHomeView: View {
                 )
             }
             guard accessLevel == .full else { return }
+            await AppInteractionMonitor.waitUntilIdle(for: 1.5)
+            guard !Task.isCancelled else { return }
             if let error = await resolvedBackfillWriter().backfill(profileID: profile.id).error {
                 PersistenceService.recordLocalSaveFailure(error)
             }
@@ -1089,7 +1091,7 @@ struct SolidsFoodDatabaseView: View {
                             HStack(spacing: 12) {
                                 if let photoID = food.photoAttachmentID,
                                    let data = photoDataByID[photoID],
-                                   let image = SolidFoodThumbnailCache.image(
+                                   let image = ThumbnailImageCache.image(
                                     attachmentID: photoID,
                                     data: data
                                    ) {
@@ -1885,7 +1887,7 @@ struct CustomSolidFoodDetailView: View {
             Section {
                 if let photo,
                    let data = photo.previewData,
-                   let image = SolidFoodThumbnailCache.image(attachmentID: photo.id, data: data) {
+                   let image = ThumbnailImageCache.image(attachmentID: photo.id, data: data) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -2619,8 +2621,10 @@ struct SolidsPlannerView: View {
                                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                             }
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("solids.plan.row")
                     .swipeActions(edge: .leading) {
                         Button { editingPlan = plan } label: { Label("Edit", systemImage: "pencil") }
                             .tint(.blue)
@@ -3078,6 +3082,20 @@ private struct SolidPlanNotesField: View {
     }
 }
 
+private enum PlannedSolidMealAlert: Identifiable {
+    case deleteConfirmation
+    case shoppingMessage(String)
+    case deleteFailure
+
+    var id: String {
+        switch self {
+        case .deleteConfirmation: "delete-confirmation"
+        case .shoppingMessage: "shopping-message"
+        case .deleteFailure: "delete-failure"
+        }
+    }
+}
+
 struct PlannedSolidMealDetailView: View {
     let plan: PlannedSolidMeal
     let profile: BabyProfile
@@ -3089,10 +3107,13 @@ struct PlannedSolidMealDetailView: View {
     let openRecipe: (String) -> Void
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @State private var showingEdit = false
     @State private var showingShoppingLists = false
+    @State private var isDeleting = false
+    @State private var activeAlert: PlannedSolidMealAlert?
+    @State private var planWriter: SolidsPlanWriter?
     @State private var shoppingWriter: SolidsShoppingListWriter?
-    @State private var shoppingMessage: String?
 
     var body: some View {
         List {
@@ -3194,6 +3215,21 @@ struct PlannedSolidMealDetailView: View {
                     .accessibilityIdentifier("solids.plan.add-missing-ingredients")
                 }
             }
+            Section {
+                Button(role: .destructive) {
+                    activeAlert = .deleteConfirmation
+                } label: {
+                    Label(
+                        isDeleting ? "Deleting planned meal…" : "Delete planned meal",
+                        systemImage: "trash"
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
+                .accessibilityIdentifier("solids.plan.delete")
+            }
         }
         .navigationTitle("Planned Meal")
         .toolbar {
@@ -3224,16 +3260,49 @@ struct PlannedSolidMealDetailView: View {
                 }
             }
         )
-        .alert("Shopping list", isPresented: Binding(
-            get: { shoppingMessage != nil },
-            set: { if !$0 { shoppingMessage = nil } }
-        )) {
-            Button("OK") { shoppingMessage = nil }
-        } message: {
-            Text(shoppingMessage ?? "")
+        .alert(item: $activeAlert) { alert in
+            switch alert {
+            case .deleteConfirmation:
+                Alert(
+                    title: Text("Delete planned meal?"),
+                    message: Text(plan.isCompleted
+                        ? "This removes the plan and cancels its reminder. The logged solids meal stays in feeding history."
+                        : "This removes the plan and cancels its reminder. This can't be undone."),
+                    primaryButton: .destructive(Text("Delete"), action: deletePlan),
+                    secondaryButton: .cancel()
+                )
+            case .shoppingMessage(let message):
+                Alert(
+                    title: Text("Shopping list"),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK"))
+                )
+            case .deleteFailure:
+                Alert(
+                    title: Text("Couldn’t delete meal"),
+                    message: Text("The planned meal is still available. Please try again."),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
         }
         .task {
             _ = await resolvedShoppingWriter()
+            _ = await resolvedPlanWriter()
+        }
+    }
+
+    private func deletePlan() {
+        guard !isDeleting else { return }
+        isDeleting = true
+        Task {
+            let writer = await resolvedPlanWriter()
+            if let error = await writer.deletePlans([plan.id]) {
+                isDeleting = false
+                activeAlert = .deleteFailure
+                PersistenceService.recordLocalSaveFailure(error)
+            } else {
+                dismiss()
+            }
         }
     }
 
@@ -3246,7 +3315,7 @@ struct PlannedSolidMealDetailView: View {
             skipAvailableInventory: true
         )
         guard !writes.isEmpty else {
-            shoppingMessage = "All ingredients are already available in inventory."
+            activeAlert = .shoppingMessage("All ingredients are already available in inventory.")
             return
         }
         Task {
@@ -3257,12 +3326,12 @@ struct PlannedSolidMealDetailView: View {
                 householdID: list.householdID
             )
             if let error = result.error {
-                shoppingMessage = "The ingredients could not be added. Please try again."
+                activeAlert = .shoppingMessage("The ingredients could not be added. Please try again.")
                 PersistenceService.recordLocalSaveFailure(error)
             } else if result.count == 0 {
-                shoppingMessage = "The missing ingredients are already on \(list.name)."
+                activeAlert = .shoppingMessage("The missing ingredients are already on \(list.name).")
             } else {
-                shoppingMessage = "Added \(result.count) ingredient\(result.count == 1 ? "" : "s") to \(list.name)."
+                activeAlert = .shoppingMessage("Added \(result.count) ingredient\(result.count == 1 ? "" : "s") to \(list.name).")
             }
         }
     }
@@ -3272,6 +3341,14 @@ struct PlannedSolidMealDetailView: View {
         if let shoppingWriter { return shoppingWriter }
         let writer = await SolidsWriterPool.shared.shoppingListWriter(for: modelContext.container)
         shoppingWriter = writer
+        return writer
+    }
+
+    @MainActor
+    private func resolvedPlanWriter() async -> SolidsPlanWriter {
+        if let planWriter { return planWriter }
+        let writer = await SolidsWriterPool.shared.planWriter(for: modelContext.container)
+        planWriter = writer
         return writer
     }
 }

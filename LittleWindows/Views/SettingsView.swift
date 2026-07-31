@@ -686,6 +686,8 @@ private struct ChildSleepSettingsSections: View {
 
     init(profile: BabyProfile?) {
         self.profile = profile
+        let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
         let recentCutoff = Calendar.current.date(
             byAdding: .day,
@@ -694,7 +696,7 @@ private struct ChildSleepSettingsSections: View {
         ) ?? Date()
         var eventDescriptor = FetchDescriptor<BabyEvent>(
             predicate: #Predicate<BabyEvent> { event in
-                event.startDate >= recentCutoff
+                event.profileID == selectedProfileID && event.startDate >= recentCutoff
             },
             sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
         )
@@ -703,7 +705,8 @@ private struct ChildSleepSettingsSections: View {
 
         var recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
             predicate: #Predicate<SleepPredictionRecord> { record in
-                record.actualSleepEventID == nil || record.generatedAt >= recentCutoff
+                record.profileID == selectedProfileID
+                    && (record.actualSleepEventID == nil || record.generatedAt >= recentCutoff)
             },
             sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
         )
@@ -1424,23 +1427,11 @@ private struct SettingsBuildInfoFooter: View {
 private struct FoodReminderSettingsLauncher: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Household.createdAt) private var households: [Household]
-    @Query(sort: \FoodReminder.dateTime) private var reminders: [FoodReminder]
-    @Query(sort: \HomeTodoList.sortOrder) private var todoLists: [HomeTodoList]
-    @Query(sort: \ShoppingList.sortOrder) private var shoppingLists: [ShoppingList]
-    @Query(sort: \MealPrepItem.updatedAt, order: .reverse) private var mealPrepItems: [MealPrepItem]
-    @Query(sort: \ReturnRequest.updatedAt, order: .reverse) private var returnRequests: [ReturnRequest]
 
     var body: some View {
         Group {
             if let household = households.first {
-                FoodReminderSettingsView(
-                    household: household,
-                    reminders: reminders.filter { $0.householdID == household.id },
-                    todoLists: todoLists.filter { $0.householdID == household.id && !$0.isArchived },
-                    shoppingLists: shoppingLists.filter { $0.householdID == household.id && !$0.isArchived },
-                    mealPrepItems: mealPrepItems.filter { $0.householdID == household.id && !$0.isArchived },
-                    returnRequests: returnRequests.filter { $0.householdID == household.id && !$0.isArchived }
-                )
+                FoodReminderSettingsDataView(household: household)
             } else {
                 ProgressView("Preparing Food & Home")
                     .task {
@@ -1448,6 +1439,51 @@ private struct FoodReminderSettingsLauncher: View {
                     }
             }
         }
+    }
+}
+
+private struct FoodReminderSettingsDataView: View {
+    let household: Household
+    @Query private var reminders: [FoodReminder]
+    @Query private var todoLists: [HomeTodoList]
+    @Query private var shoppingLists: [ShoppingList]
+    @Query private var mealPrepItems: [MealPrepItem]
+    @Query private var returnRequests: [ReturnRequest]
+
+    init(household: Household) {
+        self.household = household
+        let householdID = household.id
+        _reminders = Query(FetchDescriptor<FoodReminder>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\FoodReminder.dateTime)]
+        ))
+        _todoLists = Query(FetchDescriptor<HomeTodoList>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\HomeTodoList.sortOrder)]
+        ))
+        _shoppingLists = Query(FetchDescriptor<ShoppingList>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\ShoppingList.sortOrder)]
+        ))
+        _mealPrepItems = Query(FetchDescriptor<MealPrepItem>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
+        ))
+        _returnRequests = Query(FetchDescriptor<ReturnRequest>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
+        ))
+    }
+
+    var body: some View {
+        FoodReminderSettingsView(
+            household: household,
+            reminders: reminders,
+            todoLists: todoLists,
+            shoppingLists: shoppingLists,
+            mealPrepItems: mealPrepItems,
+            returnRequests: returnRequests
+        )
     }
 }
 

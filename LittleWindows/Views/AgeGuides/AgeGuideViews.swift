@@ -288,6 +288,16 @@ struct AgeGuideDetailView: View {
     @State private var selectedTemplate: MilestoneTemplate?
     @StateObject private var profileService = ProfileService.shared
 
+    init(guide: AgeGuide) {
+        self.guide = guide
+        let selectedProfileID = ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        _readStates = Query(FetchDescriptor<AgeGuideReadState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\AgeGuideReadState.updatedAt)]
+        ))
+    }
+
     private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
     private var babyName: String { profile?.name ?? "Baby" }
     private var scopedReadStates: [AgeGuideReadState] {

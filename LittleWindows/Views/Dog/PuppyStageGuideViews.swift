@@ -74,6 +74,17 @@ struct PuppyStageGuideDetailView: View {
     @State private var editorRoute: EventEditorRoute?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
 
+    init(guide: PuppyStageGuide, profile: CareProfile?) {
+        self.guide = guide
+        self.profile = profile
+        let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        _readStates = Query(FetchDescriptor<PuppyStageGuideReadState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\PuppyStageGuideReadState.updatedAt)]
+        ))
+    }
+
     private var scopedReadStates: [PuppyStageGuideReadState] {
         readStates.filter { $0.matchesProfile(profile?.id) }
     }

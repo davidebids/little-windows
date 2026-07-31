@@ -1661,7 +1661,7 @@ enum FoodReminderService {
 @MainActor
 func save(_ context: ModelContext) {
     guard PersistenceService.save(context: context) else { return }
-    WidgetSnapshotService.refreshFood(context: context)
+    WidgetSnapshotService.scheduleFoodRefresh(context: context)
 }
 
 func normalized(_ value: String) -> String {

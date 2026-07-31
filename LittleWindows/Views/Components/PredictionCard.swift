@@ -4,7 +4,7 @@ struct PredictionCard: View {
     let prediction: SleepPrediction?
     let babyName: String
     var awakeSinceDate: Date?
-    var sleepPressure: ((Date) -> SleepPressure?)?
+    var sleepPressure: SleepPressure?
     var alertStatusText: String?
     var alertsEnabled = false
     var toggleAlerts: (() -> Void)?
@@ -57,7 +57,7 @@ struct PredictionCard: View {
                     awakeBanner(since: awakeSinceDate, now: now)
                 }
 
-                if let pressure = sleepPressure?(now) {
+                if let pressure = sleepPressure {
                     sleepPressureMeter(pressure, now: now)
                 }
 

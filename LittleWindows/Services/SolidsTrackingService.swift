@@ -364,8 +364,38 @@ actor SolidsBackfillWriter {
                     && $0.feedKindRawValue == solidRawValue
             }
         )
+        let currentEventCount = (try? modelContext.fetchCount(eventDescriptor)) ?? 0
+        let completionKey = "solids.backfill.v2.\(profileID.uuidString).eventCount"
+        let latestUpdateKey = "solids.backfill.v2.\(profileID.uuidString).latestUpdate"
+        let defaults = UserDefaults.standard
+        var latestDescriptor = FetchDescriptor<BabyEvent>(
+            predicate: #Predicate {
+                $0.profileID == profileID
+                    && $0.typeRawValue == feedRawValue
+                    && $0.feedKindRawValue == solidRawValue
+            },
+            sortBy: [SortDescriptor(\BabyEvent.updatedAt, order: .reverse)]
+        )
+        latestDescriptor.fetchLimit = 1
+        let latestUpdate = (try? modelContext.fetch(latestDescriptor).first)?
+            .updatedAt.timeIntervalSinceReferenceDate ?? 0
+
+        func markBackfillComplete() {
+            defaults.set(currentEventCount, forKey: completionKey)
+            defaults.set(latestUpdate, forKey: latestUpdateKey)
+        }
+
+        if defaults.object(forKey: completionKey) != nil,
+           defaults.integer(forKey: completionKey) == currentEventCount,
+           defaults.object(forKey: latestUpdateKey) != nil,
+           defaults.double(forKey: latestUpdateKey) == latestUpdate {
+            return (0, nil)
+        }
         let events = (try? modelContext.fetch(eventDescriptor)) ?? []
-        guard !events.isEmpty else { return (0, nil) }
+        guard !events.isEmpty else {
+            markBackfillComplete()
+            return (0, nil)
+        }
 
         let itemDescriptor = FetchDescriptor<SolidFoodEventItem>(
             predicate: #Predicate { $0.profileID == profileID }
@@ -373,7 +403,10 @@ actor SolidsBackfillWriter {
         var storedItems = (try? modelContext.fetch(itemDescriptor)) ?? []
         let recordedEventIDs = Set(storedItems.map(\.eventID))
         let missingEvents = events.filter { !recordedEventIDs.contains($0.id) }
-        guard !missingEvents.isEmpty else { return (0, nil) }
+        guard !missingEvents.isEmpty else {
+            markBackfillComplete()
+            return (0, nil)
+        }
 
         let customFoods = (try? modelContext.fetch(FetchDescriptor<SolidFoodCatalogItem>())) ?? []
         let customByName = customFoods.reduce(into: [String: SolidFoodCatalogItem]()) { result, food in
@@ -493,6 +526,7 @@ actor SolidsBackfillWriter {
         for snapshot in reminderSnapshots {
             await NotificationManager.shared.scheduleSolidAllergenReminder(snapshot: snapshot)
         }
+        markBackfillComplete()
         return (missingEvents.count, nil)
     }
 
@@ -1547,6 +1581,7 @@ enum SolidsAccessLevel: Equatable {
 
 @MainActor
 enum SolidsTrackingService {
+    private static var pendingAllergenReconciliationTasks: [UUID: Task<Void, Never>] = [:]
     static func accessLevel(
         for profile: BabyProfile?,
         events: [BabyEvent],
@@ -2879,13 +2914,6 @@ enum SolidsTrackingService {
         }
 
         guard let profileID = event.profileID else { return }
-        let eventID = event.id
-        let progress = (try? context.fetch(FetchDescriptor<SolidFoodProgress>(
-            predicate: #Predicate { $0.profileID == profileID }
-        ))) ?? []
-        let plans = (try? context.fetch(FetchDescriptor<PlannedSolidMeal>(
-            predicate: #Predicate { $0.profileID == profileID || $0.completedEventID == eventID }
-        ))) ?? []
         let profileStates = (try? context.fetch(FetchDescriptor<SolidsProfileState>(
             predicate: #Predicate { $0.profileID == profileID }
         ))) ?? []
@@ -2893,8 +2921,8 @@ enum SolidsTrackingService {
             event: event,
             preset: preset,
             eventItems: [],
-            progress: progress,
-            plans: plans,
+            progress: [],
+            plans: [],
             profileStates: profileStates,
             context: context,
             now: now,
@@ -2946,13 +2974,19 @@ enum SolidsTrackingService {
         for (foodID, foodName) in presetPairs {
             foodByNormalizedName[SolidFoodSelection.normalizedName(foodName)] = (foodID, foodName)
         }
-        let customFoods = (try? context.fetch(FetchDescriptor<SolidFoodCatalogItem>())) ?? []
-        let customFoodsByNormalizedName = customFoods.reduce(into: [String: SolidFoodCatalogItem]()) {
-            result, food in
-            if result[food.normalizedName] == nil { result[food.normalizedName] = food }
-        }
         var details = event.solidFoodDetails
         if details.isEmpty {
+            var customFoodsByNormalizedName: [String: SolidFoodCatalogItem] = [:]
+            for name in names {
+                let normalizedName = SolidFoodSelection.normalizedName(name)
+                var descriptor = FetchDescriptor<SolidFoodCatalogItem>(
+                    predicate: #Predicate { $0.normalizedName == normalizedName }
+                )
+                descriptor.fetchLimit = 1
+                if let customFood = try? context.fetch(descriptor).first {
+                    customFoodsByNormalizedName[normalizedName] = customFood
+                }
+            }
             details = names.map { name in
                 let normalizedName = SolidFoodSelection.normalizedName(name)
                 let reference = SolidsReferenceCatalog.food(named: name)
@@ -3070,12 +3104,14 @@ enum SolidsTrackingService {
             )
         }
         if finalize {
-            reconcileAllergenProgress(
-                profileID: profileID,
-                context: context,
-                now: now,
-                persist: persist
-            )
+            if persist {
+                reconcileAllergenProgress(
+                    profileID: profileID,
+                    context: context,
+                    now: now,
+                    persist: true
+                )
+            }
         }
     }
 
@@ -3193,12 +3229,14 @@ enum SolidsTrackingService {
 
         if reconcileAllergens {
             for profileID in affectedProfileIDs {
-                reconcileAllergenProgress(
-                    profileID: profileID,
-                    context: context,
-                    now: now,
-                    persist: persist
-                )
+                if persist {
+                    reconcileAllergenProgress(
+                        profileID: profileID,
+                        context: context,
+                        now: now,
+                        persist: true
+                    )
+                }
             }
         }
     }
@@ -3294,6 +3332,25 @@ enum SolidsTrackingService {
             predicate: #Predicate { $0.profileID == profileID }
         )
         let existing = (try? context.fetch(progressDescriptor)) ?? []
+        applyAllergenProgress(
+            profileID: profileID,
+            items: items,
+            existing: existing,
+            context: context,
+            now: now
+        )
+        if persist {
+            _ = PersistenceService.save(context: context)
+        }
+    }
+
+    private static func applyAllergenProgress(
+        profileID: UUID,
+        items: [SolidFoodEventItem],
+        existing: [SolidAllergenProgress],
+        context: ModelContext,
+        now: Date
+    ) {
         let existingByAllergenID = Dictionary(uniqueKeysWithValues: existing.map { ($0.allergenID, $0) })
         let recognizedAllergenIDs = Set(SolidsAllergen.allCases.map(\.rawValue))
         var itemsByAllergenID: [String: [SolidFoodEventItem]] = [:]
@@ -3360,9 +3417,66 @@ enum SolidsTrackingService {
             let reminder = SolidAllergenReminderSnapshot(progress: record)
             Task { await NotificationManager.shared.scheduleSolidAllergenReminder(snapshot: reminder) }
         }
-        if persist {
-            _ = PersistenceService.save(context: context)
+    }
+
+    static func scheduleAllergenReconciliation(
+        profileID: UUID,
+        context: ModelContext,
+        now: Date
+    ) {
+        pendingAllergenReconciliationTasks[profileID]?.cancel()
+        pendingAllergenReconciliationTasks[profileID] = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            await AppInteractionMonitor.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            await reconcileAllergenProgressWhenIdle(
+                profileID: profileID,
+                context: context,
+                now: now
+            )
         }
+    }
+
+    private static func reconcileAllergenProgressWhenIdle(
+        profileID: UUID,
+        context: ModelContext,
+        now: Date
+    ) async {
+        var items: [SolidFoodEventItem] = []
+        var offset = 0
+        let pageSize = 200
+        while !Task.isCancelled {
+            await AppInteractionMonitor.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            var descriptor = FetchDescriptor<SolidFoodEventItem>(
+                predicate: #Predicate { $0.profileID == profileID },
+                sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt)]
+            )
+            descriptor.fetchLimit = pageSize
+            descriptor.fetchOffset = offset
+            let page = (try? context.fetch(descriptor)) ?? []
+            items.append(contentsOf: page)
+            guard page.count == pageSize else { break }
+            offset += page.count
+            await Task.yield()
+        }
+        guard !Task.isCancelled else { return }
+        let progressDescriptor = FetchDescriptor<SolidAllergenProgress>(
+            predicate: #Predicate { $0.profileID == profileID }
+        )
+        let existing = (try? context.fetch(progressDescriptor)) ?? []
+        applyAllergenProgress(
+            profileID: profileID,
+            items: items,
+            existing: existing,
+            context: context,
+            now: now
+        )
+        _ = PersistenceService.save(context: context)
     }
 
     private static func slug(_ value: String) -> String {

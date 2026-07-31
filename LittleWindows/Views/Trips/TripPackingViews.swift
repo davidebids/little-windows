@@ -9,11 +9,8 @@ struct TripsHomeView: View {
     let household: Household
     let trips: [PackingTrip]
     let travelers: [TripTraveler]
-    let bags: [PackingBag]
     let items: [PackingItem]
     let profiles: [BabyProfile]
-    let shoppingLists: [ShoppingList]
-    let shoppingItems: [ShoppingListItem]
     let openTrip: (UUID) -> Void
 
     @State private var showingNewTrip = false
@@ -37,6 +34,8 @@ struct TripsHomeView: View {
     }
 
     var body: some View {
+        let travelersByTripID = Dictionary(grouping: travelers, by: \.tripID)
+        let itemsByTripID = Dictionary(grouping: items, by: \.tripID)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
                 header
@@ -63,8 +62,8 @@ struct TripsHomeView: View {
                             } label: {
                                 PackingTripRow(
                                     trip: trip,
-                                    travelers: travelers.filter { $0.tripID == trip.id },
-                                    items: items.filter { $0.tripID == trip.id }
+                                    travelers: travelersByTripID[trip.id] ?? [],
+                                    items: itemsByTripID[trip.id] ?? []
                                 )
                             }
                             .buttonStyle(.plain)
@@ -83,8 +82,8 @@ struct TripsHomeView: View {
                             } label: {
                                 PackingTripRow(
                                     trip: trip,
-                                    travelers: travelers.filter { $0.tripID == trip.id },
-                                    items: items.filter { $0.tripID == trip.id }
+                                    travelers: travelersByTripID[trip.id] ?? [],
+                                    items: itemsByTripID[trip.id] ?? []
                                 )
                             }
                             .buttonStyle(.plain)
@@ -102,8 +101,8 @@ struct TripsHomeView: View {
                             } label: {
                                 PackingTripRow(
                                     trip: trip,
-                                    travelers: travelers.filter { $0.tripID == trip.id },
-                                    items: items.filter { $0.tripID == trip.id }
+                                    travelers: travelersByTripID[trip.id] ?? [],
+                                    items: itemsByTripID[trip.id] ?? []
                                 )
                             }
                             .buttonStyle(.plain)
@@ -2148,10 +2147,15 @@ private struct PackingTravelersEditorView: View {
     }
 
     private func refreshRelatedData() {
-        let allBags = (try? modelContext.fetch(FetchDescriptor<PackingBag>())) ?? []
-        currentBags = allBags.filter { $0.tripID == trip.id }
-        let allItems = (try? modelContext.fetch(FetchDescriptor<PackingItem>())) ?? []
-        currentItems = allItems.filter { $0.tripID == trip.id }
+        let tripID = trip.id
+        currentBags = (try? modelContext.fetch(FetchDescriptor<PackingBag>(
+            predicate: #Predicate { $0.tripID == tripID },
+            sortBy: [SortDescriptor(\PackingBag.sortOrder)]
+        ))) ?? []
+        currentItems = (try? modelContext.fetch(FetchDescriptor<PackingItem>(
+            predicate: #Predicate { $0.tripID == tripID },
+            sortBy: [SortDescriptor(\PackingItem.sortOrder)]
+        ))) ?? []
     }
 }
 

@@ -128,11 +128,14 @@ enum EventMutationService {
                 record.updatedAt = Date()
             }
         }
-        if (event.type == .feed && event.feedKind == .solid)
-            || SolidsTrackingService.hasTrackedSolidFeedRecords(
-                eventID: event.id,
-                context: context
-            ) {
+        let hadTrackedSolidFeed = SolidsTrackingService.hasTrackedSolidFeedRecords(
+            eventID: event.id,
+            context: context
+        )
+        let needsAllergenReconciliation = (event.type == .feed && event.feedKind == .solid)
+            || hadTrackedSolidFeed
+        let deletedEventProfileID = event.profileID
+        if needsAllergenReconciliation {
             SolidsTrackingService.removeSolidFeedRecords(
                 eventID: event.id,
                 context: context,
@@ -151,6 +154,13 @@ enum EventMutationService {
             )
             : currentPrediction(in: records)
         guard PersistenceService.save(context: context) else { return }
+        if needsAllergenReconciliation, let profileID = deletedEventProfileID {
+            SolidsTrackingService.scheduleAllergenReconciliation(
+                profileID: profileID,
+                context: context,
+                now: Date()
+            )
+        }
         let container = context.container
         Task { @MainActor [container] in
             await refreshSystemIntegrations(
@@ -180,11 +190,14 @@ enum EventMutationService {
         solidPreset: SolidFeedEditorPreset? = nil
     ) async {
         event.updatedAt = Date()
+        let hadTrackedSolidFeed = SolidsTrackingService.hasTrackedSolidFeedRecords(
+            eventID: event.id,
+            context: context
+        )
+        let needsAllergenReconciliation = (event.type == .feed && event.feedKind == .solid)
+            || hadTrackedSolidFeed
         if event.type == .feed
-            || SolidsTrackingService.hasTrackedSolidFeedRecords(
-                eventID: event.id,
-                context: context
-            ) {
+            || hadTrackedSolidFeed {
             SolidsTrackingService.reconcileSolidFeed(
                 event: event,
                 preset: solidPreset,
@@ -207,6 +220,13 @@ enum EventMutationService {
             )
             : currentPrediction(in: records)
         guard PersistenceService.save(context: context) else { return }
+        if needsAllergenReconciliation, let profileID = event.profileID {
+            SolidsTrackingService.scheduleAllergenReconciliation(
+                profileID: profileID,
+                context: context,
+                now: event.updatedAt
+            )
+        }
         if waitForSystemIntegrations {
             await refreshSystemIntegrations(
                 profile: profile,

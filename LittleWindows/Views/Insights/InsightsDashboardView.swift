@@ -5,10 +5,6 @@ import SwiftUI
 struct InsightsDashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @Query private var solidFoodEventItems: [SolidFoodEventItem]
-    @Query private var solidFoodProgress: [SolidFoodProgress]
-    @Query private var solidsProfileStates: [SolidsProfileState]
-    @Query private var plannedSolidMeals: [PlannedSolidMeal]
     let navigationTitle: String
     @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var viewModel = InsightsViewModel()
@@ -36,32 +32,6 @@ struct InsightsDashboardView: View {
     private var scopedRecords: [SleepPredictionRecord] {
         records.filter { $0.matchesProfile(profile?.id) }
     }
-    private var scopedSolidFoodEventItems: [SolidFoodEventItem] {
-        guard let profileID = profile?.id else { return [] }
-        return solidFoodEventItems.filter { $0.profileID == profileID }
-    }
-    private var scopedSolidFoodProgress: [SolidFoodProgress] {
-        guard let profileID = profile?.id else { return [] }
-        return solidFoodProgress.filter { $0.profileID == profileID }
-    }
-    private var solidsAccessLevel: SolidsAccessLevel {
-        SolidsTrackingService.accessLevel(
-            for: profile,
-            events: scopedEvents,
-            state: solidsProfileStates.first { $0.profileID == profile?.id }
-        )
-    }
-    private var solidsReport: SolidsReportSnapshot? {
-        guard let profile, solidsAccessLevel == .full else { return nil }
-        return SolidsReportingService.snapshot(
-            profileID: profile.id,
-            events: scopedEvents,
-            eventItems: scopedSolidFoodEventItems,
-            progress: scopedSolidFoodProgress,
-            period: viewModel.selectedPeriodRange
-        )
-    }
-
     private var refreshToken: String {
         [
             profile?.id.uuidString ?? "none",
@@ -93,12 +63,22 @@ struct InsightsDashboardView: View {
                     case .wakeWindows:
                         WakeWindowInsightsView(snapshot: viewModel.snapshot)
                     case .feeding:
-                        FeedingInsightsView(
-                            snapshot: viewModel.snapshot,
-                            solids: solidsReport,
-                            openSolidsTracker: { openSolids(.solidsTracker) },
-                            openAllergens: { openSolids(.solidsAllergens) }
-                        )
+                        if let profile, profile.profileType == .child {
+                            FeedingInsightsDataView(
+                                profile: profile,
+                                events: scopedEvents,
+                                snapshot: viewModel.snapshot,
+                                period: viewModel.selectedPeriodRange,
+                                insightsSection: viewModel.selectedSection
+                            )
+                        } else {
+                            FeedingInsightsView(
+                                snapshot: viewModel.snapshot,
+                                solids: nil,
+                                openSolidsTracker: {},
+                                openAllergens: {}
+                            )
+                        }
                     case .diapers:
                         DiaperInsightsView(snapshot: viewModel.snapshot)
                     case .activities:
@@ -322,17 +302,7 @@ struct InsightsDashboardView: View {
         let eventFetchEnd = rangeEnd.addingTimeInterval(30 * 60 * 60)
 
         do {
-            if let selectedProfileID, viewModel.selectedSection == .feeding {
-                // Feeding reports also need earlier solids history so imported
-                // legacy meals can be derived before first-food counts render.
-                let descriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
-                        event.profileID == selectedProfileID
-                    },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
-                )
-                events = try modelContext.fetch(descriptor)
-            } else if let selectedProfileID, viewModel.selectedSection == .growth {
+            if let selectedProfileID, viewModel.selectedSection == .growth {
                 let descriptor = FetchDescriptor<BabyEvent>(
                     predicate: #Predicate<BabyEvent> { event in
                         event.profileID == selectedProfileID && event.typeRawValue == "growth"
@@ -426,20 +396,6 @@ struct InsightsDashboardView: View {
             records = []
         }
 
-        if viewModel.selectedSection == .feeding,
-           let profile,
-           profile.profileType == .child {
-            SolidsTrackingService.backfillProgress(
-                profileID: profile.id,
-                events: scopedEvents,
-                eventItems: solidFoodEventItems,
-                progress: solidFoodProgress,
-                plans: plannedSolidMeals,
-                profileStates: solidsProfileStates,
-                context: modelContext
-            )
-        }
-
         viewModel.refresh(
             profileName: profile?.name ?? "Baby",
             profile: profile,
@@ -454,17 +410,6 @@ struct InsightsDashboardView: View {
         router.pendingInsightsSection = nil
         guard !isDogProfile else { return }
         viewModel.selectedSection = section
-    }
-
-    private func openSolids(_ command: FoodRouteCommand) {
-        guard let profile, profile.profileType == .child, solidsAccessLevel == .full else { return }
-        router.openSolids(
-            command,
-            profileID: profile.id,
-            returningTo: .reports,
-            insightsSection: viewModel.selectedSection,
-            feedingInsightsMode: .solids
-        )
     }
 
     private var overview: some View {
@@ -567,5 +512,98 @@ struct InsightsDashboardView: View {
             AxisTick()
             AxisValueLabel(format: .dateTime.weekday(.narrow))
         }
+    }
+}
+
+/// Keeps solids history observers out of the reports hierarchy until the user
+/// actually opens Feeding insights. The profile predicate is important for
+/// CloudKit-backed stores, where observing every family's event item caused
+/// unrelated report screens to invalidate while remote changes were imported.
+private struct FeedingInsightsDataView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query private var eventItems: [SolidFoodEventItem]
+    @Query private var progress: [SolidFoodProgress]
+    @Query private var profileStates: [SolidsProfileState]
+
+    let profile: BabyProfile
+    let events: [BabyEvent]
+    let snapshot: InsightsSnapshot
+    let period: ClosedRange<Date>
+    let insightsSection: InsightsSection
+
+    @ObservedObject private var router = DeepLinkRouter.shared
+
+    init(
+        profile: BabyProfile,
+        events: [BabyEvent],
+        snapshot: InsightsSnapshot,
+        period: ClosedRange<Date>,
+        insightsSection: InsightsSection
+    ) {
+        self.profile = profile
+        self.events = events
+        self.snapshot = snapshot
+        self.period = period
+        self.insightsSection = insightsSection
+
+        let profileID = profile.id
+        _eventItems = Query(FetchDescriptor<SolidFoodEventItem>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt)]
+        ))
+        _progress = Query(FetchDescriptor<SolidFoodProgress>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\SolidFoodProgress.createdAt)]
+        ))
+        _profileStates = Query(FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == profileID }
+        ))
+    }
+
+    private var accessLevel: SolidsAccessLevel {
+        SolidsTrackingService.accessLevel(
+            for: profile,
+            events: events,
+            state: profileStates.first
+        )
+    }
+
+    private var solidsReport: SolidsReportSnapshot? {
+        guard accessLevel == .full else { return nil }
+        return SolidsReportingService.snapshot(
+            profileID: profile.id,
+            events: events,
+            eventItems: eventItems,
+            progress: progress,
+            period: period
+        )
+    }
+
+    var body: some View {
+        FeedingInsightsView(
+            snapshot: snapshot,
+            solids: solidsReport,
+            openSolidsTracker: { openSolids(.solidsTracker) },
+            openAllergens: { openSolids(.solidsAllergens) }
+        )
+        .task(id: profile.id) {
+            let writer = await SolidsWriterPool.shared.backfillWriter(
+                for: modelContext.container
+            )
+            if let error = await writer.backfill(profileID: profile.id).error {
+                PersistenceService.recordLocalSaveFailure(error)
+            }
+        }
+    }
+
+    private func openSolids(_ command: FoodRouteCommand) {
+        guard accessLevel == .full else { return }
+        router.openSolids(
+            command,
+            profileID: profile.id,
+            returningTo: .reports,
+            insightsSection: insightsSection,
+            feedingInsightsMode: .solids
+        )
     }
 }

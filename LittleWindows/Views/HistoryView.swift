@@ -26,8 +26,10 @@ struct ReportsView: View {
     @ObservedObject private var router = DeepLinkRouter.shared
     @AppStorage("reportsDisplayMode") private var displayModeRawValue = ReportsDisplayMode.day.rawValue
     @State private var selectedDate: Date
+    private let profileID: UUID?
 
-    init() {
+    init(profileID: UUID? = nil) {
+        self.profileID = profileID
         _selectedDate = State(initialValue: HistoryView.initialSelectedDate())
     }
 
@@ -65,6 +67,7 @@ struct ReportsView: View {
 
             if let historyDisplayMode {
                 HistoryView(
+                    profileID: profileID,
                     forcedDisplayMode: historyDisplayMode,
                     showsDisplayModePicker: false,
                     navigationTitle: "Reports",
@@ -109,6 +112,7 @@ struct HistoryView: View {
     private let externalSelectedDate: Binding<Date>?
 
     init(
+        profileID: UUID? = nil,
         forcedDisplayMode: HistoryDisplayMode? = nil,
         showsDisplayModePicker: Bool = true,
         navigationTitle: String = "Calendar",
@@ -123,9 +127,12 @@ struct HistoryView: View {
             value: -45,
             to: Calendar.current.startOfDay(for: Date())
         ) ?? Date()
+        let selectedProfileID = profileID ?? ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         var recordDescriptor = FetchDescriptor<SleepPredictionRecord>(
             predicate: #Predicate<SleepPredictionRecord> { record in
-                record.actualSleepEventID == nil || record.generatedAt >= recentCutoff
+                record.profileID == selectedProfileID
+                    && (record.actualSleepEventID == nil || record.generatedAt >= recentCutoff)
             },
             sortBy: [SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)]
         )
@@ -635,6 +642,7 @@ struct HistoryView: View {
 
     private func recentPredictionEvents(including event: BabyEvent? = nil) -> [BabyEvent] {
         let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let cutoff = Calendar.current.date(
             byAdding: .day,
             value: -45,
@@ -642,13 +650,12 @@ struct HistoryView: View {
         ) ?? Date()
         var descriptor = FetchDescriptor<BabyEvent>(
             predicate: #Predicate<BabyEvent> { value in
-                value.startDate >= cutoff
+                value.profileID == selectedProfileID && value.startDate >= cutoff
             },
             sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
         )
         descriptor.fetchLimit = 900
-        var values = ((try? modelContext.fetch(descriptor)) ?? [])
-            .filter { $0.matchesProfile(selectedProfileID) }
+        var values = (try? modelContext.fetch(descriptor)) ?? []
         if let event, !values.contains(where: { $0.id == event.id }) {
             values.append(event)
         }

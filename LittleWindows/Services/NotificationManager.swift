@@ -2164,42 +2164,91 @@ enum SystemIntegrationReconciler {
     }
 
     private static func performReconciliation(context: ModelContext) async {
+        await AppInteractionMonitor.waitUntilIdle()
+        guard !Task.isCancelled else { return }
         let profiles = (try? context.fetch(FetchDescriptor<BabyProfile>())) ?? []
+        let profile = ProfileService.shared.ensureSelection(in: profiles)
         let recentCutoff = Calendar.current.date(
             byAdding: .day,
             value: -45,
             to: Calendar.current.startOfDay(for: Date())
         ) ?? Date()
-        var eventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
-                event.startDate >= recentCutoff || event.endDate == nil
-            }
+        let activeProfileIDs = profiles
+            .filter { !$0.isArchived }
+            .map(\.id)
+        let childProfileIDs = profiles
+            .filter { !$0.isArchived && $0.profileType == .child }
+            .map(\.id)
+        let events = await recentEvents(
+            profileIDs: activeProfileIDs,
+            recentCutoff: recentCutoff,
+            context: context
         )
-        eventDescriptor.fetchLimit = 1_200
-        let events = (try? context.fetch(eventDescriptor)) ?? []
-        await Task.yield()
-        var predictionDescriptor = FetchDescriptor<SleepPredictionRecord>(
-            predicate: #Predicate<SleepPredictionRecord> { record in
-                record.generatedAt >= recentCutoff || record.actualSleepEventID == nil
-            }
+        await AppInteractionMonitor.waitUntilIdle()
+        guard !Task.isCancelled else { return }
+        let predictionRecords = await recentPredictionRecords(
+            profileIDs: childProfileIDs,
+            recentCutoff: recentCutoff,
+            context: context
         )
-        predictionDescriptor.fetchLimit = 500
-        let predictionRecords = (try? context.fetch(predictionDescriptor)) ?? []
-        await Task.yield()
-        let appointments = (try? context.fetch(FetchDescriptor<DoctorAppointment>())) ?? []
-        let foodReminders = (try? context.fetch(FetchDescriptor<FoodReminder>())) ?? []
-        let plannedSolidMeals = (try? context.fetch(FetchDescriptor<PlannedSolidMeal>())) ?? []
+        await AppInteractionMonitor.waitUntilIdle()
+        guard !Task.isCancelled else { return }
+
+        let appointments = (try? context.fetch(FetchDescriptor<DoctorAppointment>(
+            predicate: #Predicate { !$0.isCompleted && $0.remindersEnabled }
+        ))) ?? []
+        let now = Date()
+        let foodReminders = (try? context.fetch(FetchDescriptor<FoodReminder>(
+            predicate: #Predicate { $0.isEnabled && $0.dateTime > now }
+        ))) ?? []
+        let plannedSolidMeals = (try? context.fetch(FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate { $0.reminderEnabled && $0.completedEventID == nil }
+        ))) ?? []
         let solidAllergenProgress = (try? context.fetch(
-            FetchDescriptor<SolidAllergenProgress>()
+            FetchDescriptor<SolidAllergenProgress>(
+                predicate: #Predicate { $0.reminderEnabled }
+            )
         )) ?? []
-        let solidsProfileStates = (try? context.fetch(FetchDescriptor<SolidsProfileState>())) ?? []
-        let packingTrips = (try? context.fetch(FetchDescriptor<PackingTrip>())) ?? []
-        let packingItems = (try? context.fetch(FetchDescriptor<PackingItem>())) ?? []
-        let routines = (try? context.fetch(FetchDescriptor<CareRoutine>())) ?? []
-        let ageGuideReadStates = (try? context.fetch(
-            FetchDescriptor<AgeGuideReadState>()
-        )) ?? []
-        let profile = ProfileService.shared.ensureSelection(in: profiles)
+        let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let solidsProfileStates = (try? context.fetch(FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID }
+        ))) ?? []
+        await AppInteractionMonitor.waitUntilIdle()
+        guard !Task.isCancelled else { return }
+
+        let upcomingStatus = PackingTripStatus.upcoming.rawValue
+        let packingTrips = (try? context.fetch(FetchDescriptor<PackingTrip>(
+            predicate: #Predicate {
+                !$0.isArchived
+                    && $0.statusRawValue == upcomingStatus
+                    && ($0.reminderDate != nil || $0.finalCheckDate != nil)
+            }
+        ))) ?? []
+        var packingItems: [PackingItem] = []
+        for trip in packingTrips {
+            await AppInteractionMonitor.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            let tripID = trip.id
+            let items = (try? context.fetch(FetchDescriptor<PackingItem>(
+                predicate: #Predicate { $0.tripID == tripID }
+            ))) ?? []
+            packingItems.append(contentsOf: items)
+        }
+        let routines = (try? context.fetch(FetchDescriptor<CareRoutine>(
+            predicate: #Predicate { $0.reminderEnabled }
+        ))) ?? []
+        let ageGuideReadStates: [AgeGuideReadState]
+        if UserDefaults.standard.bool(forKey: "monthlyAgeGuideNotificationsEnabled") {
+            ageGuideReadStates = (try? context.fetch(
+                FetchDescriptor<AgeGuideReadState>()
+            )) ?? []
+        } else {
+            ageGuideReadStates = []
+        }
+        await AppInteractionMonitor.waitUntilIdle()
+        guard !Task.isCancelled else { return }
+
         let scopedEvents = events.filter { $0.matchesProfile(profile?.id) }
         let scopedRecords = predictionRecords.filter { $0.matchesProfile(profile?.id) }
         let prediction = PredictionTuningService.currentPrediction(
@@ -2228,8 +2277,11 @@ enum SystemIntegrationReconciler {
         )
         await Task.yield()
         WidgetSnapshotService.refreshFood(context: context)
-        await Task.yield()
+        await AppInteractionMonitor.waitUntilIdle()
+        guard !Task.isCancelled else { return }
         await LiveActivityManager.shared.synchronize(profile: profile, events: scopedEvents)
+        await AppInteractionMonitor.waitUntilIdle()
+        guard !Task.isCancelled else { return }
         await NotificationManager.shared.reconcileScheduledNotifications(
             context: context,
             profiles: profiles,
@@ -2244,6 +2296,77 @@ enum SystemIntegrationReconciler {
             routines: routines,
             ageGuideReadStates: ageGuideReadStates
         )
+    }
+
+    private static func recentEvents(
+        profileIDs: [UUID],
+        recentCutoff: Date,
+        context: ModelContext
+    ) async -> [BabyEvent] {
+        var result: [BabyEvent] = []
+        let pageSize = 200
+        let maximumPerProfile = 900
+        for profileID in profileIDs {
+            var offset = 0
+            while offset < maximumPerProfile && !Task.isCancelled {
+                // Foreground reconciliation is maintenance work. Re-establish a
+                // full interaction-free window between pages so a brief pause
+                // while scrolling or changing tabs cannot let it resume and
+                // monopolize the main actor again.
+                await AppInteractionMonitor.waitUntilIdle()
+                guard !Task.isCancelled else { return result }
+                var descriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.profileID == profileID
+                            && (event.startDate >= recentCutoff || event.endDate == nil)
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                )
+                descriptor.fetchLimit = min(pageSize, maximumPerProfile - offset)
+                descriptor.fetchOffset = offset
+                let page = (try? context.fetch(descriptor)) ?? []
+                result.append(contentsOf: page)
+                guard page.count == descriptor.fetchLimit else { break }
+                offset += page.count
+                await Task.yield()
+            }
+        }
+        return result
+    }
+
+    private static func recentPredictionRecords(
+        profileIDs: [UUID],
+        recentCutoff: Date,
+        context: ModelContext
+    ) async -> [SleepPredictionRecord] {
+        var result: [SleepPredictionRecord] = []
+        let pageSize = 120
+        let maximumPerProfile = 240
+        for profileID in profileIDs {
+            var offset = 0
+            while offset < maximumPerProfile && !Task.isCancelled {
+                await AppInteractionMonitor.waitUntilIdle()
+                guard !Task.isCancelled else { return result }
+                var descriptor = FetchDescriptor<SleepPredictionRecord>(
+                    predicate: #Predicate<SleepPredictionRecord> { record in
+                        record.profileID == profileID
+                            && (record.generatedAt >= recentCutoff
+                                || record.actualSleepEventID == nil)
+                    },
+                    sortBy: [
+                        SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)
+                    ]
+                )
+                descriptor.fetchLimit = min(pageSize, maximumPerProfile - offset)
+                descriptor.fetchOffset = offset
+                let page = (try? context.fetch(descriptor)) ?? []
+                result.append(contentsOf: page)
+                guard page.count == descriptor.fetchLimit else { break }
+                offset += page.count
+                await Task.yield()
+            }
+        }
+        return result
     }
 
     private static func positiveDouble(_ key: String) -> Double? {

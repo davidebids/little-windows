@@ -46,28 +46,36 @@ private enum MilestoneTimelineItem: Identifiable {
 }
 
 struct CareView: View {
-    @Environment(\.modelContext) private var modelContext
     @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var profileService = ProfileService.shared
 
-    @Query(sort: \Household.createdAt) private var households: [Household]
-    @Query(sort: \ShoppingList.sortOrder) private var shoppingLists: [ShoppingList]
-    @Query(sort: \ShoppingListItem.sortOrder) private var shoppingItems: [ShoppingListItem]
-    @Query(sort: \InventoryLocation.sortOrder) private var locations: [InventoryLocation]
-    @Query(sort: \InventoryItem.updatedAt, order: .reverse) private var inventoryItems: [InventoryItem]
-    @Query(sort: \FoodItem.canonicalName) private var foodItems: [FoodItem]
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \BabyEvent.startDate, order: .reverse) private var careEvents: [BabyEvent]
     @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
-    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
-    @Query(sort: \SolidFoodEventItem.createdAt, order: .reverse) private var solidFoodEventItems: [SolidFoodEventItem]
-    @Query(sort: \SolidAllergenProgress.updatedAt, order: .reverse) private var solidAllergenProgress: [SolidAllergenProgress]
-    @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
-    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
-    @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
 
     @State private var path: [FoodRoute] = []
     @State private var returnOriginAfterSolids: SolidsNavigationOrigin?
+
+    init(profileID: UUID? = nil) {
+        let selectedProfileID = profileID ?? ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let feedRawValue = EventType.feed.rawValue
+        let solidRawValue = FeedKind.solid.rawValue
+        var accessEventDescriptor = FetchDescriptor<BabyEvent>(
+            predicate: #Predicate<BabyEvent> { event in
+                event.profileID == selectedProfileID
+                    && event.typeRawValue == feedRawValue
+                    && event.feedKindRawValue == solidRawValue
+            },
+            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+        )
+        accessEventDescriptor.fetchLimit = 1
+        _careEvents = Query(accessEventDescriptor)
+        _solidsProfileStates = Query(FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\SolidsProfileState.updatedAt, order: .reverse)]
+        ))
+    }
 
     private var profile: BabyProfile? {
         profileService.selectedProfile(in: profiles)
@@ -86,90 +94,80 @@ struct CareView: View {
         )
     }
 
-    private var household: Household? { households.first }
-
-    private var householdShoppingLists: [ShoppingList] {
-        guard let household else { return [] }
-        return shoppingLists.filter { $0.householdID == household.id && !$0.isArchived }
-    }
-
-    private var householdShoppingItems: [ShoppingListItem] {
-        guard let household else { return [] }
-        return shoppingItems.filter { $0.householdID == household.id }
-    }
-
-    private var householdLocations: [InventoryLocation] {
-        guard let household else { return [] }
-        return locations.filter { $0.householdID == household.id && !$0.isArchived }
-    }
-
-    private var householdInventoryItems: [InventoryItem] {
-        guard let household else { return [] }
-        return inventoryItems.filter { $0.householdID == household.id }
-    }
-
-    private var householdFoodItems: [FoodItem] {
-        guard let household else { return [] }
-        return foodItems.filter { $0.householdID == household.id && !$0.isArchived }
-    }
-
-    private var solidFoodPhotos: [PhotoAttachment] {
-        photoAttachments.filter { $0.ownerKind == .solidFood }
-    }
-
     private var routeDataVersion: Int {
         profiles.count + careEvents.count + solidsProfileStates.count
-            + solidFoodProgress.count + solidFoodEventItems.count
-            + solidAllergenProgress.count + customSolidFoods.count
-            + plannedSolidMeals.count + households.count
     }
 
     var body: some View {
+        Group {
+            if path.isEmpty {
+                navigationContent(data: nil)
+            } else {
+                CareSolidsRouteDataLoader(
+                    profileID: profile?.id,
+                    activeRoute: path.last
+                ) { data in
+                    navigationContent(data: data)
+                }
+            }
+        }
+        .task {
+            _ = profileService.ensureSelection(in: profiles)
+            handlePendingProfileSwitch()
+            handlePendingSolidsCommand()
+        }
+        .onReceive(router.$pendingSolidsCommand.compactMap { $0 }) { command in
+            handle(command)
+        }
+        .onChange(of: router.pendingProfileID) { _, _ in
+            handlePendingProfileSwitch()
+            handlePendingSolidsCommand()
+        }
+        .onChange(of: profileService.selectedProfileID) { _, _ in
+            correctUnavailableRoute()
+        }
+        .onChange(of: routeDataVersion) { _, _ in
+            handlePendingSolidsCommand()
+            correctUnavailableRoute()
+        }
+        .onChange(of: path) { previousPath, currentPath in
+            if !previousPath.isEmpty && currentPath.isEmpty {
+                returnToOrigin()
+            }
+        }
+    }
+
+    private func navigationContent(data: CareSolidsRouteData?) -> some View {
         NavigationStack(path: $path) {
-            MilestonesView(openSolids: openSolids)
+            MilestonesView(
+                profile: profile,
+                solidsAccessLevel: solidsAccessLevel,
+                openSolids: openSolids
+            )
                 .navigationDestination(for: FoodRoute.self) { route in
-                    destination(for: route)
-                        .navigationBarBackButtonHidden(shouldShowOriginBackButton)
-                        .toolbar {
-                            if shouldShowOriginBackButton,
-                               let returnOriginAfterSolids {
-                                ToolbarItem(placement: .topBarLeading) {
-                                    Button {
-                                        returnToOrigin()
-                                    } label: {
-                                        Label(
-                                            returnTitle(for: returnOriginAfterSolids.tab),
-                                            systemImage: "chevron.left"
-                                        )
-                                    }
-                                    .accessibilityIdentifier("solids.return-to-origin")
+                    Group {
+                        if let data {
+                            destinationContent(for: route, data: data)
+                        } else {
+                            CareUnavailableView()
+                        }
+                    }
+                    .navigationBarBackButtonHidden(shouldShowOriginBackButton)
+                    .toolbar {
+                        if shouldShowOriginBackButton,
+                           let returnOriginAfterSolids {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button {
+                                    returnToOrigin()
+                                } label: {
+                                    Label(
+                                        returnTitle(for: returnOriginAfterSolids.tab),
+                                        systemImage: "chevron.left"
+                                    )
                                 }
+                                .accessibilityIdentifier("solids.return-to-origin")
                             }
                         }
-                }
-                .task {
-                    FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
-                    _ = profileService.ensureSelection(in: profiles)
-                    handlePendingProfileSwitch()
-                    handlePendingSolidsCommand()
-                }
-                .onReceive(router.$pendingSolidsCommand.compactMap { $0 }) { command in
-                    handle(command)
-                }
-                .onChange(of: router.pendingProfileID) { _, _ in
-                    handlePendingProfileSwitch()
-                    handlePendingSolidsCommand()
-                }
-                .onChange(of: profileService.selectedProfileID) { _, _ in
-                    correctUnavailableRoute()
-                }
-                .onChange(of: routeDataVersion) { _, _ in
-                    handlePendingSolidsCommand()
-                    correctUnavailableRoute()
-                }
-                .onChange(of: path) { previousPath, currentPath in
-                    if !previousPath.isEmpty && currentPath.isEmpty {
-                        returnToOrigin()
                     }
                 }
         }
@@ -275,14 +273,40 @@ struct CareView: View {
     }
 
     @ViewBuilder
-    private func destination(for route: FoodRoute) -> some View {
+    private func destinationContent(
+        for route: FoodRoute,
+        data: CareSolidsRouteData
+    ) -> some View {
+        let household = data.households.first
+        let householdShoppingLists = data.shoppingLists.filter {
+            $0.householdID == household?.id && !$0.isArchived
+        }
+        let householdShoppingItems = data.shoppingItems.filter {
+            $0.householdID == household?.id
+        }
+        let householdLocations = data.locations.filter {
+            $0.householdID == household?.id && !$0.isArchived
+        }
+        let householdInventoryItems = data.inventoryItems.filter {
+            $0.householdID == household?.id
+        }
+        let householdFoodItems = data.foodItems.filter {
+            $0.householdID == household?.id && !$0.isArchived
+        }
+        let solidFoodProgress = data.solidFoodProgress
+        let solidFoodEventItems = data.solidFoodEventItems
+        let solidAllergenProgress = data.solidAllergenProgress
+        let customSolidFoods = data.customSolidFoods
+        let solidFoodPhotos = data.solidFoodPhotos
+        let plannedSolidMeals = data.plannedSolidMeals
+
         switch route {
         case .solidsHome:
             if let profile, profile.profileType == .child, solidsAccessLevel != .hidden {
                 SolidsHomeView(
                     profile: profile,
                     accessLevel: solidsAccessLevel,
-                    events: careEvents,
+                    events: data.careEvents,
                     eventItems: solidFoodEventItems,
                     progress: solidFoodProgress,
                     plans: plannedSolidMeals,
@@ -406,7 +430,7 @@ struct CareView: View {
             if let profile, profile.profileType == .child, solidsAccessLevel == .full {
                 SolidsTrackerView(
                     profile: profile,
-                    events: careEvents,
+                    events: data.careEvents,
                     progress: solidFoodProgress,
                     eventItems: solidFoodEventItems,
                     openFoodHistory: { path.append(.solidFoodHistory($0, $1)) },
@@ -421,7 +445,7 @@ struct CareView: View {
                     profile: profile,
                     foodID: foodID,
                     foodName: foodName,
-                    events: careEvents,
+                    events: data.careEvents,
                     eventItems: solidFoodEventItems,
                     openMeal: { path.append(.solidMeal($0)) }
                 )
@@ -432,7 +456,7 @@ struct CareView: View {
             if let profile,
                profile.profileType == .child,
                solidsAccessLevel == .full,
-               let event = careEvents.first(where: {
+               let event = data.careEvents.first(where: {
                    $0.id == id && $0.profileID == profile.id
                }) {
                 SolidMealDetailView(
@@ -514,6 +538,253 @@ struct CareView: View {
     }
 }
 
+private struct CareSolidsRouteData {
+    let careEvents: [BabyEvent]
+    let households: [Household]
+    let shoppingLists: [ShoppingList]
+    let shoppingItems: [ShoppingListItem]
+    let locations: [InventoryLocation]
+    let inventoryItems: [InventoryItem]
+    let foodItems: [FoodItem]
+    let solidFoodProgress: [SolidFoodProgress]
+    let solidFoodEventItems: [SolidFoodEventItem]
+    let solidAllergenProgress: [SolidAllergenProgress]
+    let customSolidFoods: [SolidFoodCatalogItem]
+    let solidFoodPhotos: [PhotoAttachment]
+    let plannedSolidMeals: [PlannedSolidMeal]
+}
+
+/// Loads the larger solids and Food & Home collections only while a solids
+/// destination is on screen. Care's main timeline no longer observes these
+/// collections or their CloudKit import notifications.
+private struct CareSolidsDataScope {
+    let route: FoodRoute?
+
+    var loadsEvents: Bool {
+        switch route {
+        case .solidsHome, .solidsTracker, .solidFoodHistory, .solidMeal: true
+        default: false
+        }
+    }
+
+    var loadsProgress: Bool {
+        switch route {
+        case .solidsHome, .solidsGuided, .solidsDatabase, .solidFood,
+             .customSolidFood, .solidsTracker: true
+        default: false
+        }
+    }
+
+    var loadsEventItems: Bool {
+        switch route {
+        case .solidsHome, .solidsGuided, .solidsTracker, .solidFoodHistory,
+             .solidMeal, .solidsAllergens, .solidAllergen: true
+        default: false
+        }
+    }
+
+    var loadsAllergens: Bool {
+        switch route {
+        case .solidsGuided, .solidsAllergens, .solidAllergen: true
+        default: false
+        }
+    }
+
+    var loadsPlans: Bool {
+        switch route {
+        case .solidsHome, .solidsGuided, .solidsPlan, .plannedSolidMeal,
+             .solidAllergen: true
+        default: false
+        }
+    }
+
+    var loadsCustomFoods: Bool {
+        switch route {
+        case .solidsDatabase, .customSolidFood, .plannedSolidMeal: true
+        default: false
+        }
+    }
+
+    var loadsPhotos: Bool {
+        route == .solidsDatabase || isCustomFoodRoute
+    }
+
+    var loadsHomeData: Bool {
+        switch route {
+        case .solidFood, .customSolidFood, .plannedSolidMeal, .solidsRecipe: true
+        default: false
+        }
+    }
+
+    var loadsLocations: Bool {
+        if case .solidsRecipe = route { return true }
+        return false
+    }
+
+    private var isCustomFoodRoute: Bool {
+        if case .customSolidFood = route { return true }
+        return false
+    }
+}
+
+private struct CareSolidsRouteDataLoader<Content: View>: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query private var careEvents: [BabyEvent]
+    @Query private var households: [Household]
+    @Query private var shoppingLists: [ShoppingList]
+    @Query private var shoppingItems: [ShoppingListItem]
+    @Query private var locations: [InventoryLocation]
+    @Query private var inventoryItems: [InventoryItem]
+    @Query private var foodItems: [FoodItem]
+    @Query private var solidFoodProgress: [SolidFoodProgress]
+    @Query private var solidFoodEventItems: [SolidFoodEventItem]
+    @Query private var solidAllergenProgress: [SolidAllergenProgress]
+    @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
+    @Query private var solidFoodPhotos: [PhotoAttachment]
+    @Query private var plannedSolidMeals: [PlannedSolidMeal]
+
+    private let scope: CareSolidsDataScope
+    private let content: (CareSolidsRouteData) -> Content
+
+    init(
+        profileID: UUID?,
+        activeRoute: FoodRoute?,
+        @ViewBuilder content: @escaping (CareSolidsRouteData) -> Content
+    ) {
+        let scope = CareSolidsDataScope(route: activeRoute)
+        self.scope = scope
+        self.content = content
+        let selectedProfileID = profileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let unloadedID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let eventProfileID = scope.loadsEvents ? selectedProfileID : unloadedID
+        let progressProfileID = scope.loadsProgress ? selectedProfileID : unloadedID
+        let eventItemProfileID = scope.loadsEventItems ? selectedProfileID : unloadedID
+        let allergenProfileID = scope.loadsAllergens ? selectedProfileID : unloadedID
+        let planProfileID = scope.loadsPlans ? selectedProfileID : unloadedID
+        let feedRawValue = EventType.feed.rawValue
+        let solidRawValue = FeedKind.solid.rawValue
+        _careEvents = Query(FetchDescriptor<BabyEvent>(
+            predicate: #Predicate { event in
+                event.profileID == eventProfileID
+                    && event.typeRawValue == feedRawValue
+                    && event.feedKindRawValue == solidRawValue
+            },
+            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+        ))
+        _solidFoodProgress = Query(FetchDescriptor<SolidFoodProgress>(
+            predicate: #Predicate { $0.profileID == progressProfileID },
+            sortBy: [SortDescriptor(\SolidFoodProgress.updatedAt, order: .reverse)]
+        ))
+        _solidFoodEventItems = Query(FetchDescriptor<SolidFoodEventItem>(
+            predicate: #Predicate { $0.profileID == eventItemProfileID },
+            sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt, order: .reverse)]
+        ))
+        _solidAllergenProgress = Query(FetchDescriptor<SolidAllergenProgress>(
+            predicate: #Predicate { $0.profileID == allergenProfileID },
+            sortBy: [SortDescriptor(\SolidAllergenProgress.updatedAt, order: .reverse)]
+        ))
+        _plannedSolidMeals = Query(FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate { $0.profileID == planProfileID },
+            sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
+        ))
+        let photoKind = scope.loadsPhotos
+            ? PhotoAttachmentOwnerKind.solidFood.rawValue
+            : "__unloaded_solid_food_photo__"
+        _solidFoodPhotos = Query(FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { $0.ownerKindRawValue == photoKind },
+            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
+        ))
+        if scope.loadsCustomFoods {
+            _customSolidFoods = Query(FetchDescriptor<SolidFoodCatalogItem>(
+                sortBy: [SortDescriptor(\SolidFoodCatalogItem.name)]
+            ))
+        } else {
+            _customSolidFoods = Query(FetchDescriptor<SolidFoodCatalogItem>(
+                predicate: #Predicate { $0.normalizedName == "__unloaded_custom_food__" },
+                sortBy: [SortDescriptor(\SolidFoodCatalogItem.name)]
+            ))
+        }
+
+        var householdDescriptor = FetchDescriptor<Household>(
+            predicate: #Predicate { $0.id == unloadedID },
+            sortBy: [SortDescriptor(\Household.createdAt)]
+        )
+        if scope.loadsHomeData {
+            householdDescriptor = FetchDescriptor<Household>(
+                sortBy: [SortDescriptor(\Household.createdAt)]
+            )
+        }
+        householdDescriptor.fetchLimit = 1
+        _households = Query(householdDescriptor)
+
+        if scope.loadsHomeData {
+            _shoppingLists = Query(FetchDescriptor<ShoppingList>(
+                sortBy: [SortDescriptor(\ShoppingList.sortOrder)]
+            ))
+            _shoppingItems = Query(FetchDescriptor<ShoppingListItem>(
+                sortBy: [SortDescriptor(\ShoppingListItem.sortOrder)]
+            ))
+            _inventoryItems = Query(FetchDescriptor<InventoryItem>(
+                sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
+            ))
+            _foodItems = Query(FetchDescriptor<FoodItem>(
+                sortBy: [SortDescriptor(\FoodItem.canonicalName)]
+            ))
+        } else {
+            _shoppingLists = Query(FetchDescriptor<ShoppingList>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\ShoppingList.sortOrder)]
+            ))
+            _shoppingItems = Query(FetchDescriptor<ShoppingListItem>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\ShoppingListItem.sortOrder)]
+            ))
+            _inventoryItems = Query(FetchDescriptor<InventoryItem>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
+            ))
+            _foodItems = Query(FetchDescriptor<FoodItem>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\FoodItem.canonicalName)]
+            ))
+        }
+        if scope.loadsLocations {
+            _locations = Query(FetchDescriptor<InventoryLocation>(
+                sortBy: [SortDescriptor(\InventoryLocation.sortOrder)]
+            ))
+        } else {
+            _locations = Query(FetchDescriptor<InventoryLocation>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\InventoryLocation.sortOrder)]
+            ))
+        }
+    }
+
+    var body: some View {
+        content(CareSolidsRouteData(
+            careEvents: careEvents,
+            households: households,
+            shoppingLists: shoppingLists,
+            shoppingItems: shoppingItems,
+            locations: locations,
+            inventoryItems: inventoryItems,
+            foodItems: foodItems,
+            solidFoodProgress: solidFoodProgress,
+            solidFoodEventItems: solidFoodEventItems,
+            solidAllergenProgress: solidAllergenProgress,
+            customSolidFoods: customSolidFoods,
+            solidFoodPhotos: solidFoodPhotos,
+            plannedSolidMeals: plannedSolidMeals
+        ))
+        .task {
+            if scope.loadsHomeData {
+                FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
+            }
+        }
+    }
+}
+
 private struct CareUnavailableView: View {
     var body: some View {
         ContentUnavailableView(
@@ -527,14 +798,11 @@ private struct CareUnavailableView: View {
 struct MilestonesView: View {
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @Query(sort: \MilestoneEntry.date, order: .reverse) private var allMilestones: [MilestoneEntry]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
-    @Query(sort: \BabyEvent.startDate, order: .reverse) private var careEvents: [BabyEvent]
-    @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
-    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
-    @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
+    let profile: BabyProfile?
+    let solidsAccessLevel: SolidsAccessLevel
     let openSolids: (FoodRoute) -> Void
     @State private var searchText = ""
     @State private var selectedCategory: MilestoneCategory?
@@ -550,15 +818,35 @@ struct MilestonesView: View {
     @State private var selectedPuppyStageGuideID: String?
     @State private var showingAgeGuides = false
     @State private var events: [BabyEvent] = []
+    @State private var foodsTriedCount = 0
+    @State private var upcomingSolidsPlanCount = 0
     @State private var milestonePendingDelete: MilestoneEntry?
     @State private var showingDeleteConfirmation = false
-    @StateObject private var profileService = ProfileService.shared
 
-    init(openSolids: @escaping (FoodRoute) -> Void = { _ in }) {
+    init(
+        profile: BabyProfile?,
+        solidsAccessLevel: SolidsAccessLevel,
+        openSolids: @escaping (FoodRoute) -> Void = { _ in }
+    ) {
+        self.profile = profile
+        self.solidsAccessLevel = solidsAccessLevel
         self.openSolids = openSolids
+        let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        _allMilestones = Query(FetchDescriptor<MilestoneEntry>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\MilestoneEntry.date, order: .reverse)]
+        ))
+        _ageGuideReadStates = Query(FetchDescriptor<AgeGuideReadState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\AgeGuideReadState.updatedAt)]
+        ))
+        _puppyStageGuideReadStates = Query(FetchDescriptor<PuppyStageGuideReadState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID },
+            sortBy: [SortDescriptor(\PuppyStageGuideReadState.updatedAt)]
+        ))
     }
 
-    private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
     private var selectedProfileID: UUID? { profile?.id }
     private var isDogProfile: Bool { profile?.profileType == .dog }
     private var milestones: [MilestoneEntry] {
@@ -586,30 +874,6 @@ struct MilestonesView: View {
         guard isDogProfile, let profile else { return nil }
         return PuppyStageGuideService.shared.currentGuide(for: profile)
     }
-    private var solidsProfileState: SolidsProfileState? {
-        guard let selectedProfileID else { return nil }
-        return solidsProfileStates.first { $0.profileID == selectedProfileID }
-    }
-    private var solidsAccessLevel: SolidsAccessLevel {
-        SolidsTrackingService.accessLevel(
-            for: profile,
-            events: careEvents,
-            state: solidsProfileState
-        )
-    }
-    private var foodsTriedCount: Int {
-        guard let selectedProfileID else { return 0 }
-        return solidFoodProgress.filter {
-            $0.profileID == selectedProfileID && $0.status == .tried
-        }.count
-    }
-    private var upcomingSolidsPlanCount: Int {
-        guard let selectedProfileID else { return 0 }
-        return plannedSolidMeals.filter {
-            $0.profileID == selectedProfileID && !$0.isCompleted
-        }.count
-    }
-
     private var timelineItems: [MilestoneTimelineItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let manualItems = milestones.compactMap { milestone -> MilestoneTimelineItem? in
@@ -710,6 +974,7 @@ struct MilestonesView: View {
             }
         }
         .task(id: summaryRefreshToken) {
+            refreshSolidsSummaryCounts()
             await refreshAutomaticSummaries()
             handlePendingAgeGuideDeepLink()
         }
@@ -962,6 +1227,27 @@ struct MilestonesView: View {
     }
 
     @MainActor
+    private func refreshSolidsSummaryCounts() {
+        guard let profile, profile.profileType == .child else {
+            foodsTriedCount = 0
+            upcomingSolidsPlanCount = 0
+            return
+        }
+        let profileID = profile.id
+        let triedRawValue = SolidsFoodStatus.tried.rawValue
+        foodsTriedCount = (try? modelContext.fetchCount(FetchDescriptor<SolidFoodProgress>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.statusRawValue == triedRawValue
+            }
+        ))) ?? 0
+        upcomingSolidsPlanCount = (try? modelContext.fetchCount(FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.completedEventID == nil
+            }
+        ))) ?? 0
+    }
+
+    @MainActor
     private func refreshAutomaticSummaries() async {
         guard let profile else {
             events = []
@@ -979,7 +1265,7 @@ struct MilestonesView: View {
             let birthDate = Calendar.current.startOfDay(for: profile.birthDate)
             let endDate = Calendar.current.startOfNextDay(for: Date())
             let profileID = profile.id
-            let fetchedEvents = try automaticSummaryEvents(
+            let fetchedEvents = try await automaticSummaryEvents(
                 profileID: profileID,
                 startDate: birthDate,
                 endDate: endDate
@@ -999,7 +1285,7 @@ struct MilestonesView: View {
         profileID: UUID,
         startDate: Date,
         endDate: Date
-    ) throws -> [BabyEvent] {
+    ) async throws -> [BabyEvent] {
         var values: [BabyEvent] = []
         for type in [
             EventType.sleep,
@@ -1010,16 +1296,27 @@ struct MilestonesView: View {
             .custom
         ] {
             let typeRawValue = type.rawValue
-            let descriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { event in
-                    event.profileID == profileID &&
-                        event.startDate >= startDate &&
-                        event.startDate < endDate &&
-                        event.typeRawValue == typeRawValue
-                },
-                sortBy: [SortDescriptor(\BabyEvent.startDate)]
-            )
-            values.append(contentsOf: try modelContext.fetch(descriptor))
+            var offset = 0
+            while !Task.isCancelled {
+                await AppInteractionMonitor.waitUntilIdle()
+                try Task.checkCancellation()
+                var descriptor = FetchDescriptor<BabyEvent>(
+                    predicate: #Predicate<BabyEvent> { event in
+                        event.profileID == profileID &&
+                            event.startDate >= startDate &&
+                            event.startDate < endDate &&
+                            event.typeRawValue == typeRawValue
+                    },
+                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
+                )
+                descriptor.fetchLimit = 200
+                descriptor.fetchOffset = offset
+                let page = try modelContext.fetch(descriptor)
+                values.append(contentsOf: page)
+                guard page.count == descriptor.fetchLimit else { break }
+                offset += page.count
+                await Task.yield()
+            }
         }
         return values.sorted { $0.startDate < $1.startDate }
     }
@@ -1751,8 +2048,8 @@ struct MilestoneTimelineRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 13) {
-            if let previewData = firstPhoto?.previewData {
-                PhotoThumbnailImage(data: previewData)
+            if let firstPhoto, let previewData = firstPhoto.previewData {
+                PhotoThumbnailImage(attachmentID: firstPhoto.id, data: previewData)
                     .frame(width: 52, height: 52)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(alignment: .bottomTrailing) {
@@ -1852,7 +2149,7 @@ private struct PhotoAttachmentGrid: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: 10) {
             ForEach(items) { item in
-                PhotoThumbnailImage(data: item.data)
+                PhotoThumbnailImage(attachmentID: item.id, data: item.data)
                     .aspectRatio(1, contentMode: .fill)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(alignment: .topTrailing) {
@@ -1876,10 +2173,11 @@ private struct PhotoAttachmentGrid: View {
 }
 
 private struct PhotoThumbnailImage: View {
+    let attachmentID: UUID
     let data: Data
 
     var body: some View {
-        if let image = UIImage(data: data) {
+        if let image = ThumbnailImageCache.image(attachmentID: attachmentID, data: data) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
@@ -1924,6 +2222,17 @@ struct MilestoneEditorView: View {
 
     init(milestone: MilestoneEntry? = nil, template: MilestoneTemplate? = nil) {
         self.milestone = milestone
+        let selectedProfileID = milestone?.profileID
+            ?? ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let milestonePhotoKind = PhotoAttachmentOwnerKind.milestone.rawValue
+        _photoAttachments = Query(FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { attachment in
+                attachment.ownerKindRawValue == milestonePhotoKind
+                    && (attachment.profileID == selectedProfileID || attachment.profileID == nil)
+            },
+            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
+        ))
         _title = State(initialValue: milestone?.title ?? template?.title ?? "")
         _date = State(initialValue: milestone?.date ?? Date())
         _approximateDate = State(initialValue: milestone?.approximateDate ?? false)
@@ -2192,6 +2501,21 @@ struct MilestoneDetailView: View {
     @State private var showingEditor = false
     @State private var showingDeleteConfirmation = false
     @StateObject private var profileService = ProfileService.shared
+
+    init(milestone: MilestoneEntry) {
+        self.milestone = milestone
+        let selectedProfileID = milestone.profileID
+            ?? ProfileService.shared.selectedProfileID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let milestonePhotoKind = PhotoAttachmentOwnerKind.milestone.rawValue
+        _photoAttachments = Query(FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { attachment in
+                attachment.ownerKindRawValue == milestonePhotoKind
+                    && (attachment.profileID == selectedProfileID || attachment.profileID == nil)
+            },
+            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
+        ))
+    }
 
     private var profile: BabyProfile? {
         if let profileID = milestone.profileID,

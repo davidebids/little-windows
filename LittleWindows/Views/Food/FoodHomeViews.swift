@@ -7,35 +7,7 @@ struct FoodHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var router = DeepLinkRouter.shared
     @Query(sort: \Household.createdAt) private var households: [Household]
-    @Query(sort: \ShoppingList.sortOrder) private var shoppingLists: [ShoppingList]
-    @Query(sort: \ShoppingListItem.sortOrder) private var shoppingItems: [ShoppingListItem]
-    @Query(sort: \FoodStore.sortOrder) private var stores: [FoodStore]
-    @Query(sort: \FoodStoreSection.sortOrder) private var storeSections: [FoodStoreSection]
-    @Query(sort: \HomeTodoList.sortOrder) private var todoLists: [HomeTodoList]
-    @Query(sort: \HomeTodoItem.sortOrder) private var todoItems: [HomeTodoItem]
-    @Query(sort: \InventoryLocation.sortOrder) private var locations: [InventoryLocation]
-    @Query(sort: \InventoryItem.updatedAt, order: .reverse) private var inventoryItems: [InventoryItem]
-    @Query(sort: \FoodItem.canonicalName) private var foodItems: [FoodItem]
-    @Query(sort: \MealPrepItem.updatedAt, order: .reverse) private var mealPrepItems: [MealPrepItem]
-    @Query(sort: \MealPrepUsage.dateTime, order: .reverse) private var mealPrepUsages: [MealPrepUsage]
-    @Query(sort: \ReturnRequest.updatedAt, order: .reverse) private var returnRequests: [ReturnRequest]
-    @Query(sort: \ReturnItem.sortOrder) private var returnItems: [ReturnItem]
-    @Query(sort: \ReturnPackage.sortOrder) private var returnPackages: [ReturnPackage]
-    @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
-    @Query(sort: \FoodReminder.dateTime) private var reminders: [FoodReminder]
-    @Query(sort: \PackingTrip.startDate) private var packingTrips: [PackingTrip]
-    @Query(sort: \TripTraveler.sortOrder) private var tripTravelers: [TripTraveler]
-    @Query(sort: \PackingBag.sortOrder) private var packingBags: [PackingBag]
-    @Query(sort: \PackingItem.sortOrder) private var packingItems: [PackingItem]
     @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @Query(sort: \BabyEvent.startDate, order: .reverse) private var careEvents: [BabyEvent]
-    @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
-    @Query(sort: \SolidFoodProgress.updatedAt, order: .reverse) private var solidFoodProgress: [SolidFoodProgress]
-    @Query(sort: \SolidFoodEventItem.createdAt, order: .reverse) private var solidFoodEventItems: [SolidFoodEventItem]
-    @Query(sort: \SolidAllergenProgress.updatedAt, order: .reverse) private var solidAllergenProgress: [SolidAllergenProgress]
-    @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
-    @Query(sort: \PhotoAttachment.createdAt) private var solidFoodPhotos: [PhotoAttachment]
-    @Query(sort: \PlannedSolidMeal.scheduledAt) private var plannedSolidMeals: [PlannedSolidMeal]
 
     @StateObject private var profileService = ProfileService.shared
 
@@ -43,39 +15,24 @@ struct FoodHomeView: View {
     @State private var path: [FoodRoute]
     @State private var showingQuickAdd = false
     @State private var deferredFoodCommand: FoodRouteCommand?
-    @State private var deferredFoodCommandRetryToken = UUID()
 
     private var household: Household? { households.first }
     private var selectedProfile: BabyProfile? { profileService.selectedProfile(in: profiles) }
-    private var selectedSolidsState: SolidsProfileState? {
-        guard let selectedProfile else { return nil }
-        return solidsProfileStates.first { $0.profileID == selectedProfile.id }
-    }
-    private var solidsAccessLevel: SolidsAccessLevel {
-        SolidsTrackingService.accessLevel(
-            for: selectedProfile,
-            events: careEvents,
-            state: selectedSolidsState
-        )
-    }
+    // Solids routes are handed to Care before Food's navigation stack is used.
+    // Keep the unreachable destination switch source-compatible without
+    // installing CloudKit observers for solids history on every Home screen.
+    private var careEvents: [BabyEvent] { [] }
+    private var solidFoodProgress: [SolidFoodProgress] { [] }
+    private var solidFoodEventItems: [SolidFoodEventItem] { [] }
+    private var solidAllergenProgress: [SolidAllergenProgress] { [] }
+    private var customSolidFoods: [SolidFoodCatalogItem] { [] }
+    private var solidFoodPhotos: [PhotoAttachment] { [] }
+    private var plannedSolidMeals: [PlannedSolidMeal] { [] }
+    private var selectedSolidsState: SolidsProfileState? { nil }
+    private var solidsAccessLevel: SolidsAccessLevel { .hidden }
     private var availableSections: [FoodHomeSection] {
         FoodHomeSection.allCases.filter { $0 != .solids }
     }
-    private var foodRouteDataVersion: Int {
-        let shoppingVersion = households.count + shoppingLists.count
-            + inventoryItems.count + mealPrepItems.count
-        let returnsVersion = returnRequests.count + returnItems.count + returnPackages.count
-        let todoVersion = todoLists.count + todoItems.count
-        let storeVersion = stores.count + storeSections.count + locations.count
-        let tripVersion = packingTrips.count + tripTravelers.count
-            + packingBags.count + packingItems.count
-        let solidsVersion = careEvents.count + solidsProfileStates.count
-            + solidFoodProgress.count + solidFoodEventItems.count + solidAllergenProgress.count
-            + customSolidFoods.count + plannedSolidMeals.count
-        return shoppingVersion + returnsVersion + todoVersion
-            + storeVersion + tripVersion + solidsVersion
-    }
-
     init() {
         let restoredNavigation = FoodNavigationRestorationState.load()
         let restoredSection: FoodHomeSection = restoredNavigation.selectedSection == .solids
@@ -86,28 +43,19 @@ struct FoodHomeView: View {
             : restoredNavigation.path
         _selectedSection = State(initialValue: restoredSection)
         _path = State(initialValue: restoredPath)
-        let returnPhotoKind = PhotoAttachmentOwnerKind.returnPhoto.rawValue
-        let descriptor = FetchDescriptor<PhotoAttachment>(
-            predicate: #Predicate<PhotoAttachment> { attachment in
-                attachment.ownerKindRawValue == returnPhotoKind
-            },
-            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
-        )
-        _photoAttachments = Query(descriptor)
-        let solidFoodPhotoKind = PhotoAttachmentOwnerKind.solidFood.rawValue
-        _solidFoodPhotos = Query(FetchDescriptor<PhotoAttachment>(
-            predicate: #Predicate<PhotoAttachment> { attachment in
-                attachment.ownerKindRawValue == solidFoodPhotoKind
-            },
-            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
-        ))
     }
 
     var body: some View {
         NavigationStack(path: $path) {
             Group {
                 if let household {
-                    content(household: household)
+                    FoodHomeDataLoader(
+                        householdID: household.id,
+                        selectedSection: selectedSection,
+                        activeRoute: path.last
+                    ) { data in
+                        navigationContent(household: household, data: data)
+                    }
                 } else {
                     ProgressView("Preparing Food & Home")
                         .task {
@@ -127,26 +75,10 @@ struct FoodHomeView: View {
                     .accessibilityLabel("Food reminders")
                 }
             }
-            .navigationDestination(for: FoodRoute.self) { route in
-                destination(for: route)
-            }
             .task {
                 FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
                 _ = profileService.ensureSelection(in: profiles)
-                correctUnavailableSolidsRoute()
                 handlePendingProfileSwitch()
-                retryDeferredFoodCommandIfPossible()
-            }
-            .onReceive(router.$pendingFoodCommand.compactMap { $0 }) { command in
-                handle(command)
-                router.pendingFoodCommand = nil
-            }
-            .onChange(of: foodRouteDataVersion) { _, _ in
-                correctUnavailableSolidsRoute()
-                retryDeferredFoodCommandIfPossible()
-            }
-            .onChange(of: profileService.selectedProfileID) { _, _ in
-                correctUnavailableSolidsRoute()
             }
             .onChange(of: router.pendingProfileID) { _, _ in
                 handlePendingProfileSwitch()
@@ -157,16 +89,35 @@ struct FoodHomeView: View {
             .onChange(of: path) { _, _ in
                 saveNavigationState()
             }
-            .sheet(isPresented: $showingQuickAdd) {
-                if let household {
-                    QuickAddShoppingItemView(
-                        household: household,
-                        shoppingLists: householdShoppingLists,
-                        shoppingItems: householdShoppingItems
-                    )
-                }
-            }
         }
+    }
+
+    private func navigationContent(
+        household: Household,
+        data: FoodHomeRouteData
+    ) -> some View {
+        content(household: household, data: data)
+            .navigationDestination(for: FoodRoute.self) { route in
+                destination(for: route, data: data)
+            }
+            .task(id: data.version) {
+                if let command = router.pendingFoodCommand {
+                    handle(command, data: data)
+                    router.pendingFoodCommand = nil
+                }
+                retryDeferredFoodCommandIfPossible(data: data)
+            }
+            .onReceive(router.$pendingFoodCommand.compactMap { $0 }) { command in
+                handle(command, data: data)
+                router.pendingFoodCommand = nil
+            }
+            .sheet(isPresented: $showingQuickAdd) {
+                QuickAddShoppingItemView(
+                    household: household,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems
+                )
+            }
     }
 
     private func saveNavigationState() {
@@ -177,7 +128,7 @@ struct FoodHomeView: View {
     }
 
     @ViewBuilder
-    private func content(household: Household) -> some View {
+    private func content(household: Household, data: FoodHomeRouteData) -> some View {
         VStack(spacing: 0) {
             FoodHomeSectionPicker(sections: availableSections, selectedSection: selectedSection) { section in
                 guard selectedSection != section else { return }
@@ -193,93 +144,77 @@ struct FoodHomeView: View {
             case .todos:
                 HomeTodoListsView(
                     household: household,
-                    lists: householdTodoLists,
-                    items: householdTodoItems,
+                    lists: data.todoLists,
+                    items: data.todoItems,
                     openList: { path.append(FoodRoute.todoList($0.id)) }
                 )
             case .solids:
-                if let selectedProfile,
-                   selectedProfile.profileType == .child,
-                   solidsAccessLevel != .hidden {
-                    SolidsHomeView(
-                        profile: selectedProfile,
-                        accessLevel: solidsAccessLevel,
-                        events: careEvents,
-                        eventItems: solidFoodEventItems,
-                        progress: solidFoodProgress,
-                        plans: plannedSolidMeals,
-                        profileState: selectedSolidsState,
-                        open: { path.append($0) }
-                    )
-                }
+                EmptyView()
             case .shopping:
                 ShoppingListsView(
                     household: household,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
-                    stores: householdStores,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    stores: data.stores,
                     openList: { path.append(FoodRoute.shoppingList($0.id)) }
                 )
             case .trips:
                 TripsHomeView(
                     household: household,
-                    trips: householdPackingTrips,
-                    travelers: householdTripTravelers,
-                    bags: householdPackingBags,
-                    items: householdPackingItems,
+                    trips: data.packingTrips,
+                    travelers: data.tripTravelers,
+                    items: data.packingItems,
                     profiles: profiles,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
                     openTrip: { path.append(FoodRoute.packingTrip($0)) }
                 )
             case .inventory:
                 InventoryHomeView(
                     household: household,
-                    locations: householdLocations,
-                    inventoryItems: householdInventoryItems,
-                    mealPrepItems: householdMealPrepItems,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
+                    locations: data.locations,
+                    inventoryItems: data.inventoryItems,
+                    mealPrepItems: data.mealPrepItems,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
                     openItem: { path.append(FoodRoute.inventoryItem($0.id)) }
                 )
             case .mealPrep:
                 MealPrepView(
                     household: household,
-                    locations: householdLocations,
-                    mealPrepItems: householdMealPrepItems,
+                    locations: data.locations,
+                    mealPrepItems: data.mealPrepItems,
                     openItem: { path.append(FoodRoute.mealPrepItem($0.id)) }
                 )
             case .returns:
                 ReturnsHomeView(
                     household: household,
-                    requests: householdReturnRequests,
-                    items: householdReturnItems,
-                    packages: householdReturnPackages,
-                    photoAttachments: householdReturnPhotos,
+                    requests: data.sortedReturnRequests,
+                    items: data.returnItems,
+                    packages: data.returnPackages,
+                    photoAttachments: data.returnPhotos,
                     openReturn: { path.append(FoodRoute.returnRequest($0.id)) }
                 )
             case .stores:
                 StoresView(
                     household: household,
-                    stores: householdStores,
-                    sections: householdStoreSections,
+                    stores: data.stores,
+                    sections: data.storeSections,
                     openStore: { path.append(FoodRoute.store($0.id)) }
                 )
             case .insights:
                 FoodInsightsView(
                     household: household,
-                    todoLists: householdTodoLists,
-                    todoItems: householdTodoItems,
-                    returnRequests: householdReturnRequests,
-                    returnItems: householdReturnItems,
-                    returnPackages: householdReturnPackages,
-                    locations: householdLocations,
-                    inventoryItems: householdInventoryItems,
-                    mealPrepItems: householdMealPrepItems,
-                    packingTrips: householdPackingTrips,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
-                    mealPrepUsages: householdMealPrepUsages
+                    todoLists: data.todoLists,
+                    todoItems: data.todoItems,
+                    returnRequests: data.sortedReturnRequests,
+                    returnItems: data.returnItems,
+                    returnPackages: data.returnPackages,
+                    locations: data.locations,
+                    inventoryItems: data.inventoryItems,
+                    mealPrepItems: data.mealPrepItems,
+                    packingTrips: data.packingTrips,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    mealPrepUsages: data.mealPrepUsages
                 )
             }
         }
@@ -287,7 +222,7 @@ struct FoodHomeView: View {
     }
 
     @ViewBuilder
-    private func destination(for route: FoodRoute) -> some View {
+    private func destination(for route: FoodRoute, data: FoodHomeRouteData) -> some View {
         switch route {
         case .solidsHome:
             if let selectedProfile,
@@ -344,10 +279,10 @@ struct FoodHomeView: View {
                     food: food,
                     profile: selectedProfile,
                     progress: solidFoodProgress,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
-                    inventoryItems: householdInventoryItems,
-                    foodItems: householdFoodItems,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    inventoryItems: data.inventoryItems,
+                    foodItems: data.foodItems,
                     openHistory: { path.append(.solidFoodHistory($0, $1)) },
                     openRecipe: { path.append(.solidsRecipe($0)) }
                 )
@@ -367,10 +302,10 @@ struct FoodHomeView: View {
                     },
                     allFoods: customSolidFoods,
                     progress: solidFoodProgress,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
-                    inventoryItems: householdInventoryItems,
-                    foodItems: householdFoodItems,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    inventoryItems: data.inventoryItems,
+                    foodItems: data.foodItems,
                     openHistory: { path.append(.solidFoodHistory($0, $1)) }
                 )
             } else {
@@ -396,10 +331,10 @@ struct FoodHomeView: View {
                 PlannedSolidMealDetailView(
                     plan: plan,
                     profile: selectedProfile,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
-                    inventoryItems: householdInventoryItems,
-                    foodItems: householdFoodItems,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    inventoryItems: data.inventoryItems,
+                    foodItems: data.foodItems,
                     openFood: { foodID, foodName in
                         if SolidsReferenceCatalog.food(id: foodID) != nil {
                             path.append(.solidFood(foodID))
@@ -509,36 +444,36 @@ struct FoodHomeView: View {
                     profile: selectedProfile,
                     profileState: selectedSolidsState,
                     household: household,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
-                    inventoryItems: householdInventoryItems,
-                    foodItems: householdFoodItems,
-                    locations: householdLocations,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    inventoryItems: data.inventoryItems,
+                    foodItems: data.foodItems,
+                    locations: data.locations,
                     openFood: { path.append(.solidFood($0)) }
                 )
             } else {
                 MissingFoodRouteView()
             }
         case .todoList(let id):
-            if let list = householdTodoLists.first(where: { $0.id == id }) {
+            if let list = data.todoLists.first(where: { $0.id == id }) {
                 HomeTodoListDetailView(
                     list: list,
-                    items: householdTodoItems.filter { $0.todoListID == list.id }
+                    items: data.todoItems.filter { $0.todoListID == list.id }
                 )
             } else {
                 MissingFoodRouteView()
             }
         case .shoppingList(let id):
-            if let list = householdShoppingLists.first(where: { $0.id == id }) {
+            if let list = data.shoppingLists.first(where: { $0.id == id }) {
                 ShoppingListDetailView(
                     list: list,
-                    items: householdShoppingItems.filter { $0.shoppingListID == list.id },
-                    shoppingLists: householdShoppingLists,
-                    allShoppingItems: householdShoppingItems,
-                    store: householdStores.first { $0.id == list.storeID },
-                    sections: householdStoreSections.filter { $0.storeID == list.storeID },
-                    inventoryItems: householdInventoryItems,
-                    mealPrepItems: householdMealPrepItems,
+                    items: data.shoppingItems.filter { $0.shoppingListID == list.id },
+                    shoppingLists: data.shoppingLists,
+                    allShoppingItems: data.shoppingItems,
+                    store: data.stores.first { $0.id == list.storeID },
+                    sections: data.storeSections.filter { $0.storeID == list.storeID },
+                    inventoryItems: data.inventoryItems,
+                    mealPrepItems: data.mealPrepItems,
                     openShoppingMode: { path.append(FoodRoute.shoppingMode(list.id)) },
                     openMealPrep: {
                         selectedSection = .mealPrep
@@ -549,69 +484,69 @@ struct FoodHomeView: View {
                 MissingFoodRouteView()
             }
         case .shoppingMode(let id):
-            if let list = householdShoppingLists.first(where: { $0.id == id }) {
+            if let list = data.shoppingLists.first(where: { $0.id == id }) {
                 ShoppingModeView(
                     list: list,
-                    items: householdShoppingItems.filter { $0.shoppingListID == list.id },
-                    sections: householdStoreSections.filter { $0.storeID == list.storeID },
-                    locations: householdLocations
+                    items: data.shoppingItems.filter { $0.shoppingListID == list.id },
+                    sections: data.storeSections.filter { $0.storeID == list.storeID },
+                    locations: data.locations
                 )
             } else {
                 MissingFoodRouteView()
             }
         case .packingTrip(let id):
-            if let trip = householdPackingTrips.first(where: { $0.id == id }) {
+            if let trip = data.packingTrips.first(where: { $0.id == id }) {
                 PackingTripDetailView(
                     trip: trip,
-                    allTrips: householdPackingTrips,
-                    allTravelers: householdTripTravelers,
-                    allBags: householdPackingBags,
-                    allItems: householdPackingItems,
+                    allTrips: data.packingTrips,
+                    allTravelers: data.tripTravelers,
+                    allBags: data.packingBags,
+                    allItems: data.packingItems,
                     profiles: profiles.filter { !$0.isArchived },
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems
                 )
             } else {
                 MissingFoodRouteView()
             }
         case .inventoryItem(let id):
-            if let item = householdInventoryItems.first(where: { $0.id == id }) {
+            if let item = data.inventoryItems.first(where: { $0.id == id }) {
                 InventoryItemDetailView(
                     item: item,
-                    locations: householdLocations,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems
+                    locations: data.locations,
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems
                 )
             } else {
                 MissingFoodRouteView()
             }
         case .mealPrepItem(let id):
-            if let item = householdMealPrepItems.first(where: { $0.id == id }) {
+            if let item = data.mealPrepItems.first(where: { $0.id == id }) {
                 MealPrepDetailView(
                     item: item,
-                    locations: householdLocations,
-                    usages: householdMealPrepUsages.filter { $0.mealPrepItemID == item.id }
+                    locations: data.locations,
+                    usages: data.mealPrepUsages.filter { $0.mealPrepItemID == item.id }
                 )
             } else {
                 MissingFoodRouteView()
             }
         case .returnRequest(let id):
-            if let request = householdReturnRequests.first(where: { $0.id == id }) {
+            if let request = data.sortedReturnRequests.first(where: { $0.id == id }) {
                 ReturnDetailView(
                     request: request,
-                    items: householdReturnItems.filter { $0.returnRequestID == request.id },
-                    packages: householdReturnPackages.filter { $0.returnRequestID == request.id },
-                    photoAttachments: householdReturnPhotos
+                    items: data.returnItems.filter { $0.returnRequestID == request.id },
+                    packages: data.returnPackages.filter { $0.returnRequestID == request.id },
+                    photoAttachments: data.returnPhotos
                 )
             } else {
                 MissingFoodRouteView()
             }
         case .store(let id):
-            if let store = householdStores.first(where: { $0.id == id }) {
+            if let store = data.stores.first(where: { $0.id == id }) {
                 StoreEditorView(
                     store: store,
-                    sections: householdStoreSections.filter { $0.storeID == store.id },
-                    shoppingItems: householdShoppingItems
+                    sections: data.storeSections.filter { $0.storeID == store.id },
+                    shoppingItems: data.shoppingItems
                 )
             } else {
                 MissingFoodRouteView()
@@ -620,17 +555,21 @@ struct FoodHomeView: View {
             if let household {
                 FoodReminderSettingsView(
                     household: household,
-                    reminders: householdReminders,
-                    todoLists: householdTodoLists,
-                    shoppingLists: householdShoppingLists,
-                    mealPrepItems: householdMealPrepItems,
-                    returnRequests: householdReturnRequests
+                    reminders: data.reminders,
+                    todoLists: data.todoLists,
+                    shoppingLists: data.shoppingLists,
+                    mealPrepItems: data.mealPrepItems,
+                    returnRequests: data.sortedReturnRequests
                 )
             }
         }
     }
 
-    private func handle(_ command: FoodRouteCommand, allowDeferral: Bool = true) {
+    private func handle(
+        _ command: FoodRouteCommand,
+        data: FoodHomeRouteData,
+        allowDeferral: Bool = true
+    ) {
         if section(for: command) == .solids {
             deferredFoodCommand = nil
             selectedSection = .todos
@@ -667,7 +606,7 @@ struct FoodHomeView: View {
             return
         }
 
-        if allowDeferral && shouldDefer(command) {
+        if allowDeferral && shouldDefer(command, data: data) {
             deferFoodCommand(command)
             return
         }
@@ -776,7 +715,7 @@ struct FoodHomeView: View {
         }
     }
 
-    private func shouldDefer(_ command: FoodRouteCommand) -> Bool {
+    private func shouldDefer(_ command: FoodRouteCommand, data: FoodHomeRouteData) -> Bool {
         guard household != nil else { return true }
         switch command {
         case .food, .todos, .shopping, .trips, .inventory, .mealPrep, .returns, .quickAdd:
@@ -800,19 +739,19 @@ struct FoodHomeView: View {
         case .solidsRecipe(let id):
             return solidsAccessLevel == .hidden || !SolidsReferenceCatalog.recipes.contains { $0.id == id }
         case .todoList(let id):
-            return !householdTodoLists.contains { $0.id == id }
+            return !data.todoLists.contains { $0.id == id }
         case .shoppingList(let id), .shoppingMode(let id):
-            return !householdShoppingLists.contains { $0.id == id }
+            return !data.shoppingLists.contains { $0.id == id }
         case .packingTrip(let id):
-            return !householdPackingTrips.contains { $0.id == id }
+            return !data.packingTrips.contains { $0.id == id }
         case .inventoryItem(let id):
-            return !householdInventoryItems.contains { $0.id == id }
+            return !data.inventoryItems.contains { $0.id == id }
         case .mealPrepItem(let id):
-            return !householdMealPrepItems.contains { $0.id == id }
+            return !data.mealPrepItems.contains { $0.id == id }
         case .returnRequest(let id):
-            return !householdReturnRequests.contains { $0.id == id }
+            return !data.sortedReturnRequests.contains { $0.id == id }
         case .store(let id):
-            return !householdStores.contains { $0.id == id }
+            return !data.stores.contains { $0.id == id }
         }
     }
 
@@ -820,25 +759,20 @@ struct FoodHomeView: View {
         selectedSection = section(for: command)
         path.removeLast(path.count)
         deferredFoodCommand = command
-
-        let retryToken = UUID()
-        deferredFoodCommandRetryToken = retryToken
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 900_000_000)
-            guard deferredFoodCommandRetryToken == retryToken else { return }
-            retryDeferredFoodCommandIfPossible(force: true)
-        }
     }
 
-    private func retryDeferredFoodCommandIfPossible(force: Bool = false) {
+    private func retryDeferredFoodCommandIfPossible(
+        data: FoodHomeRouteData,
+        force: Bool = false
+    ) {
         guard let command = deferredFoodCommand else { return }
-        if force, shouldDefer(command), section(for: command) == .solids {
+        if force, shouldDefer(command, data: data), section(for: command) == .solids {
             deferredFoodCommand = nil
             correctUnavailableSolidsRoute()
             return
         }
-        if force || !shouldDefer(command) {
-            handle(command, allowDeferral: !force)
+        if force || !shouldDefer(command, data: data) {
+            handle(command, data: data, allowDeferral: !force)
         }
     }
 
@@ -885,144 +819,280 @@ struct FoodHomeView: View {
             path.removeLast(path.count)
         }
     }
+}
 
-    private var householdShoppingLists: [ShoppingList] {
-        guard let household else { return [] }
-        return shoppingLists
-            .filter { $0.householdID == household.id && !$0.isArchived }
-            .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
+private struct FoodHomeRouteData {
+    let scopeKey: String
+    let shoppingLists: [ShoppingList]
+    let shoppingItems: [ShoppingListItem]
+    let stores: [FoodStore]
+    let storeSections: [FoodStoreSection]
+    let todoLists: [HomeTodoList]
+    let todoItems: [HomeTodoItem]
+    let locations: [InventoryLocation]
+    let inventoryItems: [InventoryItem]
+    let foodItems: [FoodItem]
+    let mealPrepItems: [MealPrepItem]
+    let mealPrepUsages: [MealPrepUsage]
+    let sortedReturnRequests: [ReturnRequest]
+    let returnItems: [ReturnItem]
+    let returnPackages: [ReturnPackage]
+    let returnPhotos: [PhotoAttachment]
+    let reminders: [FoodReminder]
+    let packingTrips: [PackingTrip]
+    let tripTravelers: [TripTraveler]
+    let packingBags: [PackingBag]
+    let packingItems: [PackingItem]
+
+    var version: String {
+        let shopping = "\(shoppingLists.count):\(shoppingItems.count):\(stores.count):\(storeSections.count)"
+        let home = "\(todoLists.count):\(todoItems.count):\(locations.count):\(inventoryItems.count)"
+        let food = "\(mealPrepItems.count):\(mealPrepUsages.count):\(reminders.count)"
+        let returns = "\(sortedReturnRequests.count):\(returnItems.count):\(returnPackages.count):\(returnPhotos.count)"
+        let trips = "\(packingTrips.count):\(tripTravelers.count):\(packingBags.count):\(packingItems.count)"
+        return "\(scopeKey):\(shopping):\(home):\(food):\(returns):\(trips)"
+    }
+}
+
+private struct FoodHomeDataScope {
+    let section: FoodHomeSection
+    let activeRoute: FoodRoute?
+
+    var key: String {
+        "\(section.rawValue):\(String(describing: activeRoute))"
     }
 
-    private var householdTodoLists: [HomeTodoList] {
-        guard let household else { return [] }
-        return todoLists
-            .filter { $0.householdID == household.id && !$0.isArchived }
-            .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
+    private var isReminders: Bool {
+        activeRoute == .reminders
     }
 
-    private var householdTodoItems: [HomeTodoItem] {
-        guard let household else { return [] }
-        return todoItems.filter { $0.householdID == household.id }
+    var packingTripID: UUID? {
+        guard case .packingTrip(let id) = activeRoute else { return nil }
+        return id
     }
 
-    private var householdShoppingItems: [ShoppingListItem] {
-        guard let household else { return [] }
-        return shoppingItems.filter { $0.householdID == household.id }
+    var loadsTodos: Bool { section == .todos || section == .insights || isReminders }
+    var loadsShoppingLists: Bool {
+        section == .shopping || packingTripID != nil || section == .inventory
+            || section == .insights || isReminders
+    }
+    var loadsShoppingItems: Bool {
+        section == .shopping || packingTripID != nil || section == .inventory
+            || section == .stores || section == .insights
+    }
+    var loadsStores: Bool { section == .shopping || section == .stores }
+    var loadsLocations: Bool {
+        section == .shopping || section == .inventory || section == .mealPrep
+            || section == .insights
+    }
+    var loadsInventory: Bool {
+        section == .shopping || section == .inventory || section == .insights
+    }
+    var loadsMealPrep: Bool {
+        section == .shopping || section == .inventory || section == .mealPrep
+            || section == .insights || isReminders
+    }
+    var loadsMealPrepUsage: Bool { section == .mealPrep || section == .insights }
+    var loadsReturns: Bool { section == .returns || section == .insights || isReminders }
+    var loadsReturnDetails: Bool { section == .returns || section == .insights }
+    var loadsReturnPhotos: Bool { section == .returns }
+    var loadsReminders: Bool { isReminders }
+    var loadsTrips: Bool { section == .trips || section == .insights }
+}
+
+/// Each Home area observes only its own records. This prevents a CloudKit
+/// import or a packing-list edit from invalidating every other Home workflow.
+private struct FoodHomeDataLoader<Content: View>: View {
+    @Query private var shoppingLists: [ShoppingList]
+    @Query private var shoppingItems: [ShoppingListItem]
+    @Query private var stores: [FoodStore]
+    @Query private var storeSections: [FoodStoreSection]
+    @Query private var todoLists: [HomeTodoList]
+    @Query private var todoItems: [HomeTodoItem]
+    @Query private var locations: [InventoryLocation]
+    @Query private var inventoryItems: [InventoryItem]
+    @Query private var mealPrepItems: [MealPrepItem]
+    @Query private var mealPrepUsages: [MealPrepUsage]
+    @Query private var returnRequests: [ReturnRequest]
+    @Query private var returnItems: [ReturnItem]
+    @Query private var returnPackages: [ReturnPackage]
+    @Query private var returnPhotos: [PhotoAttachment]
+    @Query private var reminders: [FoodReminder]
+    @Query private var packingTrips: [PackingTrip]
+    @Query private var tripTravelers: [TripTraveler]
+    @Query private var packingBags: [PackingBag]
+    @Query private var packingItems: [PackingItem]
+
+    private let scope: FoodHomeDataScope
+    private let content: (FoodHomeRouteData) -> Content
+
+    init(
+        householdID: UUID,
+        selectedSection: FoodHomeSection,
+        activeRoute: FoodRoute?,
+        @ViewBuilder content: @escaping (FoodHomeRouteData) -> Content
+    ) {
+        let scope = FoodHomeDataScope(section: selectedSection, activeRoute: activeRoute)
+        self.scope = scope
+        self.content = content
+        let unloadedID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let todoID = scope.loadsTodos ? householdID : unloadedID
+        let shoppingListID = scope.loadsShoppingLists ? householdID : unloadedID
+        let shoppingItemID = scope.loadsShoppingItems ? householdID : unloadedID
+        let storeID = scope.loadsStores ? householdID : unloadedID
+        let locationID = scope.loadsLocations ? householdID : unloadedID
+        let inventoryID = scope.loadsInventory ? householdID : unloadedID
+        let mealPrepID = scope.loadsMealPrep ? householdID : unloadedID
+        let mealPrepUsageID = scope.loadsMealPrepUsage ? householdID : unloadedID
+        let returnID = scope.loadsReturns ? householdID : unloadedID
+        let returnDetailID = scope.loadsReturnDetails ? householdID : unloadedID
+        let reminderID = scope.loadsReminders ? householdID : unloadedID
+        let tripID = scope.loadsTrips ? householdID : unloadedID
+
+        _shoppingLists = Query(FetchDescriptor<ShoppingList>(
+            predicate: #Predicate { $0.householdID == shoppingListID && !$0.isArchived },
+            sortBy: [SortDescriptor(\ShoppingList.sortOrder), SortDescriptor(\ShoppingList.name)]
+        ))
+        _shoppingItems = Query(FetchDescriptor<ShoppingListItem>(
+            predicate: #Predicate { $0.householdID == shoppingItemID },
+            sortBy: [SortDescriptor(\ShoppingListItem.sortOrder)]
+        ))
+        _stores = Query(FetchDescriptor<FoodStore>(
+            predicate: #Predicate { $0.householdID == storeID && !$0.isArchived },
+            sortBy: [SortDescriptor(\FoodStore.sortOrder), SortDescriptor(\FoodStore.name)]
+        ))
+        _storeSections = Query(FetchDescriptor<FoodStoreSection>(
+            predicate: #Predicate { $0.householdID == storeID },
+            sortBy: [SortDescriptor(\FoodStoreSection.sortOrder), SortDescriptor(\FoodStoreSection.name)]
+        ))
+        _todoLists = Query(FetchDescriptor<HomeTodoList>(
+            predicate: #Predicate { $0.householdID == todoID && !$0.isArchived },
+            sortBy: [SortDescriptor(\HomeTodoList.sortOrder), SortDescriptor(\HomeTodoList.name)]
+        ))
+        _todoItems = Query(FetchDescriptor<HomeTodoItem>(
+            predicate: #Predicate { $0.householdID == todoID },
+            sortBy: [SortDescriptor(\HomeTodoItem.sortOrder)]
+        ))
+        _locations = Query(FetchDescriptor<InventoryLocation>(
+            predicate: #Predicate { $0.householdID == locationID && !$0.isArchived },
+            sortBy: [SortDescriptor(\InventoryLocation.sortOrder), SortDescriptor(\InventoryLocation.name)]
+        ))
+        _inventoryItems = Query(FetchDescriptor<InventoryItem>(
+            predicate: #Predicate { $0.householdID == inventoryID },
+            sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
+        ))
+        _mealPrepItems = Query(FetchDescriptor<MealPrepItem>(
+            predicate: #Predicate { $0.householdID == mealPrepID },
+            sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
+        ))
+        _mealPrepUsages = Query(FetchDescriptor<MealPrepUsage>(
+            predicate: #Predicate { $0.householdID == mealPrepUsageID },
+            sortBy: [SortDescriptor(\MealPrepUsage.dateTime, order: .reverse)]
+        ))
+        _returnRequests = Query(FetchDescriptor<ReturnRequest>(
+            predicate: #Predicate { $0.householdID == returnID && !$0.isArchived },
+            sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
+        ))
+        _returnItems = Query(FetchDescriptor<ReturnItem>(
+            predicate: #Predicate { $0.householdID == returnDetailID },
+            sortBy: [SortDescriptor(\ReturnItem.sortOrder)]
+        ))
+        _returnPackages = Query(FetchDescriptor<ReturnPackage>(
+            predicate: #Predicate { $0.householdID == returnDetailID },
+            sortBy: [SortDescriptor(\ReturnPackage.sortOrder)]
+        ))
+        let returnPhotoKind = scope.loadsReturnPhotos
+            ? PhotoAttachmentOwnerKind.returnPhoto.rawValue
+            : "__unloaded_return_photo__"
+        _returnPhotos = Query(FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { $0.ownerKindRawValue == returnPhotoKind },
+            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
+        ))
+        _reminders = Query(FetchDescriptor<FoodReminder>(
+            predicate: #Predicate { $0.householdID == reminderID },
+            sortBy: [SortDescriptor(\FoodReminder.dateTime)]
+        ))
+        _packingTrips = Query(FetchDescriptor<PackingTrip>(
+            predicate: #Predicate { $0.householdID == tripID },
+            sortBy: [SortDescriptor(\PackingTrip.startDate)]
+        ))
+        if let packingTripID = scope.packingTripID {
+            _tripTravelers = Query(FetchDescriptor<TripTraveler>(
+                predicate: #Predicate { $0.tripID == packingTripID },
+                sortBy: [SortDescriptor(\TripTraveler.sortOrder)]
+            ))
+            _packingBags = Query(FetchDescriptor<PackingBag>(
+                predicate: #Predicate { $0.tripID == packingTripID },
+                sortBy: [SortDescriptor(\PackingBag.sortOrder)]
+            ))
+            _packingItems = Query(FetchDescriptor<PackingItem>(
+                predicate: #Predicate { $0.tripID == packingTripID },
+                sortBy: [SortDescriptor(\PackingItem.sortOrder)]
+            ))
+        } else {
+            _tripTravelers = Query(FetchDescriptor<TripTraveler>(
+                predicate: #Predicate { $0.householdID == tripID },
+                sortBy: [SortDescriptor(\TripTraveler.sortOrder)]
+            ))
+            _packingBags = Query(FetchDescriptor<PackingBag>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\PackingBag.sortOrder)]
+            ))
+            _packingItems = Query(FetchDescriptor<PackingItem>(
+                predicate: #Predicate { $0.householdID == tripID },
+                sortBy: [SortDescriptor(\PackingItem.sortOrder)]
+            ))
+        }
     }
 
-    private var householdPackingTrips: [PackingTrip] {
-        guard let household else { return [] }
-        return packingTrips.filter { $0.householdID == household.id }
+    var body: some View {
+        content(FoodHomeRouteData(
+            scopeKey: scope.key,
+            shoppingLists: shoppingLists,
+            shoppingItems: shoppingItems,
+            stores: stores,
+            storeSections: storeSections,
+            todoLists: todoLists,
+            todoItems: todoItems,
+            locations: locations,
+            inventoryItems: inventoryItems,
+            foodItems: [],
+            mealPrepItems: mealPrepItems,
+            mealPrepUsages: mealPrepUsages,
+            sortedReturnRequests: sortedRequests(),
+            returnItems: returnItems,
+            returnPackages: returnPackages,
+            returnPhotos: returnPhotos,
+            reminders: reminders,
+            packingTrips: packingTrips,
+            tripTravelers: tripTravelers,
+            packingBags: packingBags,
+            packingItems: packingItems
+        ))
     }
 
-    private var householdTripTravelers: [TripTraveler] {
-        guard let household else { return [] }
-        return tripTravelers.filter { $0.householdID == household.id }
-    }
-
-    private var householdPackingBags: [PackingBag] {
-        guard let household else { return [] }
-        return packingBags.filter { $0.householdID == household.id }
-    }
-
-    private var householdPackingItems: [PackingItem] {
-        guard let household else { return [] }
-        return packingItems.filter { $0.householdID == household.id }
-    }
-
-    private var householdStores: [FoodStore] {
-        guard let household else { return [] }
-        return stores
-            .filter { $0.householdID == household.id && !$0.isArchived }
-            .sorted { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }
-    }
-
-    private var householdStoreSections: [FoodStoreSection] {
-        guard let household else { return [] }
-        return storeSections
-            .filter { $0.householdID == household.id }
-            .sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
-    }
-
-    private var householdLocations: [InventoryLocation] {
-        guard let household else { return [] }
-        return locations
-            .filter { $0.householdID == household.id && !$0.isArchived }
-            .sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
-    }
-
-    private var householdInventoryItems: [InventoryItem] {
-        guard let household else { return [] }
-        return inventoryItems.filter { $0.householdID == household.id }
-    }
-
-    private var householdFoodItems: [FoodItem] {
-        guard let household else { return [] }
-        return foodItems.filter { $0.householdID == household.id && !$0.isArchived }
-    }
-
-    private var householdMealPrepItems: [MealPrepItem] {
-        guard let household else { return [] }
-        return mealPrepItems.filter { $0.householdID == household.id }
-    }
-
-    private var householdMealPrepUsages: [MealPrepUsage] {
-        guard let household else { return [] }
-        return mealPrepUsages.filter { $0.householdID == household.id }
-    }
-
-    private var householdReturnRequests: [ReturnRequest] {
-        guard let household else { return [] }
-        let householdPackages = returnPackages.filter { $0.householdID == household.id }
-        let householdItems = returnItems.filter { $0.householdID == household.id }
-        let packagesByReturnID = Dictionary(grouping: householdPackages, by: \.returnRequestID)
-        let itemsByReturnID = Dictionary(grouping: householdItems, by: \.returnRequestID)
-        let activeRequests = returnRequests.filter { $0.householdID == household.id && !$0.isArchived }
-        let statusesByReturnID = Dictionary(uniqueKeysWithValues: activeRequests.map { request in
-            (
-                request.id,
-                ReturnTrackingService.status(for: request, packages: packagesByReturnID[request.id] ?? [])
-            )
+    private func sortedRequests() -> [ReturnRequest] {
+        let packagesByReturnID = Dictionary(grouping: returnPackages, by: \.returnRequestID)
+        let itemsByReturnID = Dictionary(grouping: returnItems, by: \.returnRequestID)
+        let statusesByReturnID = Dictionary(uniqueKeysWithValues: returnRequests.map { request in
+            (request.id, ReturnTrackingService.status(
+                for: request,
+                packages: packagesByReturnID[request.id] ?? []
+            ))
         })
-        return activeRequests
-            .sorted { lhs, rhs in
-                let lhsPackages = packagesByReturnID[lhs.id] ?? []
-                let rhsPackages = packagesByReturnID[rhs.id] ?? []
-                return (
-                    statusSortOrder(statusesByReturnID[lhs.id] ?? .needsAction),
-                    earliestReturnByDate(in: lhsPackages) ?? .distantFuture,
-                    returnDisplayTitle(
-                        items: itemsByReturnID[lhs.id] ?? [],
-                        packages: lhsPackages
-                    )
-                ) < (
-                    statusSortOrder(statusesByReturnID[rhs.id] ?? .needsAction),
-                    earliestReturnByDate(in: rhsPackages) ?? .distantFuture,
-                    returnDisplayTitle(
-                        items: itemsByReturnID[rhs.id] ?? [],
-                        packages: rhsPackages
-                    )
-                )
-            }
-    }
-
-    private var householdReturnItems: [ReturnItem] {
-        guard let household else { return [] }
-        return returnItems.filter { $0.householdID == household.id }
-    }
-
-    private var householdReturnPackages: [ReturnPackage] {
-        guard let household else { return [] }
-        return returnPackages.filter { $0.householdID == household.id }
-    }
-
-    private var householdReturnPhotos: [PhotoAttachment] {
-        photoAttachments.filter { $0.ownerKind == .returnPhoto }
-    }
-
-    private var householdReminders: [FoodReminder] {
-        guard let household else { return [] }
-        return reminders.filter { $0.householdID == household.id }
+        return returnRequests.sorted { lhs, rhs in
+            let lhsPackages = packagesByReturnID[lhs.id] ?? []
+            let rhsPackages = packagesByReturnID[rhs.id] ?? []
+            return (
+                statusSortOrder(statusesByReturnID[lhs.id] ?? .needsAction),
+                lhsPackages.compactMap(\.returnByDate).min() ?? .distantFuture,
+                returnDisplayTitle(items: itemsByReturnID[lhs.id] ?? [], packages: lhsPackages)
+            ) < (
+                statusSortOrder(statusesByReturnID[rhs.id] ?? .needsAction),
+                rhsPackages.compactMap(\.returnByDate).min() ?? .distantFuture,
+                returnDisplayTitle(items: itemsByReturnID[rhs.id] ?? [], packages: rhsPackages)
+            )
+        }
     }
 
     private func statusSortOrder(_ status: ReturnRequestStatus) -> Int {
@@ -1036,15 +1106,15 @@ struct FoodHomeView: View {
         }
     }
 
-    private func earliestReturnByDate(in packages: [ReturnPackage]) -> Date? {
-        packages.compactMap(\.returnByDate).min()
-    }
-
     private func returnDisplayTitle(items: [ReturnItem], packages: [ReturnPackage]) -> String {
-        if let firstItem = items.sorted(by: { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }).first {
+        if let firstItem = items.min(by: {
+            ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name)
+        }) {
             return items.count == 1 ? firstItem.name : "\(firstItem.name) + \(items.count - 1)"
         }
-        if let firstPackage = packages.sorted(by: { ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName) }).first {
+        if let firstPackage = packages.min(by: {
+            ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName)
+        }) {
             return "Return at \(firstPackage.displayName)"
         }
         return "Return"
@@ -5224,14 +5294,20 @@ private struct ReturnPackageCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            let photos = package.photoAttachmentIDs.compactMap { id in
-                photoAttachments.first { $0.id == id }?.previewData
+            let photos = package.photoAttachmentIDs.compactMap { id -> (UUID, Data)? in
+                guard let data = photoAttachments.first(where: { $0.id == id })?.previewData else {
+                    return nil
+                }
+                return (id, data)
             }
             if !photos.isEmpty {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
-                        ForEach(Array(photos.enumerated()), id: \.offset) { _, data in
-                            if let image = UIImage(data: data) {
+                        ForEach(photos, id: \.0) { attachmentID, data in
+                            if let image = ThumbnailImageCache.image(
+                                attachmentID: attachmentID,
+                                data: data
+                            ) {
                                 Image(uiImage: image)
                                     .resizable()
                                     .scaledToFill()

@@ -3,6 +3,117 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testProductionScaleStoreKeepsPrimaryNavigationResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 25))
+
+        // Exercise the TestFlight-shaped path as well: a completely fresh
+        // process opening an already-large, CloudKit-compatible store.
+        app.terminate()
+        app.launchEnvironment = ["LITTLE_WINDOWS_UI_TESTING": "1"]
+        let coldLaunchStartedAt = ContinuousClock.now
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertLessThan(
+            coldLaunchStartedAt.duration(to: .now),
+            .seconds(10),
+            "A populated production store should not block a fresh app launch."
+        )
+
+        // A swipe can only complete after the bulk seed/save has released the
+        // app, and it also verifies that maintenance yields to active scrolling.
+        app.swipeUp()
+        app.swipeDown()
+
+        assertResponsiveTab("Home", navigationTitle: "Home")
+        let tripsArea = app.buttons["home-area.trips"]
+        for _ in 0..<8 where !tripsArea.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(tripsArea.waitForExistence(timeout: 4))
+        let tripsStartedAt = ContinuousClock.now
+        tripsArea.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 4)
+        )
+        XCTAssertLessThan(
+            tripsStartedAt.duration(to: .now),
+            .seconds(4),
+            "A production-scale packing history should not block opening Trips."
+        )
+        app.swipeUp()
+        app.swipeDown()
+
+        assertResponsiveTab("Reports", navigationTitle: "Reports")
+        app.swipeUp()
+        assertResponsiveTab("Care", navigationTitle: "Care")
+
+        let solids = app.buttons["care.solids"]
+        XCTAssertTrue(solids.waitForExistence(timeout: 4))
+        let solidsStartedAt = ContinuousClock.now
+        solids.tap()
+        XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            solidsStartedAt.duration(to: .now),
+            .seconds(4),
+            "A populated solids workspace should open without blocking the app."
+        )
+
+        let foodDatabase = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Food database")
+        ).firstMatch
+        for _ in 0..<4 where !foodDatabase.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(foodDatabase.waitForExistence(timeout: 4))
+        XCTAssertTrue(foodDatabase.isHittable)
+        foodDatabase.tap()
+        XCTAssertTrue(app.navigationBars["Food Database"].waitForExistence(timeout: 4))
+        app.swipeUp()
+        app.swipeDown()
+        assertResponsiveTab("Today", navigationTitle: "Today")
+    }
+
+    func testProductionScaleTodayScrollFramePacing() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 25))
+
+        // Measure the rendered frames, not just whether a swipe eventually
+        // finishes. This catches repeated main-thread work that is too short to
+        // register as a hang but still makes physical-device scrolling janky.
+        let options = XCTMeasureOptions()
+        options.iterationCount = 3
+        measure(
+            metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric],
+            options: options
+        ) {
+            app.swipeUp(velocity: .fast)
+        }
+    }
+
+    private func assertResponsiveTab(_ tab: String, navigationTitle: String) {
+        let button = app.tabBars.buttons[tab]
+        XCTAssertTrue(button.waitForExistence(timeout: 3))
+        let startedAt = ContinuousClock.now
+        button.tap()
+        XCTAssertTrue(app.navigationBars[navigationTitle].waitForExistence(timeout: 4))
+        // waitForExistence polls the accessibility tree at roughly one-second
+        // intervals, so allow one polling interval above the three-second app
+        // responsiveness budget. A four-second timeout still fails a genuinely
+        // blocked transition while avoiding failures caused only by poll phase.
+        XCTAssertLessThan(
+            startedAt.duration(to: .now),
+            .seconds(4),
+            "\(tab) should remain responsive with production-scale local and synced data."
+        )
+    }
+
     func testGuidedFeedingSkillTogglesWithoutBlocking() {
         continueAfterFailure = false
 
@@ -178,10 +289,14 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Food Filters"].waitForExistence(timeout: 4))
 
         let fruit = app.buttons["solids.foods.filter.type.fruit"]
+        for _ in 0..<8 where !fruit.exists {
+            app.swipeUp()
+        }
         XCTAssertTrue(fruit.waitForExistence(timeout: 4))
         fruit.tap()
         let apply = app.buttons["solids.foods.filter.apply"]
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Show '")).firstMatch.exists)
+        XCTAssertTrue(apply.waitForExistence(timeout: 3))
+        XCTAssertTrue(apply.label.hasPrefix("Show "))
         apply.tap()
 
         XCTAssertTrue(app.navigationBars["Food Database"].waitForExistence(timeout: 4))
@@ -496,6 +611,26 @@ final class UserVisibleFlowUITests: XCTestCase {
             "Saving a new solids plan should dismiss the editor promptly after the local save."
         )
         XCTAssertTrue(app.staticTexts["Avocado"].waitForExistence(timeout: 4))
+
+        let plannedMeal = app.buttons["solids.plan.row"]
+        XCTAssertTrue(plannedMeal.waitForExistence(timeout: 4))
+        plannedMeal.tap()
+        XCTAssertTrue(app.navigationBars["Planned Meal"].waitForExistence(timeout: 4))
+
+        let delete = app.buttons["solids.plan.delete"]
+        for _ in 0..<12 where !delete.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(delete.waitForExistence(timeout: 4))
+        XCTAssertTrue(delete.isHittable)
+        delete.tap()
+        let deleteAlert = app.alerts["Delete planned meal?"]
+        XCTAssertTrue(deleteAlert.waitForExistence(timeout: 4))
+        XCTAssertTrue(deleteAlert.buttons["Delete"].waitForExistence(timeout: 2))
+        deleteAlert.buttons["Delete"].tap()
+
+        XCTAssertTrue(app.navigationBars["Plan Meals"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["No meals planned"].waitForExistence(timeout: 4))
     }
 
     func testSolidsCrossTabLinksReturnToTheOriginatingReport() {
@@ -1462,6 +1597,17 @@ final class UserVisibleFlowUITests: XCTestCase {
         ]
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        // Foregrounding only proves that the process launched; it does not prove
+        // that RootView has consumed the debug route and committed its store
+        // mutation. Wait for the route's stable destination before terminating
+        // the process for the next step in a reset -> seed -> deep-link flow.
+        if startURL == "littlewindows://debug/reset-empty" {
+            XCTAssertTrue(app.navigationBars["Welcome"].waitForExistence(timeout: 12))
+        } else if startURL == "littlewindows://debug/seed-smoke"
+                    || startURL == "littlewindows://debug/seed-performance" {
+            XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 25))
+        }
     }
 
     private func visit(name: String, startURL: String, expectedText: [String]) {
