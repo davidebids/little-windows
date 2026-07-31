@@ -454,11 +454,6 @@ struct RootView: View {
                     AppInteractionMonitor.endInteraction()
                 }
         )
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                AppInteractionMonitor.noteInteraction()
-            }
-        )
         .onChange(of: router.selectedTab) { _, _ in
             AppInteractionMonitor.noteInteraction()
         }
@@ -741,9 +736,10 @@ struct RootView: View {
             path.removeFirst(2)
         }
         guard path.first == "action" else { return }
-        router.selectedTab = .today
         if path.count == 3, let eventID = UUID(uuidString: path[2]) {
-            router.pendingAction = .showEvent(eventID)
+            router.openToday(action: .showEvent(eventID))
+        } else {
+            router.selectedTab = .today
         }
     }
 

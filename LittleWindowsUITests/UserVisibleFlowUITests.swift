@@ -349,6 +349,76 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Target: Preloaded spoon"].exists)
     }
 
+    func testIngredientTrackingAndShoppingControlsRemainInteractive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 5) {
+            activate.tap()
+        }
+
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/foods/lentil")
+        XCTAssertTrue(app.navigationBars["Lentil"].waitForExistence(timeout: 8))
+
+        let favorite = app.buttons["solids.food.favorite"]
+        for _ in 0..<20 where !favorite.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(favorite.isHittable)
+        favorite.tap()
+        XCTAssertTrue(app.buttons["Remove favorite"].waitForExistence(timeout: 4))
+
+        let addToShoppingList = app.buttons["Add to shopping list"]
+        for _ in 0..<5 where !addToShoppingList.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(addToShoppingList.isHittable)
+        addToShoppingList.tap()
+
+        XCTAssertTrue(app.staticTexts["Add Lentil to a list"].waitForExistence(timeout: 4))
+        let weeklyGroceries = app.buttons["Weekly groceries"]
+        XCTAssertTrue(weeklyGroceries.waitForExistence(timeout: 4))
+        weeklyGroceries.tap()
+        XCTAssertTrue(app.staticTexts["Added Lentil to Weekly groceries."].waitForExistence(timeout: 4))
+    }
+
+    func testRecipePlanAndLogActionsRemainInteractiveWhenSolidsWasStartedEarly() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+
+        let activate = app.buttons["Start solids workspace"]
+        XCTAssertTrue(activate.waitForExistence(timeout: 8))
+        activate.tap()
+        XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 5))
+
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/recipes/avocado-bean-mash")
+        XCTAssertTrue(app.navigationBars["Avocado bean mash"].waitForExistence(timeout: 8))
+
+        let plan = app.buttons["solids.recipe.plan-tomorrow"]
+        for _ in 0..<12 where !plan.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(plan.isHittable)
+        plan.tap()
+        XCTAssertTrue(app.staticTexts["Added to tomorrow's meal plan."].waitForExistence(timeout: 5))
+        app.buttons["OK"].tap()
+
+        let log = app.buttons["solids.recipe.log"]
+        XCTAssertTrue(log.isHittable)
+        log.tap()
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["solid-food.choose"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Avocado"].exists)
+        XCTAssertTrue(app.staticTexts["Black bean"].exists)
+    }
+
     func testTodaySolidsReadinessBackReturnsToToday() {
         continueAfterFailure = false
 
@@ -631,6 +701,62 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["Plan Meals"].waitForExistence(timeout: 4))
         XCTAssertTrue(app.staticTexts["No meals planned"].waitForExistence(timeout: 4))
+    }
+
+    func testEarlyActivatedPlannerExplainsAndResolvesHardMinimumAge() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+        let activate = app.buttons["Start solids workspace"]
+        XCTAssertTrue(activate.waitForExistence(timeout: 8))
+        activate.tap()
+
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/plan")
+        XCTAssertTrue(app.navigationBars["Plan Meals"].waitForExistence(timeout: 8))
+        app.buttons["solids.plan.add"].tap()
+        XCTAssertTrue(app.navigationBars["New Solids Plan"].waitForExistence(timeout: 4))
+
+        let search = app.searchFields["Find foods"]
+        XCTAssertTrue(search.waitForExistence(timeout: 4))
+        search.tap()
+        search.typeText("honey")
+        if app.keyboards.buttons["Search"].exists {
+            app.keyboards.buttons["Search"].tap()
+        }
+
+        let honey = app.buttons["solids.plan.food.honey"]
+        XCTAssertTrue(honey.waitForExistence(timeout: 4))
+        XCTAssertTrue(honey.isEnabled)
+        XCTAssertTrue(app.staticTexts["Available at 12 months"].exists)
+        honey.tap()
+
+        XCTAssertTrue(app.staticTexts["Honey is available at 12 months"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["Move meal to 12 months"].exists)
+        let viewGuidance = app.buttons["View food guidance"]
+        XCTAssertTrue(viewGuidance.exists)
+        viewGuidance.tap()
+
+        XCTAssertTrue(app.navigationBars["Honey guidance"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Available from 12 months"].exists)
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(honey.waitForExistence(timeout: 4))
+        honey.tap()
+        let moveMeal = app.buttons["Move meal to 12 months"]
+        XCTAssertTrue(moveMeal.waitForExistence(timeout: 4))
+        moveMeal.tap()
+        XCTAssertTrue(
+            app.staticTexts["Moved the meal to 12 months and added Honey."].waitForExistence(timeout: 4)
+        )
+        let closeSearch = app.buttons["close"]
+        if closeSearch.waitForExistence(timeout: 2) {
+            closeSearch.tap()
+        }
+        let save = app.buttons["solids.plan.save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 4))
+        XCTAssertTrue(save.isEnabled)
     }
 
     func testSolidsCrossTabLinksReturnToTheOriginatingReport() {

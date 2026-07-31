@@ -531,17 +531,28 @@ final class SolidsFeatureTests: XCTestCase {
             count: 100
         )
 
+        var familiarFoodIDs = Set<String>()
+        var recipeCount = 0
         for suggestion in suggestions {
-            guard let recipe = suggestion.recipe else { continue }
-            let linkedFoodIDs = Set(recipe.foodNames.compactMap {
-                SolidsReferenceCatalog.food(named: $0)?.id
-            })
-            XCTAssertEqual(
-                Set(suggestion.foods.map(\.id)),
-                linkedFoodIDs,
-                "\(recipe.title) should display and plan the same foods as its linked recipe."
-            )
+            if let recipe = suggestion.recipe {
+                recipeCount += 1
+                let linkedFoodIDs = Set(recipe.foodNames.compactMap {
+                    SolidsReferenceCatalog.food(named: $0)?.id
+                })
+                XCTAssertEqual(
+                    Set(suggestion.foods.map(\.id)),
+                    linkedFoodIDs,
+                    "\(recipe.title) should display and plan the same foods as its linked recipe."
+                )
+                XCTAssertEqual(suggestion.kind, .recipe)
+                XCTAssertTrue(
+                    linkedFoodIDs.subtracting([suggestion.foods[0].id]).isSubset(of: familiarFoodIDs),
+                    "\(recipe.title) should not introduce an unfamiliar companion ingredient."
+                )
+            }
+            familiarFoodIDs.formUnion(suggestion.foods.map(\.id))
         }
+        XCTAssertGreaterThan(recipeCount, 0)
     }
 
     func testCatalogIndexesPreserveFoodRecipeAndSearchResults() throws {
@@ -1180,13 +1191,100 @@ final class SolidsFeatureTests: XCTestCase {
             calendar: calendar
         )
 
-        XCTAssertEqual(suggestions.count, 7)
+        XCTAssertEqual(
+            suggestions.filter { $0.kind != .familiarRepeat }.count,
+            7
+        )
+        XCTAssertGreaterThanOrEqual(suggestions.count, 7)
         XCTAssertTrue(suggestions.flatMap(\.foods).allSatisfy { $0.minimumAgeMonths <= 9 })
         XCTAssertTrue(suggestions.flatMap(\.foods).allSatisfy {
             !$0.allergenIDs.contains(SolidsAllergen.egg.rawValue)
         })
         XCTAssertTrue(suggestions.dropFirst().allSatisfy { $0.scheduledAt > suggestions[0].scheduledAt })
-        XCTAssertTrue(suggestions.contains { $0.foods.contains(where: { $0.id == "avocado" }) })
+        XCTAssertTrue(suggestions.contains { $0.foods.contains(where: { $0.isIronRich }) })
+    }
+
+    @MainActor
+    func testGuidedFirstWeekStartsWithSimpleFoodsAndDeliberateRepeats() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let startDate = Date(timeIntervalSince1970: 2_000_000_000)
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: try XCTUnwrap(calendar.date(byAdding: .month, value: -6, to: startDate))
+        )
+
+        let suggestions = SolidsTrackingService.guidedSuggestions(
+            for: profile,
+            progress: [],
+            eventItems: [],
+            allergenProgress: [],
+            plans: [],
+            startingAt: startDate,
+            count: 7,
+            calendar: calendar
+        )
+        let firstWeek = Array(suggestions.prefix(7))
+
+        XCTAssertEqual(firstWeek.count, 7)
+        XCTAssertEqual(firstWeek.map { $0.foods.first?.name }, [
+            "Avocado", "Avocado", "Lentil", "Lentil", "Oatmeal", "Oatmeal", "Egg"
+        ])
+        XCTAssertEqual(firstWeek.map(\.kind), [
+            .firstTaste,
+            .familiarRepeat,
+            .firstTaste,
+            .familiarRepeat,
+            .firstTaste,
+            .familiarRepeat,
+            .firstTaste
+        ])
+        XCTAssertTrue(firstWeek.allSatisfy { $0.recipe == nil && $0.foods.count == 1 })
+        XCTAssertEqual(firstWeek.last?.allergenID, SolidsAllergen.egg.rawValue)
+        XCTAssertEqual(firstWeek.last?.allergenIntroductionStep, 1)
+
+        let openingIntroductions = firstWeek.filter { $0.kind == .firstTaste }.prefix(3)
+        XCTAssertTrue(openingIntroductions.contains { $0.foods.first?.isIronRich == true })
+    }
+
+    @MainActor
+    func testGuidedAllergensFollowAStableOrderAndCompleteEachSeries() {
+        let startDate = Date(timeIntervalSince1970: 2_000_000_000)
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: Calendar.current.date(byAdding: .month, value: -6, to: startDate)!
+        )
+        let suggestions = SolidsTrackingService.guidedSuggestions(
+            for: profile,
+            progress: [],
+            eventItems: [],
+            allergenProgress: [],
+            plans: [],
+            startingAt: startDate,
+            count: 100
+        )
+
+        var seen = Set<String>()
+        let allergenOrder = suggestions.compactMap(\.allergenID).filter {
+            seen.insert($0).inserted
+        }
+        XCTAssertEqual(allergenOrder, [
+            SolidsAllergen.egg.rawValue,
+            SolidsAllergen.peanuts.rawValue,
+            SolidsAllergen.milk.rawValue,
+            SolidsAllergen.wheat.rawValue,
+            SolidsAllergen.soy.rawValue,
+            SolidsAllergen.sesame.rawValue,
+            SolidsAllergen.treeNuts.rawValue,
+            SolidsAllergen.fish.rawValue,
+            SolidsAllergen.crustaceanShellfish.rawValue
+        ])
+        for allergenID in allergenOrder {
+            let series = suggestions.filter { $0.allergenID == allergenID }
+            XCTAssertEqual(series.compactMap(\.allergenIntroductionStep), [1, 2, 3])
+            XCTAssertEqual(Set(series.compactMap { $0.foods.first?.id }).count, 1)
+            XCTAssertTrue(series.allSatisfy { $0.recipe == nil && $0.foods.count == 1 })
+        }
     }
 
     @MainActor
@@ -1215,9 +1313,10 @@ final class SolidsFeatureTests: XCTestCase {
             startingPosition: 1,
             context: context
         )
-        XCTAssertEqual(created.count, 2)
+        XCTAssertEqual(created.count, suggestions.count)
         XCTAssertTrue(created.allSatisfy(\.isGuided))
-        XCTAssertTrue(created.allSatisfy { $0.recipeID != nil })
+        XCTAssertTrue(created.allSatisfy { $0.recipeID == nil })
+        XCTAssertTrue(created.allSatisfy { $0.foodIDs.count == 1 })
 
         let originalDate = try XCTUnwrap(created.first?.scheduledAt)
         SolidsTrackingService.shiftUpcomingGuidedPlans(
@@ -1973,8 +2072,9 @@ final class SolidsFeatureTests: XCTestCase {
             startingAt: now,
             count: 100
         )
-        XCTAssertEqual(suggestions.count, 100)
-        XCTAssertEqual(Set(suggestions.map { $0.foods[0].id }).count, 100)
+        let introductions = suggestions.filter { $0.kind != .familiarRepeat }
+        XCTAssertEqual(introductions.count, 100)
+        XCTAssertEqual(Set(introductions.map { $0.foods[0].id }).count, 100)
     }
 
     @MainActor
@@ -2091,7 +2191,7 @@ final class SolidsFeatureTests: XCTestCase {
             startingAt: now,
             count: 100
         )
-        XCTAssertEqual(substitutes.count, 100)
+        XCTAssertEqual(substitutes.filter { $0.kind != .familiarRepeat }.count, 100)
         XCTAssertTrue(substitutes.flatMap(\.foods).allSatisfy { $0.allergenIDs.isEmpty })
     }
 

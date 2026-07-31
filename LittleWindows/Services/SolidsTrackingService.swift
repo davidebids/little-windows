@@ -22,7 +22,7 @@ struct SolidsGuidedPlanWrite: Sendable {
         title = suggestion.recipe?.title ?? names.joined(separator: " + ")
         foodIDs = suggestion.foods.map(\.id)
         foodNames = names
-        notes = "\(allergenNote)\(suggestion.stage.title): \(suggestion.stage.skill). \(suggestion.preparationNotes)"
+        notes = "\(suggestion.kind.displayName). \(allergenNote)\(suggestion.stage.title): \(suggestion.stage.skill). \(suggestion.preparationNotes)"
         recipeID = suggestion.recipe?.id
         self.guidedPosition = guidedPosition
         allergenID = suggestion.allergenID
@@ -90,6 +90,7 @@ struct SolidsGuidedSuggestionSnapshot: @unchecked Sendable {
     var blockedAllergenIDs: Set<String>
     var toleratedAllergenIDs: Set<String>
     var confirmedExposureCountByAllergen: [String: Int]
+    var plannedExposureStepByAllergen: [String: Int]
     var completedSkillIDs: Set<String>
     var startDate: Date
     var count: Int
@@ -1870,6 +1871,15 @@ enum SolidsTrackingService {
                 confirmedEventIDsByAllergen[allergenID, default: []].insert(item.eventID)
             }
         }
+        var plannedExposureStepByAllergen: [String: Int] = [:]
+        for plan in plans where plan.profileID == profileID && !plan.isCompleted {
+            guard let allergenID = plan.allergenID,
+                  let step = plan.allergenIntroductionStep else { continue }
+            plannedExposureStepByAllergen[allergenID] = max(
+                plannedExposureStepByAllergen[allergenID] ?? 0,
+                step
+            )
+        }
         return SolidsGuidedSuggestionSnapshot(
             isChild: profile.profileType == .child,
             birthDate: profile.birthDate,
@@ -1878,6 +1888,7 @@ enum SolidsTrackingService {
             blockedAllergenIDs: blockedAllergenIDs,
             toleratedAllergenIDs: toleratedAllergenIDs,
             confirmedExposureCountByAllergen: confirmedEventIDsByAllergen.mapValues(\.count),
+            plannedExposureStepByAllergen: plannedExposureStepByAllergen,
             completedSkillIDs: completedSkillIDs,
             startDate: startDate,
             count: count,
@@ -1889,90 +1900,67 @@ enum SolidsTrackingService {
         from snapshot: SolidsGuidedSuggestionSnapshot
     ) -> [SolidsGuidedMealSuggestion] {
         guard snapshot.isChild, snapshot.count > 0 else { return [] }
+        // `count` is the number of new foods to plan, not the number of meals.
+        // The returned journey can be longer because the opening foods and
+        // allergen introductions deliberately include familiar repeats.
         let triedIDs = snapshot.triedFoodIDs
         let blockedAllergens = snapshot.blockedAllergenIDs
         let toleratedAllergens = snapshot.toleratedAllergenIDs
         let calendar = snapshot.calendar
         let startDate = snapshot.startDate
         let candidatePool = SolidsReferenceCatalog.guidedCandidateFoods
-        let safeCandidatePool = candidatePool.filter {
+        let eligibleCandidatePool = candidatePool.filter {
             $0.isEligibleForGuidedPath
                 && $0.possibleAllergenIDs.isEmpty
                 && Set($0.allergenIDs).isDisjoint(with: blockedAllergens)
         }
-        var remainingNewFoods = safeCandidatePool.filter {
+        var remainingNewFoods = eligibleCandidatePool.filter {
             !triedIDs.contains($0.id) && !snapshot.plannedFoodIDs.contains($0.id)
         }
         var allergenCounts = Dictionary(uniqueKeysWithValues: SolidsAllergen.allCases.map {
-            ($0.rawValue, snapshot.confirmedExposureCountByAllergen[$0.rawValue] ?? 0)
+            let confirmedCount = snapshot.confirmedExposureCountByAllergen[$0.rawValue] ?? 0
+            let plannedStep = snapshot.plannedExposureStepByAllergen[$0.rawValue] ?? 0
+            return ($0.rawValue, max(confirmedCount, plannedStep))
         })
-        var rotation = SolidsAllergen.allCases.map(\.rawValue).filter {
+        var completedAllergenIDs = toleratedAllergens.union(
+            allergenCounts.compactMap { $0.value >= 3 ? $0.key : nil }
+        )
+        var familiarFoodIDs = triedIDs.union(snapshot.plannedFoodIDs)
+        var newlyPlannedFoodIDs = Set<String>()
+        var pendingFoundationRepeat: SolidsReferenceFood?
+        var activeAllergenID = guidedAllergenPriority.map(\.rawValue).first {
             !blockedAllergens.contains($0)
-                && !toleratedAllergens.contains($0)
+                && !completedAllergenIDs.contains($0)
+                && (allergenCounts[$0] ?? 0) > 0
                 && (allergenCounts[$0] ?? 0) < 3
-        }.sorted {
-            let lhsCount = allergenCounts[$0] ?? 0
-            let rhsCount = allergenCounts[$1] ?? 0
-            if (lhsCount > 0) != (rhsCount > 0) { return lhsCount > 0 }
-            if lhsCount != rhsCount { return lhsCount > rhsCount }
-            return $0 < $1
         }
+        var activeAllergenFood: SolidsReferenceFood?
+        var unavailableAllergenIDs = Set<String>()
+        var newFoodsSinceAllergenSeries = 2
+        var newFoodCount = 0
+        var dayOffset = 0
         var results: [SolidsGuidedMealSuggestion] = []
 
-        for dayOffset in 0..<snapshot.count {
-            let scheduledDay = calendar.date(byAdding: .day, value: dayOffset, to: startDate) ?? startDate
-            let age = max(
-                0,
-                calendar.dateComponents([.month], from: snapshot.birthDate, to: scheduledDay).month ?? 0
-            )
-            let eligibleNewFoods = remainingNewFoods.filter { $0.minimumAgeMonths <= age }
-            let familiarFoods = safeCandidatePool.filter {
-                triedIDs.contains($0.id) && $0.minimumAgeMonths <= age
-            }
-            let targetAllergen = rotation.first { allergenID in
-                eligibleNewFoods.contains { $0.allergenIDs.contains(allergenID) }
-            }
-            let primary: SolidsReferenceFood?
-            if let targetAllergen,
-               let newAllergenFood = eligibleNewFoods.first(where: { $0.allergenIDs.contains(targetAllergen) }) {
-                primary = newAllergenFood
-            } else {
-                primary = eligibleNewFoods.first
-            }
-            guard let primary else { break }
-            remainingNewFoods.removeAll { $0.id == primary.id }
-
-            let familiar = familiarFoods.first(where: { candidate in
-                candidate.id != primary.id
-                    && (targetAllergen.map { !candidate.allergenIDs.contains($0) } ?? true)
-                    && candidate.allergenIDs.allSatisfy { (allergenCounts[$0] ?? 0) > 0 }
-            })
-            let recipe = bestRecipe(
-                containing: primary,
-                ageMonths: age,
-                blockedAllergens: blockedAllergens,
-                permittedAllergens: Set(allergenCounts.filter { $0.value > 0 }.map(\.key))
-                    .union(toleratedAllergens)
-                    .union(targetAllergen.map { [$0] } ?? [])
-            )
-            let mealFoods: [SolidsReferenceFood]
-            if let recipe {
-                let recipeFoods = recipe.foodNames.compactMap(SolidsReferenceCatalog.food(named:))
-                mealFoods = [primary] + recipeFoods.filter { $0.id != primary.id }
-            } else if let familiar {
-                mealFoods = [primary, familiar]
-            } else {
-                mealFoods = [primary]
-            }
-            // Advance the guided stage by each deliberately selected primary
-            // food; a linked recipe may also include companion ingredients.
-            let plannedTriedCount = min(100, triedIDs.count + results.count)
-            let scheduledAt = calendar.date(bySettingHour: 11, minute: 30, second: 0, of: scheduledDay)
-                ?? scheduledDay
-            let introductionStep = targetAllergen.map { min(3, (allergenCounts[$0] ?? 0) + 1) }
+        func makeSuggestion(
+            primary: SolidsReferenceFood,
+            foods: [SolidsReferenceFood],
+            recipe: SolidsReferenceRecipe?,
+            kind: SolidsGuidedMealKind,
+            allergenID: String? = nil,
+            introductionStep: Int? = nil,
+            scheduledDay: Date,
+            age: Int,
+            knownFoodCount: Int
+        ) -> SolidsGuidedMealSuggestion {
+            let scheduledAt = calendar.date(
+                bySettingHour: 11,
+                minute: 30,
+                second: 0,
+                of: scheduledDay
+            ) ?? scheduledDay
             let servingGuidance: String?
-            if let targetAllergen,
-               let allergen = SolidsAllergen(rawValue: targetAllergen),
+            if let allergenID,
+               let allergen = SolidsAllergen(rawValue: allergenID),
                let introductionStep {
                 servingGuidance = SolidsReferenceCatalog.introductionServingGuidance(
                     for: allergen,
@@ -1981,28 +1969,222 @@ enum SolidsTrackingService {
             } else {
                 servingGuidance = nil
             }
-            results.append(SolidsGuidedMealSuggestion(
+            let basePreparation = personalizedPreparationNotes(
+                for: primary,
+                ageMonths: age,
+                completedSkillIDs: snapshot.completedSkillIDs
+            )
+            let preparationNotes = kind == .familiarRepeat
+                ? "Repeat this familiar food in the same safe form. \(basePreparation)"
+                : basePreparation
+            return SolidsGuidedMealSuggestion(
                 dayOffset: dayOffset,
                 scheduledAt: scheduledAt,
-                foods: mealFoods,
+                foods: foods,
                 recipe: recipe,
-                stage: .stage(forTriedCount: plannedTriedCount),
-                allergenID: targetAllergen,
+                stage: .stage(forTriedCount: min(100, knownFoodCount)),
+                kind: kind,
+                allergenID: allergenID,
                 allergenIntroductionStep: introductionStep,
                 allergenServingGuidance: servingGuidance,
-                preparationNotes: personalizedPreparationNotes(
-                    for: primary,
-                    ageMonths: age,
-                    completedSkillIDs: snapshot.completedSkillIDs
+                preparationNotes: preparationNotes
+            )
+        }
+
+        let maximumMealCount = snapshot.count + (SolidsAllergen.allCases.count * 3) + 8
+        while (newFoodCount < snapshot.count
+               || pendingFoundationRepeat != nil
+               || activeAllergenID != nil)
+              && results.count < maximumMealCount {
+            let scheduledDay = calendar.date(byAdding: .day, value: dayOffset, to: startDate) ?? startDate
+            let age = max(
+                0,
+                calendar.dateComponents([.month], from: snapshot.birthDate, to: scheduledDay).month ?? 0
+            )
+            let knownFoodCount = triedIDs
+                .union(snapshot.plannedFoodIDs)
+                .union(newlyPlannedFoodIDs)
+                .count
+
+            if let repeatFood = pendingFoundationRepeat {
+                results.append(makeSuggestion(
+                    primary: repeatFood,
+                    foods: [repeatFood],
+                    recipe: nil,
+                    kind: .familiarRepeat,
+                    scheduledDay: scheduledDay,
+                    age: age,
+                    knownFoodCount: knownFoodCount
+                ))
+                pendingFoundationRepeat = nil
+                dayOffset += 1
+                continue
+            }
+
+            if let allergenID = activeAllergenID {
+                let carrier = activeAllergenFood ?? guidedAllergenCarrier(
+                    for: allergenID,
+                    candidates: eligibleCandidatePool,
+                    familiarFoodIDs: familiarFoodIDs,
+                    ageMonths: age
                 )
-            ))
-            if let targetAllergen {
-                allergenCounts[targetAllergen, default: 0] += 1
-                rotation.removeAll { $0 == targetAllergen }
-                if allergenCounts[targetAllergen, default: 0] < 3 {
-                    rotation.append(targetAllergen)
+                guard let carrier else {
+                    unavailableAllergenIDs.insert(allergenID)
+                    activeAllergenID = nil
+                    activeAllergenFood = nil
+                    continue
+                }
+                activeAllergenFood = carrier
+                let isNewFood = !familiarFoodIDs.contains(carrier.id)
+                if isNewFood && newFoodCount >= snapshot.count {
+                    activeAllergenID = nil
+                    activeAllergenFood = nil
+                    break
+                }
+                let introductionStep = min(3, (allergenCounts[allergenID] ?? 0) + 1)
+                results.append(makeSuggestion(
+                    primary: carrier,
+                    foods: [carrier],
+                    recipe: nil,
+                    kind: isNewFood ? .firstTaste : .familiarRepeat,
+                    allergenID: allergenID,
+                    introductionStep: introductionStep,
+                    scheduledDay: scheduledDay,
+                    age: age,
+                    knownFoodCount: knownFoodCount
+                ))
+                if isNewFood {
+                    newFoodCount += 1
+                    newlyPlannedFoodIDs.insert(carrier.id)
+                    remainingNewFoods.removeAll { $0.id == carrier.id }
+                }
+                familiarFoodIDs.insert(carrier.id)
+                allergenCounts[allergenID] = introductionStep
+                if introductionStep >= 3 {
+                    completedAllergenIDs.insert(allergenID)
+                    activeAllergenID = nil
+                    activeAllergenFood = nil
+                    newFoodsSinceAllergenSeries = 0
+                }
+                dayOffset += 1
+                continue
+            }
+
+            let familiarFoundationFoods = eligibleCandidatePool.filter {
+                familiarFoodIDs.contains($0.id)
+                    && $0.minimumAgeMonths <= age
+                    && $0.allergenIDs.isEmpty
+            }
+            if familiarFoundationFoods.count < 3, newFoodCount < snapshot.count {
+                let ageEligibleFoundationFoods = remainingNewFoods.filter {
+                    $0.minimumAgeMonths <= age && $0.allergenIDs.isEmpty
+                }
+                let familiarFoundationHasIron = familiarFoundationFoods.contains(where: \.isIronRich)
+                let openingFoods = guidedOpeningFoodNames.compactMap(SolidsReferenceCatalog.food(named:))
+                let primary: SolidsReferenceFood?
+                if !familiarFoundationHasIron && !familiarFoundationFoods.isEmpty {
+                    primary = openingFoods.first { openingFood in
+                        openingFood.isIronRich && ageEligibleFoundationFoods.contains {
+                            $0.id == openingFood.id
+                        }
+                    } ?? ageEligibleFoundationFoods.first(where: \.isIronRich)
+                } else {
+                    primary = openingFoods.first { openingFood in
+                        ageEligibleFoundationFoods.contains { $0.id == openingFood.id }
+                    } ?? ageEligibleFoundationFoods.first
+                }
+                guard let primary else { break }
+                results.append(makeSuggestion(
+                    primary: primary,
+                    foods: [primary],
+                    recipe: nil,
+                    kind: .firstTaste,
+                    scheduledDay: scheduledDay,
+                    age: age,
+                    knownFoodCount: knownFoodCount
+                ))
+                newFoodCount += 1
+                newlyPlannedFoodIDs.insert(primary.id)
+                familiarFoodIDs.insert(primary.id)
+                remainingNewFoods.removeAll { $0.id == primary.id }
+                pendingFoundationRepeat = primary
+                dayOffset += 1
+                continue
+            }
+
+            if newFoodCount >= snapshot.count { break }
+
+            if newFoodsSinceAllergenSeries >= 2 {
+                var nextAllergen: (id: String, food: SolidsReferenceFood)?
+                for allergen in guidedAllergenPriority {
+                    let allergenID = allergen.rawValue
+                    guard !blockedAllergens.contains(allergenID),
+                          !completedAllergenIDs.contains(allergenID),
+                          !unavailableAllergenIDs.contains(allergenID),
+                          (allergenCounts[allergenID] ?? 0) < 3 else { continue }
+                    guard let carrier = guidedAllergenCarrier(
+                        for: allergenID,
+                        candidates: eligibleCandidatePool,
+                        familiarFoodIDs: familiarFoodIDs,
+                        ageMonths: age
+                    ) else {
+                        unavailableAllergenIDs.insert(allergenID)
+                        continue
+                    }
+                    nextAllergen = (allergenID, carrier)
+                    break
+                }
+                if let nextAllergen {
+                    activeAllergenID = nextAllergen.id
+                    activeAllergenFood = nextAllergen.food
+                    continue
                 }
             }
+
+            let permittedRecipeAllergens = toleratedAllergens
+            let ageEligibleNewFoods = remainingNewFoods.filter { food in
+                food.minimumAgeMonths <= age
+                    && (food.allergenIDs.isEmpty
+                        || Set(food.allergenIDs).isSubset(of: toleratedAllergens))
+            }
+            guard let primary = ageEligibleNewFoods.first else {
+                if newFoodsSinceAllergenSeries < 2 {
+                    newFoodsSinceAllergenSeries = 2
+                    continue
+                }
+                break
+            }
+            let recipe = knownFoodCount >= 5 ? bestRecipe(
+                containing: primary,
+                ageMonths: age,
+                blockedAllergens: blockedAllergens,
+                permittedAllergens: permittedRecipeAllergens,
+                familiarFoodIDs: familiarFoodIDs
+            ) : nil
+            let mealFoods: [SolidsReferenceFood]
+            if let recipe {
+                let recipeFoods = recipe.foodNames.compactMap(SolidsReferenceCatalog.food(named:))
+                mealFoods = [primary] + recipeFoods.filter { $0.id != primary.id }
+            } else {
+                mealFoods = [primary]
+            }
+            results.append(makeSuggestion(
+                primary: primary,
+                foods: mealFoods,
+                recipe: recipe,
+                kind: recipe == nil ? .firstTaste : .recipe,
+                scheduledDay: scheduledDay,
+                age: age,
+                knownFoodCount: knownFoodCount
+            ))
+            newFoodCount += 1
+            newlyPlannedFoodIDs.insert(primary.id)
+            familiarFoodIDs.insert(primary.id)
+            remainingNewFoods.removeAll { $0.id == primary.id }
+            if primary.allergenIDs.isEmpty {
+                newFoodsSinceAllergenSeries += 1
+            }
+            dayOffset += 1
         }
         return results
     }
@@ -2295,16 +2477,78 @@ enum SolidsTrackingService {
         return planned
     }
 
+    nonisolated private static var guidedOpeningFoodNames: [String] {
+        ["Avocado", "Lentil", "Oatmeal", "Sweet potato", "Banana"]
+    }
+
+    nonisolated private static var guidedAllergenPriority: [SolidsAllergen] {
+        [
+            .egg,
+            .peanuts,
+            .milk,
+            .wheat,
+            .soy,
+            .sesame,
+            .treeNuts,
+            .fish,
+            .crustaceanShellfish
+        ]
+    }
+
+    nonisolated private static var guidedAllergenCarrierNames: [String: [String]] {
+        [
+            SolidsAllergen.egg.rawValue: ["Egg"],
+            SolidsAllergen.peanuts.rawValue: ["Peanut butter"],
+            SolidsAllergen.milk.rawValue: ["Plain whole-milk yogurt"],
+            SolidsAllergen.wheat.rawValue: ["Wheat cereal", "Whole-wheat toast"],
+            SolidsAllergen.soy.rawValue: ["Silken tofu", "Tofu"],
+            SolidsAllergen.sesame.rawValue: ["Tahini"],
+            SolidsAllergen.treeNuts.rawValue: ["Almond butter"],
+            SolidsAllergen.fish.rawValue: ["Salmon", "Cod"],
+            SolidsAllergen.crustaceanShellfish.rawValue: ["Shrimp"]
+        ]
+    }
+
+    nonisolated private static func guidedAllergenCarrier(
+        for allergenID: String,
+        candidates: [SolidsReferenceFood],
+        familiarFoodIDs: Set<String>,
+        ageMonths: Int
+    ) -> SolidsReferenceFood? {
+        let matching = candidates.filter { food in
+            food.minimumAgeMonths <= ageMonths
+                && food.allergenIDs.contains(allergenID)
+                && Set(food.allergenIDs).subtracting([allergenID]).isEmpty
+        }
+        var ordered: [SolidsReferenceFood] = []
+        var seen = Set<String>()
+        for name in guidedAllergenCarrierNames[allergenID] ?? [] {
+            guard let food = SolidsReferenceCatalog.food(named: name),
+                  matching.contains(where: { $0.id == food.id }),
+                  seen.insert(food.id).inserted else { continue }
+            ordered.append(food)
+        }
+        for food in matching where seen.insert(food.id).inserted {
+            ordered.append(food)
+        }
+        return ordered.first(where: { familiarFoodIDs.contains($0.id) }) ?? ordered.first
+    }
+
     nonisolated private static func bestRecipe(
         containing food: SolidsReferenceFood,
         ageMonths: Int,
         blockedAllergens: Set<String>,
-        permittedAllergens: Set<String>
+        permittedAllergens: Set<String>,
+        familiarFoodIDs: Set<String>
     ) -> SolidsReferenceRecipe? {
         SolidsReferenceCatalog.recipes(containingFoodID: food.id).first { recipe in
-            recipe.minimumAgeMonths <= ageMonths
+            let recipeFoodIDs = Set(recipe.foodNames.compactMap {
+                SolidsReferenceCatalog.food(named: $0)?.id
+            })
+            return recipe.minimumAgeMonths <= ageMonths
                 && Set(recipe.allergenIDs).isDisjoint(with: blockedAllergens)
                 && Set(recipe.allergenIDs).isSubset(of: permittedAllergens)
+                && recipeFoodIDs.subtracting([food.id]).isSubset(of: familiarFoodIDs)
         }
     }
 

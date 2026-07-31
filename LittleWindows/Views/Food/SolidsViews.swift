@@ -298,9 +298,7 @@ struct SolidsHomeView: View {
 
     private func startSolidLog(_ preset: SolidFeedEditorPreset) {
         let router = DeepLinkRouter.shared
-        router.pendingProfileID = profile.id
-        router.selectedTab = .today
-        router.pendingAction = .logSolidFeed(preset)
+        router.openToday(action: .logSolidFeed(preset), profileID: profile.id)
     }
 
     private func openFeedingReport() {
@@ -501,7 +499,7 @@ struct SolidsGuidedPathView: View {
 
                     Label("2. Review the first week", systemImage: "calendar.badge.clock")
                         .font(.headline)
-                    Text("The preview adapts to \(profile.name)'s age, foods already tried, feeding skills, and allergen status. Tap a meal name to open its recipe. When no recipe is attached, the linked ingredient name opens that food's preparation guidance.")
+                    Text("The opening meals use one simple food at a time, including an iron-rich choice and familiar repeats. Allergen introductions stay separate, and recipes appear only after their other ingredients are familiar. Tap any meal for its preparation guidance.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -554,7 +552,7 @@ struct SolidsGuidedPathView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
-                                Button("Swap this meal") {
+                                Button(isUpdatingJourney ? "Updating meal…" : "Swap this meal") {
                                     Task { await swap(plan) }
                                 }
                                     .font(.caption.weight(.semibold))
@@ -684,9 +682,14 @@ struct SolidsGuidedPathView: View {
 
     private func suggestionRow(_ suggestion: SolidsGuidedMealSuggestion) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(suggestion.scheduledAt.formatted(.dateTime.weekday(.wide).month().day()))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
+            HStack(spacing: 8) {
+                Text(suggestion.scheduledAt.formatted(.dateTime.weekday(.wide).month().day()))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Label(suggestion.kind.displayName, systemImage: suggestion.kind.systemImage)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             if let destination = suggestion.primaryDestination {
                 Button { open(destination) } label: {
                     Text(suggestion.primaryDestinationTitle ?? "Meal guidance")
@@ -812,7 +815,10 @@ struct SolidsGuidedPathView: View {
     }
 
     private func swap(_ plan: PlannedSolidMeal) async {
-        let replacements = SolidsTrackingService.guidedSuggestions(
+        guard !isUpdatingJourney else { return }
+        isUpdatingJourney = true
+        defer { isUpdatingJourney = false }
+        let snapshot = SolidsTrackingService.guidedSuggestionSnapshot(
             for: profile,
             progress: progress,
             eventItems: eventItems,
@@ -822,9 +828,12 @@ struct SolidsGuidedPathView: View {
             startingAt: plan.scheduledAt,
             count: 1
         )
+        let replacements = await Task.detached(priority: .userInitiated) {
+            SolidsTrackingService.guidedSuggestions(from: snapshot)
+        }.value
+        guard !Task.isCancelled else { return }
         if let replacement = replacements.first {
-            isUpdatingJourney = true
-            defer { isUpdatingJourney = false }
+            let originalTitle = plan.title
             let writer: SolidsGuidedPlanWriter
             if let planWriter {
                 writer = planWriter
@@ -843,11 +852,18 @@ struct SolidsGuidedPathView: View {
             if let error {
                 PersistenceService.recordLocalSaveFailure(error)
                 buildResultMessage = "The meal could not be swapped. Please try again."
+            } else {
+                let replacementTitle = replacement.primaryDestinationTitle
+                    ?? replacement.foods.map(\.name).joined(separator: " + ")
+                buildResultMessage = "Replaced \(originalTitle) with \(replacementTitle)."
             }
+        } else {
+            buildResultMessage = "No suitable replacement is available right now."
         }
     }
 
     private func shiftUpcomingPlans() async {
+        guard !isUpdatingJourney else { return }
         isUpdatingJourney = true
         defer { isUpdatingJourney = false }
         let writer: SolidsGuidedPlanWriter
@@ -865,6 +881,10 @@ struct SolidsGuidedPathView: View {
         if let error = result.error {
             PersistenceService.recordLocalSaveFailure(error)
             buildResultMessage = "The remaining plan could not be shifted. Please try again."
+        } else if result.count == 0 {
+            buildResultMessage = "There are no upcoming guided meals to shift."
+        } else {
+            buildResultMessage = "Shifted \(result.count) upcoming meal\(result.count == 1 ? "" : "s") by one day."
         }
     }
 }
@@ -1778,10 +1798,11 @@ struct SolidsFoodDetailView: View {
 
     private func startSolidLog() {
         let router = DeepLinkRouter.shared
-        router.pendingProfileID = profile.id
-        router.selectedTab = .today
-        router.pendingAction = .logSolidFeed(
-            SolidFeedEditorPreset(foodIDs: [food.id], foodNames: [food.name])
+        router.openToday(
+            action: .logSolidFeed(
+                SolidFeedEditorPreset(foodIDs: [food.id], foodNames: [food.name])
+            ),
+            profileID: profile.id
         )
     }
 
@@ -1871,6 +1892,7 @@ struct CustomSolidFoodDetailView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingShoppingLists = false
     @State private var actionMessage: String?
+    @State private var isPlanningForTomorrow = false
     @State private var planWriter: SolidsPlanWriter?
     @State private var shoppingWriter: SolidsShoppingListWriter?
     @State private var catalogWriter: SolidsCustomFoodWriter?
@@ -1913,13 +1935,14 @@ struct CustomSolidFoodDetailView: View {
             Section {
                 Button {
                     let router = DeepLinkRouter.shared
-                    router.pendingProfileID = profile.id
-                    router.selectedTab = .today
-                    router.pendingAction = .logSolidFeed(SolidFeedEditorPreset(
-                        foodIDs: [visibleTrackingID],
-                        foodNames: [food.name],
-                        allergenIDsByFoodID: [visibleTrackingID: food.allergenIDs]
-                    ))
+                    router.openToday(
+                        action: .logSolidFeed(SolidFeedEditorPreset(
+                            foodIDs: [visibleTrackingID],
+                            foodNames: [food.name],
+                            allergenIDsByFoodID: [visibleTrackingID: food.allergenIDs]
+                        )),
+                        profileID: profile.id
+                    )
                 } label: {
                     Label("Log \(food.name)", systemImage: "plus.circle.fill")
                 }
@@ -1936,6 +1959,8 @@ struct CustomSolidFoodDetailView: View {
                     initiallyFavorite: visibleRecord?.isFavorite == true
                 )
                 Button {
+                    guard !isPlanningForTomorrow else { return }
+                    isPlanningForTomorrow = true
                     let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
                     Task {
                         let writer = await resolvedPlanWriter()
@@ -1949,6 +1974,7 @@ struct CustomSolidFoodDetailView: View {
                             reminderEnabled: false,
                             reminderOffsetMinutes: 30
                         ))
+                        isPlanningForTomorrow = false
                         actionMessage = result.error == nil
                             ? "Added to tomorrow's meal plan."
                             : "The meal plan could not be saved."
@@ -1957,8 +1983,13 @@ struct CustomSolidFoodDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Plan for tomorrow", systemImage: "calendar.badge.plus")
+                    Label(
+                        isPlanningForTomorrow ? "Adding to tomorrow…" : "Plan for tomorrow",
+                        systemImage: isPlanningForTomorrow ? "hourglass" : "calendar.badge.plus"
+                    )
                 }
+                .disabled(isPlanningForTomorrow)
+                .accessibilityIdentifier("solids.custom-food.plan-tomorrow")
                 if SolidsTrackingService.isAvailableInInventory(
                     foodID: visibleTrackingID,
                     foodName: food.name,
@@ -2686,6 +2717,11 @@ private struct SolidPlanFoodChoice: Identifiable {
     var name: String
     var minimumAgeMonths: Int
     var isCustom: Bool
+
+    var hasHardMinimumAge: Bool {
+        let words = name.lowercased().split { !$0.isLetter }
+        return id == "honey" || words.contains("honey")
+    }
 }
 
 private final class SolidPlanNotesDraft {
@@ -2707,30 +2743,114 @@ private struct SolidPlanFoodRow: View, Equatable {
             && lhs.food.name == rhs.food.name
             && lhs.food.minimumAgeMonths == rhs.food.minimumAgeMonths
             && lhs.food.isCustom == rhs.food.isCustom
+            && lhs.food.hasHardMinimumAge == rhs.food.hasHardMinimumAge
             && lhs.ageAtMeal == rhs.ageAtMeal
             && lhs.isSelected == rhs.isSelected
     }
 
     var body: some View {
         Button(action: action) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(food.name).foregroundStyle(.primary)
-                    if food.isCustom {
-                        Text("Custom food").font(.caption).foregroundStyle(.secondary)
-                    } else if food.minimumAgeMonths > ageAtMeal {
-                        Text("For \(food.minimumAgeMonths)+ months")
-                            .font(.caption).foregroundStyle(.orange)
+                    HStack(spacing: 6) {
+                        if food.isCustom {
+                            Text("Custom food")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if food.minimumAgeMonths > ageAtMeal {
+                            Label(
+                                food.hasHardMinimumAge
+                                    ? "Available at \(food.minimumAgeMonths) months"
+                                    : "\(food.minimumAgeMonths)+ months",
+                                systemImage: food.hasHardMinimumAge ? "lock.fill" : "calendar"
+                            )
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange.opacity(0.12), in: Capsule())
+                        }
                     }
                 }
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.orange)
+                } else if food.minimumAgeMonths > ageAtMeal {
+                    Image(systemName: food.hasHardMinimumAge ? "lock.circle.fill" : "info.circle")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .accessibilityHint(
+            food.minimumAgeMonths > ageAtMeal && !isSelected
+                ? "Opens age guidance and available actions."
+                : "Toggles this food in the planned meal."
+        )
+        .accessibilityIdentifier("solids.plan.food.\(food.id)")
+    }
+}
+
+private struct SolidPlanFoodGuidanceView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let choice: SolidPlanFoodChoice
+    let referenceFood: SolidsReferenceFood?
+    let customFood: SolidFoodCatalogItem?
+    let ageAtMeal: Int
+
+    var body: some View {
+        List {
+            Section {
+                Label(
+                    choice.hasHardMinimumAge
+                        ? "Available from \(choice.minimumAgeMonths) months"
+                        : "Designed for \(choice.minimumAgeMonths)+ months",
+                    systemImage: choice.hasHardMinimumAge ? "lock.fill" : "calendar"
+                )
+                .font(.headline)
+                .foregroundStyle(.orange)
+                LabeledContent("Age on planned date", value: "\(ageAtMeal) months")
+                Text(choice.hasHardMinimumAge
+                    ? "This is a firm minimum age, so the food cannot be added to an earlier meal."
+                    : "This is a developmental recommendation. Use the preparation guidance and the child's current skills to decide when it fits."
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+
+            if let referenceFood {
+                let stage = referenceFood.preparation(
+                    forAgeMonths: max(ageAtMeal, choice.minimumAgeMonths)
+                )
+                Section("Preparation at this stage") {
+                    Text(stage.title).font(.subheadline.weight(.semibold))
+                    Text(stage.instructions)
+                }
+                Section("Safety") {
+                    Text(referenceFood.safetyNote)
+                        .foregroundStyle(.orange)
+                }
+            } else if let customFood {
+                if !customFood.preparationNotes.isEmpty {
+                    Section("Preparation") { Text(customFood.preparationNotes) }
+                }
+                if !customFood.safetyNotes.isEmpty {
+                    Section("Safety") {
+                        Text(customFood.safetyNotes).foregroundStyle(.orange)
+                    }
                 }
             }
         }
-        .disabled(food.minimumAgeMonths > ageAtMeal)
-        .accessibilityIdentifier("solids.plan.food.\(food.id)")
+        .navigationTitle("\(choice.name) guidance")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
     }
 }
 
@@ -2750,6 +2870,10 @@ struct NewSolidMealPlanView: View {
     @State private var showingReminderOptions = false
     @State private var reminderAuthorizationConfirmed = false
     @State private var reminderPermissionMessage: String?
+    @State private var ageGuidanceFood: SolidPlanFoodChoice?
+    @State private var showingAgeGuidance = false
+    @State private var guidanceFood: SolidPlanFoodChoice?
+    @State private var ageAdjustmentMessage: String?
     @State private var isSaving = false
     @State private var saveError: String?
     @State private var planWriter: SolidsPlanWriter?
@@ -2856,6 +2980,17 @@ struct NewSolidMealPlanView: View {
         }
     }
 
+    private func hardRestrictedSelectedFoods(
+        in choices: [SolidPlanFoodChoice],
+        ageAtMeal: Int
+    ) -> [SolidPlanFoodChoice] {
+        choices.filter {
+            selectedFoodIDs.contains($0.id)
+                && $0.hasHardMinimumAge
+                && $0.minimumAgeMonths > ageAtMeal
+        }
+    }
+
     private var missingPlannedAllergen: SolidsAllergen? {
         guard let allergenID = plan?.allergenID,
               let allergen = SolidsAllergen(rawValue: allergenID) else { return nil }
@@ -2875,11 +3010,26 @@ struct NewSolidMealPlanView: View {
         let visibleAgeAtMeal = ageAtMeal
         let visibleFoods = foods(in: allChoices)
         let ineligibleFoods = ineligibleSelectedFoods(in: allChoices, ageAtMeal: visibleAgeAtMeal)
+        let hardRestrictedFoods = hardRestrictedSelectedFoods(
+            in: allChoices,
+            ageAtMeal: visibleAgeAtMeal
+        )
         let plannedAllergenGap = missingPlannedAllergen
         List {
             Section("When") {
-                DatePicker("Meal", selection: $scheduledAt)
+                DatePicker("Meal", selection: Binding(
+                    get: { scheduledAt },
+                    set: { newValue in
+                        scheduledAt = newValue
+                        ageAdjustmentMessage = nil
+                    }
+                ))
                 LabeledContent("Age at meal", value: "\(visibleAgeAtMeal) months")
+                if let ageAdjustmentMessage {
+                    Label(ageAdjustmentMessage, systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
             }
             Section("Foods") {
                 ForEach(visibleFoods) { food in
@@ -2888,12 +3038,15 @@ struct NewSolidMealPlanView: View {
                         ageAtMeal: visibleAgeAtMeal,
                         isSelected: selectedFoodIDs.contains(food.id)
                     ) {
-                        toggleFood(food)
+                        handleFoodTap(food)
                     }
                     .equatable()
                 }
                 if !ineligibleFoods.isEmpty {
-                    Text("Remove foods intended for a later stage: \(ineligibleFoods.map(\.name).joined(separator: ", ")).")
+                    Text(hardRestrictedFoods.isEmpty
+                        ? "Designed for a later stage: \(ineligibleFoods.map(\.name).joined(separator: ", ")). Keep these selected only if the child is ready and the preparation guidance fits their current skills."
+                        : "Remove \(hardRestrictedFoods.map(\.name).joined(separator: ", ")) or move the meal to the listed minimum age before saving."
+                    )
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -2928,13 +3081,13 @@ struct NewSolidMealPlanView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
+                Button(isSaving ? "Saving…" : "Save") {
                     Task { await savePlan() }
                 }
                 .accessibilityIdentifier("solids.plan.save")
                 .disabled(
                     selectedFoodIDs.isEmpty
-                        || !ineligibleFoods.isEmpty
+                        || !hardRestrictedFoods.isEmpty
                         || plannedAllergenGap != nil
                         || isSaving
                 )
@@ -2979,6 +3132,24 @@ struct NewSolidMealPlanView: View {
                 }
             }
         )
+        .appActionSheet(
+            isPresented: $showingAgeGuidance,
+            title: ageGuidanceTitle,
+            message: ageGuidanceMessage,
+            systemImage: ageGuidanceFood?.hasHardMinimumAge == true ? "lock.fill" : "calendar",
+            tint: .orange,
+            options: ageGuidanceOptions
+        )
+        .sheet(item: $guidanceFood) { food in
+            NavigationStack {
+                SolidPlanFoodGuidanceView(
+                    choice: food,
+                    referenceFood: SolidsReferenceCatalog.food(id: food.id),
+                    customFood: customFood(for: food),
+                    ageAtMeal: ageAtMeal
+                )
+            }
+        }
         .task {
             _ = await resolvedPlanWriter()
             refreshFoodChoices()
@@ -3015,11 +3186,104 @@ struct NewSolidMealPlanView: View {
     }
 
     private func toggleFood(_ food: SolidPlanFoodChoice) {
-        guard food.minimumAgeMonths <= ageAtMeal else { return }
         if selectedFoodIDs.contains(food.id) {
             selectedFoodIDs.remove(food.id)
         } else {
+            guard !food.hasHardMinimumAge || food.minimumAgeMonths <= ageAtMeal else { return }
             selectedFoodIDs.insert(food.id)
+        }
+    }
+
+    private func handleFoodTap(_ food: SolidPlanFoodChoice) {
+        if selectedFoodIDs.contains(food.id) {
+            toggleFood(food)
+        } else if food.minimumAgeMonths > ageAtMeal {
+            ageGuidanceFood = food
+            showingAgeGuidance = true
+        } else {
+            toggleFood(food)
+        }
+    }
+
+    private var ageGuidanceTitle: String {
+        guard let food = ageGuidanceFood else { return "Age guidance" }
+        return food.hasHardMinimumAge
+            ? "\(food.name) is available at \(food.minimumAgeMonths) months"
+            : "\(food.name) is designed for \(food.minimumAgeMonths)+ months"
+    }
+
+    private var ageGuidanceMessage: String? {
+        guard let food = ageGuidanceFood else { return nil }
+        if food.hasHardMinimumAge {
+            return "This food cannot be added to a meal before the listed minimum age. Move the meal date or review its guidance."
+        }
+        return "\(profile.name) will be \(ageAtMeal) months on this date. Review readiness and preparation before adding this later-stage food."
+    }
+
+    private var ageGuidanceOptions: [AppActionSheetOption] {
+        guard let food = ageGuidanceFood else { return [] }
+        var options: [AppActionSheetOption] = []
+        if !food.hasHardMinimumAge {
+            options.append(AppActionSheetOption(
+                title: "Add to this meal",
+                subtitle: "Keep the current date and use the age-specific preparation guidance.",
+                systemImage: "plus.circle.fill",
+                tint: .orange
+            ) {
+                selectedFoodIDs.insert(food.id)
+                ageGuidanceFood = nil
+            })
+        }
+        options.append(AppActionSheetOption(
+            title: "Move meal to \(food.minimumAgeMonths) months",
+            subtitle: eligibilityDate(for: food).formatted(date: .abbreviated, time: .omitted),
+            systemImage: "calendar.badge.clock",
+            tint: .orange
+        ) {
+            moveMealToEligibilityDate(for: food)
+            ageGuidanceFood = nil
+        })
+        options.append(AppActionSheetOption(
+            title: "View food guidance",
+            subtitle: "Review preparation and safety without losing this meal draft.",
+            systemImage: "book.pages",
+            tint: .orange
+        ) {
+            ageGuidanceFood = nil
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guidanceFood = food
+            }
+        })
+        return options
+    }
+
+    private func eligibilityDate(for food: SolidPlanFoodChoice) -> Date {
+        Calendar.current.date(
+            byAdding: .month,
+            value: food.minimumAgeMonths,
+            to: profile.birthDate
+        ) ?? scheduledAt
+    }
+
+    private func moveMealToEligibilityDate(for food: SolidPlanFoodChoice) {
+        let calendar = Calendar.current
+        let eligibleDay = eligibilityDate(for: food)
+        let time = calendar.dateComponents([.hour, .minute, .second], from: scheduledAt)
+        scheduledAt = calendar.date(
+            bySettingHour: time.hour ?? 12,
+            minute: time.minute ?? 0,
+            second: time.second ?? 0,
+            of: eligibleDay
+        ) ?? eligibleDay
+        selectedFoodIDs.insert(food.id)
+        ageAdjustmentMessage = "Moved the meal to \(food.minimumAgeMonths) months and added \(food.name)."
+    }
+
+    private func customFood(for food: SolidPlanFoodChoice) -> SolidFoodCatalogItem? {
+        guard food.isCustom else { return nil }
+        return customFoods.first {
+            "custom-\($0.id.uuidString.lowercased())" == food.id
         }
     }
 
@@ -3185,9 +3449,10 @@ struct PlannedSolidMealDetailView: View {
                 } else {
                     Button {
                         let router = DeepLinkRouter.shared
-                        router.pendingProfileID = profile.id
-                        router.selectedTab = .today
-                        router.pendingAction = .logSolidFeed(SolidsTrackingService.preset(for: plan))
+                        router.openToday(
+                            action: .logSolidFeed(SolidsTrackingService.preset(for: plan)),
+                            profileID: profile.id
+                        )
                     } label: {
                         Label("Log this meal", systemImage: "plus.circle.fill")
                     }
@@ -3862,6 +4127,15 @@ struct SolidsAllergenDetailView: View {
                     }
                 ))
                 .disabled(visibleExposures.isEmpty || status == .suspectedReaction || status == .avoidPendingAdvice)
+                if visibleExposures.isEmpty {
+                    Text("Log at least one exposure before turning on a weekly rotation reminder.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if status == .suspectedReaction || status == .avoidPendingAdvice {
+                    Text("Rotation reminders are paused while this allergen is marked for follow-up.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 SolidsAllergenNotesEditor(
                     profileID: profile.id,
                     allergenID: allergen.rawValue,
@@ -4614,6 +4888,7 @@ struct SolidsRecipeDetailView: View {
     @State private var showingShoppingLists = false
     @State private var showingMealPrepLocations = false
     @State private var planResultMessage: String?
+    @State private var isPlanningForTomorrow = false
     @State private var planWriter: SolidsPlanWriter?
     @State private var shoppingResultMessage: String?
     @State private var shoppingWriter: SolidsShoppingListWriter?
@@ -4662,7 +4937,7 @@ struct SolidsRecipeDetailView: View {
             if !ageEligible {
                 Section {
                     Label(
-                        "Save this for \(visibleMinimumRequiredAge)+ months. Preparation and action buttons are available when the child reaches that stage.",
+                        "This meal is designed for \(visibleMinimumRequiredAge)+ months. Review the preparation guidance and use it when the child is ready.",
                         systemImage: "calendar.badge.clock"
                     )
                     .foregroundStyle(.orange)
@@ -4721,23 +4996,28 @@ struct SolidsRecipeDetailView: View {
             Section {
                 Button {
                     let router = DeepLinkRouter.shared
-                    router.pendingProfileID = profile.id
-                    router.selectedTab = .today
-                    router.pendingAction = .logSolidFeed(
-                        SolidFeedEditorPreset(
-                            foodIDs: visibleSelectedFoods.map(\.id),
-                            foodNames: visibleSelectedFoods.map(\.name),
-                            allergenIDsByFoodID: Dictionary(uniqueKeysWithValues: visibleSelectedFoods.map {
-                                ($0.id, $0.allergenIDs)
-                            }),
-                            recipeID: recipe.id
-                        )
+                    router.openToday(
+                        action: .logSolidFeed(
+                            SolidFeedEditorPreset(
+                                foodIDs: visibleSelectedFoods.map(\.id),
+                                foodNames: visibleSelectedFoods.map(\.name),
+                                allergenIDsByFoodID: Dictionary(
+                                    uniqueKeysWithValues: visibleSelectedFoods.map {
+                                        ($0.id, $0.allergenIDs)
+                                    }
+                                ),
+                                recipeID: recipe.id
+                            )
+                        ),
+                        profileID: profile.id
                     )
                 } label: {
                     Label("Adjust and log this meal", systemImage: "plus.circle.fill")
                 }
-                .disabled(!ageEligible)
+                .accessibilityIdentifier("solids.recipe.log")
                 Button {
+                    guard !isPlanningForTomorrow else { return }
+                    isPlanningForTomorrow = true
                     let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
                     let foods = visibleSelectedFoods
                     Task {
@@ -4759,6 +5039,7 @@ struct SolidsRecipeDetailView: View {
                             title: recipe.title,
                             recipeID: recipe.id
                         ))
+                        isPlanningForTomorrow = false
                         planResultMessage = result.error == nil
                             ? "Added to tomorrow's meal plan."
                             : "The meal plan could not be saved."
@@ -4767,9 +5048,13 @@ struct SolidsRecipeDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Plan for tomorrow", systemImage: "calendar.badge.plus")
+                    Label(
+                        isPlanningForTomorrow ? "Adding to tomorrow…" : "Plan for tomorrow",
+                        systemImage: isPlanningForTomorrow ? "hourglass" : "calendar.badge.plus"
+                    )
                 }
-                .disabled(!ageEligible)
+                .disabled(isPlanningForTomorrow)
+                .accessibilityIdentifier("solids.recipe.plan-tomorrow")
             }
             if !shoppingLists.isEmpty || (household != nil && !locations.isEmpty) {
                 Section("Food & Home") {

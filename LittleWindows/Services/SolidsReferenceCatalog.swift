@@ -955,6 +955,7 @@ struct SolidsGuidedMealSuggestion: Identifiable, Hashable, @unchecked Sendable {
     var foods: [SolidsReferenceFood]
     var recipe: SolidsReferenceRecipe?
     var stage: SolidsGuidedStage
+    var kind: SolidsGuidedMealKind = .firstTaste
     var allergenID: String?
     var allergenIntroductionStep: Int? = nil
     var allergenServingGuidance: String? = nil
@@ -973,6 +974,28 @@ struct SolidsGuidedMealSuggestion: Identifiable, Hashable, @unchecked Sendable {
 
     var primaryDestinationTitle: String? {
         recipe?.title ?? foods.first?.name
+    }
+}
+
+enum SolidsGuidedMealKind: String, Hashable, Sendable {
+    case firstTaste
+    case familiarRepeat
+    case recipe
+
+    var displayName: String {
+        switch self {
+        case .firstTaste: "First taste"
+        case .familiarRepeat: "Familiar repeat"
+        case .recipe: "Recipe"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .firstTaste: "sparkles"
+        case .familiarRepeat: "arrow.triangle.2.circlepath"
+        case .recipe: "fork.knife"
+        }
     }
 }
 

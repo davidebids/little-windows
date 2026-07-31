@@ -2219,28 +2219,23 @@ struct TodayView: View {
             }
         case .openFoodHome:
             completeRoutineStep(step, routine: routine, run: run)
-            deepLinkRouter.selectedTab = .food
-            deepLinkRouter.pendingFoodCommand = .food
+            deepLinkRouter.openFood(.food)
             routineRunRoute = nil
         case .openFoodQuickAdd:
             completeRoutineStep(step, routine: routine, run: run)
-            deepLinkRouter.selectedTab = .food
-            deepLinkRouter.pendingFoodCommand = .quickAdd
+            deepLinkRouter.openFood(.quickAdd)
             routineRunRoute = nil
         case .openShoppingList:
             completeRoutineStep(step, routine: routine, run: run)
-            deepLinkRouter.selectedTab = .food
-            deepLinkRouter.pendingFoodCommand = .shopping
+            deepLinkRouter.openFood(.shopping)
             routineRunRoute = nil
         case .openInventory:
             completeRoutineStep(step, routine: routine, run: run)
-            deepLinkRouter.selectedTab = .food
-            deepLinkRouter.pendingFoodCommand = .inventory
+            deepLinkRouter.openFood(.inventory)
             routineRunRoute = nil
         case .openMealPrep:
             completeRoutineStep(step, routine: routine, run: run)
-            deepLinkRouter.selectedTab = .food
-            deepLinkRouter.pendingFoodCommand = .mealPrep
+            deepLinkRouter.openFood(.mealPrep)
             routineRunRoute = nil
         case .openReports:
             completeRoutineStep(step, routine: routine, run: run)
@@ -2257,8 +2252,8 @@ struct TodayView: View {
             showingAppointments = true
         case .openAgeGuide:
             completeRoutineStep(step, routine: routine, run: run)
-            deepLinkRouter.selectedTab = .milestones
             deepLinkRouter.pendingAgeGuideCommand = .list
+            deepLinkRouter.selectedTab = .milestones
             routineRunRoute = nil
         case .openPuppyGuide:
             completeRoutineStep(step, routine: routine, run: run)

@@ -121,6 +121,17 @@ final class DeepLinkRouter: ObservableObject {
         selectedTab = AppNavigationLaunchPolicy.initialTab
     }
 
+    func openToday(
+        action: DeepLinkAction,
+        profileID: UUID? = nil
+    ) {
+        if let profileID { pendingProfileID = profileID }
+        // Publish the action before selecting Today. RootView creates the Today
+        // hierarchy lazily, so it must be waiting when that hierarchy appears.
+        pendingAction = action
+        selectedTab = .today
+    }
+
     func openSolids(
         _ command: FoodRouteCommand,
         profileID: UUID? = nil,
@@ -138,6 +149,11 @@ final class DeepLinkRouter: ObservableObject {
         }
         pendingSolidsCommand = command
         selectedTab = .milestones
+    }
+
+    func openFood(_ command: FoodRouteCommand) {
+        pendingFoodCommand = command
+        selectedTab = .food
     }
 
     func consumeSolidsOrigin() -> SolidsNavigationOrigin? {
@@ -171,140 +187,111 @@ final class DeepLinkRouter: ObservableObject {
         if components == ["today"] {
             selectedTab = .today
         } else if components == ["food"] {
-            selectedTab = .food
-            pendingFoodCommand = .food
+            openFood(.food)
         } else if components == ["food", "solids"] {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solids
+            openSolids(.solids, returningTo: nil)
         } else if components == ["food", "solids", "database"] {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidsDatabase
+            openSolids(.solidsDatabase, returningTo: nil)
         } else if components == ["food", "solids", "guided"] {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidsGuided
+            openSolids(.solidsGuided, returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",
                   components[2] == "foods" {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidFood(components[3])
+            openSolids(.solidFood(components[3]), returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",
                   components[2] == "custom",
                   let uuid = UUID(uuidString: components[3]) {
-            selectedTab = .milestones
-            pendingSolidsCommand = .customSolidFood(uuid)
+            openSolids(.customSolidFood(uuid), returningTo: nil)
         } else if components == ["food", "solids", "plan"] {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidsPlan
+            openSolids(.solidsPlan, returningTo: nil)
         } else if components.count >= 4,
                   components[0] == "food",
                   components[1] == "solids",
                   components[2] == "plan",
                   let uuid = UUID(uuidString: components[3]) {
             if components.count == 5, components[4] == "log" {
-                selectedTab = .today
-                pendingAction = .logSolidFeed(
+                openToday(action: .logSolidFeed(
                     SolidFeedEditorPreset(plannedMealID: uuid)
-                )
+                ))
             } else {
-                selectedTab = .milestones
-                pendingSolidsCommand = .plannedSolidMeal(uuid)
+                openSolids(.plannedSolidMeal(uuid), returningTo: nil)
             }
         } else if components == ["food", "solids", "tracker"] {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidsTracker
+            openSolids(.solidsTracker, returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",
                   components[2] == "tracker",
                   let uuid = UUID(uuidString: components[3]) {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidMeal(uuid)
+            openSolids(.solidMeal(uuid), returningTo: nil)
         } else if components == ["food", "solids", "allergens"] {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidsAllergens
+            openSolids(.solidsAllergens, returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",
                   components[2] == "allergens" {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidAllergen(components[3])
+            openSolids(.solidAllergen(components[3]), returningTo: nil)
         } else if components == ["food", "solids", "recipes"] {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidsRecipes
+            openSolids(.solidsRecipes, returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",
                   components[2] == "recipes" {
-            selectedTab = .milestones
-            pendingSolidsCommand = .solidsRecipe(components[3])
+            openSolids(.solidsRecipe(components[3]), returningTo: nil)
         } else if components == ["food", "todos"] {
-            selectedTab = .food
-            pendingFoodCommand = .todos
+            openFood(.todos)
         } else if components.count == 3,
                   components[0] == "food",
                   components[1] == "todos",
                   let uuid = UUID(uuidString: components[2]) {
-            selectedTab = .food
-            pendingFoodCommand = .todoList(uuid)
+            openFood(.todoList(uuid))
         } else if components == ["food", "shopping"] {
-            selectedTab = .food
-            pendingFoodCommand = .shopping
+            openFood(.shopping)
         } else if components == ["food", "quick-add"] {
-            selectedTab = .food
-            pendingFoodCommand = .quickAdd
+            openFood(.quickAdd)
         } else if components.count >= 3,
                   components[0] == "food",
                   components[1] == "shopping",
                   let uuid = UUID(uuidString: components[2]) {
-            selectedTab = .food
-            pendingFoodCommand = components.count >= 4 && components[3] == "mode"
+            openFood(components.count >= 4 && components[3] == "mode"
                 ? .shoppingMode(uuid)
-                : .shoppingList(uuid)
+                : .shoppingList(uuid))
         } else if components == ["food", "trips"] {
-            selectedTab = .food
-            pendingFoodCommand = .trips
+            openFood(.trips)
         } else if components.count == 3,
                   components[0] == "food",
                   components[1] == "trips",
                   let uuid = UUID(uuidString: components[2]) {
-            selectedTab = .food
-            pendingFoodCommand = .packingTrip(uuid)
+            openFood(.packingTrip(uuid))
         } else if components == ["food", "inventory"] {
-            selectedTab = .food
-            pendingFoodCommand = .inventory
+            openFood(.inventory)
         } else if components.count == 3,
                   components[0] == "food",
                   components[1] == "inventory",
                   let uuid = UUID(uuidString: components[2]) {
-            selectedTab = .food
-            pendingFoodCommand = .inventoryItem(uuid)
+            openFood(.inventoryItem(uuid))
         } else if components == ["food", "meal-prep"] {
-            selectedTab = .food
-            pendingFoodCommand = .mealPrep
+            openFood(.mealPrep)
         } else if components.count == 3,
                   components[0] == "food",
                   components[1] == "meal-prep",
                   let uuid = UUID(uuidString: components[2]) {
-            selectedTab = .food
-            pendingFoodCommand = .mealPrepItem(uuid)
+            openFood(.mealPrepItem(uuid))
         } else if components == ["food", "returns"] {
-            selectedTab = .food
-            pendingFoodCommand = .returns
+            openFood(.returns)
         } else if components.count == 3,
                   components[0] == "food",
                   components[1] == "returns",
                   let uuid = UUID(uuidString: components[2]) {
-            selectedTab = .food
-            pendingFoodCommand = .returnRequest(uuid)
+            openFood(.returnRequest(uuid))
         } else if components.count == 3,
                   components[0] == "food",
                   components[1] == "stores",
                   let uuid = UUID(uuidString: components[2]) {
-            selectedTab = .food
-            pendingFoodCommand = .store(uuid)
+            openFood(.store(uuid))
         } else if components == ["history"] {
             selectedReportsMode = .day
             selectedTab = .reports
@@ -333,25 +320,25 @@ final class DeepLinkRouter: ObservableObject {
                     || components == ["memories"] {
             selectedTab = .milestones
         } else if components == ["age-guides"] {
-            selectedTab = .milestones
             pendingAgeGuideCommand = .list
+            selectedTab = .milestones
         } else if components.count == 2,
                   components[0] == "age-guide",
                   let month = Int(components[1]) {
-            selectedTab = .milestones
             pendingAgeGuideCommand = .detail(month)
+            selectedTab = .milestones
         } else if components == ["appointments"] || components == ["visits"] {
-            selectedTab = .today
             pendingAppointmentCommand = .list
-        } else if components == ["routines"] {
             selectedTab = .today
+        } else if components == ["routines"] {
             pendingRoutineCommand = .list
+            selectedTab = .today
         } else if components.count >= 2, components[0] == "appointment",
                   let uuid = UUID(uuidString: components[1]) {
-            selectedTab = .today
             pendingAppointmentCommand = components.count >= 3 && components[2] == "notes"
                 ? .notes(uuid)
                 : .detail(uuid)
+            selectedTab = .today
         } else if components == ["medical"] {
             selectedReportsMode = .summary
             selectedTab = .reports
@@ -359,100 +346,90 @@ final class DeepLinkRouter: ObservableObject {
             selectedReportsMode = .summary
             selectedTab = .reports
         } else if components == ["puppy-guide"] {
-            selectedTab = .today
             pendingPuppyGuideCommand = .current
+            selectedTab = .today
         } else if components == ["night-light"] {
-            selectedTab = .nightLight
             pendingNightLightCommand = .open
-        } else if components == ["night-light", "stop"] {
             selectedTab = .nightLight
+        } else if components == ["night-light", "stop"] {
             pendingNightLightCommand = .stop
+            selectedTab = .nightLight
         } else if components.count == 2,
                   components[0] == "night-light",
                   let preset = NightLightPresetKind(slug: components[1]) {
-            selectedTab = .nightLight
             pendingNightLightCommand = .start(preset)
+            selectedTab = .nightLight
         } else if components == ["active-timer"] {
-            selectedTab = .today
-            pendingAction = .showActiveTimer
+            openToday(action: .showActiveTimer)
         } else if components == ["prediction"] {
             selectedReportsMode = .summary
             selectedTab = .reports
         } else if components.count == 2, components[0] == "event" {
-            selectedTab = .today
-            if let uuid = UUID(uuidString: components[1]) { pendingAction = .showEvent(uuid) }
+            if let uuid = UUID(uuidString: components[1]) {
+                openToday(action: .showEvent(uuid))
+            } else {
+                selectedTab = .today
+            }
         } else if components == ["action", "stop-active"] {
-            selectedTab = .today
-            pendingAction = .stopActiveTimer
+            openToday(action: .stopActiveTimer)
         } else if components.count == 3, components[0] == "action", components[1] == "stop" {
-            selectedTab = .today
-            if let uuid = UUID(uuidString: components[2]) { pendingAction = .stopTimer(uuid) }
+            if let uuid = UUID(uuidString: components[2]) {
+                openToday(action: .stopTimer(uuid))
+            } else {
+                selectedTab = .today
+            }
         } else if components.count == 3, components[0] == "action", components[1] == "resume" {
-            selectedTab = .today
-            if let uuid = UUID(uuidString: components[2]) { pendingAction = .resumeTimer(uuid) }
+            if let uuid = UUID(uuidString: components[2]) {
+                openToday(action: .resumeTimer(uuid))
+            } else {
+                selectedTab = .today
+            }
         } else if components.count == 3, components[0] == "action", components[1] == "switch-side" {
-            selectedTab = .today
-            if let uuid = UUID(uuidString: components[2]) { pendingAction = .switchNursingSide(uuid) }
+            if let uuid = UUID(uuidString: components[2]) {
+                openToday(action: .switchNursingSide(uuid))
+            } else {
+                selectedTab = .today
+            }
         } else if components == ["quick-log", "sleep"] {
-            selectedTab = .today
-            pendingAction = .startTimer(.sleep, nil)
+            openToday(action: .startTimer(.sleep, nil))
         } else if components == ["quick-log", "feed"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.feed)
+            openToday(action: .logEvent(.feed))
         } else if components == ["quick-log", "solids"] {
-            selectedTab = .today
-            pendingAction = .logSolidFeed(.empty)
+            openToday(action: .logSolidFeed(.empty))
         } else if components == ["quick-log", "pumping"] {
-            selectedTab = .today
-            pendingAction = .startTimer(.pumping, nil)
+            openToday(action: .startTimer(.pumping, nil))
         } else if components == ["quick-log", "child-potty"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.potty)
+            openToday(action: .logEvent(.potty))
         } else if components == ["quick-log", "repeat-last"] {
-            selectedTab = .today
-            pendingAction = .repeatLast
+            openToday(action: .repeatLast)
         } else if components == ["quick-log", "food"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.food)
+            openToday(action: .logEvent(.food))
         } else if components == ["quick-log", "water"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.water)
+            openToday(action: .logEvent(.water))
         } else if components == ["quick-log", "pee"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.potty)
+            openToday(action: .logEvent(.potty))
         } else if components == ["quick-log", "poop"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.potty)
+            openToday(action: .logEvent(.potty))
         } else if components == ["quick-log", "walk"] {
-            selectedTab = .today
-            pendingAction = .startTimer(.walk, nil)
+            openToday(action: .startTimer(.walk, nil))
         } else if components == ["quick-log", "training"] {
-            selectedTab = .today
-            pendingAction = .startTimer(.training, nil)
+            openToday(action: .startTimer(.training, nil))
         } else if components == ["quick-log", "medicine"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.medicine)
+            openToday(action: .logEvent(.medicine))
         } else if components == ["quick-log", "nursing-left"] {
-            selectedTab = .today
-            pendingAction = .startTimer(.nursing, .left)
+            openToday(action: .startTimer(.nursing, .left))
         } else if components == ["quick-log", "nursing-right"] {
-            selectedTab = .today
-            pendingAction = .startTimer(.nursing, .right)
+            openToday(action: .startTimer(.nursing, .right))
         } else if components == ["quick-log", "tummy-time"] {
-            selectedTab = .today
-            pendingAction = .startActivity(.tummyTime)
+            openToday(action: .startActivity(.tummyTime))
         } else if components == ["quick-log", "story-time"] {
-            selectedTab = .today
-            pendingAction = .startActivity(.storyTime)
+            openToday(action: .startActivity(.storyTime))
         } else if components == ["quick-log", "bath"] {
-            selectedTab = .today
-            pendingAction = .startActivity(.bath)
+            openToday(action: .startActivity(.bath))
         } else if components == ["quick-log", "diaper"] {
-            selectedTab = .today
-            pendingAction = .logDiaper
+            openToday(action: .logDiaper)
         } else if components == ["quick-log", "temperature"] {
-            selectedTab = .today
-            pendingAction = .logEvent(.temperature)
+            openToday(action: .logEvent(.temperature))
         } else {
             selectedTab = .today
         }

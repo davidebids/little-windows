@@ -386,9 +386,10 @@ struct FoodHomeView: View {
                     event: event,
                     items: solidFoodEventItems,
                     editEvent: {
-                        router.pendingProfileID = selectedProfile.id
-                        router.selectedTab = .today
-                        router.pendingAction = .showEvent(event.id)
+                        router.openToday(
+                            action: .showEvent(event.id),
+                            profileID: selectedProfile.id
+                        )
                     }
                 )
             } else {
