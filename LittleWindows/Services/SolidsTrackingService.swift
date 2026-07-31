@@ -49,11 +49,19 @@ struct SolidsPlanEditorWrite: Sendable {
     var allergenIntroductionStep: Int? = nil
     var allergenServingGuidance: String? = nil
     var allergenObservationMinutes: Int? = nil
+    var duplicatePolicy: SolidsPlanDuplicatePolicy = .allow
+}
+
+enum SolidsPlanDuplicatePolicy: Sendable {
+    case allow
+    case matchingRecipeOnDay
+    case containingSelectedFoodOnDay
 }
 
 struct SolidsPlanWriteResult: Sendable {
     var planID: UUID?
     var error: String?
+    var wasAlreadyPresent: Bool = false
 }
 
 struct SolidsShoppingFoodWrite: Sendable {
@@ -745,6 +753,14 @@ actor SolidsPlanWriter {
             return SolidsPlanWriteResult(planID: nil, error: "Choose at least one food.")
         }
 
+        if write.planID == nil, let duplicate = duplicatePlan(for: write) {
+            return SolidsPlanWriteResult(
+                planID: duplicate.id,
+                error: nil,
+                wasAlreadyPresent: true
+            )
+        }
+
         let plan: PlannedSolidMeal
         if let planID = write.planID {
             let profileID = write.profileID
@@ -794,6 +810,32 @@ actor SolidsPlanWriter {
             await NotificationManager.shared.scheduleSolidMealReminder(snapshot: snapshot)
         }
         return SolidsPlanWriteResult(planID: plan.id, error: nil)
+    }
+
+    private func duplicatePlan(for write: SolidsPlanEditorWrite) -> PlannedSolidMeal? {
+        guard write.duplicatePolicy != .allow,
+              let day = Calendar.current.dateInterval(of: .day, for: write.scheduledAt) else {
+            return nil
+        }
+        let profileID = write.profileID
+        let dayStart = day.start
+        let dayEnd = day.end
+        let descriptor = FetchDescriptor<PlannedSolidMeal>(predicate: #Predicate { plan in
+            plan.profileID == profileID
+                && plan.scheduledAt >= dayStart
+                && plan.scheduledAt < dayEnd
+        })
+        guard let plans = try? modelContext.fetch(descriptor) else { return nil }
+        switch write.duplicatePolicy {
+        case .allow:
+            return nil
+        case .matchingRecipeOnDay:
+            guard let recipeID = write.recipeID else { return nil }
+            return plans.first { $0.recipeID == recipeID }
+        case .containingSelectedFoodOnDay:
+            let selectedFoodIDs = Set(write.foodIDs)
+            return plans.first { !selectedFoodIDs.isDisjoint(with: Set($0.foodIDs)) }
+        }
     }
 
     func createPlans(

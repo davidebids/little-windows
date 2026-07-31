@@ -1873,6 +1873,14 @@ private struct SolidsServingPhoto: View {
     }
 }
 
+private func solidsTomorrowInterval(
+    now: Date = Date(),
+    calendar: Calendar = .current
+) -> DateInterval? {
+    guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) else { return nil }
+    return calendar.dateInterval(of: .day, for: tomorrow)
+}
+
 struct CustomSolidFoodDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -1882,10 +1890,12 @@ struct CustomSolidFoodDetailView: View {
     let photo: PhotoAttachment?
     let allFoods: [SolidFoodCatalogItem]
     let progress: [SolidFoodProgress]
+    let plannedMeals: [PlannedSolidMeal]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
     let inventoryItems: [InventoryItem]
     let foodItems: [FoodItem]
+    let openPlan: (UUID) -> Void
     let openHistory: (String, String) -> Void
 
     @State private var showingEditor = false
@@ -1893,6 +1903,7 @@ struct CustomSolidFoodDetailView: View {
     @State private var showingShoppingLists = false
     @State private var actionMessage: String?
     @State private var isPlanningForTomorrow = false
+    @State private var locallyPlannedTomorrowID: UUID?
     @State private var planWriter: SolidsPlanWriter?
     @State private var shoppingWriter: SolidsShoppingListWriter?
     @State private var catalogWriter: SolidsCustomFoodWriter?
@@ -1900,6 +1911,15 @@ struct CustomSolidFoodDetailView: View {
     private var trackingID: String { "custom-\(food.id.uuidString.lowercased())" }
     private var record: SolidFoodProgress? {
         progress.first { $0.profileID == profile.id && $0.foodID == trackingID }
+    }
+    private var plannedTomorrowMeal: PlannedSolidMeal? {
+        guard let interval = solidsTomorrowInterval() else { return nil }
+        return plannedMeals.first {
+            interval.contains($0.scheduledAt) && $0.foodIDs.contains(trackingID)
+        }
+    }
+    private var isPlannedForTomorrow: Bool {
+        locallyPlannedTomorrowID != nil || plannedTomorrowMeal != nil
     }
 
     var body: some View {
@@ -1958,38 +1978,36 @@ struct CustomSolidFoodDetailView: View {
                     initialStatus: visibleRecord?.status ?? .notTried,
                     initiallyFavorite: visibleRecord?.isFavorite == true
                 )
-                Button {
-                    guard !isPlanningForTomorrow else { return }
-                    isPlanningForTomorrow = true
-                    let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-                    Task {
-                        let writer = await resolvedPlanWriter()
-                        let result = await writer.saveEditorPlan(SolidsPlanEditorWrite(
-                            planID: nil,
-                            profileID: profile.id,
-                            scheduledAt: tomorrow,
-                            foodIDs: [visibleTrackingID],
-                            foodNames: [food.name],
-                            notes: food.preparationNotes,
-                            reminderEnabled: false,
-                            reminderOffsetMinutes: 30
-                        ))
-                        isPlanningForTomorrow = false
-                        actionMessage = result.error == nil
-                            ? "Added to tomorrow's meal plan."
-                            : "The meal plan could not be saved."
-                        if let error = result.error {
-                            PersistenceService.recordLocalSaveFailure(error)
+                if let plannedTomorrowMeal {
+                    Button {
+                        locallyPlannedTomorrowID = nil
+                        openPlan(plannedTomorrowMeal.id)
+                    } label: {
+                        HStack {
+                            Label("Planned for tomorrow", systemImage: "checkmark.circle.fill")
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                         }
                     }
-                } label: {
-                    Label(
-                        isPlanningForTomorrow ? "Adding to tomorrow…" : "Plan for tomorrow",
-                        systemImage: isPlanningForTomorrow ? "hourglass" : "calendar.badge.plus"
-                    )
+                    .foregroundStyle(.green)
+                    .accessibilityHint("Opens the planned meal.")
+                    .accessibilityIdentifier("solids.custom-food.planned-tomorrow")
+                } else if isPlannedForTomorrow {
+                    Label("Planned for tomorrow", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .accessibilityIdentifier("solids.custom-food.planned-tomorrow")
+                } else {
+                    Button {
+                        planCustomFoodForTomorrow()
+                    } label: {
+                        Label(
+                            isPlanningForTomorrow ? "Adding to tomorrow…" : "Plan for tomorrow",
+                            systemImage: isPlanningForTomorrow ? "hourglass" : "calendar.badge.plus"
+                        )
+                    }
+                    .disabled(isPlanningForTomorrow)
+                    .accessibilityIdentifier("solids.custom-food.plan-tomorrow")
                 }
-                .disabled(isPlanningForTomorrow)
-                .accessibilityIdentifier("solids.custom-food.plan-tomorrow")
                 if SolidsTrackingService.isAvailableInInventory(
                     foodID: visibleTrackingID,
                     foodName: food.name,
@@ -2095,10 +2113,52 @@ struct CustomSolidFoodDetailView: View {
         } message: {
             Text(actionMessage ?? "")
         }
+        .onChange(of: plannedTomorrowMeal?.id) { _, planID in
+            if planID != nil {
+                locallyPlannedTomorrowID = nil
+            }
+        }
+        .onAppear {
+            if locallyPlannedTomorrowID != nil, plannedTomorrowMeal == nil {
+                locallyPlannedTomorrowID = nil
+            }
+        }
         .task {
             _ = await resolvedPlanWriter()
             _ = await resolvedShoppingWriter()
             _ = await resolvedCatalogWriter()
+        }
+    }
+
+    private func planCustomFoodForTomorrow() {
+        guard !isPlanningForTomorrow, !isPlannedForTomorrow else { return }
+        isPlanningForTomorrow = true
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        Task {
+            let writer = await resolvedPlanWriter()
+            let result = await writer.saveEditorPlan(SolidsPlanEditorWrite(
+                planID: nil,
+                profileID: profile.id,
+                scheduledAt: tomorrow,
+                foodIDs: [trackingID],
+                foodNames: [food.name],
+                notes: food.preparationNotes,
+                reminderEnabled: false,
+                reminderOffsetMinutes: 30,
+                duplicatePolicy: .containingSelectedFoodOnDay
+            ))
+            isPlanningForTomorrow = false
+            if let error = result.error {
+                actionMessage = "The meal plan could not be saved."
+                PersistenceService.recordLocalSaveFailure(error)
+            } else {
+                locallyPlannedTomorrowID = result.planID.flatMap { planID in
+                    plannedMeals.contains { $0.id == planID } ? nil : planID
+                }
+                actionMessage = result.wasAlreadyPresent
+                    ? "This food was already on tomorrow's meal plan."
+                    : "Added to tomorrow's meal plan."
+            }
         }
     }
 
@@ -4550,13 +4610,32 @@ struct SolidsRecipesView: View {
         let favoriteRecipeIDs = Set(profileState?.favoriteRecipeIDs ?? [])
         let wantToTryRecipeIDs = Set(profileState?.wantToTryRecipeIDs ?? [])
         let collections = displayedCollections ?? profileState?.recipeCollections ?? []
+        let selectedCollection = collections.first { $0.id == selectedCollectionID }
         let visibleRecipes = recipes(
             favoriteRecipeIDs: favoriteRecipeIDs,
             wantToTryRecipeIDs: wantToTryRecipeIDs,
             collections: collections
         )
         List {
-            Section {
+            if !collections.isEmpty {
+                Section("Your recipe lists") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(collections) { collection in
+                                collectionFilterButton(
+                                    collection,
+                                    selected: selectedCollectionID == collection.id
+                                ) {
+                                    selectedCollectionID = selectedCollectionID == collection.id
+                                        ? nil
+                                        : collection.id
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Section("Browse recipes") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
                         filterButton(
@@ -4575,12 +4654,25 @@ struct SolidsRecipesView: View {
                         }
                         filterButton("Saved", selected: savedOnly) { savedOnly.toggle() }
                         filterButton("Later stages", selected: showLaterStages) { showLaterStages.toggle() }
-                        ForEach(collections) { collection in
-                            filterButton(collection.name, selected: selectedCollectionID == collection.id) {
-                                selectedCollectionID = selectedCollectionID == collection.id ? nil : collection.id
-                            }
-                        }
                     }
+                }
+            }
+            if let selectedCollection {
+                Section {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selectedCollection.name)
+                                .font(.headline)
+                            Text("Showing \(visibleRecipes.count) \(visibleRecipes.count == 1 ? "meal" : "meals") in this recipe list")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "folder.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("solids.recipes.active-list")
                 }
             }
             if isPlanningAhead && !showLaterStages {
@@ -4601,7 +4693,9 @@ struct SolidsRecipesView: View {
                     ContentUnavailableView(
                         "No Matching Recipes",
                         systemImage: "fork.knife.circle",
-                        description: Text("Try clearing the search or recipe filters.")
+                        description: Text(selectedCollection.map {
+                            "No meals in \($0.name) match the other active filters."
+                        } ?? "Try clearing the search or recipe filters.")
                     )
                     Button("Clear recipe filters", systemImage: "line.3.horizontal.decrease.circle") {
                         clearFilters()
@@ -4648,7 +4742,7 @@ struct SolidsRecipesView: View {
             title: "Recipe lists",
             message: collections.isEmpty
                 ? "Create a list to group meals you want to make together."
-                : "Create a list, or rename or delete an existing one.",
+                : "Choose one of your named recipe lists to rename or delete, or create a new one.",
             systemImage: "folder.fill",
             tint: .orange,
             options: collectionActionOptions(collections)
@@ -4663,7 +4757,7 @@ struct SolidsRecipesView: View {
             Text("Create a named list for meals you want to group together.")
         }
         .alert(
-            "Rename recipe list",
+            collectionToRename.map { "Rename “\($0.name)”" } ?? "Rename recipe list",
             isPresented: Binding(
                 get: { collectionToRename != nil },
                 set: { if !$0 { collectionToRename = nil } }
@@ -4709,6 +4803,25 @@ struct SolidsRecipesView: View {
             .tint(selected ? .orange : .secondary)
     }
 
+    private func collectionFilterButton(
+        _ collection: SolidRecipeCollection,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(
+                collection.name,
+                systemImage: selected ? "folder.fill" : "folder"
+            )
+        }
+        .font(.callout.weight(.semibold))
+        .buttonStyle(.bordered)
+        .tint(selected ? .orange : .secondary)
+        .accessibilityLabel("Recipe list: \(collection.name)")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityIdentifier("solids.recipes.collection.\(collection.id.uuidString)")
+    }
+
     private func clearFilters() {
         effectiveSearchText = ""
         mealType = nil
@@ -4737,6 +4850,7 @@ struct SolidsRecipesView: View {
         for collection in collections {
             options.append(AppActionSheetOption(
                 title: "Rename \(collection.name)",
+                subtitle: "Recipe list • \(collection.recipeIDs.count) \(collection.recipeIDs.count == 1 ? "meal" : "meals")",
                 systemImage: "pencil",
                 tint: .orange
             ) {
@@ -4875,12 +4989,14 @@ struct SolidsRecipeDetailView: View {
     let recipe: SolidsReferenceRecipe
     let profile: BabyProfile
     let profileState: SolidsProfileState?
+    let plannedMeals: [PlannedSolidMeal]
     let household: Household?
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
     let inventoryItems: [InventoryItem]
     let foodItems: [FoodItem]
     let locations: [InventoryLocation]
+    let openPlan: (UUID) -> Void
     let openFood: (String) -> Void
 
     @State private var selectedFoodNames: [String]
@@ -4889,6 +5005,7 @@ struct SolidsRecipeDetailView: View {
     @State private var showingMealPrepLocations = false
     @State private var planResultMessage: String?
     @State private var isPlanningForTomorrow = false
+    @State private var locallyPlannedTomorrowID: UUID?
     @State private var planWriter: SolidsPlanWriter?
     @State private var shoppingResultMessage: String?
     @State private var shoppingWriter: SolidsShoppingListWriter?
@@ -4898,29 +5015,42 @@ struct SolidsRecipeDetailView: View {
         recipe: SolidsReferenceRecipe,
         profile: BabyProfile,
         profileState: SolidsProfileState?,
+        plannedMeals: [PlannedSolidMeal],
         household: Household?,
         shoppingLists: [ShoppingList],
         shoppingItems: [ShoppingListItem],
         inventoryItems: [InventoryItem],
         foodItems: [FoodItem],
         locations: [InventoryLocation],
+        openPlan: @escaping (UUID) -> Void,
         openFood: @escaping (String) -> Void
     ) {
         self.recipe = recipe
         self.profile = profile
         self.profileState = profileState
+        self.plannedMeals = plannedMeals
         self.household = household
         self.shoppingLists = shoppingLists
         self.shoppingItems = shoppingItems
         self.inventoryItems = inventoryItems
         self.foodItems = foodItems
         self.locations = locations
+        self.openPlan = openPlan
         self.openFood = openFood
         _selectedFoodNames = State(initialValue: recipe.foodNames)
     }
 
     private var selectedFoods: [SolidsReferenceFood] {
         selectedFoodNames.compactMap(SolidsReferenceCatalog.food(named:))
+    }
+    private var plannedTomorrowMeal: PlannedSolidMeal? {
+        guard let interval = solidsTomorrowInterval() else { return nil }
+        return plannedMeals.first {
+            interval.contains($0.scheduledAt) && $0.recipeID == recipe.id
+        }
+    }
+    private var isPlannedForTomorrow: Bool {
+        locallyPlannedTomorrowID != nil || plannedTomorrowMeal != nil
     }
 
     var body: some View {
@@ -5015,46 +5145,36 @@ struct SolidsRecipeDetailView: View {
                     Label("Adjust and log this meal", systemImage: "plus.circle.fill")
                 }
                 .accessibilityIdentifier("solids.recipe.log")
-                Button {
-                    guard !isPlanningForTomorrow else { return }
-                    isPlanningForTomorrow = true
-                    let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-                    let foods = visibleSelectedFoods
-                    Task {
-                        let writer = await resolvedPlanWriter()
-                        let result = await writer.saveEditorPlan(SolidsPlanEditorWrite(
-                            planID: nil,
-                            profileID: profile.id,
-                            scheduledAt: Calendar.current.date(
-                                bySettingHour: 12,
-                                minute: 0,
-                                second: 0,
-                                of: tomorrow
-                            ) ?? tomorrow,
-                            foodIDs: foods.map(\.id),
-                            foodNames: foods.map(\.name),
-                            notes: recipe.title,
-                            reminderEnabled: false,
-                            reminderOffsetMinutes: 30,
-                            title: recipe.title,
-                            recipeID: recipe.id
-                        ))
-                        isPlanningForTomorrow = false
-                        planResultMessage = result.error == nil
-                            ? "Added to tomorrow's meal plan."
-                            : "The meal plan could not be saved."
-                        if let error = result.error {
-                            PersistenceService.recordLocalSaveFailure(error)
+                if let plannedTomorrowMeal {
+                    Button {
+                        locallyPlannedTomorrowID = nil
+                        openPlan(plannedTomorrowMeal.id)
+                    } label: {
+                        HStack {
+                            Label("Planned for tomorrow", systemImage: "checkmark.circle.fill")
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                         }
                     }
-                } label: {
-                    Label(
-                        isPlanningForTomorrow ? "Adding to tomorrow…" : "Plan for tomorrow",
-                        systemImage: isPlanningForTomorrow ? "hourglass" : "calendar.badge.plus"
-                    )
+                    .foregroundStyle(.green)
+                    .accessibilityHint("Opens the planned meal.")
+                    .accessibilityIdentifier("solids.recipe.planned-tomorrow")
+                } else if isPlannedForTomorrow {
+                    Label("Planned for tomorrow", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .accessibilityIdentifier("solids.recipe.planned-tomorrow")
+                } else {
+                    Button {
+                        planRecipeForTomorrow(foods: visibleSelectedFoods)
+                    } label: {
+                        Label(
+                            isPlanningForTomorrow ? "Adding to tomorrow…" : "Plan for tomorrow",
+                            systemImage: isPlanningForTomorrow ? "hourglass" : "calendar.badge.plus"
+                        )
+                    }
+                    .disabled(isPlanningForTomorrow)
+                    .accessibilityIdentifier("solids.recipe.plan-tomorrow")
                 }
-                .disabled(isPlanningForTomorrow)
-                .accessibilityIdentifier("solids.recipe.plan-tomorrow")
             }
             if !shoppingLists.isEmpty || (household != nil && !locations.isEmpty) {
                 Section("Food & Home") {
@@ -5150,10 +5270,59 @@ struct SolidsRecipeDetailView: View {
         } message: {
             Text(mealPrepResultMessage ?? "")
         }
+        .onChange(of: plannedTomorrowMeal?.id) { _, planID in
+            if planID != nil {
+                locallyPlannedTomorrowID = nil
+            }
+        }
+        .onAppear {
+            if locallyPlannedTomorrowID != nil, plannedTomorrowMeal == nil {
+                locallyPlannedTomorrowID = nil
+            }
+        }
         .task {
             _ = await resolvedPlanWriter()
             _ = await resolvedShoppingWriter()
             _ = await resolvedMealPrepWriter()
+        }
+    }
+
+    private func planRecipeForTomorrow(foods: [SolidsReferenceFood]) {
+        guard !isPlanningForTomorrow, !isPlannedForTomorrow else { return }
+        isPlanningForTomorrow = true
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        Task {
+            let writer = await resolvedPlanWriter()
+            let result = await writer.saveEditorPlan(SolidsPlanEditorWrite(
+                planID: nil,
+                profileID: profile.id,
+                scheduledAt: Calendar.current.date(
+                    bySettingHour: 12,
+                    minute: 0,
+                    second: 0,
+                    of: tomorrow
+                ) ?? tomorrow,
+                foodIDs: foods.map(\.id),
+                foodNames: foods.map(\.name),
+                notes: recipe.title,
+                reminderEnabled: false,
+                reminderOffsetMinutes: 30,
+                title: recipe.title,
+                recipeID: recipe.id,
+                duplicatePolicy: .matchingRecipeOnDay
+            ))
+            isPlanningForTomorrow = false
+            if let error = result.error {
+                planResultMessage = "The meal plan could not be saved."
+                PersistenceService.recordLocalSaveFailure(error)
+            } else {
+                locallyPlannedTomorrowID = result.planID.flatMap { planID in
+                    plannedMeals.contains { $0.id == planID } ? nil : planID
+                }
+                planResultMessage = result.wasAlreadyPresent
+                    ? "This meal was already on tomorrow's plan."
+                    : "Added to tomorrow's meal plan."
+            }
         }
     }
 

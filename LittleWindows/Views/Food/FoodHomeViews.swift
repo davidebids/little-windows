@@ -302,10 +302,12 @@ struct FoodHomeView: View {
                     },
                     allFoods: customSolidFoods,
                     progress: solidFoodProgress,
+                    plannedMeals: plannedSolidMeals,
                     shoppingLists: data.shoppingLists,
                     shoppingItems: data.shoppingItems,
                     inventoryItems: data.inventoryItems,
                     foodItems: data.foodItems,
+                    openPlan: { path.append(.plannedSolidMeal($0)) },
                     openHistory: { path.append(.solidFoodHistory($0, $1)) }
                 )
             } else {
@@ -444,12 +446,14 @@ struct FoodHomeView: View {
                     recipe: recipe,
                     profile: selectedProfile,
                     profileState: selectedSolidsState,
+                    plannedMeals: plannedSolidMeals,
                     household: household,
                     shoppingLists: data.shoppingLists,
                     shoppingItems: data.shoppingItems,
                     inventoryItems: data.inventoryItems,
                     foodItems: data.foodItems,
                     locations: data.locations,
+                    openPlan: { path.append(.plannedSolidMeal($0)) },
                     openFood: { path.append(.solidFood($0)) }
                 )
             } else {

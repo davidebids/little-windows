@@ -377,10 +377,12 @@ struct CareView: View {
                     },
                     allFoods: customSolidFoods,
                     progress: solidFoodProgress,
+                    plannedMeals: plannedSolidMeals,
                     shoppingLists: householdShoppingLists,
                     shoppingItems: householdShoppingItems,
                     inventoryItems: householdInventoryItems,
                     foodItems: householdFoodItems,
+                    openPlan: { path.append(.plannedSolidMeal($0)) },
                     openHistory: { path.append(.solidFoodHistory($0, $1)) }
                 )
             } else {
@@ -518,12 +520,14 @@ struct CareView: View {
                     recipe: recipe,
                     profile: profile,
                     profileState: solidsProfileState,
+                    plannedMeals: plannedSolidMeals,
                     household: household,
                     shoppingLists: householdShoppingLists,
                     shoppingItems: householdShoppingItems,
                     inventoryItems: householdInventoryItems,
                     foodItems: householdFoodItems,
                     locations: householdLocations,
+                    openPlan: { path.append(.plannedSolidMeal($0)) },
                     openFood: { path.append(.solidFood($0)) }
                 )
             } else {
@@ -591,7 +595,7 @@ private struct CareSolidsDataScope {
     var loadsPlans: Bool {
         switch route {
         case .solidsHome, .solidsGuided, .solidsPlan, .plannedSolidMeal,
-             .solidAllergen: true
+             .solidAllergen, .customSolidFood, .solidsRecipe: true
         default: false
         }
     }

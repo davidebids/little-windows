@@ -2057,6 +2057,63 @@ final class SolidsFeatureTests: XCTestCase {
     }
 
     @MainActor
+    func testTomorrowPlanDuplicatePoliciesReturnExistingMealInsteadOfCreatingAnother() async throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profileID = UUID()
+        let tomorrow = Date(timeIntervalSince1970: 2_020_000_000)
+        let writer = SolidsPlanWriter(modelContainer: container)
+
+        let recipeWrite = SolidsPlanEditorWrite(
+            planID: nil,
+            profileID: profileID,
+            scheduledAt: tomorrow,
+            foodIDs: ["avocado", "black-bean"],
+            foodNames: ["Avocado", "Black bean"],
+            notes: "Avocado bean mash",
+            reminderEnabled: false,
+            reminderOffsetMinutes: 30,
+            title: "Avocado bean mash",
+            recipeID: "avocado-bean-mash",
+            duplicatePolicy: .matchingRecipeOnDay
+        )
+        let firstRecipeResult = await writer.saveEditorPlan(recipeWrite)
+        let duplicateRecipeResult = await writer.saveEditorPlan(recipeWrite)
+
+        XCTAssertNil(firstRecipeResult.error)
+        XCTAssertNil(duplicateRecipeResult.error)
+        XCTAssertEqual(duplicateRecipeResult.planID, firstRecipeResult.planID)
+        XCTAssertTrue(duplicateRecipeResult.wasAlreadyPresent)
+
+        let customFoodWrite = SolidsPlanEditorWrite(
+            planID: nil,
+            profileID: profileID,
+            scheduledAt: tomorrow.addingTimeInterval(3_600),
+            foodIDs: ["custom-sample"],
+            foodNames: ["Sample food"],
+            notes: "",
+            reminderEnabled: false,
+            reminderOffsetMinutes: 30,
+            duplicatePolicy: .containingSelectedFoodOnDay
+        )
+        let firstCustomResult = await writer.saveEditorPlan(customFoodWrite)
+        let duplicateCustomResult = await writer.saveEditorPlan(customFoodWrite)
+
+        XCTAssertNil(firstCustomResult.error)
+        XCTAssertNil(duplicateCustomResult.error)
+        XCTAssertEqual(duplicateCustomResult.planID, firstCustomResult.planID)
+        XCTAssertTrue(duplicateCustomResult.wasAlreadyPresent)
+
+        let verificationContext = ModelContext(container)
+        let profilePlans = try verificationContext.fetch(FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate { $0.profileID == profileID }
+        ))
+        XCTAssertEqual(profilePlans.count, 2)
+    }
+
+    @MainActor
     func testGuidedJourneyCanBuildACompleteFirstHundred() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
         let profile = BabyProfile(

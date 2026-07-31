@@ -409,6 +409,30 @@ final class UserVisibleFlowUITests: XCTestCase {
         plan.tap()
         XCTAssertTrue(app.staticTexts["Added to tomorrow's meal plan."].waitForExistence(timeout: 5))
         app.buttons["OK"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["solids.recipe.planned-tomorrow"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.buttons["solids.recipe.plan-tomorrow"].exists)
+
+        let planned = app.buttons["solids.recipe.planned-tomorrow"]
+        XCTAssertTrue(planned.waitForExistence(timeout: 5))
+        planned.tap()
+        XCTAssertTrue(app.navigationBars["Planned Meal"].waitForExistence(timeout: 5))
+        let delete = app.buttons["solids.plan.delete"]
+        for _ in 0..<12 where !delete.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(delete.isHittable)
+        delete.tap()
+        let deleteAlert = app.alerts["Delete planned meal?"]
+        XCTAssertTrue(deleteAlert.waitForExistence(timeout: 4))
+        deleteAlert.buttons["Delete"].tap()
+        XCTAssertTrue(app.navigationBars["Avocado bean mash"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["solids.recipe.plan-tomorrow"].waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            app.descendants(matching: .any)["solids.recipe.planned-tomorrow"].exists
+        )
 
         let log = app.buttons["solids.recipe.log"]
         XCTAssertTrue(log.isHittable)
@@ -824,6 +848,53 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
         XCTAssertTrue(app.staticTexts["Avocado bean mash"].waitForExistence(timeout: 4))
         XCTAssertFalse(app.staticTexts["0 meal ideas"].exists)
+    }
+
+    func testNamedRecipeListIsVisibleAndClearlySelectedOnRecipesScreen() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 5) {
+            activate.tap()
+        }
+
+        launch(
+            startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/recipes/avocado-bean-mash"
+        )
+        let newList = app.buttons["New recipe list"]
+        for _ in 0..<12 where !newList.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(newList.waitForExistence(timeout: 4))
+        newList.tap()
+
+        let nameField = app.textFields["List name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 4))
+        nameField.tap()
+        nameField.typeText("Early days")
+        app.buttons["Create and add"].tap()
+        XCTAssertTrue(app.staticTexts["Early days"].waitForExistence(timeout: 5))
+
+        launch(
+            startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/recipes"
+        )
+        XCTAssertTrue(app.staticTexts["Your recipe lists"].waitForExistence(timeout: 8))
+        let list = app.buttons["Recipe list: Early days"]
+        XCTAssertTrue(list.waitForExistence(timeout: 4))
+        list.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["solids.recipes.active-list"]
+                .waitForExistence(timeout: 4)
+        )
+        XCTAssertTrue(app.staticTexts["Showing 1 meal in this recipe list"].exists)
+
+        let manage = app.buttons["Manage recipe lists"]
+        XCTAssertTrue(manage.waitForExistence(timeout: 4))
+        manage.tap()
+        XCTAssertTrue(app.buttons["Rename Early days"].waitForExistence(timeout: 4))
     }
 
     func testFoodRecipeAndIngredientLinksOpenThePageTheyName() {
