@@ -441,6 +441,20 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["solid-food.choose"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Avocado"].exists)
         XCTAssertTrue(app.staticTexts["Black bean"].exists)
+
+        let save = app.navigationBars["Add Event"].buttons["Save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 3))
+        XCTAssertTrue(save.isHittable)
+        save.tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        let solidFoodSummary = app.staticTexts["Solid · Avocado + Black bean"]
+        for _ in 0..<8 where !solidFoodSummary.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            solidFoodSummary.waitForExistence(timeout: 4),
+            "The Feed action should identify the foods in the latest solid meal."
+        )
     }
 
     func testTodaySolidsReadinessBackReturnsToToday() {

@@ -3,6 +3,35 @@ import XCTest
 @testable import LittleWindows
 
 final class SolidsFeatureTests: XCTestCase {
+    func testTodayFeedQuickActionShowsLatestSolidFoodNamesCompactly() {
+        let event = BabyEvent(type: .feed)
+        event.feedKind = .solid
+        event.solidFoodDetails = [
+            SolidFoodLogDetail(foodID: "huckleberry", foodName: "Huckleberry"),
+            SolidFoodLogDetail(foodID: "yogurt", foodName: "Yogurt"),
+            SolidFoodLogDetail(foodID: "oat", foodName: "Oat")
+        ]
+
+        XCTAssertEqual(
+            TodayFeedQuickActionDetail.solidFoodSummary(for: event),
+            "Huckleberry + 2 more"
+        )
+    }
+
+    func testTodayFeedQuickActionFallsBackToLegacySolidFoodDescription() {
+        let event = BabyEvent(type: .feed)
+        event.feedKind = .solid
+        event.foodDescription = "Huckleberry, Yogurt"
+
+        XCTAssertEqual(
+            TodayFeedQuickActionDetail.solidFoodSummary(for: event),
+            "Huckleberry + Yogurt"
+        )
+
+        event.feedKind = .bottle
+        XCTAssertNil(TodayFeedQuickActionDetail.solidFoodSummary(for: event))
+    }
+
     func testCatalogContainsMoreThanFourHundredUniqueFoods() {
         let foods = SolidsReferenceCatalog.foods
         XCTAssertGreaterThanOrEqual(foods.count, 400)

@@ -18,6 +18,29 @@ private struct DogPottySubtitleKey: Hashable {
     var accident: Bool?
 }
 
+enum TodayFeedQuickActionDetail {
+    static func solidFoodSummary(for event: BabyEvent) -> String? {
+        guard event.type == .feed, event.feedKind == .solid else { return nil }
+
+        let detailNames = SolidFoodSelection.deduplicatedNames(
+            event.solidFoodDetails.map(\.foodName)
+        )
+        let names = detailNames.isEmpty
+            ? SolidFoodSelection.names(from: event.foodDescription)
+            : detailNames
+
+        guard let first = names.first else { return nil }
+        switch names.count {
+        case 1:
+            return first
+        case 2:
+            return names.joined(separator: " + ")
+        default:
+            return "\(first) + \(names.count - 1) more"
+        }
+    }
+}
+
 private struct TodayRenderState {
     var profile: BabyProfile?
     var profileID: UUID?
@@ -47,6 +70,7 @@ private struct TodayRenderState {
     var dogLastEventTitles: [EventType: String]
     var dogPottyTitles: [DogPottyType: String]
     var lastLoggedDates: [EventType: Date]
+    var latestSolidFoodSummary: String?
     var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date]
     var smartQuickActions: [QuickLogActionSnapshot]
     var visibleCareTypes: Set<EventType>
@@ -97,6 +121,7 @@ private struct TodayRenderState {
         dogLastEventTitles: [:],
         dogPottyTitles: [:],
         lastLoggedDates: [:],
+        latestSolidFoodSummary: nil,
         dogPottyLastLoggedDates: [:],
         smartQuickActions: [],
         visibleCareTypes: [],
@@ -386,6 +411,7 @@ struct TodayView: View {
         var latestPeeEvent: BabyEvent?
         var latestPoopEvent: BabyEvent?
         var lastLoggedDates: [EventType: Date] = [:]
+        var latestSolidFoodSummary: String?
         var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date] = [:]
         var hasSolidHistory = false
 
@@ -407,6 +433,9 @@ struct TodayView: View {
             }
             if logDate <= now, lastLoggedDates[event.type].map({ logDate > $0 }) ?? true {
                 lastLoggedDates[event.type] = logDate
+                if event.type == .feed {
+                    latestSolidFoodSummary = TodayFeedQuickActionDetail.solidFoodSummary(for: event)
+                }
             }
 
             if event.occursOnLocalDay(now, calendar: calendar) {
@@ -593,6 +622,7 @@ struct TodayView: View {
             dogLastEventTitles: dogLastEventTitles,
             dogPottyTitles: dogPottyTitles,
             lastLoggedDates: lastLoggedDates,
+            latestSolidFoodSummary: latestSolidFoodSummary,
             dogPottyLastLoggedDates: dogPottyLastLoggedDates,
             smartQuickActions: smartQuickActions,
             visibleCareTypes: visibleCareTypes,
@@ -1464,6 +1494,7 @@ struct TodayView: View {
                     if state.shows(.feed) {
                         QuickActionButton(
                             title: "Feed",
+                            detail: state.latestSolidFoodSummary.map { "Solid · \($0)" },
                             subtitle: lastEventSubtitle(.feed, state: state),
                             icon: "waterbottle.fill",
                             color: .orange
@@ -3002,6 +3033,7 @@ private struct SleepKindChooser: ViewModifier {
 
 private struct QuickActionButton: View {
     var title: String
+    var detail: String? = nil
     var subtitle: String? = nil
     var icon: String
     var color: Color
@@ -3010,7 +3042,13 @@ private struct QuickActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            QuickActionButtonLabel(title: title, subtitle: subtitle, icon: icon, color: color)
+            QuickActionButtonLabel(
+                title: title,
+                detail: detail,
+                subtitle: subtitle,
+                icon: icon,
+                color: color
+            )
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -3140,6 +3178,7 @@ private struct SleepMiniPlanTimelineRow: View {
 
 private struct QuickActionButtonLabel: View {
     var title: String
+    var detail: String? = nil
     var subtitle: String? = nil
     var icon: String
     var color: Color
@@ -3156,6 +3195,13 @@ private struct QuickActionButtonLabel: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+            if let detail {
+                Text(detail)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+            }
             if let subtitle {
                 Text(subtitle)
                     .font(.caption2.monospacedDigit())
