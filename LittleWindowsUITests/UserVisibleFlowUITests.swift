@@ -97,6 +97,110 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
     }
 
+    func testProductionScaleInputEditorsAcceptTypingPromptly() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://food/shopping/00000000-0000-0000-0000-000000000501")
+
+        let quickAdd = app.textFields["Add item"]
+        XCTAssertTrue(quickAdd.waitForExistence(timeout: 8))
+        quickAdd.tap()
+        let shoppingTypingStartedAt = ContinuousClock.now
+        quickAdd.typeText("Milk")
+        XCTAssertEqual(quickAdd.value as? String, "Milk")
+        XCTAssertLessThan(
+            shoppingTypingStartedAt.duration(to: .now),
+            .seconds(4),
+            "Typing into a populated shopping list should not rebuild the entire list."
+        )
+
+        launch(startURL: "littlewindows://milestones")
+        let captureMemory = app.buttons["Capture a memory"]
+        XCTAssertTrue(captureMemory.waitForExistence(timeout: 8))
+        captureMemory.tap()
+
+        let milestoneTitle = app.textFields["What happened?"]
+        XCTAssertTrue(milestoneTitle.waitForExistence(timeout: 4))
+        milestoneTitle.tap()
+        let milestoneTypingStartedAt = ContinuousClock.now
+        milestoneTitle.typeText("First wave")
+        XCTAssertEqual(milestoneTitle.value as? String, "First wave")
+        XCTAssertLessThan(
+            milestoneTypingStartedAt.duration(to: .now),
+            .seconds(4),
+            "Opening a photo-capable editor should not delay its first text input."
+        )
+    }
+
+    func testProductionScaleTodoEditorFocusesTitlePromptly() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://food/todos/00000000-0000-0000-0000-000000000401")
+
+        let addItem = app.buttons["home.todo.add-item"]
+        XCTAssertTrue(addItem.waitForExistence(timeout: 8))
+        let focusStartedAt = ContinuousClock.now
+        addItem.tap()
+
+        let title = app.textFields["home.todo.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        XCTAssertLessThan(
+            focusStartedAt.duration(to: .now),
+            .seconds(4),
+            "Opening a populated to-do list should not delay title-field focus."
+        )
+
+        title.typeText("Schedule pickup")
+        XCTAssertEqual(title.value as? String, "Schedule pickup")
+    }
+
+    func testGrowthWeightAcceptsSeparatePoundsAndDecimalOunces() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+
+        let growth = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Growth")
+        ).firstMatch
+        for _ in 0..<12 where !growth.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(growth.waitForExistence(timeout: 4))
+        XCTAssertTrue(growth.isHittable)
+        growth.tap()
+
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 8))
+        let weightRow = app.buttons["growth-weight-row"]
+        XCTAssertTrue(weightRow.waitForExistence(timeout: 4))
+        weightRow.tap()
+
+        let pounds = app.buttons["growth-weight-pounds-input"]
+        let ounces = app.buttons["growth-weight-ounces-input"]
+        XCTAssertTrue(pounds.waitForExistence(timeout: 4))
+        XCTAssertTrue(ounces.exists)
+
+        app.buttons["growth-keypad-1"].tap()
+        app.buttons["growth-keypad-6"].tap()
+        ounces.tap()
+        app.buttons["growth-keypad-4"].tap()
+        app.buttons["growth-keypad-decimal"].tap()
+        app.buttons["growth-keypad-4"].tap()
+
+        XCTAssertEqual(pounds.value as? String, "16")
+        XCTAssertEqual(ounces.value as? String, "4.4")
+        app.buttons["growth-measurement-save"].tap()
+
+        XCTAssertTrue(weightRow.waitForExistence(timeout: 4))
+        XCTAssertEqual(weightRow.value as? String, "16 lb 4.4 oz")
+    }
+
     private func assertResponsiveTab(_ tab: String, navigationTitle: String) {
         let button = app.tabBars.buttons[tab]
         XCTAssertTrue(button.waitForExistence(timeout: 3))

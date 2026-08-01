@@ -474,7 +474,6 @@ struct FoodHomeView: View {
                     list: list,
                     items: data.shoppingItems.filter { $0.shoppingListID == list.id },
                     shoppingLists: data.shoppingLists,
-                    allShoppingItems: data.shoppingItems,
                     store: data.stores.first { $0.id == list.storeID },
                     sections: data.storeSections.filter { $0.storeID == list.storeID },
                     inventoryItems: data.inventoryItems,
@@ -548,10 +547,14 @@ struct FoodHomeView: View {
             }
         case .store(let id):
             if let store = data.stores.first(where: { $0.id == id }) {
+                let storeSections = data.storeSections.filter { $0.storeID == store.id }
+                let storeSectionIDs = Set(storeSections.map(\.id))
                 StoreEditorView(
                     store: store,
-                    sections: data.storeSections.filter { $0.storeID == store.id },
-                    shoppingItems: data.shoppingItems
+                    sections: storeSections,
+                    shoppingItems: data.shoppingItems.filter { item in
+                        item.storeSectionID.map(storeSectionIDs.contains) == true
+                    }
                 )
             } else {
                 MissingFoodRouteView()
@@ -876,6 +879,40 @@ private struct FoodHomeDataScope {
         return id
     }
 
+    var todoListID: UUID? {
+        guard case .todoList(let id) = activeRoute else { return nil }
+        return id
+    }
+
+    var shoppingListID: UUID? {
+        switch activeRoute {
+        case .shoppingList(let id), .shoppingMode(let id):
+            return id
+        default:
+            return nil
+        }
+    }
+
+    var inventoryItemID: UUID? {
+        guard case .inventoryItem(let id) = activeRoute else { return nil }
+        return id
+    }
+
+    var mealPrepItemID: UUID? {
+        guard case .mealPrepItem(let id) = activeRoute else { return nil }
+        return id
+    }
+
+    var returnRequestID: UUID? {
+        guard case .returnRequest(let id) = activeRoute else { return nil }
+        return id
+    }
+
+    var storeID: UUID? {
+        guard case .store(let id) = activeRoute else { return nil }
+        return id
+    }
+
     var loadsTodos: Bool { section == .todos || section == .insights || isReminders }
     var loadsShoppingLists: Bool {
         section == .shopping || packingTripID != nil || section == .inventory
@@ -958,54 +995,112 @@ private struct FoodHomeDataLoader<Content: View>: View {
             predicate: #Predicate { $0.householdID == shoppingListID && !$0.isArchived },
             sortBy: [SortDescriptor(\ShoppingList.sortOrder), SortDescriptor(\ShoppingList.name)]
         ))
-        _shoppingItems = Query(FetchDescriptor<ShoppingListItem>(
-            predicate: #Predicate { $0.householdID == shoppingItemID },
-            sortBy: [SortDescriptor(\ShoppingListItem.sortOrder)]
-        ))
-        _stores = Query(FetchDescriptor<FoodStore>(
-            predicate: #Predicate { $0.householdID == storeID && !$0.isArchived },
-            sortBy: [SortDescriptor(\FoodStore.sortOrder), SortDescriptor(\FoodStore.name)]
-        ))
-        _storeSections = Query(FetchDescriptor<FoodStoreSection>(
-            predicate: #Predicate { $0.householdID == storeID },
-            sortBy: [SortDescriptor(\FoodStoreSection.sortOrder), SortDescriptor(\FoodStoreSection.name)]
-        ))
+        if let shoppingListID = scope.shoppingListID {
+            _shoppingItems = Query(FetchDescriptor<ShoppingListItem>(
+                predicate: #Predicate { $0.shoppingListID == shoppingListID },
+                sortBy: [SortDescriptor(\ShoppingListItem.sortOrder)]
+            ))
+        } else {
+            _shoppingItems = Query(FetchDescriptor<ShoppingListItem>(
+                predicate: #Predicate { $0.householdID == shoppingItemID },
+                sortBy: [SortDescriptor(\ShoppingListItem.sortOrder)]
+            ))
+        }
+        if let activeStoreID = scope.storeID {
+            _stores = Query(FetchDescriptor<FoodStore>(
+                predicate: #Predicate { $0.id == activeStoreID && !$0.isArchived },
+                sortBy: [SortDescriptor(\FoodStore.sortOrder), SortDescriptor(\FoodStore.name)]
+            ))
+            _storeSections = Query(FetchDescriptor<FoodStoreSection>(
+                predicate: #Predicate { $0.storeID == activeStoreID },
+                sortBy: [SortDescriptor(\FoodStoreSection.sortOrder), SortDescriptor(\FoodStoreSection.name)]
+            ))
+        } else {
+            _stores = Query(FetchDescriptor<FoodStore>(
+                predicate: #Predicate { $0.householdID == storeID && !$0.isArchived },
+                sortBy: [SortDescriptor(\FoodStore.sortOrder), SortDescriptor(\FoodStore.name)]
+            ))
+            _storeSections = Query(FetchDescriptor<FoodStoreSection>(
+                predicate: #Predicate { $0.householdID == storeID },
+                sortBy: [SortDescriptor(\FoodStoreSection.sortOrder), SortDescriptor(\FoodStoreSection.name)]
+            ))
+        }
         _todoLists = Query(FetchDescriptor<HomeTodoList>(
             predicate: #Predicate { $0.householdID == todoID && !$0.isArchived },
             sortBy: [SortDescriptor(\HomeTodoList.sortOrder), SortDescriptor(\HomeTodoList.name)]
         ))
-        _todoItems = Query(FetchDescriptor<HomeTodoItem>(
-            predicate: #Predicate { $0.householdID == todoID },
-            sortBy: [SortDescriptor(\HomeTodoItem.sortOrder)]
-        ))
+        if let todoListID = scope.todoListID {
+            _todoItems = Query(FetchDescriptor<HomeTodoItem>(
+                predicate: #Predicate { $0.todoListID == todoListID },
+                sortBy: [SortDescriptor(\HomeTodoItem.sortOrder)]
+            ))
+        } else {
+            _todoItems = Query(FetchDescriptor<HomeTodoItem>(
+                predicate: #Predicate { $0.householdID == todoID },
+                sortBy: [SortDescriptor(\HomeTodoItem.sortOrder)]
+            ))
+        }
         _locations = Query(FetchDescriptor<InventoryLocation>(
             predicate: #Predicate { $0.householdID == locationID && !$0.isArchived },
             sortBy: [SortDescriptor(\InventoryLocation.sortOrder), SortDescriptor(\InventoryLocation.name)]
         ))
-        _inventoryItems = Query(FetchDescriptor<InventoryItem>(
-            predicate: #Predicate { $0.householdID == inventoryID },
-            sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
-        ))
-        _mealPrepItems = Query(FetchDescriptor<MealPrepItem>(
-            predicate: #Predicate { $0.householdID == mealPrepID },
-            sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
-        ))
-        _mealPrepUsages = Query(FetchDescriptor<MealPrepUsage>(
-            predicate: #Predicate { $0.householdID == mealPrepUsageID },
-            sortBy: [SortDescriptor(\MealPrepUsage.dateTime, order: .reverse)]
-        ))
-        _returnRequests = Query(FetchDescriptor<ReturnRequest>(
-            predicate: #Predicate { $0.householdID == returnID && !$0.isArchived },
-            sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
-        ))
-        _returnItems = Query(FetchDescriptor<ReturnItem>(
-            predicate: #Predicate { $0.householdID == returnDetailID },
-            sortBy: [SortDescriptor(\ReturnItem.sortOrder)]
-        ))
-        _returnPackages = Query(FetchDescriptor<ReturnPackage>(
-            predicate: #Predicate { $0.householdID == returnDetailID },
-            sortBy: [SortDescriptor(\ReturnPackage.sortOrder)]
-        ))
+        if let inventoryItemID = scope.inventoryItemID {
+            _inventoryItems = Query(FetchDescriptor<InventoryItem>(
+                predicate: #Predicate { $0.id == inventoryItemID },
+                sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
+            ))
+        } else {
+            _inventoryItems = Query(FetchDescriptor<InventoryItem>(
+                predicate: #Predicate { $0.householdID == inventoryID },
+                sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
+            ))
+        }
+        if let mealPrepItemID = scope.mealPrepItemID {
+            _mealPrepItems = Query(FetchDescriptor<MealPrepItem>(
+                predicate: #Predicate { $0.id == mealPrepItemID },
+                sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
+            ))
+            _mealPrepUsages = Query(FetchDescriptor<MealPrepUsage>(
+                predicate: #Predicate { $0.mealPrepItemID == mealPrepItemID },
+                sortBy: [SortDescriptor(\MealPrepUsage.dateTime, order: .reverse)]
+            ))
+        } else {
+            _mealPrepItems = Query(FetchDescriptor<MealPrepItem>(
+                predicate: #Predicate { $0.householdID == mealPrepID },
+                sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
+            ))
+            _mealPrepUsages = Query(FetchDescriptor<MealPrepUsage>(
+                predicate: #Predicate { $0.householdID == mealPrepUsageID },
+                sortBy: [SortDescriptor(\MealPrepUsage.dateTime, order: .reverse)]
+            ))
+        }
+        if let returnRequestID = scope.returnRequestID {
+            _returnRequests = Query(FetchDescriptor<ReturnRequest>(
+                predicate: #Predicate { $0.id == returnRequestID && !$0.isArchived },
+                sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
+            ))
+            _returnItems = Query(FetchDescriptor<ReturnItem>(
+                predicate: #Predicate { $0.returnRequestID == returnRequestID },
+                sortBy: [SortDescriptor(\ReturnItem.sortOrder)]
+            ))
+            _returnPackages = Query(FetchDescriptor<ReturnPackage>(
+                predicate: #Predicate { $0.returnRequestID == returnRequestID },
+                sortBy: [SortDescriptor(\ReturnPackage.sortOrder)]
+            ))
+        } else {
+            _returnRequests = Query(FetchDescriptor<ReturnRequest>(
+                predicate: #Predicate { $0.householdID == returnID && !$0.isArchived },
+                sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
+            ))
+            _returnItems = Query(FetchDescriptor<ReturnItem>(
+                predicate: #Predicate { $0.householdID == returnDetailID },
+                sortBy: [SortDescriptor(\ReturnItem.sortOrder)]
+            ))
+            _returnPackages = Query(FetchDescriptor<ReturnPackage>(
+                predicate: #Predicate { $0.householdID == returnDetailID },
+                sortBy: [SortDescriptor(\ReturnPackage.sortOrder)]
+            ))
+        }
         let returnPhotoKind = scope.loadsReturnPhotos
             ? PhotoAttachmentOwnerKind.returnPhoto.rawValue
             : "__unloaded_return_photo__"
@@ -1483,7 +1578,6 @@ private struct HomeTodoListDetailView: View {
     @Bindable var list: HomeTodoList
     let items: [HomeTodoItem]
 
-    @State private var showingAddItem = false
     @State private var editingItem: HomeTodoItem?
     @State private var showingCompleted = false
     @State private var showingDeleteItemConfirmation = false
@@ -1496,23 +1590,24 @@ private struct HomeTodoListDetailView: View {
         )
     }
 
-    private var activeItems: [HomeTodoItem] {
+    private var sortedActiveItems: [HomeTodoItem] {
         items
             .filter { !$0.isCompleted }
             .sorted { ($0.sortOrder ?? 0, $0.createdAt) < ($1.sortOrder ?? 0, $1.createdAt) }
     }
 
-    private var completedItems: [HomeTodoItem] {
+    private var sortedCompletedItems: [HomeTodoItem] {
         items
             .filter(\.isCompleted)
             .sorted { ($0.sortOrder ?? 0, $0.completedAt ?? $0.updatedAt) < ($1.sortOrder ?? 0, $1.completedAt ?? $1.updatedAt) }
     }
 
-    private var canReorderVisibleItems: Bool {
-        activeItems.count > 1 || (showingCompleted && completedItems.count > 1)
-    }
-
     var body: some View {
+        let activeItems = sortedActiveItems
+        let completedItems = sortedCompletedItems
+        let canReorderVisibleItems = activeItems.count > 1
+            || (showingCompleted && completedItems.count > 1)
+
         List {
             Section {
                 if activeItems.isEmpty {
@@ -1588,19 +1683,8 @@ private struct HomeTodoListDetailView: View {
                     EditButton()
                 }
 
-                Button {
-                    showingAddItem = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("Add to-do item")
-            }
-        }
-        .sheet(isPresented: $showingAddItem) {
-            NavigationStack {
-                HomeTodoItemEditorView(
+                HomeTodoAddItemButton(
                     list: list,
-                    item: nil,
                     existingItems: items,
                     defaultActorName: actorName
                 )
@@ -1668,6 +1752,37 @@ private struct HomeTodoListDetailView: View {
     }
 }
 
+/// Owns add-editor presentation independently from the detail list. Opening
+/// the editor should not force every visible to-do row to sort and diff before
+/// the title field can receive focus.
+private struct HomeTodoAddItemButton: View {
+    let list: HomeTodoList
+    let existingItems: [HomeTodoItem]
+    let defaultActorName: String
+
+    @State private var showingEditor = false
+
+    var body: some View {
+        Button {
+            showingEditor = true
+        } label: {
+            Image(systemName: "plus")
+        }
+        .accessibilityLabel("Add to-do item")
+        .accessibilityIdentifier("home.todo.add-item")
+        .sheet(isPresented: $showingEditor) {
+            NavigationStack {
+                HomeTodoItemEditorView(
+                    list: list,
+                    item: nil,
+                    existingItems: existingItems,
+                    defaultActorName: defaultActorName
+                )
+            }
+        }
+    }
+}
+
 private struct HomeTodoItemRow: View {
     let item: HomeTodoItem
     let isCompleted: Bool
@@ -1698,6 +1813,19 @@ private struct HomeTodoItemRow: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
+                    if let assignmentText {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.crop.circle.fill")
+                            Text(assignmentText)
+                                .lineLimit(1)
+                        }
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(.blue.opacity(0.11), in: Capsule())
+                        .accessibilityElement(children: .combine)
+                    }
                     Text(metadata)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -1723,6 +1851,16 @@ private struct HomeTodoItemRow: View {
         let actor = item.addedBy?.nilIfBlank ?? "Someone"
         return "Added by \(actor) \(DateFormatting.day.string(from: item.createdAt))"
     }
+
+    private var assignmentText: String? {
+        item.assignedCaregiverName?.nilIfBlank.map { "Assigned to \($0)" }
+    }
+}
+
+private enum HomeTodoCaregiverAssignment: Hashable {
+    case unassigned
+    case me
+    case caregiver(String)
 }
 
 private struct HomeTodoItemEditorView: View {
@@ -1732,10 +1870,14 @@ private struct HomeTodoItemEditorView: View {
     let item: HomeTodoItem?
     let existingItems: [HomeTodoItem]
     let defaultActorName: String
+    private let isUsingFamilySync: Bool
+    private let familyCaregiverNames: [String]
 
     @State private var title: String
     @State private var notes: String
     @State private var addedBy: String
+    @State private var caregiverAssignment: HomeTodoCaregiverAssignment
+    @FocusState private var isTitleFocused: Bool
 
     init(
         list: HomeTodoList,
@@ -1747,24 +1889,71 @@ private struct HomeTodoItemEditorView: View {
         self.item = item
         self.existingItems = existingItems
         self.defaultActorName = defaultActorName
+        let defaults = UserDefaults.standard
+        isUsingFamilySync = PersistenceService.familySyncMode(defaults: defaults)
+            == .sharedFamilySync
+        familyCaregiverNames = CaregiverIdentityService.familySyncCaregiverNames(
+            defaults: defaults
+        ).filter {
+            !CaregiverIdentityService.namesMatch($0, defaultActorName)
+        }
         _title = State(initialValue: item?.title ?? "")
         _notes = State(initialValue: item?.notes ?? "")
         _addedBy = State(initialValue: item?.addedBy ?? defaultActorName)
+        if let assignedName = item?.assignedCaregiverName?.nilIfBlank {
+            _caregiverAssignment = State(
+                initialValue: CaregiverIdentityService.namesMatch(
+                    assignedName,
+                    defaultActorName
+                ) ? .me : .caregiver(assignedName)
+            )
+        } else {
+            _caregiverAssignment = State(initialValue: .unassigned)
+        }
     }
 
     var body: some View {
         Form {
             Section("Item") {
                 TextField("Title", text: $title)
+                    .focused($isTitleFocused)
+                    .accessibilityIdentifier("home.todo.title")
                 TextField("Notes", text: $notes, axis: .vertical)
                     .lineLimit(2...5)
             }
             Section("Added By") {
                 TextField("Name", text: $addedBy)
             }
+            Section {
+                Picker("Assigned to", selection: $caregiverAssignment) {
+                    Text("Me — \(defaultActorName)")
+                        .tag(HomeTodoCaregiverAssignment.me)
+                    if isUsingFamilySync {
+                        ForEach(familyCaregiverNames, id: \.self) { name in
+                            Text(name).tag(HomeTodoCaregiverAssignment.caregiver(name))
+                        }
+                    }
+                    Text("Unassigned").tag(HomeTodoCaregiverAssignment.unassigned)
+                    if let currentAssignedName {
+                        Text("\(currentAssignedName) — current assignment")
+                            .tag(HomeTodoCaregiverAssignment.caregiver(currentAssignedName))
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("home.todo.assignee")
+            } header: {
+                Text("Assignment")
+            } footer: {
+                Text(assignmentFooterText)
+            }
         }
         .navigationTitle(item == nil ? "Add To-Do" : "Edit To-Do")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            guard item == nil else { return }
+            await Task.yield()
+            isTitleFocused = true
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
@@ -1783,6 +1972,7 @@ private struct HomeTodoItemEditorView: View {
                 title: title,
                 notes: notes,
                 addedBy: addedBy,
+                assignedCaregiverName: resolvedAssignedCaregiverName,
                 context: modelContext
             )
         } else {
@@ -1790,12 +1980,38 @@ private struct HomeTodoItemEditorView: View {
                 title: title,
                 notes: notes,
                 addedBy: addedBy,
+                assignedCaregiverName: resolvedAssignedCaregiverName,
                 to: list,
                 existingItems: existingItems,
                 context: modelContext
             )
         }
         dismiss()
+    }
+
+    private var currentAssignedName: String? {
+        guard case .caregiver(let name) = caregiverAssignment,
+              !familyCaregiverNames.contains(name) else {
+            return nil
+        }
+        return name
+    }
+
+    private var resolvedAssignedCaregiverName: String? {
+        switch caregiverAssignment {
+        case .unassigned:
+            return nil
+        case .me:
+            return defaultActorName
+        case .caregiver(let name):
+            return name
+        }
+    }
+
+    private var assignmentFooterText: String {
+        isUsingFamilySync
+            ? "Choose yourself, an accepted Family Sync caregiver, or leave this task unassigned."
+            : "Family Sync is not active, so this task can be assigned only to you or left unassigned."
     }
 }
 
@@ -2102,7 +2318,6 @@ private struct ShoppingListDetailView: View {
     @Bindable var list: ShoppingList
     let items: [ShoppingListItem]
     let shoppingLists: [ShoppingList]
-    let allShoppingItems: [ShoppingListItem]
     let store: FoodStore?
     let sections: [FoodStoreSection]
     let inventoryItems: [InventoryItem]
@@ -2110,7 +2325,6 @@ private struct ShoppingListDetailView: View {
     let openShoppingMode: () -> Void
     let openMealPrep: () -> Void
 
-    @State private var fastAddText = ""
     @State private var selectedSectionID: UUID?
     @State private var showingChecked = true
     @State private var searchText = ""
@@ -2132,23 +2346,6 @@ private struct ShoppingListDetailView: View {
         }
     }
 
-    private var fastAddSuggestions: [ShoppingListItem] {
-        let query = fastAddText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return [] }
-        return items
-            .filter {
-                $0.isChecked
-                    && ($0.name.localizedCaseInsensitiveContains(query)
-                        || ($0.notes?.localizedCaseInsensitiveContains(query) ?? false))
-            }
-            .sorted {
-                ($0.isFavorite ? 0 : 1, $0.isRecurringStaple ? 0 : 1, -$0.purchaseCount, $0.name)
-                    < ($1.isFavorite ? 0 : 1, $1.isRecurringStaple ? 0 : 1, -$1.purchaseCount, $1.name)
-            }
-            .prefix(5)
-            .map { $0 }
-    }
-
     var body: some View {
         let visibleItems = self.visibleItems
         let activeItemsBySectionID = Dictionary(
@@ -2157,53 +2354,12 @@ private struct ShoppingListDetailView: View {
         )
         let checkedItems = visibleItems.filter(\.isChecked)
         List {
-            Section {
-                HStack {
-                    TextField("Add item", text: $fastAddText)
-                        .submitLabel(.done)
-                        .onSubmit(addFastItem)
-                    Menu {
-                        Button("No Section") { selectedSectionID = nil }
-                        ForEach(sections) { section in
-                            Button(section.name) { selectedSectionID = section.id }
-                        }
-                    } label: {
-                        Label(selectedSectionName, systemImage: "square.grid.2x2")
-                            .labelStyle(.iconOnly)
-                    }
-                    Button(action: addFastItem) {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                    .disabled(fastAddText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-
-                if let notes = list.notes, !notes.isEmpty {
-                    Text(notes)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if !fastAddSuggestions.isEmpty {
-                    ForEach(fastAddSuggestions) { item in
-                        Button {
-                            reactivate(item)
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.name)
-                                    Text("Previously purchased\(item.quantityText.isEmpty ? "" : " · \(item.quantityText)")")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .foregroundStyle(.orange)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
+            ShoppingListFastAddSection(
+                list: list,
+                items: items,
+                sections: sections,
+                selectedSectionID: $selectedSectionID
+            )
 
             suggestionsSection
 
@@ -2289,7 +2445,7 @@ private struct ShoppingListDetailView: View {
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
         .navigationTitle(list.name)
-        .searchable(text: $searchText, prompt: "Search this list")
+        .debouncedSearch(text: $searchText, prompt: "Search this list")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
@@ -2358,7 +2514,6 @@ private struct ShoppingListDetailView: View {
                 item: item,
                 sourceList: list,
                 shoppingLists: shoppingLists,
-                shoppingItems: allShoppingItems,
                 sections: sections
             )
         }
@@ -2448,10 +2603,6 @@ private struct ShoppingListDetailView: View {
         }
     }
 
-    private var selectedSectionName: String {
-        selectedSectionID.flatMap { id in sections.first { $0.id == id }?.name } ?? "Section"
-    }
-
     private func sortedItems(_ values: [ShoppingListItem]) -> [ShoppingListItem] {
         values
             .sorted {
@@ -2469,28 +2620,6 @@ private struct ShoppingListDetailView: View {
             )
         }
         .tint(.pink)
-    }
-
-    private func addFastItem() {
-        ShoppingListService.addItem(
-            named: fastAddText,
-            to: list,
-            sectionID: selectedSectionID,
-            existingItems: items,
-            context: modelContext
-        )
-        fastAddText = ""
-    }
-
-    private func reactivate(_ item: ShoppingListItem) {
-        ShoppingListService.addItem(
-            named: item.name,
-            to: list,
-            sectionID: item.storeSectionID,
-            existingItems: items,
-            context: modelContext
-        )
-        fastAddText = ""
     }
 
     private func apply(_ suggestion: FoodSuggestion) {
@@ -2517,6 +2646,106 @@ private struct ShoppingListDetailView: View {
         case .reviewMealPrep:
             openMealPrep()
         }
+    }
+}
+
+private struct ShoppingListFastAddSection: View {
+    @Environment(\.modelContext) private var modelContext
+    let list: ShoppingList
+    let items: [ShoppingListItem]
+    let sections: [FoodStoreSection]
+    @Binding var selectedSectionID: UUID?
+    @State private var text = ""
+
+    private var suggestions: [ShoppingListItem] {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return items
+            .filter {
+                $0.isChecked
+                    && ($0.name.localizedCaseInsensitiveContains(query)
+                        || ($0.notes?.localizedCaseInsensitiveContains(query) ?? false))
+            }
+            .sorted {
+                ($0.isFavorite ? 0 : 1, $0.isRecurringStaple ? 0 : 1, -$0.purchaseCount, $0.name)
+                    < ($1.isFavorite ? 0 : 1, $1.isRecurringStaple ? 0 : 1, -$1.purchaseCount, $1.name)
+            }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    var body: some View {
+        Section {
+            HStack {
+                TextField("Add item", text: $text)
+                    .submitLabel(.done)
+                    .onSubmit(addItem)
+                Menu {
+                    Button("No Section") { selectedSectionID = nil }
+                    ForEach(sections) { section in
+                        Button(section.name) { selectedSectionID = section.id }
+                    }
+                } label: {
+                    Label(selectedSectionName, systemImage: "square.grid.2x2")
+                        .labelStyle(.iconOnly)
+                }
+                Button(action: addItem) {
+                    Image(systemName: "plus.circle.fill")
+                }
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let notes = list.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(suggestions) { item in
+                Button {
+                    reactivate(item)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name)
+                            Text("Previously purchased\(item.quantityText.isEmpty ? "" : " · \(item.quantityText)")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var selectedSectionName: String {
+        selectedSectionID.flatMap { id in sections.first { $0.id == id }?.name } ?? "Section"
+    }
+
+    private func addItem() {
+        ShoppingListService.addItem(
+            named: text,
+            to: list,
+            sectionID: selectedSectionID,
+            existingItems: items,
+            context: modelContext
+        )
+        text = ""
+    }
+
+    private func reactivate(_ item: ShoppingListItem) {
+        ShoppingListService.addItem(
+            named: item.name,
+            to: list,
+            sectionID: item.storeSectionID,
+            existingItems: items,
+            context: modelContext
+        )
+        text = ""
     }
 }
 
@@ -2814,7 +3043,6 @@ private struct ShoppingListItemEditorView: View {
     @Bindable var item: ShoppingListItem
     let sourceList: ShoppingList
     let shoppingLists: [ShoppingList]
-    let shoppingItems: [ShoppingListItem]
     let sections: [FoodStoreSection]
 
     @State private var name = ""
@@ -2894,13 +3122,16 @@ private struct ShoppingListItemEditorView: View {
                         if let destinationListID,
                            destinationListID != sourceList.id,
                            let destination = shoppingLists.first(where: { $0.id == destinationListID }) {
+                            let descriptor = FetchDescriptor<ShoppingListItem>(
+                                predicate: #Predicate { $0.shoppingListID == destinationListID },
+                                sortBy: [SortDescriptor(\ShoppingListItem.sortOrder)]
+                            )
+                            let destinationItems = (try? modelContext.fetch(descriptor)) ?? []
                             ShoppingListService.moveItem(
                                 item,
                                 from: sourceList,
                                 to: destination,
-                                existingDestinationItems: shoppingItems.filter {
-                                    $0.shoppingListID == destination.id
-                                },
+                                existingDestinationItems: destinationItems,
                                 context: modelContext
                             )
                         }
@@ -4093,6 +4324,7 @@ private struct StoreEditorView: View {
     @Bindable var store: FoodStore
     let sections: [FoodStoreSection]
     let shoppingItems: [ShoppingListItem]
+    private let itemCountBySectionID: [UUID: Int]
     @State private var nameDraft: String
     @State private var notesDraft: String
     @State private var newSectionName = ""
@@ -4104,6 +4336,11 @@ private struct StoreEditorView: View {
         self.store = store
         self.sections = sections
         self.shoppingItems = shoppingItems
+        itemCountBySectionID = shoppingItems.reduce(into: [UUID: Int]()) { counts, item in
+            if let sectionID = item.storeSectionID {
+                counts[sectionID, default: 0] += 1
+            }
+        }
         _nameDraft = State(initialValue: store.name)
         _notesDraft = State(initialValue: store.notes ?? "")
     }
@@ -4111,11 +4348,6 @@ private struct StoreEditorView: View {
     var body: some View {
         let orderedSections = sections.sorted {
             ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name)
-        }
-        let itemCountBySectionID = shoppingItems.reduce(into: [UUID: Int]()) { counts, item in
-            if let sectionID = item.storeSectionID {
-                counts[sectionID, default: 0] += 1
-            }
         }
 
         Form {
@@ -4228,7 +4460,7 @@ private struct StoreEditorView: View {
 
     private var sectionRemovalMessage: String {
         guard let sectionPendingRemoval else { return "" }
-        let itemCount = shoppingItems.filter { $0.storeSectionID == sectionPendingRemoval.id }.count
+        let itemCount = itemCountBySectionID[sectionPendingRemoval.id, default: 0]
         guard itemCount > 0 else {
             return "This removes the section from this store."
         }
@@ -5409,7 +5641,10 @@ private struct ReturnCreateView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
                         ForEach(photoDrafts) { draft in
                             ZStack(alignment: .topTrailing) {
-                                if let image = UIImage(data: draft.thumbnailData ?? draft.imageData) {
+                                if let image = ThumbnailImageCache.image(
+                                    attachmentID: draft.id,
+                                    data: draft.thumbnailData ?? draft.imageData
+                                ) {
                                     Image(uiImage: image)
                                         .resizable()
                                         .scaledToFill()
@@ -5678,7 +5913,10 @@ private struct ReturnPackageEditorView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
                         ForEach(photoPreviewItems) { item in
                             ZStack(alignment: .topTrailing) {
-                                if let image = UIImage(data: item.data) {
+                                if let image = ThumbnailImageCache.image(
+                                    attachmentID: item.id,
+                                    data: item.data
+                                ) {
                                     Image(uiImage: image)
                                         .resizable()
                                         .scaledToFill()

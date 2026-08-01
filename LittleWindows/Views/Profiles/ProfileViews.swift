@@ -258,6 +258,7 @@ struct ProfileEditorView: View {
                         profile: profile,
                         profileType: profileType,
                         name: name,
+                        photoID: currentProfilePhotoID,
                         photoData: currentProfilePhotoData
                     )
                     VStack(alignment: .leading, spacing: 10) {
@@ -384,6 +385,12 @@ struct ProfileEditorView: View {
         guard !removesProfilePhoto,
               let id = profile?.profilePhotoAttachmentID else { return nil }
         return photoAttachments.first { $0.id == id }?.previewData
+    }
+
+    private var currentProfilePhotoID: UUID? {
+        if let profilePhotoDraft { return profilePhotoDraft.id }
+        guard !removesProfilePhoto else { return nil }
+        return profile?.profilePhotoAttachmentID
     }
 
     private var profilePhotoPickerSelection: Binding<PhotosPickerItem?> {
@@ -521,12 +528,17 @@ private struct ProfilePhotoPreview: View {
     let profile: CareProfile?
     let profileType: CareProfileType
     let name: String
+    let photoID: UUID?
     let photoData: Data?
 
     var body: some View {
         ZStack {
-            if let photoData,
-               let image = UIImage(data: photoData) {
+            if let photoID,
+               let photoData,
+               let image = ThumbnailImageCache.image(
+                attachmentID: photoID,
+                data: photoData
+               ) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()

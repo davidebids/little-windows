@@ -490,6 +490,7 @@ final class HomeTodoItem {
     var notes: String?
     var isCompleted: Bool = false
     var addedBy: String?
+    var assignedCaregiverName: String?
     var completedBy: String?
     var completedAt: Date?
     var lastReopenedAt: Date?
@@ -505,6 +506,7 @@ final class HomeTodoItem {
         notes: String? = nil,
         isCompleted: Bool = false,
         addedBy: String? = nil,
+        assignedCaregiverName: String? = nil,
         completedBy: String? = nil,
         completedAt: Date? = nil,
         lastReopenedAt: Date? = nil,
@@ -519,6 +521,7 @@ final class HomeTodoItem {
         self.notes = notes
         self.isCompleted = isCompleted
         self.addedBy = addedBy
+        self.assignedCaregiverName = assignedCaregiverName
         self.completedBy = completedBy
         self.completedAt = completedAt
         self.lastReopenedAt = lastReopenedAt

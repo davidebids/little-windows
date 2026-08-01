@@ -2519,6 +2519,7 @@ private struct PackingBagsEditorView: View {
     let trip: PackingTrip
     let travelers: [TripTraveler]
     let items: [PackingItem]
+    private let assignedItemCountByBagID: [UUID: Int]
 
     @State private var drafts: [PackingBagDraft]
     @State private var newName = ""
@@ -2538,6 +2539,11 @@ private struct PackingBagsEditorView: View {
         self.trip = trip
         self.travelers = travelers
         self.items = items
+        assignedItemCountByBagID = items.reduce(into: [UUID: Int]()) { counts, item in
+            if let bagID = item.bagID {
+                counts[bagID, default: 0] += 1
+            }
+        }
         _drafts = State(initialValue: bags.sorted { $0.sortOrder < $1.sortOrder }.map {
             PackingBagDraft(bag: $0, name: $0.name, travelerID: $0.travelerID)
         })
@@ -2625,7 +2631,7 @@ private struct PackingBagsEditorView: View {
                     } header: {
                         Text(draft.bag.name)
                     } footer: {
-                        let assignedCount = items.filter { $0.bagID == draft.id }.count
+                        let assignedCount = assignedItemCountByBagID[draft.id, default: 0]
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Changes save automatically.")
                             if assignedCount > 0 {

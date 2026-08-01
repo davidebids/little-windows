@@ -319,6 +319,7 @@ final class CloudKitSharingService {
                 rootRecordID: rootID,
                 shareRecordID: share.recordID
             )
+            updateShareMembership(from: share)
             defaults.removeObject(forKey: DefaultsKey.lastError)
             markSynced(uploaded: true, downloaded: false)
             schedulePushSubscriptionSetup(rootRecordID: rootID, role: .owner)
@@ -349,18 +350,17 @@ final class CloudKitSharingService {
     }
 
     func existingShare() async throws -> CKShare? {
-        guard storedRole == .owner,
+        let role = storedRole
+        guard role != .none,
               let shareID = storedShareRecordID,
               let rootID = storedRootRecordID else {
             throw FamilySharingError.missingShare
         }
         let result: [CKRecord.ID: Result<CKRecord, Error>]
         do {
-            result = try await CKContainer(identifier: containerIdentifier)
-                .privateCloudDatabase
-                .records(for: [shareID])
+            result = try await database(for: role).records(for: [shareID])
         } catch {
-            throw await shareAccessErrorIfNeeded(error, rootRecordID: rootID, role: .owner)
+            throw await shareAccessErrorIfNeeded(error, rootRecordID: rootID, role: role)
         }
         guard let shareResult = result[shareID] else {
             throw FamilySharingError.missingShare
@@ -370,15 +370,15 @@ final class CloudKitSharingService {
             guard let share = record as? CKShare else {
                 throw FamilySharingError.missingShare
             }
-            updateParticipantCount(from: share)
+            updateShareMembership(from: share)
             return share
         case .failure(let error):
-            throw await shareAccessErrorIfNeeded(error, rootRecordID: rootID, role: .owner)
+            throw await shareAccessErrorIfNeeded(error, rootRecordID: rootID, role: role)
         }
     }
 
     func refreshShareMembership() async {
-        guard storedRole == .owner else { return }
+        guard storedRole != .none else { return }
         do {
             _ = try await existingShare()
             defaults.removeObject(forKey: DefaultsKey.lastError)
@@ -413,6 +413,7 @@ final class CloudKitSharingService {
             rootRecordID: rootID,
             shareRecordID: share.recordID
         )
+        updateShareMembership(from: share)
         try await ensureFamilySyncPushSubscription(rootRecordID: rootID, role: .participant)
         let remoteData = try await datasetData(from: root, template: localPayload.data)
         let mergedData = try DataExportImportService.mergeFamilySyncData(
@@ -467,9 +468,7 @@ final class CloudKitSharingService {
         }
         if reason.ensuresPushSubscription {
             try await ensureFamilySyncPushSubscription(rootRecordID: rootID, role: storedRole)
-            if storedRole == .owner {
-                _ = try? await existingShare()
-            }
+            _ = try? await existingShare()
         }
 
         let pendingUpload = defaults.bool(forKey: DefaultsKey.pendingUpload)
@@ -881,7 +880,8 @@ final class CloudKitSharingService {
             DefaultsKey.pendingUpload,
             DefaultsKey.inactiveReason,
             DefaultsKey.inactiveEventID,
-            DefaultsKey.participantCount
+            DefaultsKey.participantCount,
+            CaregiverIdentityService.familySyncCaregiverNamesKey
         ] {
             defaults.removeObject(forKey: key)
         }
@@ -1591,13 +1591,32 @@ final class CloudKitSharingService {
         try? FileManager.default.removeItem(at: baselineFileURL)
     }
 
-    private func updateParticipantCount(from share: CKShare) {
+    private func updateShareMembership(from share: CKShare) {
         let hadPreviousValue = defaults.object(forKey: DefaultsKey.participantCount) != nil
         let previousCount = defaults.integer(forKey: DefaultsKey.participantCount)
         let count = share.participants.filter {
             $0.role != .owner && $0.acceptanceStatus == .accepted
         }.count
         defaults.set(count, forKey: DefaultsKey.participantCount)
+        let currentUserRecordID = share.currentUserParticipant?.userIdentity.userRecordID
+        let formatter = PersonNameComponentsFormatter()
+        let caregiverNames = share.participants.compactMap { participant -> String? in
+            guard participant.role == .owner || participant.acceptanceStatus == .accepted else {
+                return nil
+            }
+            if let currentUserRecordID,
+               participant.userIdentity.userRecordID == currentUserRecordID {
+                return nil
+            }
+            guard let components = participant.userIdentity.nameComponents else { return nil }
+            let name = formatter.string(from: components)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : name
+        }
+        CaregiverIdentityService.storeFamilySyncCaregiverNames(
+            caregiverNames,
+            defaults: defaults
+        )
         guard hadPreviousValue, count != previousCount else { return }
         let joined = count > previousCount
         Task { @MainActor in
@@ -1897,6 +1916,7 @@ private struct FamilySyncDatasetSnapshot {
         var notes: String?
         var isCompleted: Bool
         var addedBy: String?
+        var assignedCaregiverName: String?
         var completedBy: String?
         var completedAt: Date?
         var lastReopenedAt: Date?
@@ -2265,6 +2285,7 @@ private struct FamilySyncDatasetSnapshot {
                item.notes == previous.notes,
                item.isCompleted == previous.isCompleted,
                item.addedBy == previous.addedBy,
+               item.assignedCaregiverName == previous.assignedCaregiverName,
                item.completedBy == previous.completedBy,
                item.completedAt == previous.completedAt,
                item.lastReopenedAt == previous.lastReopenedAt {

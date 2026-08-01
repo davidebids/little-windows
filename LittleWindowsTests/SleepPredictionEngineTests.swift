@@ -6911,6 +6911,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             title: "Replace filter",
             notes: "Hallway closet",
             addedBy: "Caregiver A",
+            assignedCaregiverName: "  Caregiver B  ",
             to: list,
             existingItems: [],
             context: context,
@@ -6927,8 +6928,20 @@ final class SleepPredictionEngineTests: XCTestCase {
         ))
 
         XCTAssertEqual(item.addedBy, "Caregiver A")
+        XCTAssertEqual(item.assignedCaregiverName, "Caregiver B")
         XCTAssertFalse(item.isCompleted)
         XCTAssertNil(item.completedBy)
+
+        HomeTodoService.updateItem(
+            item,
+            title: item.title,
+            notes: item.notes ?? "",
+            addedBy: "Caregiver A",
+            assignedCaregiverName: nil,
+            context: context,
+            now: Date(timeIntervalSince1970: 117)
+        )
+        XCTAssertNil(item.assignedCaregiverName)
 
         HomeTodoService.setCompleted(
             item,
@@ -7138,6 +7151,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             title: "Change sheets",
             isCompleted: true,
             addedBy: "Caregiver A",
+            assignedCaregiverName: "Caregiver B",
             completedBy: "Caregiver B",
             completedAt: Date(timeIntervalSince1970: 210),
             createdAt: Date(timeIntervalSince1970: 205),
@@ -7160,8 +7174,25 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(importedItem.title, "Change sheets")
         XCTAssertTrue(importedItem.isCompleted)
         XCTAssertEqual(importedItem.addedBy, "Caregiver A")
+        XCTAssertEqual(importedItem.assignedCaregiverName, "Caregiver B")
         XCTAssertEqual(importedItem.completedBy, "Caregiver B")
         XCTAssertEqual(importedItem.completedAt, Date(timeIntervalSince1970: 210))
+    }
+
+    func testFamilySyncCaregiverDirectoryNormalizesAndPersistsNames() throws {
+        let suiteName = "FamilySyncCaregiverDirectory-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        CaregiverIdentityService.storeFamilySyncCaregiverNames(
+            ["  Caregiver B ", "caregiver b", "Caregiver A", ""],
+            defaults: defaults
+        )
+
+        XCTAssertEqual(
+            CaregiverIdentityService.familySyncCaregiverNames(defaults: defaults),
+            ["Caregiver A", "Caregiver B"]
+        )
     }
 
     @MainActor

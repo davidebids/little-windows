@@ -1050,6 +1050,7 @@ enum DebugSimulatorSmokeSeedService {
     static let sleepEventID = UUID(uuidString: "00000000-0000-0000-0000-000000000201")!
     static let activeNursingEventID = UUID(uuidString: "00000000-0000-0000-0000-000000000202")!
     static let appointmentID = UUID(uuidString: "00000000-0000-0000-0000-000000000301")!
+    static let todoListID = UUID(uuidString: "00000000-0000-0000-0000-000000000401")!
     static let shoppingListID = UUID(uuidString: "00000000-0000-0000-0000-000000000501")!
     static let inventoryItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000601")!
     static let mealPrepItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000701")!
@@ -1178,6 +1179,32 @@ enum DebugSimulatorSmokeSeedService {
                 foodIDs: ["performance-food-\(index % 400)"],
                 foodNames: ["Performance Food \((index % 400) + 1)"],
                 completedEventID: index < 60 ? UUID() : nil
+            ))
+        }
+
+        let todoList = HomeTodoList(
+            id: todoListID,
+            householdID: household.id,
+            name: "Performance To-Do",
+            createdAt: now,
+            updatedAt: now,
+            sortOrder: 0
+        )
+        context.insert(todoList)
+        for index in 0..<600 {
+            context.insert(HomeTodoItem(
+                householdID: household.id,
+                todoListID: todoList.id,
+                title: "Performance Task \(index + 1)",
+                isCompleted: index.isMultiple(of: 4),
+                addedBy: "Sample Caregiver",
+                completedBy: index.isMultiple(of: 4) ? "Sample Caregiver" : nil,
+                completedAt: index.isMultiple(of: 4)
+                    ? now.addingTimeInterval(Double(-index) * 300)
+                    : nil,
+                createdAt: now.addingTimeInterval(Double(-index) * 300),
+                updatedAt: now.addingTimeInterval(Double(-index) * 300),
+                sortOrder: index
             ))
         }
 

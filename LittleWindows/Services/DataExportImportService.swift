@@ -464,6 +464,7 @@ private struct HomeTodoItemDTO: Codable {
     var notes: String?
     var isCompleted: Bool
     var addedBy: String?
+    var assignedCaregiverName: String?
     var completedBy: String?
     var completedAt: Date?
     var lastReopenedAt: Date?
@@ -737,7 +738,7 @@ private struct CareRoutineRunDTO: Codable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 19
+    private static let currentBackupVersion = 20
     private static let recoveryBackupLimit = 3
 
     static func exportData(context: ModelContext) throws -> Data {
@@ -1126,6 +1127,7 @@ enum DataExportImportService {
                 notes: $0.notes,
                 isCompleted: $0.isCompleted,
                 addedBy: $0.addedBy,
+                assignedCaregiverName: $0.assignedCaregiverName,
                 completedBy: $0.completedBy,
                 completedAt: $0.completedAt,
                 lastReopenedAt: $0.lastReopenedAt,
@@ -1943,6 +1945,7 @@ enum DataExportImportService {
                 notes: value.notes,
                 isCompleted: value.isCompleted,
                 addedBy: value.addedBy,
+                assignedCaregiverName: value.assignedCaregiverName,
                 completedBy: value.completedBy,
                 completedAt: value.completedAt,
                 lastReopenedAt: value.lastReopenedAt,
@@ -2586,6 +2589,20 @@ enum DataExportImportService {
         let packingBags = envelope.packingBags ?? []
         let packingItems = envelope.packingItems ?? []
         let householdIDs = Set((envelope.households ?? []).map(\.id))
+        let homeTodoLists = envelope.homeTodoLists ?? []
+        let homeTodoItems = envelope.homeTodoItems ?? []
+        let homeTodoListIDs = Set(homeTodoLists.map(\.id))
+        guard homeTodoListIDs.count == homeTodoLists.count,
+              Set(homeTodoItems.map(\.id)).count == homeTodoItems.count,
+              homeTodoItems.allSatisfy({ item in
+                  homeTodoListIDs.contains(item.todoListID)
+                      && !item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && (item.assignedCaregiverName.map {
+                          !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      } ?? true)
+              }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         let shoppingItemsByID = Dictionary(
             (envelope.shoppingListItems ?? []).map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }

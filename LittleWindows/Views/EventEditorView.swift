@@ -881,6 +881,7 @@ struct EventEditorView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("growth-weight-row")
 
                 Button {
                     growthMeasurementEditor = .height
@@ -1540,6 +1541,11 @@ private enum GrowthMeasurementInputUnit: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum GrowthWeightInputPart {
+    case pounds
+    case ounces
+}
+
 private struct GrowthMeasurementRow: View {
     let title: String
     let value: String
@@ -1571,6 +1577,9 @@ private struct GrowthMeasurementInputSheet: View {
 
     @State private var selectedUnit: GrowthMeasurementInputUnit
     @State private var draftText: String
+    @State private var weightPoundsText: String
+    @State private var weightOuncesText: String
+    @State private var activeWeightInputPart: GrowthWeightInputPart
 
     init(
         kind: GrowthMeasurementEditorKind,
@@ -1581,6 +1590,14 @@ private struct GrowthMeasurementInputSheet: View {
         self.onSave = onSave
         _selectedUnit = State(initialValue: .imperial)
         _draftText = State(initialValue: Self.inputText(for: initialImperialValue))
+        let weightParts = Self.weightInputParts(for: initialImperialValue)
+        _weightPoundsText = State(
+            initialValue: weightParts.map { String($0.pounds) } ?? ""
+        )
+        _weightOuncesText = State(
+            initialValue: weightParts.map { Self.ouncesInputText(for: $0.ounces) } ?? ""
+        )
+        _activeWeightInputPart = State(initialValue: .pounds)
     }
 
     var body: some View {
@@ -1602,10 +1619,7 @@ private struct GrowthMeasurementInputSheet: View {
                 convertDraft(from: oldValue, to: newValue)
             }
 
-            Text(displayText)
-                .font(.system(size: 56, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundColor(draftText.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
-                .frame(maxWidth: .infinity, minHeight: 72)
+            measurementDisplay
 
             VStack(spacing: 14) {
                 ForEach(keyRows, id: \.self) { row in
@@ -1623,6 +1637,71 @@ private struct GrowthMeasurementInputSheet: View {
         .padding(.horizontal, 24)
         .padding(.top, 34)
         .padding(.bottom, 18)
+    }
+
+    @ViewBuilder
+    private var measurementDisplay: some View {
+        if kind == .weight, selectedUnit == .imperial {
+            HStack(spacing: 10) {
+                weightInputButton(
+                    part: .pounds,
+                    text: weightPoundsText,
+                    unit: "lb",
+                    accessibilityIdentifier: "growth-weight-pounds-input"
+                )
+                weightInputButton(
+                    part: .ounces,
+                    text: weightOuncesText,
+                    unit: "oz",
+                    accessibilityIdentifier: "growth-weight-ounces-input"
+                )
+            }
+            .frame(maxWidth: .infinity, minHeight: 72)
+        } else {
+            Text(displayText)
+                .font(.system(size: 56, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundColor(draftText.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
+                .frame(maxWidth: .infinity, minHeight: 72)
+        }
+    }
+
+    private func weightInputButton(
+        part: GrowthWeightInputPart,
+        text: String,
+        unit: String,
+        accessibilityIdentifier: String
+    ) -> some View {
+        let isActive = activeWeightInputPart == part
+        return Button {
+            activeWeightInputPart = part
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(text.isEmpty ? "0" : text)
+                    .font(.system(size: 42, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(text.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
+                Text(unit)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(
+                isActive ? AppTheme.accent.opacity(0.13) : Color.primary.opacity(0.045),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(
+                        isActive ? AppTheme.accent.opacity(0.8) : Color.primary.opacity(0.1),
+                        lineWidth: isActive ? 1.5 : 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityLabel(part == .pounds ? "Pounds" : "Ounces")
+        .accessibilityValue(text.isEmpty ? "0" : text)
     }
 
     private var actionBar: some View {
@@ -1648,6 +1727,7 @@ private struct GrowthMeasurementInputSheet: View {
                     .padding(.vertical, 16)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("growth-measurement-save")
             .background(AppTheme.accent)
         }
         .background {
@@ -1677,6 +1757,9 @@ private struct GrowthMeasurementInputSheet: View {
     }
 
     private var imperialValue: Double? {
+        if kind == .weight, selectedUnit == .imperial {
+            return weightImperialValue
+        }
         guard let value = Double(draftText), value > 0 else { return nil }
         switch selectedUnit {
         case .imperial:
@@ -1696,7 +1779,11 @@ private struct GrowthMeasurementInputSheet: View {
     }
 
     private func keypadButton(_ key: String) -> some View {
-        Button {
+        let isDisabled = kind == .weight
+            && selectedUnit == .imperial
+            && activeWeightInputPart == .pounds
+            && key == "."
+        return Button {
             handleKey(key)
         } label: {
             Group {
@@ -1708,44 +1795,84 @@ private struct GrowthMeasurementInputSheet: View {
                         .font(.system(size: 38, weight: .regular, design: .rounded).monospacedDigit())
                 }
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(isDisabled ? Color.secondary.opacity(0.25) : Color.primary)
             .frame(width: 74, height: 56)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
         .accessibilityLabel(accessibilityLabel(for: key))
+        .accessibilityIdentifier(keypadAccessibilityIdentifier(for: key))
     }
 
     private func handleKey(_ key: String) {
-        switch key {
-        case "delete.left":
-            if !draftText.isEmpty {
-                draftText.removeLast()
-            }
-        case ".":
-            guard !draftText.contains(".") else { return }
-            draftText = draftText.isEmpty ? "0." : draftText + "."
-        default:
-            if draftText == "0" {
-                draftText = key
-            } else if fractionalDigitCount < 2 {
-                draftText.append(key)
-            }
+        if kind == .weight, selectedUnit == .imperial {
+            handleWeightKey(key)
+            return
+        }
+        draftText = text(draftText, afterPressing: key, maximumFractionDigits: 2)
+    }
+
+    private func handleWeightKey(_ key: String) {
+        switch activeWeightInputPart {
+        case .pounds:
+            weightPoundsText = text(
+                weightPoundsText,
+                afterPressing: key,
+                maximumFractionDigits: 0
+            )
+        case .ounces:
+            weightOuncesText = text(
+                weightOuncesText,
+                afterPressing: key,
+                maximumFractionDigits: 1
+            )
         }
     }
 
-    private var fractionalDigitCount: Int {
-        guard let decimalIndex = draftText.firstIndex(of: ".") else { return 0 }
-        return draftText.distance(from: draftText.index(after: decimalIndex), to: draftText.endIndex)
+    private func text(
+        _ currentText: String,
+        afterPressing key: String,
+        maximumFractionDigits: Int
+    ) -> String {
+        var updatedText = currentText
+        switch key {
+        case "delete.left":
+            if !updatedText.isEmpty {
+                updatedText.removeLast()
+            }
+        case ".":
+            guard maximumFractionDigits > 0,
+                  !updatedText.contains(".") else { return updatedText }
+            updatedText = updatedText.isEmpty ? "0." : updatedText + "."
+        default:
+            if updatedText == "0" {
+                updatedText = key
+            } else if fractionalDigitCount(in: updatedText) < maximumFractionDigits
+                        || !updatedText.contains(".") {
+                updatedText.append(key)
+            }
+        }
+        return updatedText
+    }
+
+    private func fractionalDigitCount(in text: String) -> Int {
+        guard let decimalIndex = text.firstIndex(of: ".") else { return 0 }
+        return text.distance(from: text.index(after: decimalIndex), to: text.endIndex)
     }
 
     private func convertDraft(
         from oldUnit: GrowthMeasurementInputUnit,
         to newUnit: GrowthMeasurementInputUnit
     ) {
-        guard oldUnit != newUnit,
-              let value = Double(draftText),
-              value > 0 else { return }
+        guard oldUnit != newUnit else { return }
+
+        if kind == .weight {
+            convertWeightDraft(from: oldUnit, to: newUnit)
+            return
+        }
+
+        guard let value = Double(draftText), value > 0 else { return }
 
         let converted: Double
         switch (oldUnit, newUnit) {
@@ -1759,13 +1886,78 @@ private struct GrowthMeasurementInputSheet: View {
         draftText = Self.inputText(for: converted)
     }
 
+    private func convertWeightDraft(
+        from oldUnit: GrowthMeasurementInputUnit,
+        to newUnit: GrowthMeasurementInputUnit
+    ) {
+        switch (oldUnit, newUnit) {
+        case (.imperial, .metric):
+            guard let weightImperialValue else {
+                draftText = ""
+                return
+            }
+            draftText = Self.inputText(for: kind.metricValue(fromImperial: weightImperialValue))
+        case (.metric, .imperial):
+            guard let metricValue = Double(draftText), metricValue > 0 else {
+                weightPoundsText = ""
+                weightOuncesText = ""
+                return
+            }
+            setWeightInputParts(fromImperialValue: kind.imperialValue(fromMetric: metricValue))
+        case (.imperial, .imperial), (.metric, .metric):
+            return
+        }
+    }
+
+    private var weightImperialValue: Double? {
+        let pounds = Double(weightPoundsText) ?? 0
+        let ounces = Double(weightOuncesText) ?? 0
+        let value = pounds + ounces / 16
+        return value > 0 ? value : nil
+    }
+
+    private func setWeightInputParts(fromImperialValue value: Double) {
+        guard let parts = Self.weightInputParts(for: value) else {
+            weightPoundsText = ""
+            weightOuncesText = ""
+            return
+        }
+        weightPoundsText = String(parts.pounds)
+        weightOuncesText = Self.ouncesInputText(for: parts.ounces)
+    }
+
     private func accessibilityLabel(for key: String) -> String {
         key == "delete.left" ? "Delete" : key
+    }
+
+    private func keypadAccessibilityIdentifier(for key: String) -> String {
+        switch key {
+        case "delete.left": "growth-keypad-delete"
+        case ".": "growth-keypad-decimal"
+        default: "growth-keypad-\(key)"
+        }
     }
 
     private static func inputText(for value: Double?) -> String {
         guard let value, value > 0 else { return "" }
         return value.formatted(.number.precision(.fractionLength(0...2)))
+    }
+
+    private static func ouncesInputText(for value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...1)))
+    }
+
+    private static func weightInputParts(
+        for imperialValue: Double?
+    ) -> (pounds: Int, ounces: Double)? {
+        guard let imperialValue, imperialValue > 0 else { return nil }
+        var pounds = Int(imperialValue)
+        var ounces = ((imperialValue - Double(pounds)) * 16 * 10).rounded() / 10
+        if ounces >= 16 {
+            pounds += 1
+            ounces = 0
+        }
+        return (pounds, ounces)
     }
 }
 

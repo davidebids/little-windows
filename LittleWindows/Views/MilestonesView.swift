@@ -2224,14 +2224,12 @@ struct MilestoneEditorView: View {
 
     init(milestone: MilestoneEntry? = nil, template: MilestoneTemplate? = nil) {
         self.milestone = milestone
-        let selectedProfileID = milestone?.profileID
-            ?? ProfileService.shared.selectedProfileID
-            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let attachmentIDs = milestone?.photoAttachmentIDs ?? []
         let milestonePhotoKind = PhotoAttachmentOwnerKind.milestone.rawValue
         _photoAttachments = Query(FetchDescriptor<PhotoAttachment>(
             predicate: #Predicate { attachment in
                 attachment.ownerKindRawValue == milestonePhotoKind
-                    && (attachment.profileID == selectedProfileID || attachment.profileID == nil)
+                    && attachmentIDs.contains(attachment.id)
             },
             sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
         ))
@@ -2506,14 +2504,12 @@ struct MilestoneDetailView: View {
 
     init(milestone: MilestoneEntry) {
         self.milestone = milestone
-        let selectedProfileID = milestone.profileID
-            ?? ProfileService.shared.selectedProfileID
-            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let attachmentIDs = milestone.photoAttachmentIDs
         let milestonePhotoKind = PhotoAttachmentOwnerKind.milestone.rawValue
         _photoAttachments = Query(FetchDescriptor<PhotoAttachment>(
             predicate: #Predicate { attachment in
                 attachment.ownerKindRawValue == milestonePhotoKind
-                    && (attachment.profileID == selectedProfileID || attachment.profileID == nil)
+                    && attachmentIDs.contains(attachment.id)
             },
             sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
         ))

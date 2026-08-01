@@ -90,7 +90,7 @@ Insights support short lookback ranges, previous-period comparison, plain-langua
 Food & Home tracks household food routines separately from child and dog care events. It includes:
 
 - Shopping lists with store-specific sections, priorities, quantities, notes, recurring staples, checked state, smart history reactivation, bulk entry, reusable list duplication, and reordering helpers.
-- Named home to-do lists with active and completed sections plus added/completed caregiver tracking.
+- Named home to-do lists with active and completed sections, added/completed caregiver tracking, and optional assignment to yourself or an accepted Family Sync caregiver.
 - Trip packing lists for trip-local adults plus linked child and dog profiles, with dated multi-destination itineraries, duration-aware starter suggestions, traveler and bag grouping, quantities, essential items, per-caregiver responsibility, targeted reminders, packed-by attribution, completion progress, duplication, and shopping-list handoff.
 - Per-destination WeatherKit forecast guidance with explicit full or partial trip-day coverage and reviewable rain, cold-weather, heat, and high-UV additions. Forecasts automatically become available as each destination's dates enter the forecast window.
 - Store layouts with default sections such as Produce, Refrigerated, Frozen, Pantry, Household, and Other.
@@ -100,7 +100,7 @@ Food & Home tracks household food routines separately from child and dog care ev
 - Food & Home reminders that schedule local notifications and can link back to to-do lists, shopping lists, meal prep items, or returns.
 - Shopping List and Food Quick Add widgets backed by lightweight App Group snapshots.
 
-Food & Home data, including trip assignments and packing state, is included in JSON backup/import and in the shared Family Sync dataset. Trip collaboration is intentionally limited to accepted caregivers in the same Family Sync space. Targeted packing reminders are local to each device and match the item's assignee to that device's caregiver name in Settings.
+Food & Home data, including Home to-do and trip assignments plus packing state, is included in JSON backup/import and in the shared Family Sync dataset. Shared assignment choices are limited to accepted caregivers in the same Family Sync space; without Family Sync, Home to-dos can be assigned only to the current caregiver or left unassigned. Targeted packing reminders are local to each device and match the item's assignee to that device's caregiver name in Settings.
 
 ## Night Light
 

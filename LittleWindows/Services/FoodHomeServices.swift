@@ -698,6 +698,7 @@ enum HomeTodoService {
         title: String,
         notes: String,
         addedBy: String,
+        assignedCaregiverName: String? = nil,
         to list: HomeTodoList,
         existingItems: [HomeTodoItem],
         context: ModelContext,
@@ -712,6 +713,7 @@ enum HomeTodoService {
             title: trimmed,
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             addedBy: normalizedActorName(addedBy),
+            assignedCaregiverName: normalizedActorName(assignedCaregiverName),
             createdAt: now,
             updatedAt: now,
             sortOrder: nextOrder
@@ -727,6 +729,7 @@ enum HomeTodoService {
         title: String,
         notes: String,
         addedBy: String,
+        assignedCaregiverName: String?,
         context: ModelContext,
         now: Date = Date()
     ) {
@@ -735,6 +738,7 @@ enum HomeTodoService {
         item.title = trimmed
         item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         item.addedBy = normalizedActorName(addedBy)
+        item.assignedCaregiverName = normalizedActorName(assignedCaregiverName)
         item.updatedAt = now
         save(context)
     }
@@ -803,8 +807,8 @@ enum HomeTodoService {
         return reordered
     }
 
-    private static func normalizedActorName(_ name: String) -> String? {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    private static func normalizedActorName(_ name: String?) -> String? {
+        name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 }
 
