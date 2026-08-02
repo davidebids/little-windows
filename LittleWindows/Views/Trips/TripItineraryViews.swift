@@ -446,7 +446,7 @@ private struct TripItineraryView: View {
     private func itineraryRow(
         _ item: TripItineraryItem,
         linkValues: [TripItineraryLink]
-    ) -> TripItineraryInteractiveItemRow {
+    ) -> some View {
         TripItineraryInteractiveItemRow(
             item: item,
             links: linkValues,
@@ -482,6 +482,7 @@ private struct TripItineraryView: View {
                 }
             }
         )
+        .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 6, trailing: 20))
     }
 
     private func choiceGroupCard(
@@ -730,7 +731,7 @@ private struct TripItineraryItemRow: View {
                     .frame(width: 22)
                     .accessibilityHidden(true)
             }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 if trip.isArchived {
                     summary
                 } else {
@@ -784,7 +785,6 @@ private struct TripItineraryItemRow: View {
                 }
             }
         }
-        .padding(.vertical, 5)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trip.itinerary.item.\(item.id.uuidString)")
     }
@@ -925,11 +925,13 @@ private struct TripItineraryActionLabel: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        .font(.subheadline.weight(.semibold))
+        .font(.caption.weight(.semibold))
         .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        .frame(minHeight: 44)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background(Color(uiColor: .secondarySystemFill), in: Capsule())
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 
