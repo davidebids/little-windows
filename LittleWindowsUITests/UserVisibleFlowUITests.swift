@@ -1857,6 +1857,48 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(largeTextAttachment)
     }
 
+    func testTripActivitiesUseCompactSelectionScreen() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://food/trips")
+
+        XCTAssertTrue(app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 8))
+        app.buttons["trips.new"].tap()
+        XCTAssertTrue(app.navigationBars["New Trip"].waitForExistence(timeout: 4))
+
+        let activitiesLink = app.buttons["trip.activities.open"]
+        for _ in 0..<8 where !activitiesLink.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(activitiesLink.waitForExistence(timeout: 3))
+        XCTAssertTrue(activitiesLink.isHittable)
+        XCTAssertEqual(activitiesLink.value as? String, "None selected")
+        activitiesLink.tap()
+
+        XCTAssertTrue(app.navigationBars["Activities"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["0 selected"].exists)
+
+        let beach = app.buttons["trip.activity.beach"]
+        let sightseeing = app.buttons["trip.activity.sightseeing"]
+        XCTAssertTrue(beach.waitForExistence(timeout: 3))
+        XCTAssertTrue(sightseeing.waitForExistence(timeout: 3))
+        beach.tap()
+        sightseeing.tap()
+
+        XCTAssertEqual(beach.value as? String, "Selected")
+        XCTAssertEqual(sightseeing.value as? String, "Selected")
+        XCTAssertTrue(app.staticTexts["2 selected"].exists)
+
+        app.navigationBars["Activities"].buttons["New Trip"].tap()
+        XCTAssertTrue(app.navigationBars["New Trip"].waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            app.buttons["trip.activities.open"].value as? String,
+            "2 selected: Beach, Sightseeing"
+        )
+    }
+
     func testTripPackingCreationAddItemAndPackFlow() {
         continueAfterFailure = false
 

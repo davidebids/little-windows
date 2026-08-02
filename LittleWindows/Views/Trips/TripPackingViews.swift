@@ -263,6 +263,142 @@ private struct TripDestinationDraft: Identifiable {
     }
 }
 
+private struct PackingTripActivitiesSection: View {
+    @Binding var activities: Set<PackingTripActivity>
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                PackingTripActivitiesSelectionView(activities: $activities)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "figure.run")
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 24)
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Choose activities")
+                        Text(selectionSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            .accessibilityLabel("Activities")
+            .accessibilityValue(accessibilitySummary)
+            .accessibilityIdentifier("trip.activities.open")
+        } header: {
+            Text("Activities")
+        } footer: {
+            Text("Selections tailor clothing and gear suggestions for this trip.")
+        }
+    }
+
+    private var selectedActivities: [PackingTripActivity] {
+        PackingTripActivity.allCases.filter(activities.contains)
+    }
+
+    private var selectionSummary: String {
+        guard !selectedActivities.isEmpty else { return "None selected" }
+        let visibleNames = selectedActivities.prefix(3).map(\.displayName)
+        let remainingCount = selectedActivities.count - visibleNames.count
+        if remainingCount == 0 {
+            return visibleNames.joined(separator: ", ")
+        }
+        return "\(visibleNames.joined(separator: ", ")) +\(remainingCount) more"
+    }
+
+    private var accessibilitySummary: String {
+        guard !selectedActivities.isEmpty else { return "None selected" }
+        return "\(selectedActivities.count) selected: \(selectedActivities.map(\.displayName).joined(separator: ", "))"
+    }
+}
+
+private struct PackingTripActivitiesSelectionView: View {
+    @Binding var activities: Set<PackingTripActivity>
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 138), spacing: 10)
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(PackingTripActivity.allCases) { activity in
+                        activityButton(activity)
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text(selectionCountText)
+            } footer: {
+                Text("Choose all that apply. You can change these at any time.")
+            }
+        }
+        .navigationTitle("Activities")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Clear") {
+                    activities.removeAll()
+                }
+                .disabled(activities.isEmpty)
+            }
+        }
+    }
+
+    private var selectionCountText: String {
+        activities.count == 1 ? "1 selected" : "\(activities.count) selected"
+    }
+
+    private func activityButton(_ activity: PackingTripActivity) -> some View {
+        let isSelected = activities.contains(activity)
+        return Button {
+            if isSelected {
+                activities.remove(activity)
+            } else {
+                activities.insert(activity)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: activity.systemImage)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    Spacer(minLength: 8)
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.55))
+                }
+
+                Text(activity.displayName)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+            .padding(10)
+            .background(
+                isSelected ? Color.accentColor.opacity(0.12) : Color(uiColor: .secondarySystemFill),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.65) : .clear, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(activity.displayName)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("trip.activity.\(activity.rawValue)")
+    }
+}
+
 struct PackingTripCreationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -406,13 +542,7 @@ struct PackingTripCreationView: View {
                 }
             }
 
-            Section("Activities") {
-                ForEach(PackingTripActivity.allCases) { activity in
-                    Toggle(isOn: activitySelection(for: activity)) {
-                        Label(activity.displayName, systemImage: activity.systemImage)
-                    }
-                }
-            }
+            PackingTripActivitiesSection(activities: $activities)
 
             Section("Starter list") {
                 Toggle("Generate a starter packing list", isOn: $includeStarterList)
@@ -497,16 +627,6 @@ struct PackingTripCreationView: View {
         .task {
             await notificationManager.refreshAuthorizationStatus()
         }
-    }
-
-    private func activitySelection(for activity: PackingTripActivity) -> Binding<Bool> {
-        Binding(
-            get: { activities.contains(activity) },
-            set: { selected in
-                if selected { activities.insert(activity) }
-                else { activities.remove(activity) }
-            }
-        )
     }
 
     private func createTrip() {
@@ -2877,13 +2997,7 @@ struct PackingTripEditorView: View {
                 timeZone: trip.tripTimeZone,
                 onChange: { destinationDrafts = $0 }
             )
-            Section("Activities") {
-                ForEach(PackingTripActivity.allCases) { activity in
-                    Toggle(isOn: activitySelection(for: activity)) {
-                        Label(activity.displayName, systemImage: activity.systemImage)
-                    }
-                }
-            }
+            PackingTripActivitiesSection(activities: $activities)
             Section("Planning") {
                 Toggle("Weather suggestions", isOn: $weatherEnabled)
                 Toggle("Start packing reminder", isOn: Binding(
@@ -2973,15 +3087,6 @@ struct PackingTripEditorView: View {
         }
     }
 
-    private func activitySelection(for activity: PackingTripActivity) -> Binding<Bool> {
-        Binding(
-            get: { activities.contains(activity) },
-            set: { selected in
-                if selected { activities.insert(activity) }
-                else { activities.remove(activity) }
-            }
-        )
-    }
 }
 
 private struct PackingReminderPermissionView: View {
