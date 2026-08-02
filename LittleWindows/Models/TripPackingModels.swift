@@ -135,6 +135,16 @@ enum PackingTripActivity: String, Codable, CaseIterable, Identifiable {
     case beach
     case outdoors
     case swimming
+    case sightseeing
+    case hiking
+    case camping
+    case boating
+    case waterSports
+    case cycling
+    case fitness
+    case snowSports
+    case themeParks
+    case business
     case formal
     case coldWeather
 
@@ -145,8 +155,38 @@ enum PackingTripActivity: String, Codable, CaseIterable, Identifiable {
         case .beach: "Beach"
         case .outdoors: "Outdoors"
         case .swimming: "Swimming"
+        case .sightseeing: "Sightseeing"
+        case .hiking: "Hiking"
+        case .camping: "Camping"
+        case .boating: "Boating"
+        case .waterSports: "Water sports"
+        case .cycling: "Cycling"
+        case .fitness: "Fitness or workouts"
+        case .snowSports: "Snow sports"
+        case .themeParks: "Theme parks"
+        case .business: "Business or work"
         case .formal: "Dress-up"
         case .coldWeather: "Cold weather"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .beach: "beach.umbrella.fill"
+        case .outdoors: "tree.fill"
+        case .swimming: "figure.pool.swim"
+        case .sightseeing: "binoculars.fill"
+        case .hiking: "figure.hiking"
+        case .camping: "tent.fill"
+        case .boating: "sailboat.fill"
+        case .waterSports: "figure.water.fitness"
+        case .cycling: "figure.outdoor.cycle"
+        case .fitness: "figure.run"
+        case .snowSports: "figure.skiing.downhill"
+        case .themeParks: "ticket.fill"
+        case .business: "briefcase.fill"
+        case .formal: "sparkles"
+        case .coldWeather: "snowflake"
         }
     }
 }

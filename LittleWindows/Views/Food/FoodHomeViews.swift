@@ -506,9 +506,32 @@ struct FoodHomeView: View {
                     allTravelers: data.tripTravelers,
                     allBags: data.packingBags,
                     allItems: data.packingItems,
+                    itineraryChoiceGroups: data.itineraryChoiceGroups,
+                    itineraryItems: data.itineraryItems,
+                    itineraryLinks: data.itineraryLinks,
                     profiles: profiles.filter { !$0.isArchived },
                     shoppingLists: data.shoppingLists,
                     shoppingItems: data.shoppingItems
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .itineraryItem(let tripID, let itemID):
+            if let trip = data.packingTrips.first(where: { $0.id == tripID }),
+               data.itineraryItems.contains(where: { $0.id == itemID && $0.tripID == tripID }) {
+                PackingTripDetailView(
+                    trip: trip,
+                    allTrips: data.packingTrips,
+                    allTravelers: data.tripTravelers,
+                    allBags: data.packingBags,
+                    allItems: data.packingItems,
+                    itineraryChoiceGroups: data.itineraryChoiceGroups,
+                    itineraryItems: data.itineraryItems,
+                    itineraryLinks: data.itineraryLinks,
+                    profiles: profiles.filter { !$0.isArchived },
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    initialItineraryItemID: itemID
                 )
             } else {
                 MissingFoodRouteView()
@@ -684,6 +707,11 @@ struct FoodHomeView: View {
             selectedSection = .trips
             path.removeLast(path.count)
             path.append(FoodRoute.packingTrip(id))
+        case .itineraryItem(let tripID, let itemID):
+            deferredFoodCommand = nil
+            selectedSection = .trips
+            path.removeLast(path.count)
+            path.append(FoodRoute.itineraryItem(tripID, itemID))
         case .inventory:
             deferredFoodCommand = nil
             selectedSection = .inventory
@@ -752,6 +780,8 @@ struct FoodHomeView: View {
             return !data.shoppingLists.contains { $0.id == id }
         case .packingTrip(let id):
             return !data.packingTrips.contains { $0.id == id }
+        case .itineraryItem(let tripID, _):
+            return !data.packingTrips.contains { $0.id == tripID }
         case .inventoryItem(let id):
             return !data.inventoryItems.contains { $0.id == id }
         case .mealPrepItem(let id):
@@ -794,7 +824,7 @@ struct FoodHomeView: View {
             return .solids
         case .shopping, .shoppingList, .shoppingMode, .quickAdd:
             return .shopping
-        case .trips, .packingTrip:
+        case .trips, .packingTrip, .itineraryItem:
             return .trips
         case .inventory, .inventoryItem:
             return .inventory
@@ -851,13 +881,16 @@ private struct FoodHomeRouteData {
     let tripTravelers: [TripTraveler]
     let packingBags: [PackingBag]
     let packingItems: [PackingItem]
+    let itineraryChoiceGroups: [TripItineraryChoiceGroup]
+    let itineraryItems: [TripItineraryItem]
+    let itineraryLinks: [TripItineraryLink]
 
     var version: String {
         let shopping = "\(shoppingLists.count):\(shoppingItems.count):\(stores.count):\(storeSections.count)"
         let home = "\(todoLists.count):\(todoItems.count):\(locations.count):\(inventoryItems.count)"
         let food = "\(mealPrepItems.count):\(mealPrepUsages.count):\(reminders.count)"
         let returns = "\(sortedReturnRequests.count):\(returnItems.count):\(returnPackages.count):\(returnPhotos.count)"
-        let trips = "\(packingTrips.count):\(tripTravelers.count):\(packingBags.count):\(packingItems.count)"
+        let trips = "\(packingTrips.count):\(tripTravelers.count):\(packingBags.count):\(packingItems.count):\(itineraryChoiceGroups.count):\(itineraryItems.count):\(itineraryLinks.count)"
         return "\(scopeKey):\(shopping):\(home):\(food):\(returns):\(trips)"
     }
 }
@@ -875,8 +908,10 @@ private struct FoodHomeDataScope {
     }
 
     var packingTripID: UUID? {
-        guard case .packingTrip(let id) = activeRoute else { return nil }
-        return id
+        switch activeRoute {
+        case .packingTrip(let id), .itineraryItem(let id, _): id
+        default: nil
+        }
     }
 
     var todoListID: UUID? {
@@ -964,6 +999,9 @@ private struct FoodHomeDataLoader<Content: View>: View {
     @Query private var tripTravelers: [TripTraveler]
     @Query private var packingBags: [PackingBag]
     @Query private var packingItems: [PackingItem]
+    @Query private var itineraryChoiceGroups: [TripItineraryChoiceGroup]
+    @Query private var itineraryItems: [TripItineraryItem]
+    @Query private var itineraryLinks: [TripItineraryLink]
 
     private let scope: FoodHomeDataScope
     private let content: (FoodHomeRouteData) -> Content
@@ -1129,6 +1167,18 @@ private struct FoodHomeDataLoader<Content: View>: View {
                 predicate: #Predicate { $0.tripID == packingTripID },
                 sortBy: [SortDescriptor(\PackingItem.sortOrder)]
             ))
+            _itineraryChoiceGroups = Query(FetchDescriptor<TripItineraryChoiceGroup>(
+                predicate: #Predicate { $0.tripID == packingTripID },
+                sortBy: [SortDescriptor(\TripItineraryChoiceGroup.sortOrder)]
+            ))
+            _itineraryItems = Query(FetchDescriptor<TripItineraryItem>(
+                predicate: #Predicate { $0.tripID == packingTripID },
+                sortBy: [SortDescriptor(\TripItineraryItem.sortOrder)]
+            ))
+            _itineraryLinks = Query(FetchDescriptor<TripItineraryLink>(
+                predicate: #Predicate { $0.tripID == packingTripID },
+                sortBy: [SortDescriptor(\TripItineraryLink.sortOrder)]
+            ))
         } else {
             _tripTravelers = Query(FetchDescriptor<TripTraveler>(
                 predicate: #Predicate { $0.householdID == tripID },
@@ -1141,6 +1191,18 @@ private struct FoodHomeDataLoader<Content: View>: View {
             _packingItems = Query(FetchDescriptor<PackingItem>(
                 predicate: #Predicate { $0.householdID == tripID },
                 sortBy: [SortDescriptor(\PackingItem.sortOrder)]
+            ))
+            _itineraryChoiceGroups = Query(FetchDescriptor<TripItineraryChoiceGroup>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\TripItineraryChoiceGroup.sortOrder)]
+            ))
+            _itineraryItems = Query(FetchDescriptor<TripItineraryItem>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\TripItineraryItem.sortOrder)]
+            ))
+            _itineraryLinks = Query(FetchDescriptor<TripItineraryLink>(
+                predicate: #Predicate { $0.householdID == unloadedID },
+                sortBy: [SortDescriptor(\TripItineraryLink.sortOrder)]
             ))
         }
     }
@@ -1167,7 +1229,10 @@ private struct FoodHomeDataLoader<Content: View>: View {
             packingTrips: packingTrips,
             tripTravelers: tripTravelers,
             packingBags: packingBags,
-            packingItems: packingItems
+            packingItems: packingItems,
+            itineraryChoiceGroups: itineraryChoiceGroups,
+            itineraryItems: itineraryItems,
+            itineraryLinks: itineraryLinks
         ))
     }
 

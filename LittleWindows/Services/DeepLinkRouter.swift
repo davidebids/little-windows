@@ -243,6 +243,13 @@ final class DeepLinkRouter: ObservableObject {
             openSolids(.solidsRecipe(components[3]), returningTo: nil)
         } else if components == ["food", "todos"] {
             openFood(.todos)
+        } else if components.count == 5,
+                  components[0] == "food",
+                  components[1] == "trips",
+                  components[3] == "itinerary",
+                  let tripID = UUID(uuidString: components[2]),
+                  let itemID = UUID(uuidString: components[4]) {
+            openFood(.itineraryItem(tripID, itemID))
         } else if components.count == 3,
                   components[0] == "food",
                   components[1] == "todos",

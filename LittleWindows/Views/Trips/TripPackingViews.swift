@@ -408,13 +408,9 @@ struct PackingTripCreationView: View {
 
             Section("Activities") {
                 ForEach(PackingTripActivity.allCases) { activity in
-                    Toggle(activity.displayName, isOn: Binding(
-                        get: { activities.contains(activity) },
-                        set: { selected in
-                            if selected { activities.insert(activity) }
-                            else { activities.remove(activity) }
-                        }
-                    ))
+                    Toggle(isOn: activitySelection(for: activity)) {
+                        Label(activity.displayName, systemImage: activity.systemImage)
+                    }
                 }
             }
 
@@ -503,6 +499,16 @@ struct PackingTripCreationView: View {
         }
     }
 
+    private func activitySelection(for activity: PackingTripActivity) -> Binding<Bool> {
+        Binding(
+            get: { activities.contains(activity) },
+            set: { selected in
+                if selected { activities.insert(activity) }
+                else { activities.remove(activity) }
+            }
+        )
+    }
+
     private func createTrip() {
         saveAttempted = true
         creationErrorMessage = nil
@@ -568,7 +574,7 @@ private enum PackingListFilter: String, CaseIterable, Identifiable {
     }
 }
 
-struct PackingTripDetailView: View {
+struct PackingListDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -579,6 +585,9 @@ struct PackingTripDetailView: View {
     let allTravelers: [TripTraveler]
     let allBags: [PackingBag]
     let allItems: [PackingItem]
+    let itineraryChoiceGroups: [TripItineraryChoiceGroup]
+    let itineraryItems: [TripItineraryItem]
+    let itineraryLinks: [TripItineraryLink]
     let profiles: [BabyProfile]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
@@ -864,6 +873,9 @@ struct PackingTripDetailView: View {
                                 travelers: allTravelers,
                                 bags: allBags,
                                 items: allItems,
+                                itineraryChoiceGroups: itineraryChoiceGroups,
+                                itineraryItems: itineraryItems,
+                                itineraryLinks: itineraryLinks,
                                 existingTrips: allTrips,
                                 context: modelContext
                             ) != nil {
@@ -1019,7 +1031,7 @@ struct PackingTripDetailView: View {
         .appActionSheet(
             isPresented: $showingDeleteConfirmation,
             title: "Delete Trip?",
-            message: "This permanently removes the trip, its packing list, bags, and traveler assignments. Items already added to Shopping will remain.",
+            message: "This permanently removes the trip, itinerary, packing list, bags, and traveler assignments. Items already added to Shopping will remain.",
             systemImage: "trash.fill",
             tint: .red,
             options: [
@@ -1630,7 +1642,7 @@ private struct TripWeatherAvailabilityMessage: View {
     }
 }
 
-private struct TripWeatherAttributionMark: View {
+struct TripWeatherAttributionMark: View {
     @Environment(\.colorScheme) private var colorScheme
     let snapshot: TripWeatherSnapshot
 
@@ -1648,7 +1660,7 @@ private struct TripWeatherAttributionMark: View {
     }
 }
 
-private struct TripWeatherAttributionSheet: View {
+struct TripWeatherAttributionSheet: View {
     @Environment(\.dismiss) private var dismiss
     let snapshot: TripWeatherSnapshot
 
@@ -1660,7 +1672,7 @@ private struct TripWeatherAttributionSheet: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text("Weather data provided by Apple Weather")
                         .font(.title3.bold())
-                    Text("Forecasts are used only to help tailor packing suggestions for this trip.")
+                    Text("Forecasts are used only to provide trip-planning context and tailor packing suggestions.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Divider()
@@ -2785,7 +2797,7 @@ private struct PackingBagsEditorView: View {
     }
 }
 
-private struct PackingTripEditorView: View {
+struct PackingTripEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @StateObject private var notificationManager = NotificationManager.shared
@@ -2867,13 +2879,9 @@ private struct PackingTripEditorView: View {
             )
             Section("Activities") {
                 ForEach(PackingTripActivity.allCases) { activity in
-                    Toggle(activity.displayName, isOn: Binding(
-                        get: { activities.contains(activity) },
-                        set: { selected in
-                            if selected { activities.insert(activity) }
-                            else { activities.remove(activity) }
-                        }
-                    ))
+                    Toggle(isOn: activitySelection(for: activity)) {
+                        Label(activity.displayName, systemImage: activity.systemImage)
+                    }
                 }
             }
             Section("Planning") {
@@ -2963,6 +2971,16 @@ private struct PackingTripEditorView: View {
                 destinationDrafts[0].startDate = newValue
             }
         }
+    }
+
+    private func activitySelection(for activity: PackingTripActivity) -> Binding<Bool> {
+        Binding(
+            get: { activities.contains(activity) },
+            set: { selected in
+                if selected { activities.insert(activity) }
+                else { activities.remove(activity) }
+            }
+        )
     }
 }
 
@@ -3131,13 +3149,14 @@ private struct TripDestinationsEditor: View {
     }
 }
 
-private struct TripDestinationPickerView: View {
+struct TripDestinationPickerView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var selection: TripDestinationSelection?
+    private let currentSelection: TripDestinationSelection?
     let onSelect: (TripDestinationSelection?) -> Void
 
     @State private var query: String
     @State private var results = [TripDestinationSelection]()
+    @State private var cachedResults = [String: [TripDestinationSelection]]()
     @State private var isSearching = false
     @State private var searchError: String?
     @State private var retryToken = 0
@@ -3146,8 +3165,8 @@ private struct TripDestinationPickerView: View {
         selection: TripDestinationSelection?,
         onSelect: @escaping (TripDestinationSelection?) -> Void
     ) {
-        _selection = State(initialValue: selection)
-        _query = State(initialValue: selection?.name ?? "")
+        currentSelection = selection
+        _query = State(initialValue: "")
         self.onSelect = onSelect
     }
 
@@ -3157,13 +3176,11 @@ private struct TripDestinationPickerView: View {
 
     var body: some View {
         List {
-            if let selection {
+            if let currentSelection {
                 Section("Selected") {
-                    destinationButton(selection, selected: true)
+                    destinationButton(currentSelection, selected: true)
                     Button("Clear Destination", systemImage: "xmark.circle", role: .destructive) {
-                        self.selection = nil
-                        onSelect(nil)
-                        dismiss()
+                        commit(nil)
                     }
                 }
             }
@@ -3190,7 +3207,7 @@ private struct TripDestinationPickerView: View {
             } else if !results.isEmpty {
                 Section("Search Results") {
                     ForEach(results) { value in
-                        destinationButton(value, selected: value.id == selection?.id)
+                        destinationButton(value, selected: value.id == currentSelection?.id)
                     }
                 }
             } else if !trimmedQuery.isEmpty {
@@ -3207,9 +3224,7 @@ private struct TripDestinationPickerView: View {
                 Section {
                     Button {
                         let destination = TripDestinationSelection(name: trimmedQuery)
-                        selection = destination
-                        onSelect(destination)
-                        dismiss()
+                        commit(destination)
                     } label: {
                         Label("Use “\(trimmedQuery)” Without Weather", systemImage: "square.and.pencil")
                     }
@@ -3233,9 +3248,7 @@ private struct TripDestinationPickerView: View {
         selected: Bool
     ) -> some View {
         Button {
-            selection = value
-            onSelect(value)
-            dismiss()
+            commit(value)
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: value.supportsWeather ? "mappin.and.ellipse" : "square.and.pencil")
@@ -3260,6 +3273,14 @@ private struct TripDestinationPickerView: View {
         .accessibilityLabel([value.name, value.detail].compactMap { $0 }.joined(separator: ", "))
     }
 
+    private func commit(_ value: TripDestinationSelection?) {
+        dismiss()
+        Task { @MainActor in
+            await Task.yield()
+            onSelect(value)
+        }
+    }
+
     @MainActor
     private func search() async {
         let requestedQuery = trimmedQuery
@@ -3269,12 +3290,23 @@ private struct TripDestinationPickerView: View {
             isSearching = false
             return
         }
+        let cacheKey = requestedQuery.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
+        ).lowercased()
+        if let cached = cachedResults[cacheKey] {
+            results = cached
+            searchError = nil
+            isSearching = false
+            return
+        }
         isSearching = true
         searchError = nil
         do {
-            try await Task.sleep(for: .milliseconds(350))
+            try await Task.sleep(for: .milliseconds(200))
             let values = try await TripWeatherService.searchDestinations(matching: requestedQuery)
             guard !Task.isCancelled, requestedQuery == trimmedQuery else { return }
+            cachedResults[cacheKey] = values
             results = values
         } catch is CancellationError {
             return

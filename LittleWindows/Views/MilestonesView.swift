@@ -256,7 +256,7 @@ struct CareView: View {
         case .solidsRecipes: .solidsRecipes
         case .solidsRecipe(let id): .solidsRecipe(id)
         case .food, .todos, .todoList, .shopping, .shoppingList, .shoppingMode,
-             .trips, .packingTrip, .inventory, .inventoryItem, .mealPrep,
+             .trips, .packingTrip, .itineraryItem, .inventory, .inventoryItem, .mealPrep,
              .mealPrepItem, .returns, .returnRequest, .store, .quickAdd:
             nil
         }
@@ -533,7 +533,7 @@ struct CareView: View {
             } else {
                 CareUnavailableView()
             }
-        case .todoList, .shoppingList, .shoppingMode, .packingTrip, .inventoryItem,
+        case .todoList, .shoppingList, .shoppingMode, .packingTrip, .itineraryItem, .inventoryItem,
              .mealPrepItem, .returnRequest, .store, .reminders:
             CareUnavailableView()
         }

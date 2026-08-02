@@ -1462,6 +1462,401 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
     }
 
+    func testTripItineraryDirectionsOpensMapsInsteadOfEditor() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://food/trips")
+
+        XCTAssertTrue(app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 8))
+        app.buttons["trips.new"].tap()
+        let tripName = app.textFields["trip.create.name"]
+        XCTAssertTrue(tripName.waitForExistence(timeout: 4))
+        tripName.tap()
+        tripName.typeText("Directions Test Trip")
+        addOfflineTripDestination(named: "Sample Destination", index: 1)
+        app.buttons["trip.create.save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Directions Test Trip"].waitForExistence(timeout: 6))
+        app.buttons["trip.itinerary.add"].tap()
+        let addItem = app.buttons["Add Itinerary Item"]
+        XCTAssertTrue(addItem.waitForExistence(timeout: 3))
+        addItem.tap()
+        XCTAssertTrue(app.navigationBars["Add Itinerary Item"].waitForExistence(timeout: 4))
+
+        let titleField = app.textFields["trip.itinerary.editor.title"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 3))
+        titleField.tap()
+        titleField.typeText("Sample Brunch")
+        let keyboardReturn = app.keyboards.buttons["return"].firstMatch
+        if keyboardReturn.exists { keyboardReturn.tap() }
+
+        let locationLink = app.buttons["trip.itinerary.editor.location"]
+        let itemEditor = app.descendants(matching: .any)["trip.itinerary.editor"]
+        for _ in 0..<2 where !locationLink.exists || !locationLink.isHittable {
+            itemEditor.swipeUp()
+        }
+        XCTAssertTrue(locationLink.waitForExistence(timeout: 3))
+        locationLink.tap()
+        XCTAssertTrue(app.navigationBars["Destination"].waitForExistence(timeout: 3))
+
+        let searchField = app.searchFields.firstMatch
+        XCTAssertTrue(searchField.waitForExistence(timeout: 3))
+        searchField.tap()
+        searchField.typeText("Sample Venue")
+        let keyboardSearch = app.keyboards.buttons["Search"].firstMatch
+        if keyboardSearch.exists { keyboardSearch.tap() }
+        let offlineLocation = app.buttons["trip.destination.offline"]
+        XCTAssertTrue(offlineLocation.waitForExistence(timeout: 3))
+        for _ in 0..<2 where !offlineLocation.isHittable { app.swipeUp() }
+        XCTAssertTrue(offlineLocation.isHittable)
+        offlineLocation.tap()
+
+        XCTAssertTrue(app.navigationBars["Add Itinerary Item"].waitForExistence(timeout: 3))
+        app.buttons["trip.itinerary.editor.save"].tap()
+        let itemSummary = app.buttons["Sample Brunch"]
+        XCTAssertTrue(itemSummary.waitForExistence(timeout: 4))
+        let directions = app.buttons.matching(
+            NSPredicate(format: "identifier ENDSWITH %@", ".directions")
+        ).firstMatch
+        XCTAssertTrue(directions.waitForExistence(timeout: 3))
+        XCTAssertTrue(directions.isHittable)
+        XCTAssertLessThan(
+            directions.frame.maxY - itemSummary.frame.minY,
+            140,
+            "The itinerary card summary and actions should remain compact."
+        )
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "trip-itinerary-item-card"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        itemSummary.tap()
+        XCTAssertTrue(app.navigationBars["Edit Itinerary Item"].waitForExistence(timeout: 3))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(directions.waitForExistence(timeout: 3))
+
+        directions.tap()
+        XCTAssertFalse(
+            app.navigationBars["Edit Itinerary Item"].waitForExistence(timeout: 1),
+            "Directions must not trigger the itinerary row's edit action."
+        )
+        let maps = XCUIApplication(bundleIdentifier: "com.apple.Maps")
+        XCTAssertTrue(
+            maps.wait(for: .runningForeground, timeout: 5),
+            "Directions should launch Apple Maps."
+        )
+    }
+
+    func testTripItineraryCreationLabelsOptionsAndResponsiveness() throws {
+        continueAfterFailure = false
+        var accessibilityFindings = [String]()
+        func auditCurrentItinerary(_ context: String) throws {
+            try app.performAccessibilityAudit { issue in
+                let details = XCTAttachment(string: issue.element.debugDescription)
+                details.name = "Accessibility element (\(context)) — \(issue.compactDescription)"
+                details.lifetime = .keepAlways
+                self.add(details)
+                guard let element = issue.element else { return true }
+                let elementDescription = element.debugDescription
+                let isNativeItineraryAction = ["Add an idea", "Add option"].contains(element.label)
+                let isUnreliableNativeTextCheck = issue.compactDescription.contains("Dynamic Type")
+                    || issue.compactDescription.contains("Text clipped")
+                if isNativeItineraryAction && isUnreliableNativeTextCheck {
+                    return true
+                }
+                let list = self.app.descendants(matching: .any)["trip.itinerary"]
+                let tabBar = self.app.tabBars.firstMatch
+                let visibleTop = list.exists ? list.frame.minY : self.app.frame.minY
+                let visibleBottom = tabBar.exists ? tabBar.frame.minY - 32 : self.app.frame.maxY - 112
+                let elementFrame = element.frame
+                guard elementFrame.minY >= visibleTop,
+                      elementFrame.maxY <= visibleBottom else {
+                    return true
+                }
+                accessibilityFindings.append(
+                    "\(context) — \(issue.compactDescription): \(elementDescription)"
+                )
+                return true
+            }
+        }
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://food/trips")
+
+        XCTAssertTrue(app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 8))
+        app.buttons["trips.new"].tap()
+        let tripName = app.textFields["trip.create.name"]
+        XCTAssertTrue(tripName.waitForExistence(timeout: 4))
+        tripName.tap()
+        tripName.typeText("Itinerary Audit Trip")
+        addOfflineTripDestination(named: "Sample Destination", index: 1)
+        app.buttons["trip.create.save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Itinerary Audit Trip"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.descendants(matching: .any)["trip.itinerary"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.segmentedControls.buttons["Itinerary"].isSelected)
+        XCTAssertTrue(app.buttons["trip.actions"].exists)
+
+        app.buttons["trip.itinerary.add"].tap()
+        let addItem = app.buttons["Add Itinerary Item"]
+        XCTAssertTrue(addItem.waitForExistence(timeout: 3))
+        let editorStartedAt = ContinuousClock.now
+        addItem.tap()
+        XCTAssertTrue(app.navigationBars["Add Itinerary Item"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            editorStartedAt.duration(to: .now),
+            .seconds(4),
+            "Opening the itinerary editor should remain responsive."
+        )
+
+        let itemEditor = app.descendants(matching: .any)["trip.itinerary.editor"]
+        XCTAssertTrue(itemEditor.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Title"].exists)
+        XCTAssertTrue(app.staticTexts["Type"].exists)
+        XCTAssertTrue(app.staticTexts["Status"].exists)
+        XCTAssertTrue(app.staticTexts["Schedule"].exists)
+        XCTAssertTrue(app.staticTexts["Day"].exists)
+        XCTAssertTrue(app.staticTexts["Start"].exists)
+
+        let titleField = app.textFields["trip.itinerary.editor.title"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 3))
+        titleField.tap()
+        let typingStartedAt = ContinuousClock.now
+        titleField.typeText("Sample Reservation")
+        XCTAssertEqual(titleField.value as? String, "Sample Reservation")
+        XCTAssertLessThan(
+            typingStartedAt.duration(to: .now),
+            .seconds(3),
+            "Typing should not rebuild or stall the itinerary."
+        )
+        let keyboardReturn = app.keyboards.buttons["return"].firstMatch
+        if keyboardReturn.exists {
+            keyboardReturn.tap()
+        }
+
+        let locationLink = app.buttons["trip.itinerary.editor.location"]
+        for _ in 0..<2 where !locationLink.exists || !locationLink.isHittable {
+            itemEditor.swipeUp()
+        }
+        XCTAssertTrue(locationLink.waitForExistence(timeout: 3))
+        XCTAssertTrue(locationLink.isHittable)
+        locationLink.tap()
+        XCTAssertTrue(app.navigationBars["Destination"].waitForExistence(timeout: 3))
+
+        let locationSearch = app.searchFields.firstMatch
+        XCTAssertTrue(locationSearch.waitForExistence(timeout: 3))
+        locationSearch.tap()
+        locationSearch.typeText("Sample Activity Place")
+        let locationKeyboardSearch = app.keyboards.buttons["Search"].firstMatch
+        if locationKeyboardSearch.exists {
+            locationKeyboardSearch.tap()
+        }
+        let offlineLocation = app.buttons["trip.destination.offline"]
+        XCTAssertTrue(offlineLocation.waitForExistence(timeout: 3))
+        for _ in 0..<2 where !offlineLocation.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(offlineLocation.isHittable)
+        let locationSelectionStartedAt = ContinuousClock.now
+        offlineLocation.tap()
+        let itemEditorNavigationBar = app.navigationBars["Add Itinerary Item"]
+        let locationSelectionDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !itemEditorNavigationBar.exists, ContinuousClock.now < locationSelectionDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertTrue(itemEditorNavigationBar.exists)
+        XCTAssertLessThan(
+            locationSelectionStartedAt.duration(to: .now),
+            .seconds(2),
+            "Selecting an activity location should return to the editor promptly."
+        )
+        XCTAssertTrue(app.staticTexts["Sample Activity Place"].exists)
+        app.buttons["trip.itinerary.editor.location"].tap()
+        XCTAssertTrue(app.navigationBars["Destination"].waitForExistence(timeout: 3))
+        let clearLocation = app.buttons["Clear Destination"]
+        XCTAssertTrue(clearLocation.waitForExistence(timeout: 3))
+        clearLocation.tap()
+        XCTAssertTrue(app.navigationBars["Add Itinerary Item"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Sample Activity Place"].exists)
+
+        itemEditor.swipeUp()
+        XCTAssertTrue(app.staticTexts["Provider or property"].waitForExistence(timeout: 3))
+        for _ in 0..<2 where !app.staticTexts["Confirmation number"].exists {
+            itemEditor.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts["Confirmation number"].waitForExistence(timeout: 3))
+        for _ in 0..<2 where !app.staticTexts["Notes"].exists {
+            itemEditor.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts["Notes"].waitForExistence(timeout: 3))
+
+        let addLink = app.buttons["Add Link"]
+        for _ in 0..<3 where !addLink.exists || !addLink.isHittable {
+            itemEditor.swipeUp()
+        }
+        XCTAssertTrue(addLink.waitForExistence(timeout: 3))
+        XCTAssertTrue(addLink.isHittable)
+        addLink.tap()
+
+        let linkLabel = app.textFields.matching(
+            NSPredicate(format: "identifier ENDSWITH %@", ".label")
+        ).firstMatch
+        let linkURL = app.textFields.matching(
+            NSPredicate(format: "identifier ENDSWITH %@", ".url")
+        ).firstMatch
+        XCTAssertTrue(linkLabel.waitForExistence(timeout: 3))
+        XCTAssertTrue(linkURL.waitForExistence(timeout: 3))
+
+        let linkFocusStartedAt = ContinuousClock.now
+        linkLabel.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        XCTAssertLessThan(
+            linkFocusStartedAt.duration(to: .now),
+            .seconds(2),
+            "The link label should accept focus promptly."
+        )
+        let linkLabelTypingStartedAt = ContinuousClock.now
+        linkLabel.typeText("Official Site")
+        XCTAssertEqual(linkLabel.value as? String, "Official Site")
+        XCTAssertLessThan(
+            linkLabelTypingStartedAt.duration(to: .now),
+            .seconds(2),
+            "Typing a link label should not rebuild or stall the itinerary editor."
+        )
+
+        linkURL.tap()
+        let linkURLTypingStartedAt = ContinuousClock.now
+        linkURL.typeText("https://sample.test/menu")
+        XCTAssertEqual(linkURL.value as? String, "https://sample.test/menu")
+        XCTAssertLessThan(
+            linkURLTypingStartedAt.duration(to: .now),
+            .seconds(3),
+            "Typing a link URL should not rebuild or stall the itinerary editor."
+        )
+
+        let saveItem = app.buttons["trip.itinerary.editor.save"]
+        XCTAssertTrue(saveItem.isEnabled)
+        let saveStartedAt = ContinuousClock.now
+        saveItem.tap()
+        XCTAssertTrue(app.staticTexts["Sample Reservation"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            saveStartedAt.duration(to: .now),
+            .seconds(4),
+            "Saving an itinerary item should update the day promptly."
+        )
+
+        app.swipeUp()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        let addIdeaText = app.staticTexts["Add an idea"]
+        XCTAssertTrue(addIdeaText.waitForExistence(timeout: 3))
+        let regularAddIdeaHeight = addIdeaText.frame.height
+        try auditCurrentItinerary("ideas and day items")
+        app.swipeDown()
+        app.swipeDown()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        app.buttons["trip.itinerary.add"].tap()
+        let addGroup = app.buttons["Add Option Group"]
+        XCTAssertTrue(addGroup.waitForExistence(timeout: 3))
+        addGroup.tap()
+        XCTAssertTrue(app.navigationBars["New Option Group"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Title"].exists)
+        XCTAssertTrue(app.staticTexts["Decision notes"].exists)
+        let groupTitle = app.textFields["trip.itinerary.group-editor.title"]
+        XCTAssertTrue(groupTitle.waitForExistence(timeout: 3))
+        groupTitle.tap()
+        groupTitle.typeText("Weather Options")
+        let groupEditor = app.descendants(matching: .any)["trip.itinerary.group-editor"]
+        groupEditor.swipeUp()
+        let assignToDay = app.switches["Assign to a day"]
+        XCTAssertEqual(assignToDay.value as? String, "0")
+        XCTAssertTrue(assignToDay.isHittable)
+        assignToDay.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let toggleEnabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "1"),
+            object: assignToDay
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [toggleEnabled], timeout: 2), .completed)
+        XCTAssertEqual(assignToDay.value as? String, "1")
+        let saveGroup = app.buttons["trip.itinerary.group-editor.save"]
+        XCTAssertTrue(saveGroup.isEnabled)
+        saveGroup.tap()
+        XCTAssertTrue(app.staticTexts["Weather Options"].waitForExistence(timeout: 4))
+        let optionGroup = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "trip.itinerary.group.")
+        ).firstMatch
+        XCTAssertTrue(optionGroup.waitForExistence(timeout: 3))
+        let addOptionText = app.staticTexts["Add option"]
+        XCTAssertTrue(addOptionText.waitForExistence(timeout: 3))
+        let regularAddOptionHeight = addOptionText.frame.height
+        let ideasHeader = app.staticTexts["Ideas · No Day Yet"]
+        XCTAssertTrue(ideasHeader.waitForExistence(timeout: 3))
+        XCTAssertLessThan(
+            optionGroup.frame.minY,
+            ideasHeader.frame.minY,
+            "A group assigned to a day should render under that day, not under Ideas."
+        )
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        try auditCurrentItinerary("option group")
+        XCTAssertTrue(
+            accessibilityFindings.isEmpty,
+            "Accessibility audit findings:\n\(accessibilityFindings.joined(separator: "\n\n"))"
+        )
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "trip-itinerary-detail"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        app.terminate()
+        app.launchArguments = [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": "littlewindows://food/trips"
+        ]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 8))
+        let savedTrip = app.staticTexts["Itinerary Audit Trip"]
+        XCTAssertTrue(savedTrip.waitForExistence(timeout: 4))
+        savedTrip.tap()
+        XCTAssertTrue(app.navigationBars["Itinerary Audit Trip"].waitForExistence(timeout: 6))
+
+        let largeAddOption = app.staticTexts["Add option"]
+        for _ in 0..<4 where !largeAddOption.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(largeAddOption.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(
+            largeAddOption.frame.height,
+            regularAddOptionHeight * 1.4,
+            "Add option should grow at the largest accessibility text size."
+        )
+
+        let largeAddIdea = app.staticTexts["Add an idea"]
+        for _ in 0..<6 where !largeAddIdea.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(largeAddIdea.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(
+            largeAddIdea.frame.height,
+            regularAddIdeaHeight * 1.4,
+            "Add an idea should grow at the largest accessibility text size."
+        )
+        XCTAssertGreaterThanOrEqual(app.buttons["Add an idea"].frame.height, 44)
+
+        let largeTextAttachment = XCTAttachment(screenshot: app.screenshot())
+        largeTextAttachment.name = "trip-itinerary-accessibility-text"
+        largeTextAttachment.lifetime = .keepAlways
+        add(largeTextAttachment)
+    }
+
     func testTripPackingCreationAddItemAndPackFlow() {
         continueAfterFailure = false
 
@@ -1505,6 +1900,9 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.buttons["trip.create.save"].tap()
 
         XCTAssertTrue(app.navigationBars["Automation Trip"].waitForExistence(timeout: 6))
+        let packingWorkspace = app.segmentedControls.buttons["Packing"]
+        XCTAssertTrue(packingWorkspace.waitForExistence(timeout: 3))
+        packingWorkspace.tap()
         XCTAssertTrue(app.descendants(matching: .any)["trip.detail"].exists)
         XCTAssertTrue(
             app.staticTexts.matching(
@@ -1709,6 +2107,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         archivedTrip.tap()
 
         XCTAssertTrue(app.navigationBars["Automation Trip Copy"].waitForExistence(timeout: 5))
+        app.segmentedControls.buttons["Packing"].tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["trip.archived.read-only"].waitForExistence(timeout: 3)
         )
@@ -1765,6 +2164,9 @@ final class UserVisibleFlowUITests: XCTestCase {
         addOfflineTripDestination(named: "Test Destination", index: 1)
         app.buttons["trip.create.save"].tap()
         XCTAssertTrue(app.navigationBars["Editor Scroll Trip"].waitForExistence(timeout: 6))
+        let packingWorkspace = app.segmentedControls.buttons["Packing"]
+        XCTAssertTrue(packingWorkspace.waitForExistence(timeout: 3))
+        packingWorkspace.tap()
 
         let starterItem = app.staticTexts["Identification and travel documents"]
         XCTAssertTrue(starterItem.waitForExistence(timeout: 5))
@@ -1889,6 +2291,12 @@ final class UserVisibleFlowUITests: XCTestCase {
         searchField.tap()
         searchField.typeText(name)
 
+        let keyboardSearch = app.keyboards.buttons["Search"].firstMatch
+        if keyboardSearch.exists {
+            keyboardSearch.tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+
         let offlineChoice = app.buttons["trip.destination.offline"]
         XCTAssertTrue(offlineChoice.waitForExistence(timeout: 4))
         for _ in 0..<3 {
@@ -1898,6 +2306,9 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
         XCTAssertTrue(offlineChoice.isHittable)
         offlineChoice.tap()
+        if !app.navigationBars["New Trip"].waitForExistence(timeout: 2), offlineChoice.exists {
+            offlineChoice.tap()
+        }
         XCTAssertTrue(
             app.navigationBars["New Trip"].waitForExistence(timeout: 5),
             "Expected to return to trip creation after choosing \(name); app state \(app.state.rawValue).\n\(app.debugDescription)"

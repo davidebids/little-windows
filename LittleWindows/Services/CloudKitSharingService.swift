@@ -74,7 +74,7 @@ final class CloudKitSharingService {
         static let schemaVersionKey = "schemaVersion"
         static let familyIDKey = "familyID"
         static let shareTitle = "Little Windows Family Sync"
-        static let syncSchemaVersion = 3
+        static let syncSchemaVersion = 4
         static let entityRecordType = "FamilyEntity"
         static let entityCollectionKey = "collection"
         static let entityIDKey = "entityID"

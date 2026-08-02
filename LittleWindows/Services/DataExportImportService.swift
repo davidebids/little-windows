@@ -62,6 +62,9 @@ private struct BackupEnvelope: Codable {
     var tripTravelers: [TripTravelerDTO]?
     var packingBags: [PackingBagDTO]?
     var packingItems: [PackingItemDTO]?
+    var tripItineraryChoiceGroups: [TripItineraryChoiceGroupDTO]?
+    var tripItineraryItems: [TripItineraryItemDTO]?
+    var tripItineraryLinks: [TripItineraryLinkDTO]?
     var foodItems: [FoodItemDTO]?
     var inventoryLocations: [InventoryLocationDTO]?
     var inventoryItems: [InventoryItemDTO]?
@@ -553,6 +556,65 @@ private struct PackingItemDTO: Codable {
     var sortOrder: Int
 }
 
+private struct TripItineraryChoiceGroupDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var tripID: UUID
+    var title: String
+    var notes: String?
+    var scheduledDay: Date?
+    var selectedItemID: UUID?
+    var createdBy: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int
+}
+
+private struct TripItineraryItemDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var tripID: UUID
+    var choiceGroupID: UUID?
+    var title: String
+    var kindRawValue: String
+    var scheduleKindRawValue: String
+    var scheduledDay: Date?
+    var startDate: Date?
+    var endDate: Date?
+    var startTimeZoneIdentifier: String?
+    var endTimeZoneIdentifier: String?
+    var location: TripDestinationSelection?
+    var origin: TripDestinationSelection?
+    var notes: String?
+    var bookingStatusRawValue: String
+    var providerName: String?
+    var confirmationNumber: String?
+    var isCompleted: Bool
+    var assignedCaregiverName: String?
+    var reminderEnabled: Bool
+    var reminderOffsetMinutes: Int
+    var createdBy: String?
+    var completedBy: String?
+    var completedAt: Date?
+    var lastReopenedAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int
+}
+
+private struct TripItineraryLinkDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var tripID: UUID
+    var itineraryItemID: UUID?
+    var title: String
+    var urlString: String
+    var createdBy: String?
+    var createdAt: Date
+    var updatedAt: Date
+    var sortOrder: Int
+}
+
 private struct FoodItemDTO: Codable {
     var id: UUID
     var householdID: UUID
@@ -738,7 +800,7 @@ private struct CareRoutineRunDTO: Codable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 20
+    private static let currentBackupVersion = 21
     private static let recoveryBackupLimit = 3
 
     static func exportData(context: ModelContext) throws -> Data {
@@ -1220,6 +1282,70 @@ enum DataExportImportService {
                 sortOrder: $0.sortOrder
             )
         }
+        let tripItineraryChoiceGroups = try context.fetch(
+            FetchDescriptor<TripItineraryChoiceGroup>()
+        ).map {
+            TripItineraryChoiceGroupDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                tripID: $0.tripID,
+                title: $0.title,
+                notes: $0.notes,
+                scheduledDay: $0.scheduledDay,
+                selectedItemID: $0.selectedItemID,
+                createdBy: $0.createdBy,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let tripItineraryItems = try context.fetch(FetchDescriptor<TripItineraryItem>()).map {
+            TripItineraryItemDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                tripID: $0.tripID,
+                choiceGroupID: $0.choiceGroupID,
+                title: $0.title,
+                kindRawValue: $0.kindRawValue,
+                scheduleKindRawValue: $0.scheduleKindRawValue,
+                scheduledDay: $0.scheduledDay,
+                startDate: $0.startDate,
+                endDate: $0.endDate,
+                startTimeZoneIdentifier: $0.startTimeZoneIdentifier,
+                endTimeZoneIdentifier: $0.endTimeZoneIdentifier,
+                location: $0.location,
+                origin: $0.origin,
+                notes: $0.notes,
+                bookingStatusRawValue: $0.bookingStatusRawValue,
+                providerName: $0.providerName,
+                confirmationNumber: $0.confirmationNumber,
+                isCompleted: $0.isCompleted,
+                assignedCaregiverName: $0.assignedCaregiverName,
+                reminderEnabled: $0.reminderEnabled,
+                reminderOffsetMinutes: $0.reminderOffsetMinutes,
+                createdBy: $0.createdBy,
+                completedBy: $0.completedBy,
+                completedAt: $0.completedAt,
+                lastReopenedAt: $0.lastReopenedAt,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
+        let tripItineraryLinks = try context.fetch(FetchDescriptor<TripItineraryLink>()).map {
+            TripItineraryLinkDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                tripID: $0.tripID,
+                itineraryItemID: $0.itineraryItemID,
+                title: $0.title,
+                urlString: $0.urlString,
+                createdBy: $0.createdBy,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                sortOrder: $0.sortOrder
+            )
+        }
         let foodItems = try context.fetch(FetchDescriptor<FoodItem>()).map {
             FoodItemDTO(
                 id: $0.id,
@@ -1444,6 +1570,9 @@ enum DataExportImportService {
             tripTravelers: tripTravelers,
             packingBags: packingBags,
             packingItems: packingItems,
+            tripItineraryChoiceGroups: tripItineraryChoiceGroups,
+            tripItineraryItems: tripItineraryItems,
+            tripItineraryLinks: tripItineraryLinks,
             foodItems: foodItems,
             inventoryLocations: inventoryLocations,
             inventoryItems: inventoryItems,
@@ -2052,6 +2181,68 @@ enum DataExportImportService {
                 sortOrder: value.sortOrder
             ))
         }
+        for value in envelope.tripItineraryChoiceGroups ?? [] {
+            context.insert(TripItineraryChoiceGroup(
+                id: value.id,
+                householdID: value.householdID,
+                tripID: value.tripID,
+                title: value.title,
+                notes: value.notes,
+                scheduledDay: value.scheduledDay,
+                selectedItemID: value.selectedItemID,
+                createdBy: value.createdBy,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.tripItineraryItems ?? [] {
+            context.insert(TripItineraryItem(
+                id: value.id,
+                householdID: value.householdID,
+                tripID: value.tripID,
+                choiceGroupID: value.choiceGroupID,
+                title: value.title,
+                kind: TripItineraryItemKind(rawValue: value.kindRawValue) ?? .activity,
+                scheduleKind: TripItineraryScheduleKind(rawValue: value.scheduleKindRawValue) ?? .anytime,
+                scheduledDay: value.scheduledDay,
+                startDate: value.startDate,
+                endDate: value.endDate,
+                startTimeZoneIdentifier: value.startTimeZoneIdentifier,
+                endTimeZoneIdentifier: value.endTimeZoneIdentifier,
+                location: value.location,
+                origin: value.origin,
+                notes: value.notes,
+                bookingStatus: TripItineraryBookingStatus(rawValue: value.bookingStatusRawValue) ?? .planned,
+                providerName: value.providerName,
+                confirmationNumber: value.confirmationNumber,
+                isCompleted: value.isCompleted,
+                assignedCaregiverName: value.assignedCaregiverName,
+                reminderEnabled: value.reminderEnabled,
+                reminderOffsetMinutes: value.reminderOffsetMinutes,
+                createdBy: value.createdBy,
+                completedBy: value.completedBy,
+                completedAt: value.completedAt,
+                lastReopenedAt: value.lastReopenedAt,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
+        for value in envelope.tripItineraryLinks ?? [] {
+            context.insert(TripItineraryLink(
+                id: value.id,
+                householdID: value.householdID,
+                tripID: value.tripID,
+                itineraryItemID: value.itineraryItemID,
+                title: value.title,
+                urlString: value.urlString,
+                createdBy: value.createdBy,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                sortOrder: value.sortOrder
+            ))
+        }
         for value in envelope.foodItems ?? [] {
             context.insert(FoodItem(
                 id: value.id,
@@ -2289,6 +2480,9 @@ enum DataExportImportService {
         try deleteAll(CareRoutineStep.self, context: context)
         try deleteAll(CareRoutine.self, context: context)
         try deleteAll(FoodReminder.self, context: context)
+        try deleteAll(TripItineraryLink.self, context: context)
+        try deleteAll(TripItineraryItem.self, context: context)
+        try deleteAll(TripItineraryChoiceGroup.self, context: context)
         try deleteAll(PackingItem.self, context: context)
         try deleteAll(PackingBag.self, context: context)
         try deleteAll(TripTraveler.self, context: context)
@@ -2702,6 +2896,121 @@ enum DataExportImportService {
                           bagsByID[bagID]?.tripID == item.tripID
                       } != false
                       && relatedShoppingItemIsValid
+              }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let itineraryChoiceGroups = envelope.tripItineraryChoiceGroups ?? []
+        let itineraryItems = envelope.tripItineraryItems ?? []
+        let itineraryLinks = envelope.tripItineraryLinks ?? []
+        let itineraryItemIDs = Set(itineraryItems.map(\.id))
+        let itineraryGroupsByID = Dictionary(
+            itineraryChoiceGroups.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let itineraryItemsByID = Dictionary(
+            itineraryItems.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let destinationIsValid: (TripDestinationSelection?) -> Bool = { destination in
+            guard let destination else { return true }
+            guard !destination.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return false
+            }
+            switch (destination.latitude, destination.longitude) {
+            case (nil, nil): break
+            case (let latitude?, let longitude?):
+                guard latitude.isFinite,
+                      longitude.isFinite,
+                      (-90...90).contains(latitude),
+                      (-180...180).contains(longitude) else { return false }
+            default: return false
+            }
+            return destination.timeZoneIdentifier.map { TimeZone(identifier: $0) != nil } ?? true
+        }
+        let scheduledDayIsValid: (Date?, PackingTripDTO) -> Bool = { day, trip in
+            guard let day else { return true }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = trip.timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
+            return (calendar.startOfDay(for: trip.startDate)...calendar.startOfDay(for: trip.endDate))
+                .contains(calendar.startOfDay(for: day))
+        }
+        guard Set(itineraryChoiceGroups.map(\.id)).count == itineraryChoiceGroups.count,
+              itineraryItemIDs.count == itineraryItems.count,
+              Set(itineraryLinks.map(\.id)).count == itineraryLinks.count,
+              itineraryChoiceGroups.allSatisfy({ group in
+                  guard let trip = tripsByID[group.tripID] else { return false }
+                  return group.householdID == trip.householdID
+                      && !group.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && scheduledDayIsValid(group.scheduledDay, trip)
+                      && group.selectedItemID.map { selectedID in
+                          guard let item = itineraryItemsByID[selectedID] else { return false }
+                          return item.tripID == group.tripID && item.choiceGroupID == group.id
+                      } != false
+              }),
+              itineraryItems.allSatisfy({ item in
+                  guard let trip = tripsByID[item.tripID],
+                        let kind = TripItineraryItemKind(rawValue: item.kindRawValue),
+                        let schedule = TripItineraryScheduleKind(rawValue: item.scheduleKindRawValue),
+                        TripItineraryBookingStatus(rawValue: item.bookingStatusRawValue) != nil else {
+                      return false
+                  }
+                  let scheduleIsValid: Bool
+                  switch schedule {
+                  case .unscheduled:
+                      scheduleIsValid = item.scheduledDay == nil
+                          && item.startDate == nil
+                          && item.endDate == nil
+                          && !item.reminderEnabled
+                  case .timed:
+                      scheduleIsValid = item.scheduledDay != nil
+                          && item.startDate != nil
+                          && (item.endDate.map { end in
+                              item.startDate.map { end >= $0 } ?? false
+                          } ?? true)
+                  case .morning, .afternoon, .evening, .anytime:
+                      scheduleIsValid = item.scheduledDay != nil
+                          && item.startDate == nil
+                          && item.endDate == nil
+                          && !item.reminderEnabled
+                  }
+                  let choiceGroupIsValid: Bool
+                  if let groupID = item.choiceGroupID {
+                      choiceGroupIsValid = itineraryGroupsByID[groupID]?.tripID == item.tripID
+                  } else {
+                      choiceGroupIsValid = true
+                  }
+                  return item.householdID == trip.householdID
+                      && !item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && scheduleIsValid
+                      && scheduledDayIsValid(item.scheduledDay, trip)
+                      && item.reminderOffsetMinutes >= 0
+                      && choiceGroupIsValid
+                      && (item.assignedCaregiverName.map {
+                          !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      } ?? true)
+                      && (item.startTimeZoneIdentifier.map { TimeZone(identifier: $0) != nil } ?? true)
+                      && (item.endTimeZoneIdentifier.map { TimeZone(identifier: $0) != nil } ?? true)
+                      && destinationIsValid(item.location)
+                      && destinationIsValid(kind.supportsOrigin ? item.origin : nil)
+              }),
+              itineraryLinks.allSatisfy({ link in
+                  guard let trip = tripsByID[link.tripID],
+                        let url = URL(string: link.urlString),
+                        let scheme = url.scheme?.lowercased(),
+                        (scheme == "http" || scheme == "https"),
+                        url.host?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+                      return false
+                  }
+                  let itineraryItemIsValid: Bool
+                  if let itemID = link.itineraryItemID {
+                      itineraryItemIsValid = itineraryItemsByID[itemID]?.tripID == link.tripID
+                  } else {
+                      itineraryItemIsValid = true
+                  }
+                  return link.householdID == trip.householdID
+                      && !link.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && itineraryItemIsValid
               }) else {
             throw CocoaError(.fileReadCorruptFile)
         }

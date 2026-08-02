@@ -109,11 +109,37 @@ enum TripPackingSuggestionEngine {
         if trip.travelMode == .plane {
             values.append(PackingSuggestion(templateKey: "plane.carry-on-change", title: "Carry-on change of clothes", category: .clothing, quantity: 1, unit: "set", travelerID: nil))
         }
-        if trip.lodgingType == .camping {
+        if trip.lodgingType == .camping || trip.activities.contains(.camping) {
             values.append(PackingSuggestion(templateKey: "camping.light", title: "Flashlight or headlamp", category: .gear, quantity: 1, unit: nil, travelerID: nil))
         }
-        if trip.activities.contains(.beach) || trip.activities.contains(.swimming) {
+        if trip.activities.contains(.beach)
+            || trip.activities.contains(.swimming)
+            || trip.activities.contains(.waterSports) {
             values.append(PackingSuggestion(templateKey: "activity.towels", title: "Swim towels", category: .activities, quantity: nil, unit: nil, travelerID: nil))
+        }
+        if trip.activities.contains(.outdoors)
+            || trip.activities.contains(.hiking)
+            || trip.activities.contains(.sightseeing)
+            || trip.activities.contains(.themeParks) {
+            values.append(PackingSuggestion(templateKey: "activity.day-bag", title: "Day bag", category: .gear, quantity: 1, unit: nil, travelerID: nil))
+        }
+        if trip.activities.contains(.hiking) {
+            values.append(PackingSuggestion(templateKey: "activity.hiking-essentials", title: "Trail essentials", category: .gear, quantity: nil, unit: nil, travelerID: nil, notes: "Include the route, appropriate safety gear, and supplies for the planned outing."))
+        }
+        if trip.activities.contains(.camping) {
+            values.append(PackingSuggestion(templateKey: "activity.camping-sleep", title: "Camping sleep setup", category: .gear, quantity: nil, unit: nil, travelerID: nil))
+        }
+        if trip.activities.contains(.boating) || trip.activities.contains(.waterSports) {
+            values.append(PackingSuggestion(templateKey: "activity.dry-bag", title: "Dry bag or waterproof pouch", category: .gear, quantity: 1, unit: nil, travelerID: nil))
+        }
+        if trip.activities.contains(.cycling) {
+            values.append(PackingSuggestion(templateKey: "activity.cycling-safety", title: "Cycling helmets and safety gear", category: .gear, quantity: nil, unit: nil, travelerID: nil))
+        }
+        if trip.activities.contains(.snowSports) {
+            values.append(PackingSuggestion(templateKey: "activity.snow-safety", title: "Snow-sport helmet and goggles", category: .gear, quantity: nil, unit: nil, travelerID: nil))
+        }
+        if trip.activities.contains(.business) {
+            values.append(PackingSuggestion(templateKey: "activity.work-materials", title: "Work devices and materials", category: .electronics, quantity: nil, unit: nil, travelerID: nil))
         }
         return values
     }
@@ -135,11 +161,25 @@ enum TripPackingSuggestionEngine {
         if trip.activities.contains(.formal) {
             values.append(PackingSuggestion(templateKey: "adult.dress-outfit", title: "Dress-up outfit", category: .clothing, quantity: 1, unit: "set", travelerID: travelerID))
         }
-        if trip.activities.contains(.beach) || trip.activities.contains(.swimming) {
+        if trip.activities.contains(.beach)
+            || trip.activities.contains(.swimming)
+            || trip.activities.contains(.waterSports) {
             values.append(PackingSuggestion(templateKey: "adult.swimwear", title: "Swimwear", category: .activities, quantity: 1, unit: nil, travelerID: travelerID))
         }
         if trip.activities.contains(.coldWeather) {
             values.append(PackingSuggestion(templateKey: "adult.warm-layer", title: "Warm outer layer", category: .clothing, quantity: 1, unit: nil, travelerID: travelerID))
+        }
+        if trip.activities.contains(.hiking) {
+            values.append(PackingSuggestion(templateKey: "adult.trail-footwear", title: "Trail footwear", category: .clothing, quantity: 1, unit: "pair", travelerID: travelerID))
+        }
+        if trip.activities.contains(.fitness) {
+            values.append(PackingSuggestion(templateKey: "adult.workout-outfit", title: "Workout outfit", category: .clothing, quantity: 1, unit: "set", travelerID: travelerID))
+        }
+        if trip.activities.contains(.snowSports) {
+            values.append(PackingSuggestion(templateKey: "adult.snow-layers", title: "Snow-sport layers", category: .clothing, quantity: 1, unit: "set", travelerID: travelerID))
+        }
+        if trip.activities.contains(.business) {
+            values.append(PackingSuggestion(templateKey: "adult.work-outfit", title: "Work outfit", category: .clothing, quantity: 1, unit: "set", travelerID: travelerID))
         }
         return values
     }
@@ -160,8 +200,16 @@ enum TripPackingSuggestionEngine {
             PackingSuggestion(templateKey: "child.car-seat", title: "Car seat", category: .gear, quantity: 1, unit: nil, travelerID: travelerID, priority: .essential),
             PackingSuggestion(templateKey: "child.stroller-carrier", title: "Stroller or carrier", category: .gear, quantity: 1, unit: nil, travelerID: travelerID)
         ]
-        if trip.activities.contains(.beach) || trip.activities.contains(.swimming) {
+        if trip.activities.contains(.beach)
+            || trip.activities.contains(.swimming)
+            || trip.activities.contains(.waterSports) {
             values.append(PackingSuggestion(templateKey: "child.swim", title: "Swimwear and swim diaper", category: .activities, quantity: 1, unit: "set", travelerID: travelerID))
+        }
+        if trip.activities.contains(.hiking) {
+            values.append(PackingSuggestion(templateKey: "child.trail-footwear", title: "Outdoor or trail footwear", category: .clothing, quantity: 1, unit: "pair", travelerID: travelerID))
+        }
+        if trip.activities.contains(.snowSports) {
+            values.append(PackingSuggestion(templateKey: "child.snow-layers", title: "Snow-sport layers", category: .clothing, quantity: 1, unit: "set", travelerID: travelerID))
         }
         return values
     }
@@ -754,6 +802,92 @@ enum TripPackingService {
                   reminderDate: reminderDate,
                   finalCheckDate: finalCheckDate
               ) else { return false }
+        let originalCalendar = trip.tripCalendar
+        let originalStartDate = trip.startDate
+        let newTripStart = originalCalendar.startOfDay(for: startDate)
+        let newTripEnd = originalCalendar.startOfDay(for: endDate)
+        let tripID = trip.id
+        let itineraryGroups = (try? context.fetch(FetchDescriptor<TripItineraryChoiceGroup>(
+            predicate: #Predicate { $0.tripID == tripID }
+        ))) ?? []
+        let itineraryItems = (try? context.fetch(FetchDescriptor<TripItineraryItem>(
+            predicate: #Predicate { $0.tripID == tripID }
+        ))) ?? []
+        let itineraryGroupIDs = Set(itineraryGroups.map(\.id))
+        var reconciledGroupDays = [UUID: Date]()
+        for group in itineraryGroups {
+            let reconciledDay = group.scheduledDay.map {
+                reconciledItineraryDay(
+                    $0,
+                    originalStartDate: originalStartDate,
+                    newStartDate: newTripStart,
+                    newEndDate: newTripEnd,
+                    calendar: originalCalendar
+                )
+            }
+            group.scheduledDay = reconciledDay
+            group.updatedAt = now
+            if let reconciledDay {
+                reconciledGroupDays[group.id] = reconciledDay
+            }
+        }
+        for item in itineraryItems {
+            guard item.scheduleKind != .unscheduled else {
+                item.scheduledDay = nil
+                item.startDate = nil
+                item.endDate = nil
+                item.reminderEnabled = false
+                item.updatedAt = now
+                continue
+            }
+            let originalItemDay = item.scheduledDay ?? originalStartDate
+            let reconciledDay: Date
+            if let groupID = item.choiceGroupID,
+               itineraryGroupIDs.contains(groupID) {
+                guard let groupDay = reconciledGroupDays[groupID] else {
+                    item.scheduleKind = .unscheduled
+                    item.scheduledDay = nil
+                    item.startDate = nil
+                    item.endDate = nil
+                    item.reminderEnabled = false
+                    item.updatedAt = now
+                    continue
+                }
+                reconciledDay = groupDay
+            } else {
+                reconciledDay = reconciledItineraryDay(
+                    originalItemDay,
+                    originalStartDate: originalStartDate,
+                    newStartDate: newTripStart,
+                    newEndDate: newTripEnd,
+                    calendar: originalCalendar
+                )
+            }
+            if item.scheduleKind == .timed {
+                item.startDate = item.startDate.map {
+                    TripItineraryService.movingScheduledDate(
+                        $0,
+                        from: originalItemDay,
+                        to: reconciledDay,
+                        sourceScheduleCalendar: originalCalendar,
+                        destinationScheduleCalendar: originalCalendar,
+                        valueTimeZoneIdentifier: item.startTimeZoneIdentifier
+                    )
+                }
+                item.endDate = item.endDate.map {
+                    TripItineraryService.movingScheduledDate(
+                        $0,
+                        from: originalItemDay,
+                        to: reconciledDay,
+                        sourceScheduleCalendar: originalCalendar,
+                        destinationScheduleCalendar: originalCalendar,
+                        valueTimeZoneIdentifier: item.endTimeZoneIdentifier
+                    )
+                }
+            }
+            item.scheduledDay = reconciledDay
+            item.updatedAt = now
+        }
         trip.title = trimmedTitle
         trip.destinationName = destination?.name.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         trip.destinationDetail = destination?.detail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -774,6 +908,11 @@ enum TripPackingService {
         trip.updatedAt = now
         guard PersistenceService.save(context: context) else { return false }
         scheduleReminders(for: trip, context: context)
+        TripItineraryService.rescheduleReminders(
+            for: trip,
+            items: itineraryItems.filter(\.reminderEnabled),
+            choiceGroups: itineraryGroups
+        )
         return true
     }
 
@@ -905,11 +1044,14 @@ enum TripPackingService {
         travelers: [TripTraveler],
         bags: [PackingBag],
         items: [PackingItem],
+        itineraryChoiceGroups: [TripItineraryChoiceGroup] = [],
+        itineraryItems: [TripItineraryItem] = [],
+        itineraryLinks: [TripItineraryLink] = [],
         existingTrips: [PackingTrip],
         context: ModelContext,
-        now: Date = Date()
+        now: Date = Date(),
+        copiedTimeZoneIdentifier: String = CareTimeZoneSettings.effectiveIdentifier()
     ) -> PackingTrip? {
-        let copiedTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
         var copiedCalendar = Calendar(identifier: .gregorian)
         copiedCalendar.timeZone = TimeZone(identifier: copiedTimeZoneIdentifier) ?? .current
         let copiedStartDate = copiedCalendar.startOfDay(for: now)
@@ -1004,6 +1146,103 @@ enum TripPackingService {
                 sortOrder: sourceItem.sortOrder
             ))
         }
+        var choiceGroupMap = [UUID: UUID]()
+        for sourceGroup in itineraryChoiceGroups
+            .filter({ $0.tripID == source.id })
+            .sorted(by: { $0.sortOrder < $1.sortOrder }) {
+            let group = TripItineraryChoiceGroup(
+                householdID: copy.householdID,
+                tripID: copy.id,
+                title: sourceGroup.title,
+                notes: sourceGroup.notes,
+                scheduledDay: shiftedItineraryDate(
+                    sourceGroup.scheduledDay,
+                    sourceTrip: source,
+                    copiedStartDate: copiedStartDate,
+                    copiedCalendar: copiedCalendar
+                ),
+                selectedItemID: nil,
+                createdBy: CaregiverIdentityService.currentCaregiverName(),
+                createdAt: now,
+                updatedAt: now,
+                sortOrder: sourceGroup.sortOrder
+            )
+            choiceGroupMap[sourceGroup.id] = group.id
+            context.insert(group)
+        }
+        var itineraryItemMap = [UUID: UUID]()
+        for sourceItem in itineraryItems
+            .filter({ $0.tripID == source.id })
+            .sorted(by: { $0.sortOrder < $1.sortOrder }) {
+            let sourceScheduledDay = sourceItem.scheduledDay ?? source.startDate
+            let copiedScheduledDay = shiftedItineraryDate(
+                sourceItem.scheduledDay,
+                sourceTrip: source,
+                copiedStartDate: copiedStartDate,
+                copiedCalendar: copiedCalendar
+            )
+            let item = TripItineraryItem(
+                householdID: copy.householdID,
+                tripID: copy.id,
+                choiceGroupID: sourceItem.choiceGroupID.flatMap { choiceGroupMap[$0] },
+                title: sourceItem.title,
+                kind: sourceItem.kind,
+                scheduleKind: sourceItem.scheduleKind,
+                scheduledDay: copiedScheduledDay,
+                startDate: sourceItem.startDate.map {
+                    TripItineraryService.movingScheduledDate(
+                        $0,
+                        from: sourceScheduledDay,
+                        to: copiedScheduledDay ?? copiedStartDate,
+                        sourceScheduleCalendar: source.tripCalendar,
+                        destinationScheduleCalendar: copiedCalendar,
+                        valueTimeZoneIdentifier: sourceItem.startTimeZoneIdentifier
+                    )
+                },
+                endDate: sourceItem.endDate.map {
+                    TripItineraryService.movingScheduledDate(
+                        $0,
+                        from: sourceScheduledDay,
+                        to: copiedScheduledDay ?? copiedStartDate,
+                        sourceScheduleCalendar: source.tripCalendar,
+                        destinationScheduleCalendar: copiedCalendar,
+                        valueTimeZoneIdentifier: sourceItem.endTimeZoneIdentifier
+                    )
+                },
+                startTimeZoneIdentifier: sourceItem.startTimeZoneIdentifier,
+                endTimeZoneIdentifier: sourceItem.endTimeZoneIdentifier,
+                location: sourceItem.location,
+                origin: sourceItem.origin,
+                notes: sourceItem.notes,
+                bookingStatus: sourceItem.bookingStatus == .booked ? .planned : sourceItem.bookingStatus,
+                providerName: sourceItem.providerName,
+                confirmationNumber: nil,
+                assignedCaregiverName: sourceItem.assignedCaregiverName,
+                reminderEnabled: false,
+                reminderOffsetMinutes: sourceItem.reminderOffsetMinutes,
+                createdBy: CaregiverIdentityService.currentCaregiverName(),
+                createdAt: now,
+                updatedAt: now,
+                sortOrder: sourceItem.sortOrder
+            )
+            itineraryItemMap[sourceItem.id] = item.id
+            context.insert(item)
+        }
+        for sourceLink in itineraryLinks
+            .filter({ $0.tripID == source.id })
+            .sorted(by: { $0.sortOrder < $1.sortOrder }) {
+            context.insert(TripItineraryLink(
+                householdID: copy.householdID,
+                tripID: copy.id,
+                itineraryItemID: sourceLink.itineraryItemID.flatMap { itineraryItemMap[$0] },
+                title: sourceLink.title,
+                urlString: sourceLink.urlString,
+                createdBy: CaregiverIdentityService.currentCaregiverName(),
+                createdAt: now,
+                updatedAt: now,
+                sortOrder: sourceLink.sortOrder
+            ))
+        }
         guard PersistenceService.save(context: context) else { return nil }
         return copy
     }
@@ -1021,6 +1260,7 @@ enum TripPackingService {
         trip.updatedAt = now
         guard PersistenceService.save(context: context) else { return false }
         scheduleReminders(for: trip, context: context)
+        SystemIntegrationReconciler.requestReconciliation()
         return true
     }
 
@@ -1036,6 +1276,15 @@ enum TripPackingService {
         trip.updatedAt = now
         guard PersistenceService.save(context: context) else { return false }
         scheduleReminders(for: trip, context: context)
+        let tripID = trip.id
+        let itineraryItems = (try? context.fetch(FetchDescriptor<TripItineraryItem>(
+            predicate: #Predicate { $0.tripID == tripID }
+        ))) ?? []
+        Task {
+            for item in itineraryItems {
+                await NotificationManager.shared.cancelItineraryItemReminder(itemID: item.id)
+            }
+        }
         return true
     }
 
@@ -1051,6 +1300,7 @@ enum TripPackingService {
         trip.updatedAt = now
         guard PersistenceService.save(context: context) else { return false }
         scheduleReminders(for: trip, context: context)
+        SystemIntegrationReconciler.requestReconciliation()
         return true
     }
 
@@ -1070,7 +1320,19 @@ enum TripPackingService {
             let items = try context.fetch(FetchDescriptor<PackingItem>(
                 predicate: #Predicate { $0.tripID == tripID }
             ))
+            let itineraryLinks = try context.fetch(FetchDescriptor<TripItineraryLink>(
+                predicate: #Predicate { $0.tripID == tripID }
+            ))
+            let itineraryItems = try context.fetch(FetchDescriptor<TripItineraryItem>(
+                predicate: #Predicate { $0.tripID == tripID }
+            ))
+            let itineraryChoiceGroups = try context.fetch(FetchDescriptor<TripItineraryChoiceGroup>(
+                predicate: #Predicate { $0.tripID == tripID }
+            ))
 
+            for link in itineraryLinks { context.delete(link) }
+            for item in itineraryItems { context.delete(item) }
+            for group in itineraryChoiceGroups { context.delete(group) }
             for item in items { context.delete(item) }
             for bag in bags { context.delete(bag) }
             for traveler in travelers { context.delete(traveler) }
@@ -1079,6 +1341,9 @@ enum TripPackingService {
             guard PersistenceService.save(context: context) else { return false }
             Task {
                 await NotificationManager.shared.cancelPackingTripReminders(tripID: tripID)
+                for item in itineraryItems {
+                    await NotificationManager.shared.cancelItineraryItemReminder(itemID: item.id)
+                }
             }
             return true
         } catch {
@@ -1110,6 +1375,51 @@ enum TripPackingService {
         var suffix = 2
         while existing.contains("\(base) \(suffix)".lowercased()) { suffix += 1 }
         return "\(base) \(suffix)"
+    }
+
+    private static func shiftedItineraryDate(
+        _ date: Date?,
+        sourceTrip: PackingTrip,
+        copiedStartDate: Date,
+        copiedCalendar: Calendar
+    ) -> Date? {
+        guard let date else { return nil }
+        let sourceStart = sourceTrip.tripCalendar.startOfDay(for: sourceTrip.startDate)
+        let sourceDay = sourceTrip.tripCalendar.startOfDay(for: date)
+        let dayOffset = sourceTrip.tripCalendar.dateComponents(
+            [.day],
+            from: sourceStart,
+            to: sourceDay
+        ).day ?? 0
+        let targetDay = copiedCalendar.date(
+            byAdding: .day,
+            value: dayOffset,
+            to: copiedStartDate
+        ) ?? copiedStartDate
+        let components = sourceTrip.tripCalendar.dateComponents(
+            [.hour, .minute, .second],
+            from: date
+        )
+        return copiedCalendar.date(
+            bySettingHour: components.hour ?? 0,
+            minute: components.minute ?? 0,
+            second: components.second ?? 0,
+            of: targetDay
+        ) ?? targetDay
+    }
+
+    private static func reconciledItineraryDay(
+        _ date: Date,
+        originalStartDate: Date,
+        newStartDate: Date,
+        newEndDate: Date,
+        calendar: Calendar
+    ) -> Date {
+        let originalStart = calendar.startOfDay(for: originalStartDate)
+        let originalDay = calendar.startOfDay(for: date)
+        let offset = max(0, calendar.dateComponents([.day], from: originalStart, to: originalDay).day ?? 0)
+        let availableDays = max(0, calendar.dateComponents([.day], from: newStartDate, to: newEndDate).day ?? 0)
+        return calendar.date(byAdding: .day, value: min(offset, availableDays), to: newStartDate) ?? newStartDate
     }
 
     private static func reorderedValues<T>(

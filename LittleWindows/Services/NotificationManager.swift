@@ -279,6 +279,7 @@ final class NotificationManager: NSObject, ObservableObject {
     static let openFoodActionID = "OPEN_FOOD_HOME"
     static let packingTripReminderCategoryID = "PACKING_TRIP_REMINDER"
     static let openPackingTripActionID = "OPEN_PACKING_TRIP"
+    static let itineraryReminderCategoryID = "TRIP_ITINERARY_REMINDER"
     static let routineReminderCategoryID = "CARE_ROUTINE_REMINDER"
     static let openRoutineActionID = "OPEN_CARE_ROUTINES"
     static let familySyncActivityCategoryID = "FAMILY_SYNC_ACTIVITY"
@@ -297,6 +298,8 @@ final class NotificationManager: NSObject, ObservableObject {
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var notificationState: LittleWindowNotificationState
     private var statesByProfile: [String: LittleWindowNotificationState]
+    private var lockedItineraryReminderIDs = Set<UUID>()
+    private var itineraryReminderWaiters = [UUID: [CheckedContinuation<Void, Never>]]()
 
     private override init() {
         let loadedStates = Self.loadStatesByProfile()
@@ -430,6 +433,12 @@ final class NotificationManager: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
+        let itineraryCategory = UNNotificationCategory(
+            identifier: Self.itineraryReminderCategoryID,
+            actions: [openPackingTrip],
+            intentIdentifiers: [],
+            options: []
+        )
         let openRoutine = UNNotificationAction(
             identifier: Self.openRoutineActionID,
             title: "Open Routines",
@@ -459,6 +468,7 @@ final class NotificationManager: NSObject, ObservableObject {
             ageGuideCategory,
             foodCategory,
             packingTripCategory,
+            itineraryCategory,
             routineCategory,
             familySyncActivityCategory
         ])
@@ -1150,6 +1160,94 @@ final class NotificationManager: NSObject, ObservableObject {
         )
     }
 
+    func rescheduleItineraryItemReminder(
+        item: TripItineraryItem,
+        trip: PackingTrip,
+        choiceIsSelected: Bool = true,
+        authorizationAlreadyConfirmed: Bool = false,
+        currentCaregiverName: String = CaregiverIdentityService.currentCaregiverName(),
+        now: Date = Date()
+    ) async {
+        await lockItineraryReminder(item.id)
+        defer { unlockItineraryReminder(item.id) }
+        guard !Task.isCancelled else { return }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.itineraryItemNotificationID(itemID: item.id)]
+        )
+        guard !trip.isArchived,
+              trip.status == .upcoming,
+              choiceIsSelected,
+              !item.isCompleted,
+              item.bookingStatus != .cancelled,
+              let fireDate = item.reminderDate,
+              fireDate > now else { return }
+        if let assigned = item.assignedCaregiverName,
+           !CaregiverIdentityService.namesMatch(assigned, currentCaregiverName) {
+            return
+        }
+        if !authorizationAlreadyConfirmed {
+            let status = await getAuthorizationStatus()
+            authorizationStatus = status
+            guard status == .authorized || status == .provisional || status == .ephemeral else { return }
+        }
+        let request = UNNotificationRequest(
+            identifier: Self.itineraryItemNotificationID(itemID: item.id),
+            content: buildItineraryItemNotificationContent(item: item, trip: trip),
+            trigger: Self.oneShotTrigger(at: fireDate, now: now)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelItineraryItemReminder(itemID: UUID) async {
+        await lockItineraryReminder(itemID)
+        defer { unlockItineraryReminder(itemID) }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.itineraryItemNotificationID(itemID: itemID)]
+        )
+    }
+
+    private func lockItineraryReminder(_ itemID: UUID) async {
+        guard lockedItineraryReminderIDs.contains(itemID) else {
+            lockedItineraryReminderIDs.insert(itemID)
+            return
+        }
+        await withCheckedContinuation { continuation in
+            itineraryReminderWaiters[itemID, default: []].append(continuation)
+        }
+    }
+
+    private func unlockItineraryReminder(_ itemID: UUID) {
+        guard var waiters = itineraryReminderWaiters[itemID], !waiters.isEmpty else {
+            itineraryReminderWaiters.removeValue(forKey: itemID)
+            lockedItineraryReminderIDs.remove(itemID)
+            return
+        }
+        let next = waiters.removeFirst()
+        itineraryReminderWaiters[itemID] = waiters.isEmpty ? nil : waiters
+        next.resume()
+    }
+
+    func buildItineraryItemNotificationContent(
+        item: TripItineraryItem,
+        trip: PackingTrip
+    ) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = item.kind == .flight ? "Flight coming up" : "Coming up on \(trip.title)"
+        content.body = item.title
+        content.sound = .default
+        content.categoryIdentifier = Self.itineraryReminderCategoryID
+        content.userInfo = [
+            "packingTripID": trip.id.uuidString,
+            "itineraryItemID": item.id.uuidString,
+            "householdID": trip.householdID.uuidString,
+            "deepLink": Self.deepLink(
+                path: "food/trips/\(trip.id.uuidString)/itinerary/\(item.id.uuidString)",
+                profileID: nil
+            )
+        ]
+        return content
+    }
+
     func buildPackingTripNotificationContent(
         trip: PackingTrip,
         finalCheck: Bool
@@ -1316,6 +1414,8 @@ final class NotificationManager: NSObject, ObservableObject {
         solidAllergenProgress: [SolidAllergenProgress],
         packingTrips: [PackingTrip],
         packingItems: [PackingItem],
+        itineraryChoiceGroups: [TripItineraryChoiceGroup],
+        itineraryItems: [TripItineraryItem],
         routines: [CareRoutine],
         ageGuideReadStates: [AgeGuideReadState]
     ) async {
@@ -1351,10 +1451,19 @@ final class NotificationManager: NSObject, ObservableObject {
             !$0.isArchived && $0.reminderEnabled
         }.map { Self.routineReminderNotificationID(routineID: $0.id) })
         let currentCaregiverName = CaregiverIdentityService.currentCaregiverName()
+        let packingItemsByTripID = Dictionary(grouping: packingItems, by: \.tripID)
+        let packingTripsByID = Dictionary(
+            packingTrips.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let itineraryChoiceGroupsByID = Dictionary(
+            itineraryChoiceGroups.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let packingTripIDs = Set(packingTrips.flatMap { trip -> [String] in
             let snapshot = PackingTripReminderSnapshot(
                 trip: trip,
-                items: packingItems.filter { $0.tripID == trip.id },
+                items: packingItemsByTripID[trip.id] ?? [],
                 currentCaregiverName: currentCaregiverName
             )
             guard !snapshot.isArchived,
@@ -1364,6 +1473,24 @@ final class NotificationManager: NSObject, ObservableObject {
                 trip.reminderDate.map { _ in Self.packingTripNotificationID(tripID: trip.id, kind: "start") },
                 trip.finalCheckDate.map { _ in Self.packingTripNotificationID(tripID: trip.id, kind: "final") }
             ].compactMap { $0 }
+        })
+        let itineraryIDs = Set(itineraryItems.compactMap { item -> String? in
+            guard item.reminderEnabled,
+                  !item.isCompleted,
+                  item.bookingStatus != .cancelled,
+                  item.reminderDate.map({ $0 > Date() }) == true,
+                  let trip = packingTripsByID[item.tripID],
+                  !trip.isArchived,
+                  trip.status == .upcoming else { return nil }
+            if let assigned = item.assignedCaregiverName,
+               !CaregiverIdentityService.namesMatch(assigned, currentCaregiverName) {
+                return nil
+            }
+            if let choiceGroupID = item.choiceGroupID,
+               itineraryChoiceGroupsByID[choiceGroupID]?.selectedItemID != item.id {
+                return nil
+            }
+            return Self.itineraryItemNotificationID(itemID: item.id)
         })
         let orphaned = pending.map(\.identifier).filter { identifier in
             if identifier.hasPrefix("appointment.") {
@@ -1383,6 +1510,9 @@ final class NotificationManager: NSObject, ObservableObject {
             }
             if identifier.hasPrefix("packing.trip.") {
                 return !packingTripIDs.contains(identifier)
+            }
+            if identifier.hasPrefix("trip.itinerary.") {
+                return !itineraryIDs.contains(identifier)
             }
             return false
         }
@@ -1474,9 +1604,28 @@ final class NotificationManager: NSObject, ObservableObject {
         for trip in packingTrips {
             await reschedulePackingTripReminders(
                 trip: trip,
-                items: packingItems.filter { $0.tripID == trip.id },
+                items: packingItemsByTripID[trip.id] ?? [],
                 currentCaregiverName: currentCaregiverName
             )
+        }
+        for item in itineraryItems {
+            if let trip = packingTripsByID[item.tripID] {
+                let choiceIsSelected: Bool
+                if let choiceGroupID = item.choiceGroupID {
+                    choiceIsSelected = itineraryChoiceGroupsByID[choiceGroupID]?.selectedItemID == item.id
+                } else {
+                    choiceIsSelected = true
+                }
+                await rescheduleItineraryItemReminder(
+                    item: item,
+                    trip: trip,
+                    choiceIsSelected: choiceIsSelected,
+                    authorizationAlreadyConfirmed: true,
+                    currentCaregiverName: currentCaregiverName
+                )
+            } else {
+                await cancelItineraryItemReminder(itemID: item.id)
+            }
         }
         for routine in routines {
             if !routine.isArchived && routine.reminderEnabled {
@@ -1705,7 +1854,8 @@ final class NotificationManager: NSObject, ObservableObject {
                 DeepLinkRouter.shared.route(URL(string: "littlewindows://food")!)
             }
         } else if action == Self.openPackingTripActionID ||
-                    response.notification.request.content.categoryIdentifier == Self.packingTripReminderCategoryID {
+                    response.notification.request.content.categoryIdentifier == Self.packingTripReminderCategoryID ||
+                    response.notification.request.content.categoryIdentifier == Self.itineraryReminderCategoryID {
             if let deepLink = response.notification.request.content.userInfo["deepLink"] as? String,
                let url = URL(string: deepLink) {
                 DeepLinkRouter.shared.route(url)
@@ -2017,6 +2167,10 @@ final class NotificationManager: NSObject, ObservableObject {
         "packing.trip.\(tripID.uuidString).\(kind)"
     }
 
+    static func itineraryItemNotificationID(itemID: UUID) -> String {
+        "trip.itinerary.\(itemID.uuidString)"
+    }
+
     static func activeSleepPlanWakeNotificationID(profileID: UUID? = nil) -> String {
         scopedNotificationID(activeSleepPlanWakeNotificationBaseID, profileID: profileID)
     }
@@ -2222,19 +2376,21 @@ enum SystemIntegrationReconciler {
             predicate: #Predicate {
                 !$0.isArchived
                     && $0.statusRawValue == upcomingStatus
-                    && ($0.reminderDate != nil || $0.finalCheckDate != nil)
             }
         ))) ?? []
-        var packingItems: [PackingItem] = []
-        for trip in packingTrips {
-            await AppInteractionMonitor.waitUntilIdle()
-            guard !Task.isCancelled else { return }
-            let tripID = trip.id
-            let items = (try? context.fetch(FetchDescriptor<PackingItem>(
-                predicate: #Predicate { $0.tripID == tripID }
-            ))) ?? []
-            packingItems.append(contentsOf: items)
-        }
+        let upcomingTripIDs = packingTrips.map(\.id)
+        let packingItems = upcomingTripIDs.isEmpty ? [] :
+            ((try? context.fetch(FetchDescriptor<PackingItem>(
+                predicate: #Predicate { upcomingTripIDs.contains($0.tripID) }
+            ))) ?? [])
+        let itineraryItems = (try? context.fetch(FetchDescriptor<TripItineraryItem>(
+            predicate: #Predicate { $0.reminderEnabled && !$0.isCompleted }
+        ))) ?? []
+        let itineraryChoiceGroupIDs = Array(Set(itineraryItems.compactMap(\.choiceGroupID)))
+        let itineraryChoiceGroups = itineraryChoiceGroupIDs.isEmpty ? [] :
+            ((try? context.fetch(FetchDescriptor<TripItineraryChoiceGroup>(
+                predicate: #Predicate { itineraryChoiceGroupIDs.contains($0.id) }
+            ))) ?? [])
         let routines = (try? context.fetch(FetchDescriptor<CareRoutine>(
             predicate: #Predicate { $0.reminderEnabled }
         ))) ?? []
@@ -2293,6 +2449,8 @@ enum SystemIntegrationReconciler {
             solidAllergenProgress: solidAllergenProgress,
             packingTrips: packingTrips,
             packingItems: packingItems,
+            itineraryChoiceGroups: itineraryChoiceGroups,
+            itineraryItems: itineraryItems,
             routines: routines,
             ageGuideReadStates: ageGuideReadStates
         )

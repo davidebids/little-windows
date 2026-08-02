@@ -8081,6 +8081,57 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testExpandedTripActivitiesProvidePackingSuggestions() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let startDate = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_900_000_000))
+        let endDate = try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: startDate))
+        let householdID = UUID()
+        let tripID = UUID()
+        let trip = PackingTrip(
+            id: tripID,
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: startDate,
+            endDate: endDate
+        )
+        let adult = TripTraveler(
+            householdID: householdID,
+            tripID: tripID,
+            kind: .adult,
+            displayName: "Adult Traveler"
+        )
+        let expectedSuggestionByActivity: [PackingTripActivity: String] = [
+            .sightseeing: "activity.day-bag",
+            .hiking: "activity.hiking-essentials",
+            .camping: "activity.camping-sleep",
+            .boating: "activity.dry-bag",
+            .waterSports: "activity.towels",
+            .cycling: "activity.cycling-safety",
+            .fitness: "adult.workout-outfit",
+            .snowSports: "activity.snow-safety",
+            .themeParks: "activity.day-bag",
+            .business: "activity.work-materials"
+        ]
+
+        XCTAssertEqual(PackingTripActivity.allCases.count, 15)
+        XCTAssertTrue(PackingTripActivity.allCases.allSatisfy {
+            !$0.displayName.isEmpty && !$0.systemImage.isEmpty
+        })
+
+        for (activity, expectedKey) in expectedSuggestionByActivity {
+            trip.activities = [activity]
+            let suggestions = TripPackingSuggestionEngine.suggestions(
+                for: trip,
+                travelers: [adult]
+            )
+            XCTAssertNotNil(
+                suggestions.first { $0.templateKey == expectedKey },
+                "Expected \(activity.displayName) to add \(expectedKey)."
+            )
+        }
+    }
+
+    @MainActor
     func testTripPackingCreationStateAttributionAndDuplicate() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -8297,12 +8348,36 @@ final class SleepPredictionEngineTests: XCTestCase {
             title: "Sample Item",
             relatedShoppingItemID: shoppingItem.id
         )
+        let choiceGroup = TripItineraryChoiceGroup(
+            householdID: householdID,
+            tripID: trip.id,
+            title: "Sample options",
+            scheduledDay: trip.startDate
+        )
+        let itineraryItem = TripItineraryItem(
+            householdID: householdID,
+            tripID: trip.id,
+            choiceGroupID: choiceGroup.id,
+            title: "Sample activity",
+            scheduleKind: .anytime,
+            scheduledDay: trip.startDate
+        )
+        let itineraryLink = TripItineraryLink(
+            householdID: householdID,
+            tripID: trip.id,
+            itineraryItemID: itineraryItem.id,
+            title: "Details",
+            urlString: "https://example.com/details"
+        )
         context.insert(trip)
         context.insert(traveler)
         context.insert(bag)
         context.insert(packingItem)
         context.insert(shoppingList)
         context.insert(shoppingItem)
+        context.insert(choiceGroup)
+        context.insert(itineraryItem)
+        context.insert(itineraryLink)
         try context.save()
 
         XCTAssertTrue(TripPackingService.deleteTrip(trip, context: context))
@@ -8310,6 +8385,9 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(try context.fetch(FetchDescriptor<TripTraveler>()).isEmpty)
         XCTAssertTrue(try context.fetch(FetchDescriptor<PackingBag>()).isEmpty)
         XCTAssertTrue(try context.fetch(FetchDescriptor<PackingItem>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<TripItineraryChoiceGroup>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<TripItineraryItem>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<TripItineraryLink>()).isEmpty)
         XCTAssertEqual(try context.fetch(FetchDescriptor<ShoppingList>()).map(\.id), [shoppingList.id])
         XCTAssertEqual(try context.fetch(FetchDescriptor<ShoppingListItem>()).map(\.id), [shoppingItem.id])
     }
@@ -9162,6 +9240,590 @@ final class SleepPredictionEngineTests: XCTestCase {
             content.userInfo["deepLink"] as? String,
             "littlewindows://food/trips/\(trip.id.uuidString)"
         )
+    }
+
+    @MainActor
+    func testTripItineraryServiceSupportsBookedTasksLinksAndChoices() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let householdID = UUID()
+        let start = tripDate(2027, 7, 10, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: start,
+            endDate: start.addingTimeInterval(3 * 86_400),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        context.insert(trip)
+
+        let group = try XCTUnwrap(TripItineraryService.createChoiceGroup(
+            title: "Weather plan",
+            notes: "Choose after checking the forecast.",
+            scheduledDay: start.addingTimeInterval(86_400),
+            trip: trip,
+            existingGroups: [],
+            context: context
+        ))
+        let input = TripItineraryItemInput(
+            title: "Confirm reservation",
+            kind: .task,
+            scheduleKind: .timed,
+            scheduledDay: start.addingTimeInterval(86_400),
+            startDate: start.addingTimeInterval(86_400 + 10 * 3_600),
+            endDate: nil,
+            startTimeZoneIdentifier: "America/Los_Angeles",
+            endTimeZoneIdentifier: "America/Los_Angeles",
+            location: TripDestinationSelection(name: "Sample Hotel"),
+            origin: nil,
+            notes: "Call before noon.",
+            bookingStatus: .booked,
+            providerName: "Sample Provider",
+            confirmationNumber: "TEST-123",
+            choiceGroupID: group.id,
+            assignedCaregiverName: "Caregiver A",
+            reminderEnabled: true,
+            reminderOffsetMinutes: 30,
+            links: [TripItineraryLinkInput(
+                title: "Reservation",
+                urlString: "https://example.com/reservation"
+            )]
+        )
+        let item = try XCTUnwrap(TripItineraryService.createItem(
+            input: input,
+            trip: trip,
+            choiceGroups: [group],
+            existingItems: [],
+            context: context,
+            caregiverName: "Caregiver A"
+        ))
+        let alternative = TripItineraryItem(
+            householdID: householdID,
+            tripID: trip.id,
+            choiceGroupID: group.id,
+            title: "Alternative plan"
+        )
+
+        XCTAssertFalse(TripItineraryService.reminderIsEligible(for: item, choiceGroups: [group]))
+        XCTAssertFalse(TripItineraryService.reminderIsEligible(for: alternative, choiceGroups: [group]))
+        XCTAssertTrue(TripItineraryService.selectChoice(item, in: group, trip: trip, context: context))
+        XCTAssertEqual(group.selectedItemID, item.id)
+        XCTAssertTrue(TripItineraryService.reminderIsEligible(for: item, choiceGroups: [group]))
+        XCTAssertFalse(TripItineraryService.reminderIsEligible(for: alternative, choiceGroups: [group]))
+        XCTAssertTrue(TripItineraryService.setCompleted(
+            item,
+            completed: true,
+            trip: trip,
+            context: context,
+            caregiverName: "Caregiver A"
+        ))
+        XCTAssertTrue(item.isCompleted)
+        XCTAssertEqual(item.completedBy, "Caregiver A")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<TripItineraryLink>()).first?.url?.host, "example.com")
+
+        let content = NotificationManager.shared.buildItineraryItemNotificationContent(item: item, trip: trip)
+        XCTAssertEqual(content.categoryIdentifier, NotificationManager.itineraryReminderCategoryID)
+        XCTAssertEqual(
+            content.userInfo["deepLink"] as? String,
+            "littlewindows://food/trips/\(trip.id.uuidString)/itinerary/\(item.id.uuidString)"
+        )
+
+        var ungroupedInput = input
+        ungroupedInput.choiceGroupID = nil
+        XCTAssertTrue(TripItineraryService.updateItem(
+            item,
+            input: ungroupedInput,
+            trip: trip,
+            choiceGroups: [group],
+            existingLinks: try context.fetch(FetchDescriptor<TripItineraryLink>()),
+            context: context
+        ))
+        XCTAssertNil(group.selectedItemID)
+        XCTAssertNil(item.choiceGroupID)
+        XCTAssertTrue(TripItineraryService.reminderIsEligible(for: item, choiceGroups: [group]))
+    }
+
+    @MainActor
+    func testTripItineraryGroupDayOwnsAndMovesItsOptions() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let householdID = UUID()
+        let start = tripDate(2027, 3, 6, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: householdID,
+            title: "Sample Trip",
+            startDate: start,
+            endDate: tripDate(2027, 3, 15, timeZoneIdentifier: "America/Los_Angeles"),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let firstDay = tripDate(2027, 3, 7, timeZoneIdentifier: "America/Los_Angeles")
+        let secondDay = tripDate(2027, 3, 14, timeZoneIdentifier: "America/Los_Angeles")
+        var londonCalendar = Calendar(identifier: .gregorian)
+        londonCalendar.timeZone = TimeZone(identifier: "Europe/London")!
+        let firstDayStart = londonCalendar.date(from: DateComponents(
+            year: 2027,
+            month: 3,
+            day: 7,
+            hour: 10
+        ))!
+        let group = TripItineraryChoiceGroup(
+            householdID: householdID,
+            tripID: trip.id,
+            title: "Weather plan",
+            scheduledDay: firstDay
+        )
+        let item = TripItineraryItem(
+            householdID: householdID,
+            tripID: trip.id,
+            choiceGroupID: group.id,
+            title: "Outdoor activity",
+            scheduleKind: .timed,
+            scheduledDay: firstDay,
+            startDate: firstDayStart,
+            startTimeZoneIdentifier: "Europe/London",
+            endTimeZoneIdentifier: "Europe/London",
+            reminderEnabled: true
+        )
+        context.insert(trip)
+        context.insert(group)
+        context.insert(item)
+        try context.save()
+
+        XCTAssertTrue(TripItineraryService.updateChoiceGroup(
+            group,
+            title: group.title,
+            notes: "Choose based on the forecast.",
+            scheduledDay: secondDay,
+            trip: trip,
+            items: [item],
+            context: context
+        ))
+        XCTAssertTrue(trip.tripCalendar.isDate(item.scheduledDay!, inSameDayAs: secondDay))
+        XCTAssertEqual(londonCalendar.component(.hour, from: item.startDate!), 10)
+
+        XCTAssertTrue(TripItineraryService.updateChoiceGroup(
+            group,
+            title: group.title,
+            notes: "Choose based on the forecast.",
+            scheduledDay: nil,
+            trip: trip,
+            items: [item],
+            context: context
+        ))
+        XCTAssertEqual(item.scheduleKind, .unscheduled)
+        XCTAssertNil(item.scheduledDay)
+        XCTAssertNil(item.startDate)
+        XCTAssertFalse(item.reminderEnabled)
+    }
+
+    @MainActor
+    func testTripDateEditReconcilesItineraryWithinNewRange() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let originalStart = tripDate(2027, 3, 6, timeZoneIdentifier: "America/Los_Angeles")
+        let originalLastDay = tripDate(2027, 3, 7, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: originalStart,
+            endDate: originalLastDay,
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let group = TripItineraryChoiceGroup(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            title: "Last-day plan",
+            scheduledDay: originalLastDay
+        )
+        var londonCalendar = Calendar(identifier: .gregorian)
+        londonCalendar.timeZone = TimeZone(identifier: "Europe/London")!
+        let originalItemStart = londonCalendar.date(from: DateComponents(
+            year: 2027,
+            month: 3,
+            day: 7,
+            hour: 10
+        ))!
+        let item = TripItineraryItem(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            choiceGroupID: group.id,
+            title: "Check out",
+            kind: .task,
+            scheduleKind: .timed,
+            scheduledDay: originalLastDay,
+            startDate: originalItemStart,
+            startTimeZoneIdentifier: "Europe/London",
+            endTimeZoneIdentifier: "Europe/London",
+            reminderEnabled: true
+        )
+        context.insert(trip)
+        context.insert(group)
+        context.insert(item)
+        try context.save()
+
+        let newStart = tripDate(2027, 3, 13, timeZoneIdentifier: "America/Los_Angeles")
+        let newEnd = tripDate(2027, 3, 14, timeZoneIdentifier: "America/Los_Angeles")
+        XCTAssertTrue(TripPackingService.updateTrip(
+            trip,
+            title: trip.title,
+            destination: nil,
+            startDate: newStart,
+            endDate: newEnd,
+            travelMode: trip.travelMode,
+            lodgingType: trip.lodgingType,
+            laundryAvailable: trip.laundryAvailable,
+            activities: trip.activities,
+            weatherSuggestionsEnabled: false,
+            reminderDate: nil,
+            finalCheckDate: nil,
+            notes: "",
+            context: context
+        ))
+
+        XCTAssertTrue(trip.tripCalendar.isDate(group.scheduledDay!, inSameDayAs: newEnd))
+        XCTAssertTrue(trip.tripCalendar.isDate(item.scheduledDay!, inSameDayAs: newEnd))
+        XCTAssertEqual(londonCalendar.component(.hour, from: item.startDate!), 10)
+        XCTAssertTrue((trip.startDate...trip.endDate.addingTimeInterval(86_400)).contains(item.startDate!))
+    }
+
+    @MainActor
+    func testTripItineraryValidationRejectsInconsistentOrUnsafeInputs() {
+        let start = tripDate(2027, 7, 10, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: start,
+            endDate: start.addingTimeInterval(2 * 86_400),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let group = TripItineraryChoiceGroup(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            title: "Day plan",
+            scheduledDay: start
+        )
+        var input = TripItineraryItemInput(
+            title: "Sample activity",
+            kind: .activity,
+            scheduleKind: .timed,
+            scheduledDay: start.addingTimeInterval(86_400),
+            startDate: start.addingTimeInterval(86_400 + 9 * 3_600),
+            endDate: nil,
+            startTimeZoneIdentifier: "Not/A_Time_Zone",
+            endTimeZoneIdentifier: "America/Los_Angeles",
+            location: TripDestinationSelection(name: "Sample Place", latitude: 100, longitude: -122),
+            origin: nil,
+            notes: "",
+            bookingStatus: .planned,
+            providerName: "",
+            confirmationNumber: "",
+            choiceGroupID: group.id,
+            assignedCaregiverName: nil,
+            reminderEnabled: false,
+            reminderOffsetMinutes: 30,
+            links: [TripItineraryLinkInput(title: "Broken", urlString: "https:///missing-host")]
+        )
+
+        XCTAssertEqual(
+            TripItineraryService.validationMessage(for: input, trip: trip, choiceGroups: [group]),
+            "Options must use the same day as their option group."
+        )
+        input.scheduledDay = start
+        input.startDate = start.addingTimeInterval(9 * 3_600)
+        XCTAssertEqual(
+            TripItineraryService.validationMessage(for: input, trip: trip, choiceGroups: [group]),
+            "Choose a valid time zone."
+        )
+        input.startTimeZoneIdentifier = "America/Los_Angeles"
+        XCTAssertEqual(
+            TripItineraryService.validationMessage(for: input, trip: trip, choiceGroups: [group]),
+            "Choose a valid place with a name and complete coordinates."
+        )
+        input.location = TripDestinationSelection(name: "Sample Place", latitude: 37, longitude: -122)
+        XCTAssertEqual(
+            TripItineraryService.validationMessage(for: input, trip: trip, choiceGroups: [group]),
+            "Each link must use a valid http or https address."
+        )
+        input.links = [TripItineraryLinkInput(title: "Details", urlString: "https://example.com/details")]
+        input.startDate = start.addingTimeInterval(86_400 + 9 * 3_600)
+        XCTAssertEqual(
+            TripItineraryService.validationMessage(for: input, trip: trip, choiceGroups: [group]),
+            "The start time must be on the selected itinerary day."
+        )
+    }
+
+    @MainActor
+    func testTripItineraryTimeZoneChangesPreserveEnteredWallClock() throws {
+        let losAngeles = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let london = try XCTUnwrap(TimeZone(identifier: "Europe/London"))
+        let value = tripDate(2027, 3, 10, timeZoneIdentifier: losAngeles.identifier)
+            .addingTimeInterval(9 * 3_600)
+        let converted = TripItineraryService.date(
+            value,
+            preservingWallClockFrom: losAngeles,
+            to: london
+        )
+        var londonCalendar = Calendar(identifier: .gregorian)
+        londonCalendar.timeZone = london
+        XCTAssertEqual(londonCalendar.component(.hour, from: converted), 21)
+        XCTAssertEqual(londonCalendar.component(.day, from: converted), 10)
+    }
+
+    @MainActor
+    func testTripItineraryPresentationIndexLargeDatasetPerformance() {
+        let start = tripDate(2027, 7, 1, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: start,
+            endDate: start.addingTimeInterval(29 * 86_400),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let groups = (0..<100).map { index in
+            TripItineraryChoiceGroup(
+                householdID: trip.householdID,
+                tripID: trip.id,
+                title: "Option Group \(index)",
+                scheduledDay: start.addingTimeInterval(TimeInterval(index % 30) * 86_400),
+                sortOrder: index
+            )
+        }
+        var items = [TripItineraryItem]()
+        items.reserveCapacity(3_000)
+        for index in 0..<3_000 {
+            let isUnscheduled = index % 11 == 0
+            let isTimed = index % 3 == 0
+            let dayOffset = TimeInterval(index % 30) * 86_400
+            items.append(TripItineraryItem(
+                householdID: trip.householdID,
+                tripID: trip.id,
+                choiceGroupID: index % 5 == 0 ? groups[index % groups.count].id : nil,
+                title: "Itinerary Item \(index)",
+                scheduleKind: isUnscheduled ? .unscheduled : (isTimed ? .timed : .anytime),
+                scheduledDay: isUnscheduled ? nil : start.addingTimeInterval(dayOffset),
+                startDate: isTimed ? start.addingTimeInterval(dayOffset + 9 * 3_600) : nil,
+                sortOrder: index
+            ))
+        }
+        var links = [TripItineraryLink]()
+        links.reserveCapacity(1_500)
+        for (index, item) in items.prefix(1_500).enumerated() {
+            links.append(TripItineraryLink(
+                householdID: trip.householdID,
+                tripID: trip.id,
+                itineraryItemID: item.id,
+                title: "Details",
+                urlString: "https://example.com/\(index)",
+                sortOrder: index
+            ))
+        }
+
+        var lastIndex: TripItineraryPresentationIndex?
+        measure(metrics: [XCTClockMetric()]) {
+            lastIndex = TripItineraryPresentationIndex(
+                trip: trip,
+                choiceGroups: groups,
+                items: items,
+                links: links
+            )
+        }
+        XCTAssertEqual(lastIndex?.itineraryDays.count, 30)
+        XCTAssertEqual(lastIndex?.linksByItemID.count, 1_500)
+        XCTAssertEqual(lastIndex?.optionsByGroupID.values.reduce(0) { $0 + $1.count }, 600)
+    }
+
+    @MainActor
+    func testTripDuplicationShiftsAndResetsItineraryPlanningState() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let start = tripDate(2027, 3, 10, timeZoneIdentifier: "America/Los_Angeles")
+        let copyStart = tripDate(2027, 3, 20, timeZoneIdentifier: "America/Los_Angeles")
+        let trip = PackingTrip(
+            householdID: UUID(),
+            title: "Sample Trip",
+            startDate: start,
+            endDate: start.addingTimeInterval(2 * 86_400),
+            timeZoneIdentifier: "America/Los_Angeles"
+        )
+        let group = TripItineraryChoiceGroup(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            title: "Day plan",
+            scheduledDay: start.addingTimeInterval(86_400)
+        )
+        var londonCalendar = Calendar(identifier: .gregorian)
+        londonCalendar.timeZone = TimeZone(identifier: "Europe/London")!
+        let itemDay = trip.tripCalendar.date(byAdding: .day, value: 1, to: start)!
+        let itemDayComponents = trip.tripCalendar.dateComponents([.year, .month, .day], from: itemDay)
+        var itemStartComponents = itemDayComponents
+        itemStartComponents.hour = 10
+        let itemStart = londonCalendar.date(from: itemStartComponents)!
+        var itemEndComponents = itemDayComponents
+        itemEndComponents.hour = 12
+        let itemEnd = londonCalendar.date(from: itemEndComponents)!
+        let item = TripItineraryItem(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            choiceGroupID: group.id,
+            title: "Booked activity",
+            kind: .activity,
+            scheduleKind: .timed,
+            scheduledDay: itemDay,
+            startDate: itemStart,
+            endDate: itemEnd,
+            startTimeZoneIdentifier: londonCalendar.timeZone.identifier,
+            endTimeZoneIdentifier: londonCalendar.timeZone.identifier,
+            bookingStatus: .booked,
+            confirmationNumber: "TEST-456",
+            reminderEnabled: true
+        )
+        group.selectedItemID = item.id
+        let link = TripItineraryLink(
+            householdID: trip.householdID,
+            tripID: trip.id,
+            itineraryItemID: item.id,
+            title: "Details",
+            urlString: "https://example.com/details"
+        )
+        context.insert(trip)
+        context.insert(group)
+        context.insert(item)
+        context.insert(link)
+        try context.save()
+
+        let duplicate = try XCTUnwrap(TripPackingService.duplicateTrip(
+            trip,
+            travelers: [],
+            bags: [],
+            items: [],
+            itineraryChoiceGroups: [group],
+            itineraryItems: [item],
+            itineraryLinks: [link],
+            existingTrips: [trip],
+            context: context,
+            now: copyStart,
+            copiedTimeZoneIdentifier: "America/Los_Angeles"
+        ))
+        let copiedGroup = try XCTUnwrap(try context.fetch(FetchDescriptor<TripItineraryChoiceGroup>())
+            .first { $0.tripID == duplicate.id })
+        let copiedItem = try XCTUnwrap(try context.fetch(FetchDescriptor<TripItineraryItem>())
+            .first { $0.tripID == duplicate.id })
+        let copiedLink = try XCTUnwrap(try context.fetch(FetchDescriptor<TripItineraryLink>())
+            .first { $0.tripID == duplicate.id })
+
+        XCTAssertNil(copiedGroup.selectedItemID)
+        XCTAssertEqual(copiedItem.bookingStatus, .planned)
+        XCTAssertNil(copiedItem.confirmationNumber)
+        XCTAssertFalse(copiedItem.reminderEnabled)
+        XCTAssertEqual(copiedLink.itineraryItemID, copiedItem.id)
+        XCTAssertTrue(duplicate.tripCalendar.isDate(
+            try XCTUnwrap(copiedItem.scheduledDay),
+            inSameDayAs: duplicate.tripCalendar.date(byAdding: .day, value: 1, to: copyStart)!
+        ))
+        XCTAssertEqual(londonCalendar.component(.hour, from: try XCTUnwrap(copiedItem.startDate)), 10)
+        XCTAssertEqual(londonCalendar.component(.hour, from: try XCTUnwrap(copiedItem.endDate)), 12)
+        XCTAssertEqual(londonCalendar.component(.day, from: try XCTUnwrap(copiedItem.startDate)), 21)
+    }
+
+    @MainActor
+    func testTripItineraryBackupRoundTrip() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let household = Household(name: "Sample Home")
+        let start = tripDate(2027, 7, 10, timeZoneIdentifier: "America/New_York")
+        let trip = PackingTrip(
+            householdID: household.id,
+            title: "Sample Trip",
+            startDate: start,
+            endDate: start.addingTimeInterval(86_400),
+            timeZoneIdentifier: "America/New_York"
+        )
+        let group = TripItineraryChoiceGroup(
+            householdID: household.id,
+            tripID: trip.id,
+            title: "Dinner options",
+            scheduledDay: start
+        )
+        let item = TripItineraryItem(
+            householdID: household.id,
+            tripID: trip.id,
+            choiceGroupID: group.id,
+            title: "Sample Restaurant",
+            kind: .meal,
+            scheduleKind: .evening,
+            scheduledDay: start,
+            location: TripDestinationSelection(name: "Sample Restaurant"),
+            bookingStatus: .booked,
+            confirmationNumber: "TEST-789"
+        )
+        group.selectedItemID = item.id
+        let link = TripItineraryLink(
+            householdID: household.id,
+            tripID: trip.id,
+            itineraryItemID: item.id,
+            title: "Menu",
+            urlString: "https://example.com/menu"
+        )
+        context.insert(household)
+        context.insert(trip)
+        context.insert(group)
+        context.insert(item)
+        context.insert(link)
+        try context.save()
+
+        let backup = try DataExportImportService.exportData(context: context)
+        let familyPayloads = try DataExportImportService.familySyncEntityPayloads(from: backup)
+        XCTAssertNotNil(familyPayloads[DataExportImportService.familySyncEntityKey(
+            collection: "tripItineraryChoiceGroups",
+            id: group.id.uuidString
+        )])
+        XCTAssertNotNil(familyPayloads[DataExportImportService.familySyncEntityKey(
+            collection: "tripItineraryItems",
+            id: item.id.uuidString
+        )])
+        XCTAssertNotNil(familyPayloads[DataExportImportService.familySyncEntityKey(
+            collection: "tripItineraryLinks",
+            id: link.id.uuidString
+        )])
+        var corruptObject = try XCTUnwrap(JSONSerialization.jsonObject(with: backup) as? [String: Any])
+        var corruptLinks = try XCTUnwrap(corruptObject["tripItineraryLinks"] as? [[String: Any]])
+        corruptLinks[0]["urlString"] = "https:///missing-host"
+        corruptObject["tripItineraryLinks"] = corruptLinks
+        let corruptBackup = try JSONSerialization.data(withJSONObject: corruptObject)
+        XCTAssertThrowsError(try DataExportImportService.importData(
+            corruptBackup,
+            context: context,
+            recordLocalSave: false,
+            createRecoveryBackup: false
+        ))
+        try DataExportImportService.importData(
+            backup,
+            context: context,
+            recordLocalSave: false,
+            createRecoveryBackup: false
+        )
+
+        let restoredGroup = try XCTUnwrap(try context.fetch(FetchDescriptor<TripItineraryChoiceGroup>()).first)
+        let restoredItem = try XCTUnwrap(try context.fetch(FetchDescriptor<TripItineraryItem>()).first)
+        let restoredLink = try XCTUnwrap(try context.fetch(FetchDescriptor<TripItineraryLink>()).first)
+        XCTAssertEqual(restoredGroup.selectedItemID, restoredItem.id)
+        XCTAssertEqual(restoredItem.confirmationNumber, "TEST-789")
+        XCTAssertEqual(restoredItem.choiceGroupID, restoredGroup.id)
+        XCTAssertEqual(restoredLink.itineraryItemID, restoredItem.id)
+        XCTAssertEqual(restoredLink.urlString, "https://example.com/menu")
+    }
+
+    @MainActor
+    func testTripItineraryDeepLinkOpensSpecificItem() throws {
+        let tripID = UUID()
+        let itemID = UUID()
+        let router = DeepLinkRouter.shared
+        router.pendingFoodCommand = nil
+        router.route(try XCTUnwrap(URL(
+            string: "littlewindows://food/trips/\(tripID.uuidString)/itinerary/\(itemID.uuidString)"
+        )))
+        XCTAssertEqual(router.selectedTab, .food)
+        XCTAssertEqual(router.pendingFoodCommand, .itineraryItem(tripID, itemID))
     }
 
     private func rmsWindows(_ samples: [Double], windowSize: Int) -> [Double] {
