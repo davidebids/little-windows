@@ -7,6 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A40000000000000000000001 /* Models/WatchCompanionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */; };
+		A40000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */; };
+		A40000000000000000000003 /* Models/LittleWindowsActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */; };
+		A40000000000000000000004 /* Services/WatchStateFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000003 /* Services/WatchStateFactory.swift */; };
+		A40000000000000000000005 /* Services/WatchCommandProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000004 /* Services/WatchCommandProcessor.swift */; };
+		A40000000000000000000006 /* Services/WatchConnectivityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000005 /* Services/WatchConnectivityService.swift */; };
+		A40000000000000000000007 /* WatchCompanionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000006 /* WatchCompanionTests.swift */; };
+		A40000000000000000000008 /* Models/WatchCompanionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */; };
+		A40000000000000000000009 /* WatchSharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5000000000000000000000B /* WatchSharedStorage.swift */; };
+		A4000000000000000000000A /* WatchConnectivityClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000008 /* WatchConnectivityClient.swift */; };
+		A4000000000000000000000B /* WatchCompanionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000007 /* WatchCompanionApp.swift */; };
+		A4000000000000000000000C /* WatchHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000009 /* WatchHomeView.swift */; };
+		A4000000000000000000000D /* WatchAppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5000000000000000000000A /* WatchAppIntents.swift */; };
+		A4000000000000000000000E /* LittleWindowsWatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A50000000000000000000011 /* LittleWindowsWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A4000000000000000000000F /* LittleWindowsWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A5000000000000000000000D /* LittleWindowsWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A40000000000000000000010 /* WatchCompanionWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5000000000000000000000E /* WatchCompanionWidgets.swift */; };
+		A40000000000000000000011 /* Models/WatchCompanionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */; };
+		A40000000000000000000012 /* WatchSharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5000000000000000000000B /* WatchSharedStorage.swift */; };
+		A40000000000000000000013 /* WatchCompanionProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000012 /* WatchCompanionProtocolTests.swift */; };
+		A40000000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* Assets.xcassets */; };
 		B00000000000000000000001 /* LittleWindowsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000001 /* LittleWindowsApp.swift */; };
 		B00000000000000000000002 /* Models/BabyProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000002 /* Models/BabyProfile.swift */; };
 		B00000000000000000000003 /* Models/BabyEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003 /* Models/BabyEvent.swift */; };
@@ -155,6 +175,27 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A90000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A70000000000000000000001;
+			remoteInfo = LittleWindowsWatch;
+		};
+		A90000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A70000000000000000000002;
+			remoteInfo = LittleWindowsWatchWidgets;
+		};
+		A90000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A70000000000000000000001;
+			remoteInfo = LittleWindowsWatch;
+		};
 		C00000000000000000000001 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = D00000000000000000000001 /* Project object */;
@@ -179,6 +220,28 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		A70000000000000000000013 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A4000000000000000000000E /* LittleWindowsWatchWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000014 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				A4000000000000000000000F /* LittleWindowsWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D00000000000000000000025 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -193,6 +256,25 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/WatchCompanionProtocol.swift; sourceTree = "<group>"; };
+		A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/LittleWindowsActivityAttributes.swift; sourceTree = "<group>"; };
+		A50000000000000000000003 /* Services/WatchStateFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WatchStateFactory.swift; sourceTree = "<group>"; };
+		A50000000000000000000004 /* Services/WatchCommandProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WatchCommandProcessor.swift; sourceTree = "<group>"; };
+		A50000000000000000000005 /* Services/WatchConnectivityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WatchConnectivityService.swift; sourceTree = "<group>"; };
+		A50000000000000000000006 /* WatchCompanionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCompanionTests.swift; sourceTree = "<group>"; };
+		A50000000000000000000007 /* WatchCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCompanionApp.swift; sourceTree = "<group>"; };
+		A50000000000000000000008 /* WatchConnectivityClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConnectivityClient.swift; sourceTree = "<group>"; };
+		A50000000000000000000009 /* WatchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHomeView.swift; sourceTree = "<group>"; };
+		A5000000000000000000000A /* WatchAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAppIntents.swift; sourceTree = "<group>"; };
+		A5000000000000000000000B /* WatchSharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSharedStorage.swift; sourceTree = "<group>"; };
+		A5000000000000000000000C /* LittleWindowsWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LittleWindowsWatch.entitlements; sourceTree = "<group>"; };
+		A5000000000000000000000D /* LittleWindowsWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LittleWindowsWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A5000000000000000000000E /* WatchCompanionWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCompanionWidgets.swift; sourceTree = "<group>"; };
+		A5000000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A50000000000000000000010 /* LittleWindowsWatchWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LittleWindowsWatchWidgets.entitlements; sourceTree = "<group>"; };
+		A50000000000000000000011 /* LittleWindowsWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LittleWindowsWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A50000000000000000000012 /* WatchCompanionProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCompanionProtocolTests.swift; sourceTree = "<group>"; };
+		A50000000000000000000013 /* LittleWindowsWatchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LittleWindowsWatchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000000000000000000001 /* Models/SolidsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SolidsModels.swift; sourceTree = "<group>"; };
 		C20000000000000000000002 /* Services/SolidsReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SolidsReferenceCatalog.swift; sourceTree = "<group>"; };
 		C20000000000000000000003 /* Services/SolidsTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SolidsTrackingService.swift; sourceTree = "<group>"; };
@@ -340,6 +422,27 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A70000000000000000000011 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000021 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000031 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D00000000000000000000003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -377,12 +480,46 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A60000000000000000000001 /* LittleWindowsWatch */ = {
+			isa = PBXGroup;
+			children = (
+				A50000000000000000000007 /* WatchCompanionApp.swift */,
+				A50000000000000000000008 /* WatchConnectivityClient.swift */,
+				A50000000000000000000009 /* WatchHomeView.swift */,
+				A5000000000000000000000A /* WatchAppIntents.swift */,
+				A5000000000000000000000B /* WatchSharedStorage.swift */,
+				A5000000000000000000000C /* LittleWindowsWatch.entitlements */,
+			);
+			path = LittleWindowsWatch;
+			sourceTree = "<group>";
+		};
+		A60000000000000000000002 /* LittleWindowsWatchWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				A5000000000000000000000E /* WatchCompanionWidgets.swift */,
+				A5000000000000000000000F /* Info.plist */,
+				A50000000000000000000010 /* LittleWindowsWatchWidgets.entitlements */,
+			);
+			path = LittleWindowsWatchWidgets;
+			sourceTree = "<group>";
+		};
+		A60000000000000000000003 /* LittleWindowsWatchTests */ = {
+			isa = PBXGroup;
+			children = (
+				A50000000000000000000012 /* WatchCompanionProtocolTests.swift */,
+			);
+			path = LittleWindowsWatchTests;
+			sourceTree = "<group>";
+		};
 		D00000000000000000000005 = {
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000006 /* LittleWindows */,
 				D00000000000000000000027 /* LittleWindowsWidgets */,
+				A60000000000000000000001 /* LittleWindowsWatch */,
+				A60000000000000000000002 /* LittleWindowsWatchWidgets */,
 				D00000000000000000000007 /* LittleWindowsTests */,
+				A60000000000000000000003 /* LittleWindowsWatchTests */,
 				D00000000000000000000029 /* LittleWindowsUITests */,
 				D00000000000000000000008 /* Frameworks */,
 				D00000000000000000000009 /* Products */,
@@ -393,6 +530,11 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000001 /* LittleWindowsApp.swift */,
+				A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */,
+				A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */,
+				A50000000000000000000003 /* Services/WatchStateFactory.swift */,
+				A50000000000000000000004 /* Services/WatchCommandProcessor.swift */,
+				A50000000000000000000005 /* Services/WatchConnectivityService.swift */,
 				F00000000000000000000002 /* Models/BabyProfile.swift */,
 				F00000000000000000000003 /* Models/BabyEvent.swift */,
 				F00000000000000000000004 /* Models/EventType.swift */,
@@ -519,6 +661,7 @@
 		D00000000000000000000007 /* LittleWindowsTests */ = {
 			isa = PBXGroup;
 			children = (
+				A50000000000000000000006 /* WatchCompanionTests.swift */,
 				F0000000000000000000001B /* SleepPredictionEngineTests.swift */,
 				F00000000000000000000097 /* CareReportExportServiceTests.swift */,
 				C20000000000000000000005 /* SolidsFeatureTests.swift */,
@@ -542,7 +685,10 @@
 			isa = PBXGroup;
 			children = (
 				F0000000000000000000001D /* LittleWindows.app */,
+				A5000000000000000000000D /* LittleWindowsWatch.app */,
+				A50000000000000000000011 /* LittleWindowsWatchWidgets.appex */,
 				F0000000000000000000001E /* LittleWindowsTests.xctest */,
+				A50000000000000000000013 /* LittleWindowsWatchTests.xctest */,
 				F00000000000000000000049 /* LittleWindowsWidgets.appex */,
 				F0000000000000000000008D /* LittleWindowsUITests.xctest */,
 			);
@@ -578,6 +724,60 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A70000000000000000000001 /* LittleWindowsWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000040 /* Build configuration list for PBXNativeTarget "LittleWindowsWatch" */;
+			buildPhases = (
+				A70000000000000000000010 /* Sources */,
+				A70000000000000000000011 /* Frameworks */,
+				A70000000000000000000012 /* Resources */,
+				A70000000000000000000013 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A70000000000000000000051 /* PBXTargetDependency */,
+			);
+			name = LittleWindowsWatch;
+			productName = LittleWindowsWatch;
+			productReference = A5000000000000000000000D /* LittleWindowsWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A70000000000000000000002 /* LittleWindowsWatchWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000041 /* Build configuration list for PBXNativeTarget "LittleWindowsWatchWidgets" */;
+			buildPhases = (
+				A70000000000000000000020 /* Sources */,
+				A70000000000000000000021 /* Frameworks */,
+				A70000000000000000000022 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LittleWindowsWatchWidgets;
+			productName = LittleWindowsWatchWidgets;
+			productReference = A50000000000000000000011 /* LittleWindowsWatchWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		A70000000000000000000003 /* LittleWindowsWatchTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000042 /* Build configuration list for PBXNativeTarget "LittleWindowsWatchTests" */;
+			buildPhases = (
+				A70000000000000000000030 /* Sources */,
+				A70000000000000000000031 /* Frameworks */,
+				A70000000000000000000032 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A70000000000000000000052 /* PBXTargetDependency */,
+			);
+			name = LittleWindowsWatchTests;
+			productName = LittleWindowsWatchTests;
+			productReference = A50000000000000000000013 /* LittleWindowsWatchTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		D00000000000000000000002 /* LittleWindows */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D0000000000000000000000A /* Build configuration list for PBXNativeTarget "LittleWindows" */;
@@ -586,11 +786,13 @@
 				D00000000000000000000003 /* Frameworks */,
 				D0000000000000000000000C /* Resources */,
 				D00000000000000000000025 /* Embed Foundation Extensions */,
+				A70000000000000000000014 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				D00000000000000000000026 /* PBXTargetDependency */,
+				A70000000000000000000050 /* PBXTargetDependency */,
 			);
 			name = LittleWindows;
 			productName = LittleWindows;
@@ -660,6 +862,16 @@
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					A70000000000000000000001 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					A70000000000000000000002 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					A70000000000000000000003 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = A70000000000000000000001;
+					};
 					D00000000000000000000002 = {
 						CreatedOnToolsVersion = 16.0;
 						SystemCapabilities = {
@@ -699,13 +911,38 @@
 			targets = (
 				D00000000000000000000002 /* LittleWindows */,
 				D00000000000000000000020 /* LittleWindowsWidgets */,
+				A70000000000000000000001 /* LittleWindowsWatch */,
+				A70000000000000000000002 /* LittleWindowsWatchWidgets */,
 				D0000000000000000000000D /* LittleWindowsTests */,
+				A70000000000000000000003 /* LittleWindowsWatchTests */,
 				D0000000000000000000002A /* LittleWindowsUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A70000000000000000000012 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000014 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000022 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000032 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D0000000000000000000000C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -742,10 +979,46 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A70000000000000000000010 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000008 /* Models/WatchCompanionProtocol.swift in Sources */,
+				A40000000000000000000009 /* WatchSharedStorage.swift in Sources */,
+				A4000000000000000000000A /* WatchConnectivityClient.swift in Sources */,
+				A4000000000000000000000B /* WatchCompanionApp.swift in Sources */,
+				A4000000000000000000000C /* WatchHomeView.swift in Sources */,
+				A4000000000000000000000D /* WatchAppIntents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000020 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000010 /* WatchCompanionWidgets.swift in Sources */,
+				A40000000000000000000011 /* Models/WatchCompanionProtocol.swift in Sources */,
+				A40000000000000000000012 /* WatchSharedStorage.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A70000000000000000000030 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A40000000000000000000013 /* WatchCompanionProtocolTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D0000000000000000000000B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A40000000000000000000001 /* Models/WatchCompanionProtocol.swift in Sources */,
+				A40000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift in Sources */,
+				A40000000000000000000004 /* Services/WatchStateFactory.swift in Sources */,
+				A40000000000000000000005 /* Services/WatchCommandProcessor.swift in Sources */,
+				A40000000000000000000006 /* Services/WatchConnectivityService.swift in Sources */,
 				B00000000000000000000001 /* LittleWindowsApp.swift in Sources */,
 				B00000000000000000000002 /* Models/BabyProfile.swift in Sources */,
 				B00000000000000000000003 /* Models/BabyEvent.swift in Sources */,
@@ -868,6 +1141,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A40000000000000000000007 /* WatchCompanionTests.swift in Sources */,
 				C10000000000000000000005 /* SolidsFeatureTests.swift in Sources */,
 				B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */,
 				B00000000000000000000097 /* CareReportExportServiceTests.swift in Sources */,
@@ -878,6 +1152,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A40000000000000000000003 /* Models/LittleWindowsActivityAttributes.swift in Sources */,
 				B00000000000000000000040 /* LittleWindowsWidgetsBundle.swift in Sources */,
 				B00000000000000000000041 /* WidgetSnapshotReader.swift in Sources */,
 				B00000000000000000000042 /* ActiveTimerWidget.swift in Sources */,
@@ -906,6 +1181,21 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A70000000000000000000050 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A70000000000000000000001 /* LittleWindowsWatch */;
+			targetProxy = A90000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		A70000000000000000000051 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A70000000000000000000002 /* LittleWindowsWatchWidgets */;
+			targetProxy = A90000000000000000000002 /* PBXContainerItemProxy */;
+		};
+		A70000000000000000000052 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A70000000000000000000001 /* LittleWindowsWatch */;
+			targetProxy = A90000000000000000000003 /* PBXContainerItemProxy */;
+		};
 		D00000000000000000000011 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = D00000000000000000000002 /* LittleWindows */;
@@ -924,6 +1214,144 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A80000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1.4.0;
+				DEVELOPMENT_TEAM = A3H3Y9PUP3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Little Windows";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.debidia.LittleWindows;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.4.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
+				PRODUCT_NAME = LittleWindowsWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1.4.0;
+				DEVELOPMENT_TEAM = A3H3Y9PUP3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Little Windows";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.debidia.LittleWindows;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.4.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
+				PRODUCT_NAME = LittleWindowsWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		A80000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1.4.0;
+				DEVELOPMENT_TEAM = A3H3Y9PUP3;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
+				MARKETING_VERSION = 1.4.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
+				PRODUCT_NAME = LittleWindowsWatchWidgets;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1.4.0;
+				DEVELOPMENT_TEAM = A3H3Y9PUP3;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
+				MARKETING_VERSION = 1.4.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
+				PRODUCT_NAME = LittleWindowsWatchWidgets;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		A80000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.tests;
+				PRODUCT_NAME = LittleWindowsWatchTests;
+				SDKROOT = watchos;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LittleWindowsWatch.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LittleWindowsWatch";
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.tests;
+				PRODUCT_NAME = LittleWindowsWatchTests;
+				SDKROOT = watchos;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LittleWindowsWatch.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LittleWindowsWatch";
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
 		E00000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1053,13 +1481,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.8;
+				CURRENT_PROJECT_VERSION = 1.4.0;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.8;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1078,13 +1506,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.8;
+				CURRENT_PROJECT_VERSION = 1.4.0;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.8;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1132,11 +1560,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.8;
+				CURRENT_PROJECT_VERSION = 1.4.0;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.8;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1152,11 +1580,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.3.8;
+				CURRENT_PROJECT_VERSION = 1.4.0;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.3.8;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1200,6 +1628,33 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A70000000000000000000040 /* Build configuration list for PBXNativeTarget "LittleWindowsWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000001 /* Debug */,
+				A80000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000041 /* Build configuration list for PBXNativeTarget "LittleWindowsWatchWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000003 /* Debug */,
+				A80000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000042 /* Build configuration list for PBXNativeTarget "LittleWindowsWatchTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000005 /* Debug */,
+				A80000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		D0000000000000000000000A /* Build configuration list for PBXNativeTarget "LittleWindows" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

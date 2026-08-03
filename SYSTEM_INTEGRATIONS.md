@@ -1,6 +1,6 @@
 # Little Windows System Integrations
 
-Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcuts, deep links, local notifications, App Groups, and iOS 18 Control Center controls. The app remains the single writer for SwiftData history; extensions and system surfaces pass commands back to the app and read lightweight snapshots.
+Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcuts, deep links, local notifications, App Groups, WatchConnectivity, an Apple Watch companion, and iOS 18 Control Center controls. The iPhone app remains the single writer for SwiftData history; extensions and system surfaces pass commands back to it and read lightweight snapshots.
 
 ## Included surfaces
 
@@ -14,6 +14,9 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - App Intents for timer control, quick logging, app navigation, and night-light presets.
 - App Shortcuts for repeat-last logging, solids and other high-frequency quick logging, timer control, and dog care.
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
+- A dependent watchOS 10+ companion app with profile switching, six profile-aware smart or customized favorites, a watch-safe All Actions list, timer controls, today metrics, and sleep-window predictions.
+- Apple Watch complications and Smart Stack widgets for the active timer, next sleep window, and today summary.
+- Apple Watch App Intents for the most common child and dog actions.
 - Local notifications for sleep windows, routine reminders, appointment reminders, monthly guide reminders, itinerary items, trip packing and final-check reminders, and user-created Food & Home reminders.
 - WeatherKit forecasts and Apple Weather attribution for trip packing suggestions.
 
@@ -34,7 +37,7 @@ The app target also uses this CloudKit container for SwiftData private database 
 iCloud.com.debidia.LittleWindows
 ```
 
-For both the `LittleWindows` and `LittleWindowsWidgets` targets:
+For the `LittleWindows`, `LittleWindowsWidgets`, `LittleWindowsWatch`, and `LittleWindowsWatchWidgets` targets:
 
 1. Open **Signing & Capabilities**.
 2. Select the same Apple Developer team.
@@ -72,6 +75,34 @@ The extension target includes:
 - the WidgetKit extension point
 - `LittleWindowsWidgets/LittleWindowsWidgets.entitlements`
 - bundle identifier `com.debidia.LittleWindows.widgets`
+
+The Apple Watch integration includes:
+
+- `LittleWindowsWatch`, a dependent watchOS 10+ app with bundle identifier `com.debidia.LittleWindows.watchkitapp`
+- `LittleWindowsWatchWidgets`, a watch WidgetKit extension with bundle identifier `com.debidia.LittleWindows.watchkitapp.widgets`
+- `LittleWindowsWatch/LittleWindowsWatch.entitlements` and `LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements`, both using the same App Group
+- an **Embed Watch Content** build phase on the iPhone app target and an **Embed Foundation Extensions** phase on the watch app target
+- `WKCompanionAppBundleIdentifier = com.debidia.LittleWindows` on the watch app
+
+Select the same Apple Developer team for both watch targets, add the App Groups capability to both, and regenerate their provisioning profiles. The watch app is intentionally dependent on the iPhone app and does not declare `WKWatchOnly`.
+
+## Apple Watch companion behavior
+
+The watch is a fast companion surface, not an independent data store. It receives a versioned, profile-scoped state snapshot from the iPhone using WatchConnectivity and caches that snapshot in the shared App Group for offline UI and complications. The snapshot contains only active profiles, the selected profile, one active timer, a sleep prediction when available, today metrics, up to six favorites, and the watch-safe action catalog.
+
+Child smart-favorite defaults are Sleep, Nursing, Feed, Diaper, Pumping, and Tummy Time. Dog defaults are Food, Water, Potty, Walk, Treat, and Rest. The iPhone's ranked quick actions replace those defaults when matching watch-safe actions are available. Settings > Apple Watch can instead store a custom ordered selection of up to six actions for each profile. Hidden care categories remain hidden on the watch. All Actions adds less frequent watch-safe timers and quick logs, including child potty plus Tummy Time, Story Time, Brush Teeth, Indoor Play, Outdoor Play, Screen Time, and Bath timers, and a Dog Grooming timer. Sleep includes Nap, Night Sleep, and Night Waking choices; Feed includes Bottle and Other. Solids remain iPhone-only because selecting at least one food is required. Detailed editors such as medicine, temperature, growth, and custom notes also remain on the iPhone so the Watch cannot silently create incomplete records.
+
+Settings > Apple Watch reports pairing, companion installation, the last confirmed Watch contact, whether the latest state revision has been received, and whether an immediate foreground connection happens to be available. `isReachable` is presented only as `Connected now`; it is not treated as sync health because normal background delivery does not require live reachability. **Send Latest State** queues a fresh profile, favorites, timer, prediction, and summary snapshot. Whenever the companion accepts an authoritative state, it returns the revision through its latest-only application context so the iPhone can distinguish an update that is merely queued from one the Watch has actually received.
+
+Every watch mutation is a versioned, uniquely identified command containing its profile, the watch tap time, time zone, and expected timer revision when applicable. The watch immediately applies an optimistic local update, writes the command to a durable outbox, and shows a pending-sync status. It first attempts an interactive message and falls back to background user-info transfer. The iPhone de-duplicates commands, rejects expired or stale timer mutations, applies them through the existing event mutation/timer services, saves SwiftData, and returns both an acknowledgement and refreshed state. Rejected commands restore the authoritative iPhone state and show an error on the watch.
+
+Commands retain their Watch tap order across both interactive and background delivery, so a rapid sequence such as switch side, pause, then save cannot overtake itself. Pull to refresh requests a fresh iPhone snapshot when the phone is reachable. Ordinary iPhone event edits, profile switches, favorite changes, and category-visibility changes also publish through the same content-deduplicated state channel, avoiding redundant transfers and complication reloads when nothing visible changed.
+
+`Pause` pauses the active timer and leaves it as a draft. A paused draft can be resumed, saved, or discarded after confirmation. `Save` stops and saves in one iPhone-side mutation using the exact watch tap time. Resume, discard, and nursing-side switching use the same stale-revision protection. The nursing timer card shows a live total plus independent Left and Right totals; switching banks the current side before the other side begins counting. Quick logs and timer starts carry a watch-generated event identifier so retrying an offline command cannot create a second event.
+
+Watch complications are read-only cached surfaces. They never open or write the SwiftData store. Their timelines refresh when the companion receives authoritative state and otherwise age naturally until the next WatchConnectivity delivery.
+
+Watch validation requires both an iPhone and paired Apple Watch signed with profiles that contain the shared App Group. Verify immediate reachable actions, several offline queued actions followed by reconnection, duplicate delivery, profile switching, Stop versus Stop & Save, nursing-side switching, stale timer rejection after an iPhone edit, complication refresh, and app relaunch with a non-empty outbox. Simulator builds require an installed watchOS simulator runtime in addition to the watchOS SDK.
 
 ## Action behavior
 

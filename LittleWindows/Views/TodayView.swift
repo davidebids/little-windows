@@ -2405,6 +2405,7 @@ struct TodayView: View {
             prediction: prediction,
             solidsState: solidsProfileStates.first { $0.profileID == profile?.id }
         )
+        WatchConnectivityService.shared.publishCurrentState()
     }
 
     private func scheduleRenderStateRefresh() {

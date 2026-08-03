@@ -191,6 +191,8 @@ final class ProfileService: ObservableObject {
     func switchProfile(_ profile: CareProfile) {
         selectedProfileID = profile.id
         UserDefaults.standard.set(profile.id.uuidString, forKey: selectedProfileKey)
+        WatchConnectivityService.shared.publishCurrentState()
+        SystemIntegrationReconciler.requestReconciliation()
     }
 
     func switchProfile(id: UUID, profiles: [CareProfile]) {
