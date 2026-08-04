@@ -168,6 +168,38 @@ final class WatchCompanionProtocolTests: XCTestCase {
         XCTAssertEqual(calendar.component(.second, from: second), 0)
     }
 
+    func testQuickBackdatedStartUsesMinutesAgoAndClampsToWatchRange() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 10_020)
+
+        let fiveMinutesAgo = WatchTimerStartPolicy.quickBackdatedStart(
+            minutesAgo: 5,
+            now: now,
+            calendar: calendar
+        )
+        let sixMinutesAgo = WatchTimerStartPolicy.quickBackdatedStart(
+            minutesAgo: 6,
+            now: now,
+            calendar: calendar
+        )
+        let belowRange = WatchTimerStartPolicy.quickBackdatedStart(
+            minutesAgo: 0,
+            now: now,
+            calendar: calendar
+        )
+        let aboveRange = WatchTimerStartPolicy.quickBackdatedStart(
+            minutesAgo: 500,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(fiveMinutesAgo.timeIntervalSince(now), -300, accuracy: 0.001)
+        XCTAssertEqual(sixMinutesAgo.timeIntervalSince(fiveMinutesAgo), -60, accuracy: 0.001)
+        XCTAssertEqual(belowRange.timeIntervalSince(now), -60, accuracy: 0.001)
+        XCTAssertEqual(aboveRange.timeIntervalSince(now), -7_200, accuracy: 0.001)
+    }
+
     func testDiscardCommandRoundTrip() throws {
         let command = WatchCommand(
             kind: .discardTimer,

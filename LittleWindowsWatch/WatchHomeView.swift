@@ -363,18 +363,11 @@ private struct WatchTimerStartView: View {
 
     @State private var selectedOptionID: String
     @State private var startMode = WatchTimerStartMode.now
-    @State private var manualStartDate: Date
-    @State private var referenceNow: Date
+    @State private var minutesAgo = 5
 
     init(action: WatchActionSnapshot) {
         self.action = action
-        let now = Date()
         _selectedOptionID = State(initialValue: action.options.first?.id ?? "")
-        _manualStartDate = State(initialValue: WatchTimerStartPolicy.normalizedManualStart(
-            now.addingTimeInterval(-60),
-            now: now
-        ))
-        _referenceNow = State(initialValue: now)
     }
 
     var body: some View {
@@ -391,22 +384,78 @@ private struct WatchTimerStartView: View {
             }
 
             Section("Start time") {
-                Picker("When", selection: $startMode) {
+                HStack(spacing: 6) {
                     ForEach(WatchTimerStartMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Button {
+                            startMode = mode
+                        } label: {
+                            Text(mode.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 7)
+                                .background(
+                                    startMode == mode
+                                        ? WatchTint.color(action.tintName).opacity(0.28)
+                                        : WatchTheme.surface,
+                                    in: Capsule()
+                                )
+                                .overlay {
+                                    Capsule()
+                                        .stroke(
+                                            startMode == mode
+                                                ? WatchTint.color(action.tintName).opacity(0.7)
+                                                : Color.secondary.opacity(0.2),
+                                            lineWidth: 0.75
+                                        )
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(
+                            startMode == mode ? .isSelected : []
+                        )
                     }
                 }
 
                 if startMode == .earlier {
-                    DatePicker(
-                        "Started",
-                        selection: $manualStartDate,
-                        in: WatchTimerStartPolicy.selectableRange(now: referenceNow),
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
-                    Text("Adjust the start time in one-minute increments.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    VStack(spacing: 2) {
+                        Text("How many minutes ago?")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Minutes ago", selection: $minutesAgo) {
+                            ForEach(
+                                WatchTimerStartPolicy.quickBackdateMinuteRange,
+                                id: \.self
+                            ) { minute in
+                                Text("\(minute) min ago").tag(minute)
+                            }
+                        }
+                        .pickerStyle(.wheel)
+                        .labelsHidden()
+                        .accessibilityLabel("Minutes ago")
+
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            HStack(spacing: 4) {
+                                Text("Starts at")
+                                    .foregroundStyle(.secondary)
+                                Text(
+                                    WatchTimerStartPolicy.quickBackdatedStart(
+                                        minutesAgo: minutesAgo,
+                                        now: context.date
+                                    ),
+                                    format: .dateTime.hour().minute()
+                                )
+                                .foregroundStyle(WatchTint.color(action.tintName))
+                            }
+                            .font(.caption.weight(.semibold))
+                        }
+
+                        Text("Turn the Digital Crown • 1-minute steps")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
                 }
             }
 
@@ -415,10 +464,14 @@ private struct WatchTimerStartView: View {
                     startTimer()
                 } label: {
                     Label(
-                        startMode == .now ? "Start Now" : "Start Timer",
+                        startMode == .now
+                            ? "Start Now"
+                            : "Start \(minutesAgo) min ago",
                         systemImage: "play.fill"
                     )
                     .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .frame(maxWidth: .infinity)
                 }
                 .tint(WatchTint.color(action.tintName))
@@ -431,8 +484,8 @@ private struct WatchTimerStartView: View {
     private func startTimer() {
         let optionID = selectedOptionID.isEmpty ? nil : selectedOptionID
         let timerStartDate = startMode == .earlier
-            ? WatchTimerStartPolicy.normalizedManualStart(
-                manualStartDate,
+            ? WatchTimerStartPolicy.quickBackdatedStart(
+                minutesAgo: minutesAgo,
                 now: Date()
             )
             : nil
