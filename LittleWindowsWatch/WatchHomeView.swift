@@ -363,11 +363,16 @@ private struct WatchTimerStartView: View {
 
     @State private var selectedOptionID: String
     @State private var startMode = WatchTimerStartMode.now
-    @State private var minutesAgo = 5
+    @State private var manualStartTime: Date
 
     init(action: WatchActionSnapshot) {
         self.action = action
+        let now = Date()
         _selectedOptionID = State(initialValue: action.options.first?.id ?? "")
+        _manualStartTime = State(initialValue: WatchTimerStartPolicy.normalizedManualStart(
+            now.addingTimeInterval(-5 * 60),
+            now: now
+        ))
     }
 
     var body: some View {
@@ -387,6 +392,13 @@ private struct WatchTimerStartView: View {
                 HStack(spacing: 6) {
                     ForEach(WatchTimerStartMode.allCases) { mode in
                         Button {
+                            if mode == .earlier, startMode != .earlier {
+                                let now = Date()
+                                manualStartTime = WatchTimerStartPolicy.normalizedManualStart(
+                                    now.addingTimeInterval(-5 * 60),
+                                    now: now
+                                )
+                            }
                             startMode = mode
                         } label: {
                             Text(mode.title)
@@ -418,44 +430,16 @@ private struct WatchTimerStartView: View {
                 }
 
                 if startMode == .earlier {
-                    VStack(spacing: 2) {
-                        Text("How many minutes ago?")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    DatePicker(
+                        "Started at",
+                        selection: $manualStartTime,
+                        displayedComponents: [.hourAndMinute]
+                    )
+                    .accessibilityHint("Choose the timer start time")
 
-                        Picker("Minutes ago", selection: $minutesAgo) {
-                            ForEach(
-                                WatchTimerStartPolicy.quickBackdateMinuteRange,
-                                id: \.self
-                            ) { minute in
-                                Text("\(minute) min ago").tag(minute)
-                            }
-                        }
-                        .pickerStyle(.wheel)
-                        .labelsHidden()
-                        .accessibilityLabel("Minutes ago")
-
-                        TimelineView(.periodic(from: .now, by: 30)) { context in
-                            HStack(spacing: 4) {
-                                Text("Starts at")
-                                    .foregroundStyle(.secondary)
-                                Text(
-                                    WatchTimerStartPolicy.quickBackdatedStart(
-                                        minutesAgo: minutesAgo,
-                                        now: context.date
-                                    ),
-                                    format: .dateTime.hour().minute()
-                                )
-                                .foregroundStyle(WatchTint.color(action.tintName))
-                            }
-                            .font(.caption.weight(.semibold))
-                        }
-
-                        Text("Turn the Digital Crown • 1-minute steps")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
+                    Text("Set the exact time • 1-minute steps")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -466,7 +450,7 @@ private struct WatchTimerStartView: View {
                     Label(
                         startMode == .now
                             ? "Start Now"
-                            : "Start \(minutesAgo) min ago",
+                            : "Start at \(manualStartLabel)",
                         systemImage: "play.fill"
                     )
                     .font(.headline)
@@ -484,8 +468,8 @@ private struct WatchTimerStartView: View {
     private func startTimer() {
         let optionID = selectedOptionID.isEmpty ? nil : selectedOptionID
         let timerStartDate = startMode == .earlier
-            ? WatchTimerStartPolicy.quickBackdatedStart(
-                minutesAgo: minutesAgo,
+            ? WatchTimerStartPolicy.resolvedTimeOfDayStart(
+                manualStartTime,
                 now: Date()
             )
             : nil
@@ -498,6 +482,10 @@ private struct WatchTimerStartView: View {
         }
         WKInterfaceDevice.current().play(.click)
         dismiss()
+    }
+
+    private var manualStartLabel: String {
+        manualStartTime.formatted(date: .omitted, time: .shortened)
     }
 }
 

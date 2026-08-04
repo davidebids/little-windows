@@ -14,7 +14,6 @@ enum WatchCompanionProtocol {
 
 enum WatchTimerStartPolicy {
     static let maximumBackdate: TimeInterval = 7 * 24 * 60 * 60
-    static let quickBackdateMinuteRange = 1...120
 
     static func selectableRange(
         now: Date,
@@ -34,17 +33,37 @@ enum WatchTimerStartPolicy {
         return min(max(minute, range.lowerBound), range.upperBound)
     }
 
-    static func quickBackdatedStart(
-        minutesAgo: Int,
+    static func resolvedTimeOfDayStart(
+        _ selectedTime: Date,
         now: Date,
         calendar: Calendar = .autoupdatingCurrent
     ) -> Date {
-        let clampedMinutes = min(
-            max(minutesAgo, quickBackdateMinuteRange.lowerBound),
-            quickBackdateMinuteRange.upperBound
+        let selectedComponents = calendar.dateComponents(
+            [.hour, .minute],
+            from: selectedTime
         )
+        guard let hour = selectedComponents.hour,
+              let minute = selectedComponents.minute,
+              let selectedToday = calendar.date(
+                bySettingHour: hour,
+                minute: minute,
+                second: 0,
+                of: now
+              ) else {
+            return normalizedManualStart(selectedTime, now: now, calendar: calendar)
+        }
+        let mostRecentOccurrence: Date
+        if selectedToday <= now.addingTimeInterval(5) {
+            mostRecentOccurrence = selectedToday
+        } else {
+            mostRecentOccurrence = calendar.date(
+                byAdding: .day,
+                value: -1,
+                to: selectedToday
+            ) ?? selectedToday
+        }
         return normalizedManualStart(
-            now.addingTimeInterval(-TimeInterval(clampedMinutes * 60)),
+            mostRecentOccurrence,
             now: now,
             calendar: calendar
         )
