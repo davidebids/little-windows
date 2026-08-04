@@ -128,6 +128,46 @@ final class WatchCompanionProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.kind, .stopAndSaveTimer)
     }
 
+    func testManualTimerStartRoundTripKeepsTapAndStartTimesSeparate() throws {
+        let issuedAt = Date(timeIntervalSince1970: 10_000)
+        let timerStartDate = issuedAt.addingTimeInterval(-17 * 60)
+        let command = WatchCommand(
+            kind: .performAction,
+            profileID: UUID(),
+            eventID: UUID(),
+            actionID: "sleep",
+            optionID: "nap",
+            issuedAt: issuedAt,
+            timerStartDate: timerStartDate
+        )
+
+        let data = try JSONEncoder().encode(command)
+        let decoded = try JSONDecoder().decode(WatchCommand.self, from: data)
+
+        XCTAssertEqual(decoded.issuedAt, issuedAt)
+        XCTAssertEqual(decoded.timerStartDate, timerStartDate)
+    }
+
+    func testManualTimerStartUsesSingleMinutePrecision() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 10_000)
+        let first = WatchTimerStartPolicy.normalizedManualStart(
+            Date(timeIntervalSince1970: 9_125),
+            now: now,
+            calendar: calendar
+        )
+        let second = WatchTimerStartPolicy.normalizedManualStart(
+            Date(timeIntervalSince1970: 9_185),
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(second.timeIntervalSince(first), 60)
+        XCTAssertEqual(calendar.component(.second, from: first), 0)
+        XCTAssertEqual(calendar.component(.second, from: second), 0)
+    }
+
     func testDiscardCommandRoundTrip() throws {
         let command = WatchCommand(
             kind: .discardTimer,

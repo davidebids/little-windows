@@ -14,7 +14,8 @@ final class WatchCompanionTests: XCTestCase {
         try container.mainContext.save()
         ProfileService.shared.switchProfile(profile)
         let eventID = UUID()
-        let issuedAt = Date().addingTimeInterval(-90)
+        let issuedAt = Date()
+        let timerStartDate = issuedAt.addingTimeInterval(-90)
 
         let acknowledgement = await WatchCommandProcessor.process(
             WatchCommand(
@@ -24,6 +25,7 @@ final class WatchCompanionTests: XCTestCase {
                 actionID: "sleep",
                 optionID: "nap",
                 issuedAt: issuedAt,
+                timerStartDate: timerStartDate,
                 timeZoneIdentifier: "America/Los_Angeles"
             ),
             container: container
@@ -34,8 +36,44 @@ final class WatchCompanionTests: XCTestCase {
         XCTAssertEqual(event.profileID, profile.id)
         XCTAssertEqual(event.sleepKind, .nap)
         XCTAssertTrue(event.isTimerRunning)
-        XCTAssertEqual(event.startDate, issuedAt)
+        XCTAssertEqual(event.startDate, timerStartDate)
+        XCTAssertEqual(event.activeTimerSegmentStartDate, timerStartDate)
+        XCTAssertEqual(event.createdAt, issuedAt)
         XCTAssertEqual(event.startTimeZoneIdentifier, "America/Los_Angeles")
+    }
+
+    @MainActor
+    func testWatchRejectsManualTimerStartOlderThanSevenDays() async throws {
+        let container = try makeInMemoryContainer()
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: Date().addingTimeInterval(-180 * 86_400)
+        )
+        container.mainContext.insert(profile)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+        let issuedAt = Date()
+
+        let acknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .performAction,
+                profileID: profile.id,
+                eventID: UUID(),
+                actionID: "sleep",
+                optionID: "nap",
+                issuedAt: issuedAt,
+                timerStartDate: issuedAt.addingTimeInterval(
+                    -WatchTimerStartPolicy.maximumBackdate - 60
+                )
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(acknowledgement.status, .rejected)
+        XCTAssertEqual(
+            acknowledgement.message,
+            "Choose a start time within the previous seven days."
+        )
     }
 
     @MainActor

@@ -109,6 +109,9 @@ enum WatchCommandProcessor {
               ).first(where: { $0.id == actionID }) else {
             return .rejected("That action is not available for this profile.")
         }
+        guard command.timerStartDate == nil || action.startsTimer else {
+            return .rejected("A custom start time is only available for timers.")
+        }
         let hiddenTypes = CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)
         guard !hiddenTypes.contains(where: { $0.rawValue == action.categoryRawValue }) else {
             return .rejected("That care category is hidden on the iPhone.")
@@ -225,6 +228,13 @@ enum WatchCommandProcessor {
         activityType: ActivityType? = nil,
         context: ModelContext
     ) -> MutationOutcome {
+        let timerStartDate = command.timerStartDate ?? command.issuedAt
+        guard WatchTimerStartPolicy.isValid(
+            startDate: timerStartDate,
+            issuedAt: command.issuedAt
+        ) else {
+            return .rejected("Choose a start time within the previous seven days.")
+        }
         let events = fetchActiveEvents(profileID: profile.id, context: context)
         guard let event = EventMutationService.startTimer(
             type: type,
@@ -244,8 +254,8 @@ enum WatchCommandProcessor {
         }
         event.createdAt = command.issuedAt
         event.updatedAt = command.issuedAt
-        event.startDate = command.issuedAt
-        event.activeTimerSegmentStartDate = command.issuedAt
+        event.startDate = timerStartDate
+        event.activeTimerSegmentStartDate = timerStartDate
         event.startTimeZoneIdentifier = validTimeZoneIdentifier(command.timeZoneIdentifier)
         return .applied
     }

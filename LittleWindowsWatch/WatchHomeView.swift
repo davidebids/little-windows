@@ -278,7 +278,13 @@ private struct WatchActionTile: View {
 
     var body: some View {
         Group {
-            if action.requiresChoice {
+            if action.startsTimer {
+                NavigationLink {
+                    WatchTimerStartView(action: action)
+                } label: {
+                    label
+                }
+            } else if action.requiresChoice {
                 NavigationLink {
                     WatchActionOptionsView(action: action)
                 } label: {
@@ -335,6 +341,113 @@ private struct WatchActionTile: View {
     private var tint: Color { WatchTint.color(action.tintName) }
 }
 
+private enum WatchTimerStartMode: String, CaseIterable, Identifiable {
+    case now
+    case earlier
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .now: "Now"
+        case .earlier: "Earlier"
+        }
+    }
+}
+
+private struct WatchTimerStartView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var connectivity: WatchConnectivityClient
+
+    let action: WatchActionSnapshot
+
+    @State private var selectedOptionID: String
+    @State private var startMode = WatchTimerStartMode.now
+    @State private var manualStartDate: Date
+    @State private var referenceNow: Date
+
+    init(action: WatchActionSnapshot) {
+        self.action = action
+        let now = Date()
+        _selectedOptionID = State(initialValue: action.options.first?.id ?? "")
+        _manualStartDate = State(initialValue: WatchTimerStartPolicy.normalizedManualStart(
+            now.addingTimeInterval(-60),
+            now: now
+        ))
+        _referenceNow = State(initialValue: now)
+    }
+
+    var body: some View {
+        List {
+            if action.requiresChoice {
+                Section(action.id == "nursing" ? "Side" : "Type") {
+                    Picker("Choice", selection: $selectedOptionID) {
+                        ForEach(action.options) { option in
+                            Label(option.title, systemImage: option.systemImage)
+                                .tag(option.id)
+                        }
+                    }
+                }
+            }
+
+            Section("Start time") {
+                Picker("When", selection: $startMode) {
+                    ForEach(WatchTimerStartMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+
+                if startMode == .earlier {
+                    DatePicker(
+                        "Started",
+                        selection: $manualStartDate,
+                        in: WatchTimerStartPolicy.selectableRange(now: referenceNow),
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    Text("Adjust the start time in one-minute increments.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button {
+                    startTimer()
+                } label: {
+                    Label(
+                        startMode == .now ? "Start Now" : "Start Timer",
+                        systemImage: "play.fill"
+                    )
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                }
+                .tint(WatchTint.color(action.tintName))
+                .disabled(action.requiresChoice && selectedOptionID.isEmpty)
+            }
+        }
+        .navigationTitle(action.title)
+    }
+
+    private func startTimer() {
+        let optionID = selectedOptionID.isEmpty ? nil : selectedOptionID
+        let timerStartDate = startMode == .earlier
+            ? WatchTimerStartPolicy.normalizedManualStart(
+                manualStartDate,
+                now: Date()
+            )
+            : nil
+        guard connectivity.perform(
+            action,
+            optionID: optionID,
+            timerStartDate: timerStartDate
+        ) else {
+            return
+        }
+        WKInterfaceDevice.current().play(.click)
+        dismiss()
+    }
+}
+
 private struct WatchActionOptionsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var connectivity: WatchConnectivityClient
@@ -366,7 +479,7 @@ private struct WatchAllActionsView: View {
     let actions: [WatchActionSnapshot]
 
     private var timers: [WatchActionSnapshot] {
-        actions.filter { $0.subtitle == "Timer" || $0.id == "nursing" || $0.id == "sleep" }
+        actions.filter(\.startsTimer)
     }
 
     private var quickLogs: [WatchActionSnapshot] {
@@ -396,7 +509,13 @@ private struct WatchActionRow: View {
 
     var body: some View {
         Group {
-            if action.requiresChoice {
+            if action.startsTimer {
+                NavigationLink {
+                    WatchTimerStartView(action: action)
+                } label: {
+                    rowLabel
+                }
+            } else if action.requiresChoice {
                 NavigationLink {
                     WatchActionOptionsView(action: action)
                 } label: {

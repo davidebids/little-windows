@@ -1,7 +1,7 @@
 import Foundation
 
 enum WatchCompanionProtocol {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
     static let appGroupIdentifier = "group.com.debidia.LittleWindows"
     static let stateFilename = "watch-companion-state.json"
     static let outboxFilename = "watch-companion-outbox.json"
@@ -10,6 +10,40 @@ enum WatchCompanionProtocol {
     static let commandMessageKey = "watchCommand"
     static let acknowledgementMessageKey = "watchAcknowledgement"
     static let stateReceiptMessageKey = "watchStateReceipt"
+}
+
+enum WatchTimerStartPolicy {
+    static let maximumBackdate: TimeInterval = 7 * 24 * 60 * 60
+
+    static func selectableRange(
+        now: Date,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> ClosedRange<Date> {
+        let latest = startOfMinute(now, calendar: calendar)
+        return latest.addingTimeInterval(-maximumBackdate)...latest
+    }
+
+    static func normalizedManualStart(
+        _ proposedDate: Date,
+        now: Date,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Date {
+        let range = selectableRange(now: now, calendar: calendar)
+        let minute = startOfMinute(proposedDate, calendar: calendar)
+        return min(max(minute, range.lowerBound), range.upperBound)
+    }
+
+    static func isValid(startDate: Date, issuedAt: Date) -> Bool {
+        startDate <= issuedAt.addingTimeInterval(5)
+            && startDate >= issuedAt.addingTimeInterval(-maximumBackdate)
+    }
+
+    private static func startOfMinute(
+        _ date: Date,
+        calendar: Calendar
+    ) -> Date {
+        calendar.dateInterval(of: .minute, for: date)?.start ?? date
+    }
 }
 
 struct WatchStateReceipt: Codable, Hashable {
@@ -205,6 +239,7 @@ struct WatchCommand: Codable, Hashable, Identifiable {
     var actionID: String?
     var optionID: String?
     var issuedAt: Date
+    var timerStartDate: Date?
     var timeZoneIdentifier: String
     var expectedEventUpdatedAt: Date?
 
@@ -217,6 +252,7 @@ struct WatchCommand: Codable, Hashable, Identifiable {
         actionID: String? = nil,
         optionID: String? = nil,
         issuedAt: Date = Date(),
+        timerStartDate: Date? = nil,
         timeZoneIdentifier: String = TimeZone.autoupdatingCurrent.identifier,
         expectedEventUpdatedAt: Date? = nil
     ) {
@@ -228,6 +264,7 @@ struct WatchCommand: Codable, Hashable, Identifiable {
         self.actionID = actionID
         self.optionID = optionID
         self.issuedAt = issuedAt
+        self.timerStartDate = timerStartDate
         self.timeZoneIdentifier = timeZoneIdentifier
         self.expectedEventUpdatedAt = expectedEventUpdatedAt
     }

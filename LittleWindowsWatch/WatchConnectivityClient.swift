@@ -68,7 +68,11 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
     }
 
     @discardableResult
-    func perform(_ action: WatchActionSnapshot, optionID: String? = nil) -> Bool {
+    func perform(
+        _ action: WatchActionSnapshot,
+        optionID: String? = nil,
+        timerStartDate: Date? = nil
+    ) -> Bool {
         guard let profileID = state.selectedProfileID else { return false }
         let eventID = UUID()
         let command = WatchCommand(
@@ -76,7 +80,8 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
             profileID: profileID,
             eventID: eventID,
             actionID: action.id,
-            optionID: optionID
+            optionID: optionID,
+            timerStartDate: timerStartDate
         )
         applyOptimistic(command, action: action)
         submit(command)
@@ -377,20 +382,21 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
         case .performAction:
             guard let action, timerActionIDs.contains(action.id),
                   let eventID = command.eventID else { break }
+            let timerStartDate = command.timerStartDate ?? command.issuedAt
             let optionTitle = action.options.first { $0.id == command.optionID }?.title
             optimisticState.activeTimer = WatchTimerSnapshot(
                 id: eventID,
                 profileID: command.profileID,
                 title: optionTitle.map { "\(action.title): \($0)" } ?? action.title,
                 systemImage: action.systemImage,
-                displayStartDate: command.issuedAt,
+                displayStartDate: timerStartDate,
                 isRunning: true,
                 elapsedSeconds: 0,
                 activeNursingSideRawValue: action.id == "nursing" ? command.optionID : nil,
                 leftDurationSeconds: 0,
                 rightDurationSeconds: 0,
                 updatedAt: command.issuedAt,
-                elapsedReferenceDate: command.issuedAt
+                elapsedReferenceDate: timerStartDate
             )
             optimisticState.favoriteActions.removeAll {
                 $0.startsTimer && $0.categoryRawValue == action.categoryRawValue
