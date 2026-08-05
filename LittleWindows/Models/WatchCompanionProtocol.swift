@@ -1,7 +1,7 @@
 import Foundation
 
 enum WatchCompanionProtocol {
-    static let schemaVersion = 2
+    static let schemaVersion = 3
     static let appGroupIdentifier = "group.com.debidia.LittleWindows"
     static let stateFilename = "watch-companion-state.json"
     static let outboxFilename = "watch-companion-outbox.json"
@@ -14,6 +14,7 @@ enum WatchCompanionProtocol {
 
 enum WatchTimerStartPolicy {
     static let maximumBackdate: TimeInterval = 7 * 24 * 60 * 60
+    static let maximumTimeOfDayLookback: TimeInterval = 12 * 60 * 60
 
     static func selectableRange(
         now: Date,
@@ -67,6 +68,24 @@ enum WatchTimerStartPolicy {
             now: now,
             calendar: calendar
         )
+    }
+
+    static func validatedTimeOfDayStart(
+        _ selectedTime: Date,
+        now: Date,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Date? {
+        let resolvedStart = resolvedTimeOfDayStart(
+            selectedTime,
+            now: now,
+            calendar: calendar
+        )
+        let lookback = now.timeIntervalSince(resolvedStart)
+        guard lookback >= -5,
+              lookback <= maximumTimeOfDayLookback else {
+            return nil
+        }
+        return resolvedStart
     }
 
     static func isValid(startDate: Date, issuedAt: Date) -> Bool {
@@ -201,7 +220,7 @@ struct WatchCompanionState: Codable, Hashable {
     var revision: UUID
     var selectedProfileID: UUID?
     var profiles: [WatchProfileSnapshot]
-    var activeTimer: WatchTimerSnapshot?
+    var activeTimers: [WatchTimerSnapshot]
     var prediction: WatchPredictionSnapshot?
     var todayMetrics: [WatchMetricSnapshot]
     var favoriteActions: [WatchActionSnapshot]
@@ -213,7 +232,7 @@ struct WatchCompanionState: Codable, Hashable {
         revision: UUID(),
         selectedProfileID: nil,
         profiles: [],
-        activeTimer: nil,
+        activeTimers: [],
         prediction: nil,
         todayMetrics: [],
         favoriteActions: [],

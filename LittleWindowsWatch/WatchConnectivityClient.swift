@@ -88,12 +88,13 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
         return true
     }
 
-    func stopTimer(save: Bool) {
-        guard let profileID = state.selectedProfileID,
-              let timer = state.activeTimer else { return }
+    func stopTimer(_ timerID: UUID, save: Bool) {
+        guard let timer = state.activeTimers.first(where: { $0.id == timerID }) else {
+            return
+        }
         let command = WatchCommand(
             kind: save ? .stopAndSaveTimer : .stopTimer,
-            profileID: profileID,
+            profileID: timer.profileID,
             eventID: timer.id,
             expectedEventUpdatedAt: timer.updatedAt
         )
@@ -101,12 +102,13 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
         submit(command)
     }
 
-    func resumeTimer() {
-        guard let profileID = state.selectedProfileID,
-              let timer = state.activeTimer else { return }
+    func resumeTimer(_ timerID: UUID) {
+        guard let timer = state.activeTimers.first(where: { $0.id == timerID }) else {
+            return
+        }
         let command = WatchCommand(
             kind: .resumeTimer,
-            profileID: profileID,
+            profileID: timer.profileID,
             eventID: timer.id,
             expectedEventUpdatedAt: timer.updatedAt
         )
@@ -114,13 +116,12 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
         submit(command)
     }
 
-    func discardTimer() {
-        guard let profileID = state.selectedProfileID,
-              let timer = state.activeTimer,
+    func discardTimer(_ timerID: UUID) {
+        guard let timer = state.activeTimers.first(where: { $0.id == timerID }),
               !timer.isRunning else { return }
         let command = WatchCommand(
             kind: .discardTimer,
-            profileID: profileID,
+            profileID: timer.profileID,
             eventID: timer.id,
             expectedEventUpdatedAt: timer.updatedAt
         )
@@ -128,13 +129,15 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
         submit(command)
     }
 
-    func switchNursingSide() {
-        guard let profileID = state.selectedProfileID,
-              let timer = state.activeTimer else { return }
+    func selectNursingSide(_ sideRawValue: String, timerID: UUID) {
+        guard let timer = state.activeTimers.first(where: { $0.id == timerID }),
+              ["left", "right"].contains(sideRawValue),
+              timer.activeNursingSideRawValue != sideRawValue else { return }
         let command = WatchCommand(
             kind: .switchNursingSide,
-            profileID: profileID,
+            profileID: timer.profileID,
             eventID: timer.id,
+            optionID: sideRawValue,
             expectedEventUpdatedAt: timer.updatedAt
         )
         applyOptimistic(command, action: nil)
@@ -384,7 +387,7 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
                   let eventID = command.eventID else { break }
             let timerStartDate = command.timerStartDate ?? command.issuedAt
             let optionTitle = action.options.first { $0.id == command.optionID }?.title
-            optimisticState.activeTimer = WatchTimerSnapshot(
+            let timer = WatchTimerSnapshot(
                 id: eventID,
                 profileID: command.profileID,
                 title: optionTitle.map { "\(action.title): \($0)" } ?? action.title,
@@ -398,6 +401,8 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
                 updatedAt: command.issuedAt,
                 elapsedReferenceDate: timerStartDate
             )
+            optimisticState.activeTimers.removeAll { $0.id == eventID }
+            optimisticState.activeTimers.insert(timer, at: 0)
             optimisticState.favoriteActions.removeAll {
                 $0.startsTimer && $0.categoryRawValue == action.categoryRawValue
             }
@@ -405,29 +410,48 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
                 $0.startsTimer && $0.categoryRawValue == action.categoryRawValue
             }
         case .stopTimer:
-            if var timer = optimisticState.activeTimer {
+            if let eventID = command.eventID,
+               let index = optimisticState.activeTimers.firstIndex(where: {
+                   $0.id == eventID
+               }) {
+                var timer = optimisticState.activeTimers[index]
                 timer.accrueLiveDurations(at: command.issuedAt)
                 timer.isRunning = false
                 timer.updatedAt = command.issuedAt
-                optimisticState.activeTimer = timer
+                optimisticState.activeTimers[index] = timer
             }
         case .stopAndSaveTimer, .discardTimer:
-            optimisticState.activeTimer = nil
+            if let eventID = command.eventID {
+                optimisticState.activeTimers.removeAll { $0.id == eventID }
+            }
         case .resumeTimer:
-            if var timer = optimisticState.activeTimer {
+            if let eventID = command.eventID,
+               let index = optimisticState.activeTimers.firstIndex(where: {
+                   $0.id == eventID
+               }) {
+                var timer = optimisticState.activeTimers[index]
                 timer.isRunning = true
                 timer.updatedAt = command.issuedAt
                 timer.elapsedReferenceDate = command.issuedAt
-                optimisticState.activeTimer = timer
+                optimisticState.activeTimers[index] = timer
             }
         case .switchNursingSide:
-            if var timer = optimisticState.activeTimer {
+            if let eventID = command.eventID,
+               let index = optimisticState.activeTimers.firstIndex(where: {
+                   $0.id == eventID
+               }) {
+                var timer = optimisticState.activeTimers[index]
                 timer.accrueLiveDurations(at: command.issuedAt)
-                timer.activeNursingSideRawValue = timer.activeNursingSideRawValue == "left"
-                    ? "right"
-                    : "left"
+                if let requestedSide = command.optionID,
+                   ["left", "right"].contains(requestedSide) {
+                    timer.activeNursingSideRawValue = requestedSide
+                } else {
+                    timer.activeNursingSideRawValue = timer.activeNursingSideRawValue == "left"
+                        ? "right"
+                        : "left"
+                }
                 timer.updatedAt = command.issuedAt
-                optimisticState.activeTimer = timer
+                optimisticState.activeTimers[index] = timer
             }
         case .selectProfile:
             optimisticState.selectedProfileID = command.profileID
@@ -447,7 +471,7 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
                 }
                 optimisticState.favoriteActions = Array(actions.prefix(6))
                 optimisticState.allActions = actions
-                optimisticState.activeTimer = nil
+                optimisticState.activeTimers = []
                 optimisticState.prediction = nil
                 optimisticState.todayMetrics = []
             }

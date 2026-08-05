@@ -95,6 +95,47 @@ final class WatchCompanionProtocolTests: XCTestCase {
         XCTAssertLessThan(encoded.count, 64 * 1_024)
     }
 
+    func testTransportSnapshotRoundTripsMultipleActiveTimers() throws {
+        let profileID = UUID()
+        var state = WatchCompanionState.empty
+        state.selectedProfileID = profileID
+        state.activeTimers = [
+            WatchTimerSnapshot(
+                id: UUID(),
+                profileID: profileID,
+                title: "Sleep",
+                systemImage: "moon.fill",
+                displayStartDate: Date(timeIntervalSince1970: 700),
+                isRunning: true,
+                elapsedSeconds: 300,
+                activeNursingSideRawValue: nil,
+                leftDurationSeconds: 0,
+                rightDurationSeconds: 0,
+                updatedAt: Date(timeIntervalSince1970: 1_000),
+                elapsedReferenceDate: Date(timeIntervalSince1970: 1_000)
+            ),
+            WatchTimerSnapshot(
+                id: UUID(),
+                profileID: profileID,
+                title: "Nursing",
+                systemImage: "figure.and.child.holdinghands",
+                displayStartDate: Date(timeIntervalSince1970: 800),
+                isRunning: false,
+                elapsedSeconds: 180,
+                activeNursingSideRawValue: "left",
+                leftDurationSeconds: 120,
+                rightDurationSeconds: 60,
+                updatedAt: Date(timeIntervalSince1970: 980),
+                elapsedReferenceDate: Date(timeIntervalSince1970: 980)
+            )
+        ]
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(WatchCompanionState.self, from: data)
+
+        XCTAssertEqual(decoded.activeTimers, state.activeTimers)
+    }
+
     func testLiveTimerTimelineAdvancesEachMinuteWithoutRefreshingOtherWidgets() {
         let start = Date(timeIntervalSince1970: 1_000)
         let liveDates = WatchCompanionTimeline.entryDates(
@@ -203,6 +244,35 @@ final class WatchCompanionProtocolTests: XCTestCase {
         XCTAssertEqual(calendar.component(.second, from: result), 0)
     }
 
+    func testValidatedTimeOfDayStartRejectsFutureTime() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(
+            from: DateComponents(
+                year: 2026,
+                month: 8,
+                day: 4,
+                hour: 9,
+                minute: 0
+            )
+        )!
+        let selectedTime = calendar.date(
+            from: DateComponents(
+                year: 2026,
+                month: 8,
+                day: 4,
+                hour: 9,
+                minute: 1
+            )
+        )!
+
+        XCTAssertNil(WatchTimerStartPolicy.validatedTimeOfDayStart(
+            selectedTime,
+            now: now,
+            calendar: calendar
+        ))
+    }
+
     func testTimeOfDayStartUsesPreviousDayAcrossMidnight() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -230,8 +300,14 @@ final class WatchCompanionProtocolTests: XCTestCase {
             now: now,
             calendar: calendar
         )
+        let validatedResult = WatchTimerStartPolicy.validatedTimeOfDayStart(
+            selectedTime,
+            now: now,
+            calendar: calendar
+        )
 
         XCTAssertEqual(result.timeIntervalSince(now), -5 * 60, accuracy: 0.001)
+        XCTAssertEqual(validatedResult, result)
     }
 
     func testDiscardCommandRoundTrip() throws {

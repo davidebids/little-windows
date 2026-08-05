@@ -365,7 +365,20 @@ enum WatchCommandProcessor {
             guard event.updatedAt <= command.issuedAt.addingTimeInterval(0.75) else {
                 return .rejected("The nursing timer changed after this action was requested.")
             }
-            EventTimerService.switchNursingSide(event, context: context, at: command.issuedAt)
+            if let requestedSide = command.optionID.flatMap(NursingSide.init(rawValue:)) {
+                EventTimerService.setNursingSide(
+                    event,
+                    to: requestedSide,
+                    context: context,
+                    at: command.issuedAt
+                )
+            } else {
+                EventTimerService.switchNursingSide(
+                    event,
+                    context: context,
+                    at: command.issuedAt
+                )
+            }
         case .selectProfile, .performAction:
             return .rejected("Unsupported timer action.")
         }

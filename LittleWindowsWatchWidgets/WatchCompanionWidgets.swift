@@ -27,7 +27,8 @@ private struct WatchCompanionProvider: TimelineProvider {
         let now = Date()
         let state = WatchSharedStorage.readState()
         let dates = WatchCompanionTimeline.entryDates(
-            timerIsRunning: includesLiveTimerEntries && state.activeTimer?.isRunning == true,
+            timerIsRunning: includesLiveTimerEntries
+                && state.activeTimers.contains(where: \.isRunning),
             from: now
         )
         let entries = dates.map {
@@ -65,7 +66,8 @@ private struct WatchActiveTimerWidgetView: View {
     let entry: WatchCompanionEntry
 
     var body: some View {
-        if let timer = entry.state.activeTimer {
+        if let timer = entry.state.activeTimers.first(where: \.isRunning)
+            ?? entry.state.activeTimers.first {
             switch family {
             case .accessoryCircular:
                 Gauge(value: min(timer.elapsed(at: entry.date), 4 * 60 * 60), in: 0...(4 * 60 * 60)) {

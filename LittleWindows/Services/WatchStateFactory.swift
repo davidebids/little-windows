@@ -69,7 +69,7 @@ enum WatchStateFactory {
                 revision: UUID(),
                 selectedProfileID: nil,
                 profiles: [],
-                activeTimer: nil,
+                activeTimers: [],
                 prediction: nil,
                 todayMetrics: [],
                 favoriteActions: [],
@@ -97,7 +97,7 @@ enum WatchStateFactory {
         )
         activeTimerDescriptor.fetchLimit = 300
         let activeTimerEvents = ((try? context.fetch(activeTimerDescriptor)) ?? [])
-            .filter(\.isTimerDraft)
+            .filter { $0.isTimerDraft && $0.timerStateRawValue != nil }
         var activeTimerCategoriesByProfile: [UUID: Set<String>] = [:]
         for event in activeTimerEvents {
             guard let eventProfileID = event.profileID else { continue }
@@ -138,29 +138,44 @@ enum WatchStateFactory {
             profileID: profileID
         )
 
-        let activeEvent = events.first { event in
-            event.id == freshSnapshot.activeTimer?.id
+        let activeTimers = events.filter {
+            $0.isTimerDraft && $0.timerStateRawValue != nil
         }
-        let activeTimer = activeEvent.map { event in
-            let elapsedReferenceDate = event.isTimerRunning
-                ? (event.activeTimerSegmentStartDate ?? event.startDate)
-                : now
-            return WatchTimerSnapshot(
-                id: event.id,
-                profileID: profileID,
-                title: freshSnapshot.activeTimer?.eventLabel ?? event.displayTitle,
-                systemImage: freshSnapshot.activeTimer?.systemImage
-                    ?? event.type.systemImage(for: selectedProfile.profileType),
-                displayStartDate: event.timerDisplayStartDate(at: now),
-                isRunning: event.isTimerRunning,
-                elapsedSeconds: event.timerElapsed(at: elapsedReferenceDate),
-                activeNursingSideRawValue: event.activeNursingSide?.rawValue,
-                leftDurationSeconds: event.leftDurationSeconds ?? 0,
-                rightDurationSeconds: event.rightDurationSeconds ?? 0,
-                updatedAt: event.updatedAt,
-                elapsedReferenceDate: elapsedReferenceDate
-            )
-        }
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt {
+                    return lhs.createdAt > rhs.createdAt
+                }
+                if lhs.startDate != rhs.startDate {
+                    return lhs.startDate > rhs.startDate
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .map { event in
+                let timer = WidgetSnapshotService.activeSnapshot(
+                    event: event,
+                    profileID: profileID,
+                    babyName: selectedProfile.name,
+                    additionalActiveCount: 0,
+                    now: now
+                )
+                let elapsedReferenceDate = event.isTimerRunning
+                    ? (event.activeTimerSegmentStartDate ?? event.startDate)
+                    : now
+                return WatchTimerSnapshot(
+                    id: event.id,
+                    profileID: profileID,
+                    title: timer.eventLabel,
+                    systemImage: timer.systemImage,
+                    displayStartDate: event.timerDisplayStartDate(at: now),
+                    isRunning: event.isTimerRunning,
+                    elapsedSeconds: event.timerElapsed(at: elapsedReferenceDate),
+                    activeNursingSideRawValue: event.activeNursingSide?.rawValue,
+                    leftDurationSeconds: event.leftDurationSeconds ?? 0,
+                    rightDurationSeconds: event.rightDurationSeconds ?? 0,
+                    updatedAt: event.updatedAt,
+                    elapsedReferenceDate: elapsedReferenceDate
+                )
+            }
         let prediction = priorSnapshot.profileID == profileID
             ? priorSnapshot.prediction.map {
                 WatchPredictionSnapshot(
@@ -206,7 +221,7 @@ enum WatchStateFactory {
                     ).sorted()
                 )
             },
-            activeTimer: activeTimer,
+            activeTimers: activeTimers,
             prediction: currentPrediction,
             todayMetrics: Array(metrics),
             favoriteActions: favoriteActions,

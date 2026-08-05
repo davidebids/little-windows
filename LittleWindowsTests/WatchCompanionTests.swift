@@ -212,7 +212,7 @@ final class WatchCompanionTests: XCTestCase {
 
         XCTAssertEqual(acknowledgement.status, .applied)
         XCTAssertNil(fetchEvent(event.id, context: container.mainContext))
-        XCTAssertNil(acknowledgement.state?.activeTimer)
+        XCTAssertTrue(acknowledgement.state?.activeTimers.isEmpty == true)
         XCTAssertTrue(acknowledgement.state?.allActions.contains {
             $0.id == "sleep"
         } == true)
@@ -389,7 +389,7 @@ final class WatchCompanionTests: XCTestCase {
 
         let state = WatchStateFactory.make(context: container.mainContext)
 
-        XCTAssertNotNil(state.activeTimer)
+        XCTAssertEqual(state.activeTimers.map(\.id), [event.id])
         XCTAssertFalse(state.allActions.contains { $0.id == "nursing" })
         XCTAssertFalse(state.favoriteActions.contains { $0.id == "nursing" })
         XCTAssertTrue(state.allActions.contains { $0.id == "sleep" })
@@ -397,6 +397,158 @@ final class WatchCompanionTests: XCTestCase {
             state.selectedProfile?.activeTimerCategoryRawValues,
             [EventType.nursing.rawValue]
         )
+    }
+
+    @MainActor
+    func testWatchStateIncludesEveryTimerForSelectedProfile() throws {
+        let container = try makeInMemoryContainer()
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: Date().addingTimeInterval(-180 * 86_400)
+        )
+        let otherProfile = BabyProfile(
+            profileType: .dog,
+            name: "Test Dog",
+            birthDate: Date().addingTimeInterval(-500 * 86_400)
+        )
+        let now = Date()
+        let sleep = BabyEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-600),
+            startTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        sleep.timerState = .running
+        sleep.activeTimerSegmentStartDate = sleep.startDate
+        sleep.createdAt = now.addingTimeInterval(-30)
+        sleep.updatedAt = sleep.startDate
+        let nursing = BabyEvent(
+            profileID: profile.id,
+            type: .nursing,
+            startDate: now.addingTimeInterval(-300),
+            startTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        nursing.timerState = .running
+        nursing.activeTimerSegmentStartDate = nursing.startDate
+        nursing.nursingSide = .left
+        nursing.activeNursingSide = .left
+        nursing.leftDurationSeconds = 0
+        nursing.rightDurationSeconds = 0
+        nursing.createdAt = now.addingTimeInterval(-60)
+        nursing.updatedAt = nursing.startDate
+        let otherProfileTimer = BabyEvent(
+            profileID: otherProfile.id,
+            type: .walk,
+            startDate: now.addingTimeInterval(-120),
+            startTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        otherProfileTimer.timerState = .running
+        otherProfileTimer.activeTimerSegmentStartDate = otherProfileTimer.startDate
+        otherProfileTimer.updatedAt = otherProfileTimer.startDate
+        let legacyOpenEndedEvent = BabyEvent(
+            profileID: profile.id,
+            type: .activity,
+            startDate: now.addingTimeInterval(-86_400),
+            startTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        container.mainContext.insert(profile)
+        container.mainContext.insert(otherProfile)
+        container.mainContext.insert(sleep)
+        container.mainContext.insert(nursing)
+        container.mainContext.insert(otherProfileTimer)
+        container.mainContext.insert(legacyOpenEndedEvent)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+
+        let state = WatchStateFactory.make(context: container.mainContext, now: now)
+
+        XCTAssertEqual(Set(state.activeTimers.map(\.id)), Set([sleep.id, nursing.id]))
+        XCTAssertFalse(state.activeTimers.contains { $0.id == otherProfileTimer.id })
+        XCTAssertFalse(state.activeTimers.contains { $0.id == legacyOpenEndedEvent.id })
+        XCTAssertFalse(state.allActions.contains { $0.id == "sleep" })
+        XCTAssertFalse(state.allActions.contains { $0.id == "nursing" })
+        XCTAssertEqual(
+            state.selectedProfile?.activeTimerCategoryRawValues,
+            [EventType.nursing.rawValue, EventType.sleep.rawValue].sorted()
+        )
+    }
+
+    @MainActor
+    func testWatchTimerCommandOnlyMutatesTargetedTimer() async throws {
+        let container = try makeInMemoryContainer()
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: Date().addingTimeInterval(-180 * 86_400)
+        )
+        let stopDate = Date()
+        let sleep = BabyEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: stopDate.addingTimeInterval(-600),
+            startTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        sleep.timerState = .running
+        sleep.activeTimerSegmentStartDate = sleep.startDate
+        sleep.createdAt = stopDate.addingTimeInterval(-30)
+        sleep.updatedAt = sleep.startDate
+        let nursing = BabyEvent(
+            profileID: profile.id,
+            type: .nursing,
+            startDate: stopDate.addingTimeInterval(-300),
+            startTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        nursing.timerState = .running
+        nursing.activeTimerSegmentStartDate = nursing.startDate
+        nursing.nursingSide = .right
+        nursing.activeNursingSide = .right
+        nursing.leftDurationSeconds = 0
+        nursing.rightDurationSeconds = 0
+        nursing.createdAt = stopDate.addingTimeInterval(-60)
+        nursing.updatedAt = nursing.startDate
+        container.mainContext.insert(profile)
+        container.mainContext.insert(sleep)
+        container.mainContext.insert(nursing)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+
+        let acknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .stopTimer,
+                profileID: profile.id,
+                eventID: sleep.id,
+                issuedAt: stopDate,
+                expectedEventUpdatedAt: sleep.updatedAt
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(acknowledgement.status, .applied)
+        XCTAssertFalse(sleep.isTimerRunning)
+        XCTAssertTrue(sleep.isTimerDraft)
+        XCTAssertTrue(nursing.isTimerRunning)
+        let timers = try XCTUnwrap(acknowledgement.state?.activeTimers)
+        XCTAssertEqual(timers.map(\.id), [sleep.id, nursing.id])
+        XCTAssertFalse(try XCTUnwrap(timers.first { $0.id == sleep.id }).isRunning)
+        XCTAssertTrue(try XCTUnwrap(timers.first { $0.id == nursing.id }).isRunning)
+
+        let resumedAcknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .resumeTimer,
+                profileID: profile.id,
+                eventID: sleep.id,
+                issuedAt: stopDate.addingTimeInterval(1),
+                expectedEventUpdatedAt: sleep.updatedAt
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(resumedAcknowledgement.status, .applied)
+        XCTAssertEqual(
+            resumedAcknowledgement.state?.activeTimers.map(\.id),
+            [sleep.id, nursing.id]
+        )
+        XCTAssertTrue(sleep.isTimerRunning)
+        XCTAssertTrue(nursing.isTimerRunning)
     }
 
     @MainActor
@@ -469,7 +621,7 @@ final class WatchCompanionTests: XCTestCase {
             context: container.mainContext,
             now: snapshotDate
         )
-        let timer = try XCTUnwrap(snapshot.activeTimer)
+        let timer = try XCTUnwrap(snapshot.activeTimers.first)
 
         XCTAssertEqual(timer.elapsed(at: snapshotDate), 120, accuracy: 0.01)
         XCTAssertEqual(timer.leftDuration(at: snapshotDate), 120, accuracy: 0.01)
@@ -524,7 +676,7 @@ final class WatchCompanionTests: XCTestCase {
             ),
             container: container
         )
-        let timer = try XCTUnwrap(acknowledgement.state?.activeTimer)
+        let timer = try XCTUnwrap(acknowledgement.state?.activeTimers.first)
         let laterDate = switchDate.addingTimeInterval(20)
 
         XCTAssertEqual(acknowledgement.status, .applied)
@@ -532,6 +684,54 @@ final class WatchCompanionTests: XCTestCase {
         XCTAssertEqual(timer.leftDuration(at: laterDate), 75, accuracy: 0.01)
         XCTAssertEqual(timer.rightDuration(at: laterDate), 20, accuracy: 0.01)
         XCTAssertEqual(timer.elapsed(at: laterDate), 95, accuracy: 0.01)
+    }
+
+    @MainActor
+    func testWatchNursingSideSelectionUsesRequestedSide() async throws {
+        let container = try makeInMemoryContainer()
+        let profile = BabyProfile(
+            name: "Test Child",
+            birthDate: Date().addingTimeInterval(-180 * 86_400)
+        )
+        let startDate = Date().addingTimeInterval(-120)
+        let selectionDate = startDate.addingTimeInterval(75)
+        let event = BabyEvent(
+            profileID: profile.id,
+            type: .nursing,
+            startDate: startDate,
+            startTimeZoneIdentifier: "America/Los_Angeles"
+        )
+        event.timerState = .running
+        event.timerAccumulatedSeconds = 0
+        event.activeTimerSegmentStartDate = startDate
+        event.nursingSide = .left
+        event.activeNursingSide = .left
+        event.leftDurationSeconds = 0
+        event.rightDurationSeconds = 0
+        event.updatedAt = startDate
+        container.mainContext.insert(profile)
+        container.mainContext.insert(event)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+
+        let acknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .switchNursingSide,
+                profileID: profile.id,
+                eventID: event.id,
+                optionID: NursingSide.left.rawValue,
+                issuedAt: selectionDate,
+                expectedEventUpdatedAt: startDate
+            ),
+            container: container
+        )
+        let timer = try XCTUnwrap(acknowledgement.state?.activeTimers.first)
+        let laterDate = selectionDate.addingTimeInterval(20)
+
+        XCTAssertEqual(acknowledgement.status, .applied)
+        XCTAssertEqual(timer.activeNursingSideRawValue, "left")
+        XCTAssertEqual(timer.leftDuration(at: laterDate), 95, accuracy: 0.01)
+        XCTAssertEqual(timer.rightDuration(at: laterDate), 0, accuracy: 0.01)
     }
 
     @MainActor
