@@ -34,6 +34,7 @@ enum IntegrationCommandProcessor {
         Task { @MainActor in
             await LiveActivityManager.shared.updateTimer(timer)
         }
+        WatchConnectivityService.shared.publishCurrentState()
         return true
     }
 

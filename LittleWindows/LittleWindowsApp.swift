@@ -128,6 +128,7 @@ final class PersistenceStartupController: ObservableObject {
         isDataReady = false
         DeepLinkRouter.shared.isDataReady = false
         CloudKitSharingService.install(container: container)
+        WatchConnectivityService.shared.install(container: container)
         IntegrationCommandStore.installInAppHandler { url in
             let processed = await IntegrationCommandProcessor.process(
                 url,

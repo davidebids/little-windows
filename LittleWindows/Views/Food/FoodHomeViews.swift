@@ -100,16 +100,14 @@ struct FoodHomeView: View {
             .navigationDestination(for: FoodRoute.self) { route in
                 destination(for: route, data: data)
             }
-            .task(id: data.version) {
-                if let command = router.pendingFoodCommand {
-                    handle(command, data: data)
-                    router.pendingFoodCommand = nil
-                }
-                retryDeferredFoodCommandIfPossible(data: data)
+            .task(id: router.pendingFoodCommand) {
+                guard let command = router.pendingFoodCommand else { return }
+                await Task.yield()
+                consumePendingFoodCommand(command, data: data)
             }
-            .onReceive(router.$pendingFoodCommand.compactMap { $0 }) { command in
-                handle(command, data: data)
-                router.pendingFoodCommand = nil
+            .task(id: data.version) {
+                await Task.yield()
+                retryDeferredFoodCommandIfPossible(data: data)
             }
             .sheet(isPresented: $showingQuickAdd) {
                 QuickAddShoppingItemView(
@@ -133,10 +131,7 @@ struct FoodHomeView: View {
             FoodHomeSectionPicker(sections: availableSections, selectedSection: selectedSection) { section in
                 guard selectedSection != section else { return }
                 withAnimation(.snappy(duration: 0.24)) {
-                    selectedSection = section
-                    if !path.isEmpty {
-                        path.removeLast(path.count)
-                    }
+                    replaceNavigation(with: section)
                 }
             }
 
@@ -480,8 +475,7 @@ struct FoodHomeView: View {
                     mealPrepItems: data.mealPrepItems,
                     openShoppingMode: { path.append(FoodRoute.shoppingMode(list.id)) },
                     openMealPrep: {
-                        selectedSection = .mealPrep
-                        path.removeLast(path.count)
+                        replaceNavigation(with: .mealPrep)
                     }
                 )
             } else {
@@ -603,8 +597,7 @@ struct FoodHomeView: View {
     ) {
         if section(for: command) == .solids {
             deferredFoodCommand = nil
-            selectedSection = .todos
-            path.removeLast(path.count)
+            replaceNavigation(with: .todos)
             router.openSolids(
                 command,
                 profileID: selectedProfile?.id,
@@ -632,8 +625,7 @@ struct FoodHomeView: View {
            solidsAccessLevel == .readinessPreview,
            command != .solids {
             deferredFoodCommand = nil
-            selectedSection = .solids
-            path.removeLast(path.count)
+            replaceNavigation(with: .solids)
             return
         }
 
@@ -645,12 +637,10 @@ struct FoodHomeView: View {
         switch command {
         case .food:
             deferredFoodCommand = nil
-            selectedSection = .todos
-            path.removeLast(path.count)
+            replaceNavigation(with: .todos)
         case .solids:
             deferredFoodCommand = nil
-            selectedSection = .solids
-            path.removeLast(path.count)
+            replaceNavigation(with: .solids)
         case .solidsDatabase:
             openSolidsRoute(.solidsDatabase)
         case .solidsGuided:
@@ -677,77 +667,79 @@ struct FoodHomeView: View {
             openSolidsRoute(.solidsRecipe(id))
         case .todos:
             deferredFoodCommand = nil
-            selectedSection = .todos
-            path.removeLast(path.count)
+            replaceNavigation(with: .todos)
         case .todoList(let id):
             deferredFoodCommand = nil
-            selectedSection = .todos
-            path.removeLast(path.count)
-            path.append(FoodRoute.todoList(id))
+            replaceNavigation(with: .todos, route: .todoList(id))
         case .shopping:
             deferredFoodCommand = nil
-            selectedSection = .shopping
-            path.removeLast(path.count)
+            replaceNavigation(with: .shopping)
         case .shoppingList(let id):
             deferredFoodCommand = nil
-            selectedSection = .shopping
-            path.removeLast(path.count)
-            path.append(FoodRoute.shoppingList(id))
+            replaceNavigation(with: .shopping, route: .shoppingList(id))
         case .shoppingMode(let id):
             deferredFoodCommand = nil
-            selectedSection = .shopping
-            path.removeLast(path.count)
-            path.append(FoodRoute.shoppingMode(id))
+            replaceNavigation(with: .shopping, route: .shoppingMode(id))
         case .trips:
             deferredFoodCommand = nil
-            selectedSection = .trips
-            path.removeLast(path.count)
+            replaceNavigation(with: .trips)
         case .packingTrip(let id):
             deferredFoodCommand = nil
-            selectedSection = .trips
-            path.removeLast(path.count)
-            path.append(FoodRoute.packingTrip(id))
+            replaceNavigation(with: .trips, route: .packingTrip(id))
         case .itineraryItem(let tripID, let itemID):
             deferredFoodCommand = nil
-            selectedSection = .trips
-            path.removeLast(path.count)
-            path.append(FoodRoute.itineraryItem(tripID, itemID))
+            replaceNavigation(with: .trips, route: .itineraryItem(tripID, itemID))
         case .inventory:
             deferredFoodCommand = nil
-            selectedSection = .inventory
-            path.removeLast(path.count)
+            replaceNavigation(with: .inventory)
         case .inventoryItem(let id):
             deferredFoodCommand = nil
-            selectedSection = .inventory
-            path.removeLast(path.count)
-            path.append(FoodRoute.inventoryItem(id))
+            replaceNavigation(with: .inventory, route: .inventoryItem(id))
         case .mealPrep:
             deferredFoodCommand = nil
-            selectedSection = .mealPrep
-            path.removeLast(path.count)
+            replaceNavigation(with: .mealPrep)
         case .mealPrepItem(let id):
             deferredFoodCommand = nil
-            selectedSection = .mealPrep
-            path.removeLast(path.count)
-            path.append(FoodRoute.mealPrepItem(id))
+            replaceNavigation(with: .mealPrep, route: .mealPrepItem(id))
         case .returns:
             deferredFoodCommand = nil
-            selectedSection = .returns
-            path.removeLast(path.count)
+            replaceNavigation(with: .returns)
         case .returnRequest(let id):
             deferredFoodCommand = nil
-            selectedSection = .returns
-            path.removeLast(path.count)
-            path.append(FoodRoute.returnRequest(id))
+            replaceNavigation(with: .returns, route: .returnRequest(id))
         case .store(let id):
             deferredFoodCommand = nil
-            selectedSection = .stores
-            path.removeLast(path.count)
-            path.append(FoodRoute.store(id))
+            replaceNavigation(with: .stores, route: .store(id))
         case .quickAdd:
             deferredFoodCommand = nil
             selectedSection = .shopping
             showingQuickAdd = true
+        }
+    }
+
+    private func consumePendingFoodCommand(
+        _ expectedCommand: FoodRouteCommand,
+        data: FoodHomeRouteData
+    ) {
+        guard router.pendingFoodCommand == expectedCommand else { return }
+
+        // Clear first so rebuilding the task cannot replay the same command if
+        // handling it causes the view hierarchy to refresh.
+        router.pendingFoodCommand = nil
+        handle(expectedCommand, data: data)
+    }
+
+    private func replaceNavigation(
+        with section: FoodHomeSection,
+        route: FoodRoute? = nil
+    ) {
+        if selectedSection != section {
+            selectedSection = section
+        }
+
+        let replacementPath = route.map { [$0] } ?? []
+        if path != replacementPath {
+            path = replacementPath
         }
     }
 
@@ -794,8 +786,7 @@ struct FoodHomeView: View {
     }
 
     private func deferFoodCommand(_ command: FoodRouteCommand) {
-        selectedSection = section(for: command)
-        path.removeLast(path.count)
+        replaceNavigation(with: section(for: command))
         deferredFoodCommand = command
     }
 
@@ -839,9 +830,7 @@ struct FoodHomeView: View {
 
     private func openSolidsRoute(_ route: FoodRoute) {
         deferredFoodCommand = nil
-        selectedSection = .solids
-        path.removeLast(path.count)
-        path.append(route)
+        replaceNavigation(with: .solids, route: route)
     }
 
     private func handlePendingProfileSwitch() {
@@ -853,8 +842,7 @@ struct FoodHomeView: View {
 
     private func correctUnavailableSolidsRoute() {
         if selectedSection == .solids || path.contains(where: { $0.isSolidsWorkspaceRoute }) {
-            selectedSection = .todos
-            path.removeLast(path.count)
+            replaceNavigation(with: .todos)
         }
     }
 }

@@ -230,6 +230,8 @@ struct SettingsView: View {
 
             SyncSettingsSection()
 
+            WatchSettingsSection(profile: selectedProfile)
+
             Section {
                 NavigationLink {
                     LazySettingsDestination {
@@ -1484,6 +1486,562 @@ private struct FoodReminderSettingsDataView: View {
             mealPrepItems: mealPrepItems,
             returnRequests: returnRequests
         )
+    }
+}
+
+private struct WatchSettingsSection: View {
+    let profile: BabyProfile?
+
+    @State private var status = WatchConnectivityService.shared.statusSnapshot()
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                LazySettingsDestination {
+                    AppleWatchSettingsView()
+                }
+            } label: {
+                LabeledContent {
+                    Text(summary)
+                        .foregroundStyle(summaryTint)
+                } label: {
+                    Label("Apple Watch", systemImage: "applewatch")
+                }
+            }
+        } header: {
+            Text("Apple Watch")
+        } footer: {
+            if let profile {
+                Text("The Watch companion follows the selected profile, currently \(profile.name), and keeps working from its last received snapshot when the iPhone is not immediately reachable.")
+            } else {
+                Text("Add a profile before configuring Watch favorites.")
+            }
+        }
+        .onAppear(perform: refreshStatus)
+        .onReceive(NotificationCenter.default.publisher(
+            for: .watchConnectivityStatusDidChange
+        )) { _ in
+            refreshStatus()
+        }
+    }
+
+    private var summary: String {
+        guard status.isSupported else { return "Unavailable" }
+        guard status.isPaired else { return "Not paired" }
+        guard status.isWatchAppInstalled else { return "Not installed" }
+        guard status.isActivated else { return "Connecting" }
+        if status.isLatestStateConfirmed { return "Ready" }
+        if status.lastStateQueuedAt != nil { return "Syncing" }
+        return "Waiting for first sync"
+    }
+
+    private var summaryTint: Color {
+        guard status.isSupported,
+              status.isPaired,
+              status.isWatchAppInstalled else {
+            return .orange
+        }
+        return status.isLatestStateConfirmed ? .green : .secondary
+    }
+
+    private func refreshStatus() {
+        status = WatchConnectivityService.shared.statusSnapshot()
+    }
+}
+
+private struct AppleWatchSettingsView: View {
+    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @StateObject private var profileService = ProfileService.shared
+    @State private var status = WatchConnectivityService.shared.statusSnapshot()
+    @State private var refreshMessage: String?
+
+    private var selectedProfile: BabyProfile? {
+        profileService.selectedProfile(in: profiles)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: 14) {
+                    Image(systemName: statusSymbol)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(statusTint)
+                        .frame(width: 44, height: 44)
+                        .background(statusTint.opacity(0.12), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(statusTitle)
+                            .font(.headline)
+                        Text(statusDetail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+
+                LabeledContent("Watch app", value: watchAppStatus)
+                LabeledContent("State delivery", value: stateDeliveryStatus)
+                LabeledContent("Last confirmed contact", value: lastContactText)
+                LabeledContent("Connection", value: connectionText)
+
+                Button {
+                    sendLatestState()
+                } label: {
+                    Label("Send Latest State", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(!canSendState)
+
+                if let refreshMessage {
+                    Text(refreshMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Status")
+            } footer: {
+                Text("Background delivery is normal. A live connection usually appears only while Little Windows is open on the Watch.")
+            }
+
+            Section {
+                LabeledContent("Current profile") {
+                    Text(selectedProfile?.name ?? "None")
+                        .foregroundStyle(.secondary)
+                }
+
+                if let selectedProfile {
+                    NavigationLink {
+                        WatchFavoritesSettingsView(profile: selectedProfile)
+                    } label: {
+                        LabeledContent {
+                            Text(favoriteModeText(for: selectedProfile))
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            Label("Watch Favorites", systemImage: "star.square.on.square.fill")
+                        }
+                    }
+                } else {
+                    Label("Watch Favorites", systemImage: "star.square.on.square.fill")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Configuration")
+            } footer: {
+                Text("Choose up to six favorites for each profile, or let Smart Favorites adapt to recent care. Hidden care categories remain hidden on the Watch.")
+            }
+
+            Section("What syncs") {
+                WatchSyncContentRow(
+                    title: "Profiles and preferences",
+                    detail: "Selected profile and hidden categories",
+                    systemImage: "person.crop.circle"
+                )
+                WatchSyncContentRow(
+                    title: "Actions and timers",
+                    detail: "Favorites, all actions, and the active timer",
+                    systemImage: "timer"
+                )
+                WatchSyncContentRow(
+                    title: "Today at a glance",
+                    detail: "Summary metrics and the next sleep window",
+                    systemImage: "chart.bar.fill"
+                )
+            }
+
+            Section {
+                Label("Configured on Apple Watch", systemImage: "applewatch.watchface")
+                Text("Add Little Windows complications while editing a Watch face, or add its widgets to the Smart Stack. The phone sends their data, but watchOS controls where they appear.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Complications and widgets")
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle("Apple Watch")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: refreshStatus)
+        .onReceive(NotificationCenter.default.publisher(
+            for: .watchConnectivityStatusDidChange
+        )) { _ in
+            refreshStatus()
+        }
+    }
+
+    private var canSendState: Bool {
+        status.isSupported
+            && status.isActivated
+            && status.isPaired
+            && status.isWatchAppInstalled
+            && selectedProfile != nil
+    }
+
+    private var statusTitle: String {
+        guard status.isSupported else { return "Watch unavailable" }
+        guard status.isPaired else { return "No paired Watch" }
+        guard status.isWatchAppInstalled else { return "Install the Watch app" }
+        guard status.isActivated else { return "Preparing Watch sync" }
+        if status.isLatestStateConfirmed { return "Ready" }
+        if status.lastConfirmedContactAt == nil { return "Open the Watch app once" }
+        return "Update queued"
+    }
+
+    private var statusDetail: String {
+        guard status.isSupported else {
+            return "Watch connectivity is not available on this device."
+        }
+        guard status.isPaired else {
+            return "Pair an Apple Watch with this iPhone to use the companion."
+        }
+        guard status.isWatchAppInstalled else {
+            return "Install Little Windows from the Watch app on this iPhone."
+        }
+        guard status.isActivated else {
+            return "The iPhone is preparing the background connection."
+        }
+        if status.isLatestStateConfirmed {
+            return "The latest Little Windows state was received by your Watch."
+        }
+        if status.lastConfirmedContactAt == nil {
+            return "Open Little Windows on the Watch to complete the first confirmed sync."
+        }
+        return "The latest state is queued for background delivery."
+    }
+
+    private var statusSymbol: String {
+        guard status.isSupported,
+              status.isPaired,
+              status.isWatchAppInstalled else {
+            return "applewatch.slash"
+        }
+        if status.isLatestStateConfirmed { return "checkmark.circle.fill" }
+        return "arrow.triangle.2.circlepath"
+    }
+
+    private var statusTint: Color {
+        guard status.isSupported,
+              status.isPaired,
+              status.isWatchAppInstalled else {
+            return .orange
+        }
+        return status.isLatestStateConfirmed ? .green : AppTheme.accent
+    }
+
+    private var watchAppStatus: String {
+        guard status.isSupported else { return "Unavailable" }
+        guard status.isPaired else { return "No paired Watch" }
+        return status.isWatchAppInstalled ? "Installed" : "Not installed"
+    }
+
+    private var stateDeliveryStatus: String {
+        guard status.isWatchAppInstalled else { return "—" }
+        if status.isLatestStateConfirmed { return "Up to date" }
+        if status.lastStateQueuedAt != nil { return "Update queued" }
+        return "Waiting"
+    }
+
+    private var lastContactText: String {
+        guard let date = status.lastConfirmedContactAt else { return "Not yet" }
+        return date.formatted(.relative(presentation: .numeric))
+    }
+
+    private var connectionText: String {
+        guard status.isWatchAppInstalled else { return "—" }
+        return status.isReachable ? "Connected now" : "Background delivery"
+    }
+
+    private func favoriteModeText(for profile: BabyProfile) -> String {
+        guard let ids = WatchFavoritePreferenceStore.customActionIDs(
+            profileID: profile.id
+        ) else {
+            return "Smart"
+        }
+        return "\(ids.count) custom"
+    }
+
+    private func sendLatestState() {
+        let queued = WatchConnectivityService.shared.publishCurrentState(force: true)
+        refreshMessage = queued
+            ? "Latest profile, favorites, timer, and summary queued for delivery."
+            : "The Watch is not ready for delivery yet."
+        refreshStatus()
+    }
+
+    private func refreshStatus() {
+        status = WatchConnectivityService.shared.statusSnapshot()
+    }
+}
+
+private struct WatchSyncContentRow: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(AppTheme.accent)
+        }
+    }
+}
+
+private struct WatchFavoritesSettingsView: View {
+    let profile: BabyProfile
+
+    @State private var usesSmartFavorites: Bool
+    @State private var selectedActionIDs: [String]
+
+    init(profile: BabyProfile) {
+        self.profile = profile
+        let customIDs = WatchFavoritePreferenceStore.customActionIDs(
+            profileID: profile.id
+        )
+        _usesSmartFavorites = State(initialValue: customIDs == nil)
+        _selectedActionIDs = State(initialValue: customIDs ?? [])
+    }
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("Profile", value: profile.name)
+                Picker("Favorite mode", selection: Binding(
+                    get: { usesSmartFavorites },
+                    set: setUsesSmartFavorites
+                )) {
+                    Text("Smart").tag(true)
+                    Text("Custom").tag(false)
+                }
+                .pickerStyle(.segmented)
+            } footer: {
+                Text(usesSmartFavorites
+                    ? "Smart Favorites use recent care activity and the iPhone's pinned quick actions to keep the most useful choices first."
+                    : "Custom Favorites keep the order you choose for this profile until you switch back to Smart.")
+            }
+
+            if usesSmartFavorites {
+                Section("Current smart order") {
+                    ForEach(Array(smartActions.enumerated()), id: \.element.id) { index, action in
+                        actionRow(action, position: index + 1)
+                    }
+                }
+            } else {
+                Section {
+                    ForEach(Array(selectedActions.enumerated()), id: \.element.id) { index, action in
+                        HStack(spacing: 10) {
+                            actionRow(action, position: index + 1)
+                            Spacer(minLength: 8)
+                            favoriteOptionsMenu(for: action, at: index)
+                        }
+                    }
+                } header: {
+                    Text("Shown on Watch · \(selectedActions.count)/\(WatchFavoritePreferenceStore.maximumFavoriteCount)")
+                        .accessibilityIdentifier("watch.favorites.custom-header")
+                } footer: {
+                    Text("Use each action's menu to reorder or remove it. At least one favorite is kept; every supported action remains available from All Actions on the Watch.")
+                }
+
+                if !unselectedActions.isEmpty {
+                    Section("Add an action") {
+                        ForEach(unselectedActions) { action in
+                            Button {
+                                addAction(action)
+                            } label: {
+                                HStack {
+                                    actionLabel(action)
+                                    Spacer()
+                                    Image(systemName: "plus.circle.fill")
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("watch.favorite.add.\(action.id)")
+                            .disabled(
+                                selectedActionIDs.count
+                                    >= WatchFavoritePreferenceStore.maximumFavoriteCount
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle("Watch Favorites")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: reconcileSelection)
+    }
+
+    private var availableActions: [WatchActionSnapshot] {
+        let hiddenRawValues = Set(CareCategoryPreferenceStore.hiddenTypes(
+            profileID: profile.id
+        ).map(\.rawValue))
+        return WatchActionCatalog.actions(
+            profileTypeRawValue: profile.profileType.rawValue
+        ).filter { !hiddenRawValues.contains($0.categoryRawValue) }
+    }
+
+    private var selectedActions: [WatchActionSnapshot] {
+        let actionsByID = Dictionary(
+            uniqueKeysWithValues: availableActions.map { ($0.id, $0) }
+        )
+        return selectedActionIDs.compactMap { actionsByID[$0] }
+    }
+
+    private var unselectedActions: [WatchActionSnapshot] {
+        let selected = Set(selectedActionIDs)
+        return availableActions.filter { !selected.contains($0.id) }
+    }
+
+    private var smartActions: [WatchActionSnapshot] {
+        WatchStateFactory.smartFavorites(
+            from: WidgetSnapshotService.read().resolvedQuickActions,
+            allActions: availableActions
+        )
+    }
+
+    @ViewBuilder
+    private func actionRow(_ action: WatchActionSnapshot, position: Int) -> some View {
+        HStack(spacing: 10) {
+            Text("\(position)")
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            actionLabel(action)
+        }
+    }
+
+    private func actionLabel(_ action: WatchActionSnapshot) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(action.title)
+                if let subtitle = action.subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } icon: {
+            Image(systemName: action.systemImage)
+                .foregroundStyle(watchActionTint(action.tintName))
+        }
+    }
+
+    private func favoriteOptionsMenu(
+        for action: WatchActionSnapshot,
+        at index: Int
+    ) -> some View {
+        Menu {
+            Button("Move Up", systemImage: "arrow.up") {
+                moveAction(at: index, offset: -1)
+            }
+            .disabled(index == 0)
+
+            Button("Move Down", systemImage: "arrow.down") {
+                moveAction(at: index, offset: 1)
+            }
+            .disabled(index >= selectedActionIDs.count - 1)
+
+            Divider()
+
+            Button("Remove", systemImage: "minus.circle", role: .destructive) {
+                removeAction(at: index)
+            }
+            .disabled(selectedActionIDs.count <= 1)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Favorite options for \(action.title)")
+        .accessibilityIdentifier("watch.favorite.options.\(action.id)")
+    }
+
+    private func setUsesSmartFavorites(_ usesSmart: Bool) {
+        usesSmartFavorites = usesSmart
+        if usesSmart {
+            WatchFavoritePreferenceStore.useSmartFavorites(profileID: profile.id)
+        } else {
+            let seed = smartActions.isEmpty
+                ? Array(availableActions.prefix(
+                    WatchFavoritePreferenceStore.maximumFavoriteCount
+                ))
+                : smartActions
+            selectedActionIDs = seed.map(\.id)
+            saveCustomSelection()
+            return
+        }
+        publishFavorites()
+    }
+
+    private func addAction(_ action: WatchActionSnapshot) {
+        guard selectedActionIDs.count < WatchFavoritePreferenceStore.maximumFavoriteCount,
+              !selectedActionIDs.contains(action.id) else {
+            return
+        }
+        selectedActionIDs.append(action.id)
+        saveCustomSelection()
+    }
+
+    private func moveAction(at index: Int, offset: Int) {
+        let destination = index + offset
+        guard selectedActionIDs.indices.contains(index),
+              selectedActionIDs.indices.contains(destination) else {
+            return
+        }
+        selectedActionIDs.swapAt(index, destination)
+        saveCustomSelection()
+    }
+
+    private func removeAction(at index: Int) {
+        guard selectedActionIDs.count > 1,
+              selectedActionIDs.indices.contains(index) else {
+            return
+        }
+        selectedActionIDs.remove(at: index)
+        saveCustomSelection()
+    }
+
+    private func reconcileSelection() {
+        guard !usesSmartFavorites else { return }
+        let validIDs = Set(availableActions.map(\.id))
+        selectedActionIDs = selectedActionIDs.filter { validIDs.contains($0) }
+        if selectedActionIDs.isEmpty {
+            selectedActionIDs = smartActions.map(\.id)
+        }
+        saveCustomSelection()
+    }
+
+    private func saveCustomSelection() {
+        WatchFavoritePreferenceStore.setCustomActionIDs(
+            selectedActionIDs,
+            profileID: profile.id
+        )
+        publishFavorites()
+    }
+
+    private func publishFavorites() {
+        WatchConnectivityService.shared.publishCurrentState(force: true)
+    }
+
+    private func watchActionTint(_ name: String) -> Color {
+        switch name {
+        case "cyan": .cyan
+        case "green": .green
+        case "indigo": .indigo
+        case "orange": .orange
+        case "pink": .pink
+        case "purple": .purple
+        case "red": .red
+        case "teal": .teal
+        default: AppTheme.accent
+        }
     }
 }
 

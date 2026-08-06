@@ -673,6 +673,58 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Monthly Guides"].waitForExistence(timeout: 4))
     }
 
+    func testAppleWatchSettingsAndFavoritesNavigation() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://settings")
+
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 8))
+        let watchRow = app.buttons.containing(
+            .staticText,
+            identifier: "Apple Watch"
+        ).firstMatch
+        for _ in 0..<8 where !watchRow.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(watchRow.waitForExistence(timeout: 4))
+        watchRow.tap()
+
+        XCTAssertTrue(app.navigationBars["Apple Watch"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Status"].exists)
+        XCTAssertTrue(app.buttons["Send Latest State"].exists)
+
+        let favoritesRow = app.buttons.containing(
+            .staticText,
+            identifier: "Watch Favorites"
+        ).firstMatch
+        for _ in 0..<5 where !favoritesRow.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(favoritesRow.waitForExistence(timeout: 4))
+        favoritesRow.tap()
+
+        XCTAssertTrue(app.navigationBars["Watch Favorites"].waitForExistence(timeout: 4))
+        let customMode = app.segmentedControls.buttons["Custom"]
+        XCTAssertTrue(customMode.waitForExistence(timeout: 3))
+        customMode.tap()
+        XCTAssertTrue(customMode.isSelected)
+        let customHeader = app.staticTexts["watch.favorites.custom-header"]
+        XCTAssertTrue(customHeader.waitForExistence(timeout: 3))
+
+        let outdoorPlay = app.buttons["watch.favorite.add.outdoor-play"]
+        for _ in 0..<8 where !outdoorPlay.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(outdoorPlay.waitForExistence(timeout: 3))
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Apple Watch Favorites Settings"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testSolidFoodVisualPickerAndReactionControls() {
         continueAfterFailure = false
 

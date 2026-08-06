@@ -2431,6 +2431,7 @@ enum SystemIntegrationReconciler {
             prediction: prediction,
             solidsState: solidsProfileStates.first { $0.profileID == profile?.id }
         )
+        WatchConnectivityService.shared.publishCurrentState()
         await Task.yield()
         WidgetSnapshotService.refreshFood(context: context)
         await AppInteractionMonitor.waitUntilIdle()

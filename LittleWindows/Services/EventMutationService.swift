@@ -109,6 +109,16 @@ enum EventMutationService {
         EventTimerService.save(event, context: context, at: date, endDate: endDate)
     }
 
+    @discardableResult
+    static func discardTimer(
+        _ event: BabyEvent,
+        context: ModelContext
+    ) -> Bool {
+        guard event.isTimerDraft, !event.isTimerRunning else { return false }
+        context.delete(event)
+        return true
+    }
+
     static func delete(
         _ event: BabyEvent,
         profile: BabyProfile?,
@@ -377,6 +387,7 @@ enum EventMutationService {
         settings: PredictionSettings
     ) async {
         WidgetSnapshotService.refresh(profile: profile, events: events, prediction: prediction)
+        WatchConnectivityService.shared.publishCurrentState()
         let isSleeping = events.contains {
             $0.isSleepBlock && $0.isTimerRunning
         }

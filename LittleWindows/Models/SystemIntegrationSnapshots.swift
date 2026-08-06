@@ -1,4 +1,3 @@
-import ActivityKit
 import Foundation
 
 enum SystemIntegrationConstants {
@@ -320,14 +319,4 @@ struct WidgetSnapshot: Codable, Hashable {
     var resolvedQuickActions: [QuickLogActionSnapshot] {
         quickActions ?? []
     }
-}
-
-struct LittleWindowsActivityAttributes: ActivityAttributes {
-    struct ContentState: Codable, Hashable {
-        var timer: ActiveTimerSnapshot
-    }
-
-    var babyName: String
-    var profileID: UUID?
-    var profileName: String?
 }
