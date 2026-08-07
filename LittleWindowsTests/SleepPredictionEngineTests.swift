@@ -7462,6 +7462,126 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
     }
 
+    func testCaregiverIdentityRestoresFromNewerICloudPayload() throws {
+        let suiteName = "CaregiverIdentityICloud-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let updatedAt = Date(timeIntervalSince1970: 500)
+        let data = try XCTUnwrap(CaregiverIdentityService.iCloudPayloadData(
+            currentName: "Test Caregiver",
+            primaryName: "Test Caregiver",
+            updatedAt: updatedAt
+        ))
+
+        XCTAssertTrue(CaregiverIdentityService.applyICloudPayloadData(data, defaults: defaults))
+        XCTAssertEqual(
+            defaults.string(forKey: CaregiverIdentityService.currentCaregiverNameKey),
+            "Test Caregiver"
+        )
+        XCTAssertEqual(
+            defaults.string(forKey: CaregiverIdentityService.primaryCaregiverNameKey),
+            "Test Caregiver"
+        )
+        XCTAssertEqual(
+            defaults.object(forKey: CaregiverIdentityService.lastModifiedAtKey) as? Date,
+            updatedAt
+        )
+    }
+
+    func testCaregiverIdentityKeepsNewerLocalValue() throws {
+        let suiteName = "CaregiverIdentityNewerLocal-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            "Local Test Caregiver",
+            forKey: CaregiverIdentityService.currentCaregiverNameKey
+        )
+        defaults.set(
+            Date(timeIntervalSince1970: 600),
+            forKey: CaregiverIdentityService.lastModifiedAtKey
+        )
+        let data = try XCTUnwrap(CaregiverIdentityService.iCloudPayloadData(
+            currentName: "Cloud Test Caregiver",
+            primaryName: "Cloud Test Caregiver",
+            updatedAt: Date(timeIntervalSince1970: 500)
+        ))
+
+        XCTAssertFalse(CaregiverIdentityService.applyICloudPayloadData(data, defaults: defaults))
+        XCTAssertEqual(
+            defaults.string(forKey: CaregiverIdentityService.currentCaregiverNameKey),
+            "Local Test Caregiver"
+        )
+    }
+
+    func testCaregiverIdentityRecoversOnlyOneNonDefaultHistoricalName() {
+        XCTAssertEqual(
+            CaregiverIdentityService.recoverableHistoricalName(
+                from: ["Caregiver 1", " Test Caregiver ", "test caregiver", nil]
+            ),
+            "Test Caregiver"
+        )
+        XCTAssertNil(CaregiverIdentityService.recoverableHistoricalName(
+            from: ["Test Caregiver", "Second Caregiver"]
+        ))
+    }
+
+    @MainActor
+    func testCaregiverIdentityRoundTripsThroughJSONBackupButNotFamilyDataset() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        context.insert(BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown))
+        try context.save()
+
+        let sourceSuite = "CaregiverIdentityBackupSource-\(UUID().uuidString)"
+        let targetSuite = "CaregiverIdentityBackupTarget-\(UUID().uuidString)"
+        let sourceDefaults = try XCTUnwrap(UserDefaults(suiteName: sourceSuite))
+        let targetDefaults = try XCTUnwrap(UserDefaults(suiteName: targetSuite))
+        defer {
+            sourceDefaults.removePersistentDomain(forName: sourceSuite)
+            targetDefaults.removePersistentDomain(forName: targetSuite)
+        }
+        PersistenceService.setFamilySyncMode(.localOnly, defaults: sourceDefaults)
+        PersistenceService.setFamilySyncMode(.localOnly, defaults: targetDefaults)
+        CaregiverIdentityService.storeIdentity(
+            currentName: "Test Caregiver",
+            primaryName: "Test Caregiver",
+            defaults: sourceDefaults,
+            now: Date(timeIntervalSince1970: 500)
+        )
+
+        let backup = try DataExportImportService.exportData(
+            context: context,
+            defaults: sourceDefaults
+        )
+        let backupObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: backup) as? [String: Any]
+        )
+        let identity = try XCTUnwrap(backupObject["caregiverIdentity"] as? [String: Any])
+        XCTAssertEqual(identity["currentName"] as? String, "Test Caregiver")
+
+        let familyData = try DataExportImportService.exportData(
+            context: context,
+            defaults: sourceDefaults,
+            includeCaregiverIdentity: false
+        )
+        let familyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: familyData) as? [String: Any]
+        )
+        XCTAssertNil(familyObject["caregiverIdentity"])
+
+        try DataExportImportService.importData(
+            backup,
+            context: context,
+            recordLocalSave: false,
+            createRecoveryBackup: false,
+            defaults: targetDefaults
+        )
+        XCTAssertEqual(
+            targetDefaults.string(forKey: CaregiverIdentityService.currentCaregiverNameKey),
+            "Test Caregiver"
+        )
+    }
+
     @MainActor
     func testStoreSectionsCanReorderAndRemoveDefaultsWithoutOrphaningItems() throws {
         let container = try makeInMemoryContainer()

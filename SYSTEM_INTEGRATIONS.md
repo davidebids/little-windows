@@ -49,13 +49,14 @@ For the `LittleWindows` app target only:
 
 1. Add the **iCloud** capability.
 2. Enable **CloudKit**.
-3. Select or create `iCloud.com.debidia.LittleWindows`.
-4. Add the **Push Notifications** capability to the main app target. The widget extension does not need it.
-5. Enable the **Remote notifications** background mode on the main app target.
-6. Keep `LittleWindows/LittleWindows.entitlements` connected to the target.
-7. Add the **WeatherKit** capability. In the Apple Developer portal, enable WeatherKit in both the app identifier’s **Capabilities** tab and its separate **App Services** tab; enabling only the capability leaves WeatherKit JWT authentication unavailable.
-8. Use CloudKit Dashboard to inspect the development schema and deploy it to production before TestFlight/App Store use.
-9. For Family Sync testing, create a share from Settings > Family Sync on the owner's device, accept the iCloud invitation on a second Apple Account, and verify both devices can write care data.
+3. Enable **Key-value storage** so the caregiver identity for new entries follows the same Apple Account.
+4. Select or create `iCloud.com.debidia.LittleWindows`.
+5. Add the **Push Notifications** capability to the main app target. The widget extension does not need it.
+6. Enable the **Remote notifications** background mode on the main app target.
+7. Keep `LittleWindows/LittleWindows.entitlements` connected to the target.
+8. Add the **WeatherKit** capability. In the Apple Developer portal, enable WeatherKit in both the app identifier’s **Capabilities** tab and its separate **App Services** tab; enabling only the capability leaves WeatherKit JWT authentication unavailable.
+9. Use CloudKit Dashboard to inspect the development schema and deploy it to production before TestFlight/App Store use.
+10. For Family Sync testing, create a share from Settings > Family Sync on the owner's device, accept the iCloud invitation on a second Apple Account, and verify both devices can write care data.
 
 The source entitlement declares the development APNs environment. Xcode derives the final development or production value from the provisioning profile when it signs the app; verify the exported TestFlight/App Store app contains `aps-environment = production`.
 

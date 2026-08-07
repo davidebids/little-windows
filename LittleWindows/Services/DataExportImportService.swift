@@ -37,6 +37,7 @@ struct AutomaticRecoveryBackup: Identifiable, Hashable {
 private struct BackupEnvelope: Codable {
     var version: Int
     var exportedAt: Date
+    var caregiverIdentity: CaregiverIdentityDTO?
     var profiles: [ProfileDTO]
     var photoAttachments: [PhotoAttachmentDTO]?
     var solidFoods: [SolidFoodCatalogItemDTO]?
@@ -77,6 +78,11 @@ private struct BackupEnvelope: Codable {
     var careRoutines: [CareRoutineDTO]?
     var careRoutineSteps: [CareRoutineStepDTO]?
     var careRoutineRuns: [CareRoutineRunDTO]?
+}
+
+private struct CaregiverIdentityDTO: Codable {
+    var currentName: String?
+    var primaryName: String?
 }
 
 private struct ProfileDTO: Codable {
@@ -800,10 +806,14 @@ private struct CareRoutineRunDTO: Codable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 21
+    private static let currentBackupVersion = 22
     private static let recoveryBackupLimit = 3
 
-    static func exportData(context: ModelContext) throws -> Data {
+    static func exportData(
+        context: ModelContext,
+        defaults: UserDefaults = .standard,
+        includeCaregiverIdentity: Bool = true
+    ) throws -> Data {
         let profiles = try context.fetch(FetchDescriptor<BabyProfile>()).map {
             ProfileDTO(
                 id: $0.id,
@@ -1542,9 +1552,29 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
+        let caregiverIdentity: CaregiverIdentityDTO?
+        if includeCaregiverIdentity {
+            let currentName = defaults.string(
+                forKey: CaregiverIdentityService.currentCaregiverNameKey
+            )?.nilIfBlank
+            let primaryName = defaults.string(
+                forKey: CaregiverIdentityService.primaryCaregiverNameKey
+            )?.nilIfBlank
+            caregiverIdentity = if currentName != nil || primaryName != nil {
+                CaregiverIdentityDTO(
+                    currentName: currentName,
+                    primaryName: primaryName
+                )
+            } else {
+                nil
+            }
+        } else {
+            caregiverIdentity = nil
+        }
         let envelope = BackupEnvelope(
             version: currentBackupVersion,
             exportedAt: Date(),
+            caregiverIdentity: caregiverIdentity,
             profiles: profiles,
             photoAttachments: photoAttachments,
             solidFoods: solidFoods,
@@ -1597,7 +1627,8 @@ enum DataExportImportService {
         _ data: Data,
         context: ModelContext,
         recordLocalSave: Bool = true,
-        createRecoveryBackup: Bool = true
+        createRecoveryBackup: Bool = true,
+        defaults: UserDefaults = .standard
     ) throws {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -2451,6 +2482,13 @@ enum DataExportImportService {
                 saveChanges: false
             )
             try context.save()
+            if let caregiverIdentity = envelope.caregiverIdentity {
+                CaregiverIdentityService.restoreIdentityIfMissing(
+                    currentName: caregiverIdentity.currentName,
+                    primaryName: caregiverIdentity.primaryName,
+                    defaults: defaults
+                )
+            }
             if recordLocalSave {
                 PersistenceService.recordLocalSave()
             }
@@ -2632,6 +2670,7 @@ enum DataExportImportService {
         let localObject = try jsonObject(from: local)
         let remoteObject = try jsonObject(from: remote)
         var merged = remoteObject
+        merged.removeValue(forKey: "caregiverIdentity")
 
         let collectionKeys = Set(localObject.compactMap { key, value in
             value is [Any] ? key : nil
@@ -2673,6 +2712,7 @@ enum DataExportImportService {
     static func familySyncCanonicalData(from data: Data) throws -> Data {
         var object = try jsonObject(from: data)
         object.removeValue(forKey: "exportedAt")
+        object.removeValue(forKey: "caregiverIdentity")
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
@@ -2700,6 +2740,7 @@ enum DataExportImportService {
         entityPayloads: [String: Data]
     ) throws -> Data {
         var object = try jsonObject(from: template)
+        object.removeValue(forKey: "caregiverIdentity")
         for (key, value) in object where value is [Any] {
             object[key] = []
         }

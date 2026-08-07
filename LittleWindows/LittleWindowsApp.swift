@@ -171,6 +171,7 @@ struct LittleWindowsApp: App {
                 .animation(.easeOut(duration: 0.25), value: startupController.isDataReady)
                 .task {
                     if !startupController.isDataReady {
+                        CaregiverIdentityService.startICloudSync()
                         await SampleData.seedIfNeeded(in: modelContainer.mainContext)
                         if PersistenceService.isICloudSyncEnabled() {
                             CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)

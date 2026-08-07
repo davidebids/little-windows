@@ -553,6 +553,7 @@ struct RootView: View {
             handleIncomingURL(url)
         }
         .task {
+            recoverCaregiverIdentityIfNeeded()
             markOnboardingCompleteForExistingData()
             hasCheckedInitialOnboardingState = true
             if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "insights" {
@@ -601,6 +602,7 @@ struct RootView: View {
             lastPresentedFamilySyncInactiveEventID = familySyncInactiveEventID
         }
         .onChange(of: profiles.count) { _, _ in
+            recoverCaregiverIdentityIfNeeded()
             markOnboardingCompleteForExistingData()
             hasCheckedInitialOnboardingState = true
         }
@@ -647,6 +649,16 @@ struct RootView: View {
             needsLogNamePrompt = true
         }
         hasCompletedInitialOnboarding = true
+    }
+
+    private func recoverCaregiverIdentityIfNeeded() {
+        guard !profiles.isEmpty,
+              !CaregiverIdentityService.hasExplicitCurrentCaregiverName() else {
+            return
+        }
+        if CaregiverIdentityService.restoreFromHistoryIfUnambiguous(context: modelContext) != nil {
+            needsLogNamePrompt = false
+        }
     }
 
     private func pollFamilyTimerChangesWhileActive() async {

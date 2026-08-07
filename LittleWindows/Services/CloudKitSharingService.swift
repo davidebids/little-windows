@@ -1190,7 +1190,10 @@ final class CloudKitSharingService {
             }.value
         }
         return try FamilySyncDatasetPayload(
-            data: DataExportImportService.exportData(context: context)
+            data: DataExportImportService.exportData(
+                context: context,
+                includeCaregiverIdentity: false
+            )
         )
     }
 
@@ -1763,7 +1766,10 @@ private final class FamilySyncQueryPageCollector: @unchecked Sendable {
 private actor FamilySyncDatasetExporter {
     func export() throws -> FamilySyncDatasetPayload {
         try FamilySyncDatasetPayload(
-            data: DataExportImportService.exportData(context: modelContext)
+            data: DataExportImportService.exportData(
+                context: modelContext,
+                includeCaregiverIdentity: false
+            )
         )
     }
 }

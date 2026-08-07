@@ -218,7 +218,7 @@ struct SettingsView: View {
 
             Section("Your name") {
                 CaregiverNameFields(
-                    detail: "Name on this device appears on new care entries you log here. Family Sync share name labels the shared family space; most people can keep both names the same."
+                    detail: "Your name appears on new care entries and follows this Apple Account when iCloud Sync is on. Family Sync share name labels the shared family space; most people can keep both names the same."
                 )
             }
 
@@ -2208,7 +2208,7 @@ struct CaregiverNameFields: View {
 
     var body: some View {
         Group {
-            LabeledContent("Name on this device") {
+            LabeledContent("Name for new entries") {
                 TextField("Your name", text: $currentName)
                     .textContentType(.name)
                     .multilineTextAlignment(.trailing)
@@ -2261,8 +2261,11 @@ struct CaregiverNameFields: View {
     private func save(currentName: String, primaryName: String) {
         let defaults = UserDefaults.standard
         let previousEffectiveName = CaregiverIdentityService.currentCaregiverName(defaults: defaults)
-        defaults.set(currentName, forKey: CaregiverIdentityService.currentCaregiverNameKey)
-        defaults.set(primaryName, forKey: CaregiverIdentityService.primaryCaregiverNameKey)
+        CaregiverIdentityService.storeIdentity(
+            currentName: currentName,
+            primaryName: primaryName,
+            defaults: defaults
+        )
         let updatedEffectiveName = CaregiverIdentityService.currentCaregiverName(defaults: defaults)
         if !CaregiverIdentityService.namesMatch(previousEffectiveName, updatedEffectiveName) {
             SystemIntegrationReconciler.requestReconciliation()
