@@ -9,6 +9,20 @@ enum LittleWindowsTab: String, Hashable, Codable {
     case medical
 }
 
+enum TodayDisplayMode: String, Hashable, Codable, CaseIterable, Identifiable {
+    case care
+    case home
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .care: "Care"
+        case .home: "Home"
+        }
+    }
+}
+
 struct SolidsNavigationOrigin: Equatable {
     var tab: LittleWindowsTab
     var insightsSection: InsightsSection?
@@ -98,6 +112,7 @@ final class DeepLinkRouter: ObservableObject {
     static let shared = DeepLinkRouter()
 
     @Published var selectedTab: LittleWindowsTab
+    @Published var todayDisplayMode: TodayDisplayMode = .care
     @Published var pendingAction: DeepLinkAction?
     @Published var pendingNightLightCommand: NightLightCommand?
     @Published var pendingAppointmentCommand: AppointmentRouteCommand?
@@ -129,6 +144,11 @@ final class DeepLinkRouter: ObservableObject {
         // Publish the action before selecting Today. RootView creates the Today
         // hierarchy lazily, so it must be waiting when that hierarchy appears.
         pendingAction = action
+        selectTodayCare()
+    }
+
+    func selectTodayCare() {
+        todayDisplayMode = .care
         selectedTab = .today
     }
 
@@ -185,7 +205,7 @@ final class DeepLinkRouter: ObservableObject {
         }
 
         if components == ["today"] {
-            selectedTab = .today
+            selectTodayCare()
         } else if components == ["food"] {
             openFood(.food)
         } else if components == ["food", "solids"] {
@@ -336,16 +356,16 @@ final class DeepLinkRouter: ObservableObject {
             selectedTab = .milestones
         } else if components == ["appointments"] || components == ["visits"] {
             pendingAppointmentCommand = .list
-            selectedTab = .today
+            selectTodayCare()
         } else if components == ["routines"] {
             pendingRoutineCommand = .list
-            selectedTab = .today
+            selectTodayCare()
         } else if components.count >= 2, components[0] == "appointment",
                   let uuid = UUID(uuidString: components[1]) {
             pendingAppointmentCommand = components.count >= 3 && components[2] == "notes"
                 ? .notes(uuid)
                 : .detail(uuid)
-            selectedTab = .today
+            selectTodayCare()
         } else if components == ["medical"] {
             selectedReportsMode = .summary
             selectedTab = .reports
@@ -354,7 +374,7 @@ final class DeepLinkRouter: ObservableObject {
             selectedTab = .reports
         } else if components == ["puppy-guide"] {
             pendingPuppyGuideCommand = .current
-            selectedTab = .today
+            selectTodayCare()
         } else if components == ["night-light"] {
             pendingNightLightCommand = .open
             selectedTab = .nightLight
@@ -375,7 +395,7 @@ final class DeepLinkRouter: ObservableObject {
             if let uuid = UUID(uuidString: components[1]) {
                 openToday(action: .showEvent(uuid))
             } else {
-                selectedTab = .today
+                selectTodayCare()
             }
         } else if components == ["action", "stop-active"] {
             openToday(action: .stopActiveTimer)
@@ -383,19 +403,19 @@ final class DeepLinkRouter: ObservableObject {
             if let uuid = UUID(uuidString: components[2]) {
                 openToday(action: .stopTimer(uuid))
             } else {
-                selectedTab = .today
+                selectTodayCare()
             }
         } else if components.count == 3, components[0] == "action", components[1] == "resume" {
             if let uuid = UUID(uuidString: components[2]) {
                 openToday(action: .resumeTimer(uuid))
             } else {
-                selectedTab = .today
+                selectTodayCare()
             }
         } else if components.count == 3, components[0] == "action", components[1] == "switch-side" {
             if let uuid = UUID(uuidString: components[2]) {
                 openToday(action: .switchNursingSide(uuid))
             } else {
-                selectedTab = .today
+                selectTodayCare()
             }
         } else if components == ["quick-log", "sleep"] {
             openToday(action: .startTimer(.sleep, nil))
@@ -438,7 +458,7 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["quick-log", "temperature"] {
             openToday(action: .logEvent(.temperature))
         } else {
-            selectedTab = .today
+            selectTodayCare()
         }
     }
 

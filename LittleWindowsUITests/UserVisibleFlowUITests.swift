@@ -3,6 +3,35 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testFirstRunOffersRestoreFromICloud() {
+        continueAfterFailure = false
+
+        launch(
+            startURL: "littlewindows://debug/reset-empty",
+            additionalEnvironment: [
+                "LITTLE_WINDOWS_UI_TEST_ICLOUD_RESTORE_WAITING": "1"
+            ]
+        )
+
+        let restoreButton = app.buttons["firstRun.restoreFromICloud"]
+        XCTAssertTrue(
+            restoreButton.waitForExistence(timeout: 4),
+            "A returning user should be able to restore Private iCloud Sync data from onboarding."
+        )
+        XCTAssertTrue(
+            app.staticTexts["Already use Little Windows?"].exists
+        )
+
+        restoreButton.tap()
+        XCTAssertTrue(
+            app.otherElements["firstRun.iCloudRestoreProgress"]
+                .waitForExistence(timeout: 2),
+            "iCloud restore should show progress while synced data is arriving."
+        )
+        XCTAssertTrue(app.staticTexts["Restoring from iCloud…"].exists)
+        XCTAssertTrue(app.buttons["Cancel"].exists)
+    }
+
     func testProductionScaleStoreKeepsPrimaryNavigationResponsive() {
         continueAfterFailure = false
 
@@ -650,6 +679,57 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(homeAreas.frame.minY, navigationBar.frame.maxY - 1)
         XCTAssertEqual(homeAreas.frame.minY, initialY, accuracy: 1)
+    }
+
+    func testTodayHomeSummaryHandsOffToHomeAndRetainsModeForSession() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+
+        let homeMode = app.segmentedControls.buttons["Home"]
+        XCTAssertTrue(homeMode.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        homeMode.tap()
+
+        let openToDo = app.buttons["Open To-Do in Home"]
+        XCTAssertTrue(openToDo.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Today"].isSelected)
+        XCTAssertFalse(app.tabBars.buttons["Home"].isSelected)
+        let homeSummaryScreenshot = XCTAttachment(screenshot: app.screenshot())
+        homeSummaryScreenshot.name = "Today Home summary"
+        homeSummaryScreenshot.lifetime = .keepAlways
+        add(homeSummaryScreenshot)
+
+        let openShopping = app.buttons["Open Shopping in Home"]
+        XCTAssertTrue(openShopping.waitForExistence(timeout: 4))
+        openShopping.tap()
+
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.tabBars.buttons["Home"].isSelected)
+        XCTAssertTrue(app.buttons["home-area.shopping"].isSelected)
+
+        app.tabBars.buttons["Today"].tap()
+        let retainedHomeMode = app.segmentedControls.buttons["Home"]
+        XCTAssertTrue(retainedHomeMode.waitForExistence(timeout: 6))
+        XCTAssertTrue(retainedHomeMode.isSelected)
+
+        let careMode = app.segmentedControls.buttons["Care"]
+        XCTAssertTrue(careMode.waitForExistence(timeout: 4))
+        careMode.tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        XCTAssertFalse(app.buttons["Open To-Do in Home"].exists)
+
+        app.segmentedControls.buttons["Home"].tap()
+        XCTAssertTrue(app.buttons["Open To-Do in Home"].waitForExistence(timeout: 4))
+        app.terminate()
+        app.launchEnvironment = ["LITTLE_WINDOWS_UI_TESTING": "1"]
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.segmentedControls.buttons["Care"].isSelected)
+        XCTAssertFalse(app.buttons["Open To-Do in Home"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
     }
 
     func testSettingsMonthlyGuideNavigation() {
@@ -2409,12 +2489,17 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
     }
 
-    private func launch(startURL: String) {
+    private func launch(
+        startURL: String,
+        additionalEnvironment: [String: String] = [:]
+    ) {
         app.terminate()
-        app.launchEnvironment = [
+        var launchEnvironment = [
             "LITTLE_WINDOWS_UI_TESTING": "1",
             "LITTLE_WINDOWS_START_URL": startURL
         ]
+        launchEnvironment.merge(additionalEnvironment) { _, newValue in newValue }
+        app.launchEnvironment = launchEnvironment
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
 

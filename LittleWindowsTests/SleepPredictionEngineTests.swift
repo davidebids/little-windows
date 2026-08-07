@@ -1340,6 +1340,126 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testProfileDuplicateRepairRemovesRepeatedIdentifierAndPreservesHistory() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profileID = UUID()
+        let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
+        let original = BabyProfile(
+            id: profileID,
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
+        )
+        let duplicate = BabyProfile(
+            id: profileID,
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 300_000)
+        )
+        let event = BabyEvent(
+            profileID: profileID,
+            type: .feed,
+            startDate: Date(timeIntervalSinceReferenceDate: 400_000)
+        )
+        context.insert(original)
+        context.insert(duplicate)
+        context.insert(event)
+        try context.save()
+
+        XCTAssertEqual(ProfileService.shared.allProfiles(in: [duplicate, original]).count, 1)
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 1)
+
+        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        let events = try context.fetch(FetchDescriptor<BabyEvent>())
+        XCTAssertEqual(profiles.count, 1)
+        XCTAssertEqual(profiles.first?.id, profileID)
+        XCTAssertEqual(profiles.first?.createdAt, original.createdAt)
+        XCTAssertEqual(events.map(\.profileID), [profileID])
+    }
+
+    @MainActor
+    func testProfileDuplicateRepairRemovesNewEmptySetupShellAfterHistorySyncs() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
+        let restoredProfile = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
+        )
+        let setupShell = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 400_000),
+            displayColor: "indigo"
+        )
+        context.insert(restoredProfile)
+        context.insert(setupShell)
+        try context.save()
+        ProfileService.shared.switchProfile(setupShell)
+
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BabyProfile>()), 2)
+
+        let restoredEvent = BabyEvent(
+            profileID: restoredProfile.id,
+            type: .diaper,
+            startDate: Date(timeIntervalSinceReferenceDate: 300_000)
+        )
+        context.insert(restoredEvent)
+        try context.save()
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 1)
+
+        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        XCTAssertEqual(profiles.map(\.id), [restoredProfile.id])
+        XCTAssertEqual(ProfileService.shared.selectedProfileID, restoredProfile.id)
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<BabyEvent>()).map(\.profileID),
+            [restoredProfile.id]
+        )
+    }
+
+    @MainActor
+    func testProfileDuplicateRepairPreservesMatchingProfilesWhenBothHaveHistory() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
+        let firstProfile = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
+        )
+        let secondProfile = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 400_000)
+        )
+        context.insert(firstProfile)
+        context.insert(secondProfile)
+        context.insert(BabyEvent(
+            profileID: firstProfile.id,
+            type: .feed,
+            startDate: Date(timeIntervalSinceReferenceDate: 300_000)
+        ))
+        context.insert(BabyEvent(
+            profileID: secondProfile.id,
+            type: .diaper,
+            startDate: Date(timeIntervalSinceReferenceDate: 500_000)
+        ))
+        try context.save()
+
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BabyProfile>()), 2)
+    }
+
+    @MainActor
     func testProfileSelectionFallsBackToActiveChild() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -3616,6 +3736,74 @@ final class SleepPredictionEngineTests: XCTestCase {
             hasCompleted: false,
             profiles: [existingProfile]
         ))
+    }
+
+    func testFirstRunICloudRestoreRequiresPrivateCloudStoreAndAvailableAccount() {
+        XCTAssertEqual(
+            ICloudRestoreService.eligibility(
+                syncMode: .privateICloudSync,
+                isUsingCloudKitStore: true,
+                availability: .available
+            ),
+            .ready
+        )
+
+        for eligibility in [
+            ICloudRestoreService.eligibility(
+                syncMode: .localOnly,
+                isUsingCloudKitStore: false,
+                availability: .available
+            ),
+            ICloudRestoreService.eligibility(
+                syncMode: .privateICloudSync,
+                isUsingCloudKitStore: false,
+                availability: .available
+            ),
+            ICloudRestoreService.eligibility(
+                syncMode: .privateICloudSync,
+                isUsingCloudKitStore: true,
+                availability: .unavailable("No iCloud account")
+            )
+        ] {
+            guard case .unavailable(let message) = eligibility else {
+                XCTFail("Expected iCloud restore to be unavailable")
+                continue
+            }
+            XCTAssertFalse(message.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testFirstRunICloudRestoreDetectsImportedProfilesWithoutWriting() async throws {
+        let container = try makeInMemoryContainer()
+        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        container.mainContext.insert(profile)
+
+        let outcome = await ICloudRestoreService.waitForImportedProfiles(
+            context: container.mainContext,
+            waitDuration: .zero,
+            pollInterval: .zero
+        )
+
+        XCTAssertEqual(outcome, .restored(profileCount: 1))
+        XCTAssertEqual(
+            try container.mainContext.fetch(FetchDescriptor<CareProfile>()).map(\.id),
+            [profile.id]
+        )
+    }
+
+    @MainActor
+    func testFirstRunICloudRestoreLeavesEmptyStoreUnchangedWhenNothingArrives() async throws {
+        let container = try makeInMemoryContainer()
+
+        let outcome = await ICloudRestoreService.waitForImportedProfiles(
+            context: container.mainContext,
+            waitDuration: .zero,
+            pollInterval: .zero
+        )
+
+        XCTAssertEqual(outcome, .noDataArrived)
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<CareProfile>()).isEmpty)
     }
 
     @MainActor
@@ -7026,6 +7214,205 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testTodayHomeSummaryPrioritizesUsefulRowsAndRoutesToHomeDetails() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 5,
+            hour: 12
+        )))
+        let dayStart = calendar.startOfDay(for: now)
+        let household = Household(name: "Test Home")
+        let otherHousehold = Household(name: "Other Home")
+
+        let todoList = HomeTodoList(householdID: household.id, name: "House Tasks")
+        let todoItems = [
+            HomeTodoItem(
+                householdID: household.id,
+                todoListID: todoList.id,
+                title: "Assigned first",
+                assignedCaregiverName: "Caregiver 1",
+                updatedAt: now.addingTimeInterval(-300),
+                sortOrder: 5
+            ),
+            HomeTodoItem(householdID: household.id, todoListID: todoList.id, title: "Second", sortOrder: 0),
+            HomeTodoItem(householdID: household.id, todoListID: todoList.id, title: "Third", sortOrder: 1),
+            HomeTodoItem(householdID: household.id, todoListID: todoList.id, title: "Fourth", sortOrder: 2),
+            HomeTodoItem(
+                householdID: household.id,
+                todoListID: todoList.id,
+                title: "Completed today",
+                isCompleted: true,
+                completedAt: now.addingTimeInterval(-600)
+            )
+        ]
+
+        let shoppingList = ShoppingList(householdID: household.id, name: "Groceries")
+        let shoppingItems = [
+            ShoppingListItem(
+                householdID: household.id,
+                shoppingListID: shoppingList.id,
+                name: "Milk",
+                priority: .high
+            ),
+            ShoppingListItem(
+                householdID: household.id,
+                shoppingListID: shoppingList.id,
+                name: "Bread"
+            ),
+            ShoppingListItem(
+                householdID: household.id,
+                shoppingListID: shoppingList.id,
+                name: "Apples",
+                isChecked: true,
+                checkedAt: now.addingTimeInterval(-900)
+            )
+        ]
+
+        let locationID = UUID()
+        let lowMealPrep = MealPrepItem(
+            householdID: household.id,
+            name: "Soup",
+            locationID: locationID,
+            servingsTotal: 4,
+            servingsRemaining: 1
+        )
+        let usage = MealPrepUsage(
+            householdID: household.id,
+            mealPrepItemID: lowMealPrep.id,
+            dateTime: now.addingTimeInterval(-1_200),
+            servingsUsed: 1
+        )
+        let usedUpInventory = InventoryItem(
+            householdID: household.id,
+            name: "Rice",
+            quantity: 0,
+            locationID: locationID,
+            status: .usedUp
+        )
+
+        let trip = PackingTrip(
+            householdID: household.id,
+            title: "Day Trip",
+            startDate: dayStart,
+            endDate: dayStart.addingTimeInterval(2 * 86_400),
+            finalCheckDate: now.addingTimeInterval(-3_600)
+        )
+        let essential = PackingItem(
+            householdID: household.id,
+            tripID: trip.id,
+            title: "Tickets",
+            priority: .essential,
+            state: .needed
+        )
+        let itinerary = TripItineraryItem(
+            householdID: household.id,
+            tripID: trip.id,
+            title: "Museum",
+            scheduledDay: dayStart
+        )
+
+        let returnRequest = ReturnRequest(householdID: household.id)
+        let returnItem = ReturnItem(
+            householdID: household.id,
+            returnRequestID: returnRequest.id,
+            name: "Shoes"
+        )
+        let returnPackage = ReturnPackage(
+            householdID: household.id,
+            returnRequestID: returnRequest.id,
+            name: "Drop-off",
+            returnByDate: dayStart.addingTimeInterval(-86_400)
+        )
+        let reminder = FoodReminder(
+            householdID: household.id,
+            type: .shopping,
+            title: "Pick up groceries",
+            relatedShoppingListID: shoppingList.id,
+            dateTime: now.addingTimeInterval(1_800)
+        )
+        let ignoredList = HomeTodoList(householdID: otherHousehold.id, name: "Ignore")
+        let ignoredItem = HomeTodoItem(
+            householdID: otherHousehold.id,
+            todoListID: ignoredList.id,
+            title: "Other household"
+        )
+
+        let summary = TodayHomeSummaryService.summary(
+            householdID: household.id,
+            currentCaregiverName: "Caregiver 1",
+            todoLists: [todoList, ignoredList],
+            todoItems: todoItems + [ignoredItem],
+            shoppingLists: [shoppingList],
+            shoppingItems: shoppingItems,
+            inventoryItems: [usedUpInventory],
+            mealPrepItems: [lowMealPrep],
+            mealPrepUsages: [usage],
+            packingTrips: [trip],
+            packingItems: [essential],
+            itineraryItems: [itinerary],
+            returnRequests: [returnRequest],
+            returnItems: [returnItem],
+            returnPackages: [returnPackage],
+            reminders: [reminder],
+            now: now,
+            calendar: calendar
+        )
+
+        let todos = try XCTUnwrap(summary.sections.first { $0.category == .todos })
+        XCTAssertEqual(todos.countLabel, "4 open")
+        XCTAssertEqual(todos.items.count, TodayHomeSummaryService.visibleItemLimit)
+        XCTAssertEqual(todos.items.first?.title, "Assigned first")
+        XCTAssertEqual(todos.items.first?.route, .todoList(todoList.id))
+        XCTAssertEqual(todos.remainderText, "+ 1 more task")
+        XCTAssertTrue(todos.summary.contains("1 completed today"))
+
+        let shopping = try XCTUnwrap(summary.sections.first { $0.category == .shopping })
+        XCTAssertEqual(shopping.countLabel, "2 items")
+        XCTAssertEqual(shopping.items.first?.route, .shoppingList(shoppingList.id))
+        XCTAssertEqual(shopping.items.first?.badge, "1 high priority")
+
+        let kitchen = try XCTUnwrap(summary.sections.first { $0.category == .kitchen })
+        XCTAssertEqual(kitchen.items.first?.route, .mealPrepItem(lowMealPrep.id))
+        XCTAssertTrue(kitchen.summary.contains("1 used today"))
+
+        let trips = try XCTUnwrap(summary.sections.first { $0.category == .trips })
+        XCTAssertEqual(trips.items.first?.route, .itineraryItem(trip.id, itinerary.id))
+        XCTAssertTrue(trips.summary.contains("1 itinerary item today"))
+
+        let returns = try XCTUnwrap(summary.sections.first { $0.category == .returns })
+        XCTAssertEqual(returns.items.first?.title, "Shoes")
+        XCTAssertEqual(returns.items.first?.route, .returnRequest(returnRequest.id))
+        XCTAssertEqual(returns.items.first?.badge, "Overdue")
+
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .shoppingList(shoppingList.id) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .mealPrepItem(lowMealPrep.id) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .packingList(trip.id) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .returnRequest(returnRequest.id) })
+        XCTAssertFalse(summary.sections.flatMap(\.items).contains { $0.title == "Other household" })
+    }
+
+    @MainActor
+    func testTodayDisplayModePersistsForTabChangesButTodayRoutesResetToCare() throws {
+        let router = DeepLinkRouter.shared
+        router.todayDisplayMode = .home
+        router.selectedTab = .reports
+        router.selectedTab = .today
+        XCTAssertEqual(router.todayDisplayMode, .home)
+
+        router.route(try XCTUnwrap(URL(string: "littlewindows://today")))
+        XCTAssertEqual(router.selectedTab, .today)
+        XCTAssertEqual(router.todayDisplayMode, .care)
+
+        router.todayDisplayMode = .home
+        router.openToday(action: .logEvent(.feed))
+        XCTAssertEqual(router.todayDisplayMode, .care)
+        XCTAssertEqual(router.consumeAction(), .logEvent(.feed))
+    }
+
+    @MainActor
     func testFoodHomeInsightsSeparatePackingTripsFromShoppingListHistory() {
         let household = Household(name: "Home")
         let usedShoppingList = ShoppingList(
@@ -7192,6 +7579,126 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(
             CaregiverIdentityService.familySyncCaregiverNames(defaults: defaults),
             ["Caregiver A", "Caregiver B"]
+        )
+    }
+
+    func testCaregiverIdentityRestoresFromNewerICloudPayload() throws {
+        let suiteName = "CaregiverIdentityICloud-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let updatedAt = Date(timeIntervalSince1970: 500)
+        let data = try XCTUnwrap(CaregiverIdentityService.iCloudPayloadData(
+            currentName: "Test Caregiver",
+            primaryName: "Test Caregiver",
+            updatedAt: updatedAt
+        ))
+
+        XCTAssertTrue(CaregiverIdentityService.applyICloudPayloadData(data, defaults: defaults))
+        XCTAssertEqual(
+            defaults.string(forKey: CaregiverIdentityService.currentCaregiverNameKey),
+            "Test Caregiver"
+        )
+        XCTAssertEqual(
+            defaults.string(forKey: CaregiverIdentityService.primaryCaregiverNameKey),
+            "Test Caregiver"
+        )
+        XCTAssertEqual(
+            defaults.object(forKey: CaregiverIdentityService.lastModifiedAtKey) as? Date,
+            updatedAt
+        )
+    }
+
+    func testCaregiverIdentityKeepsNewerLocalValue() throws {
+        let suiteName = "CaregiverIdentityNewerLocal-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            "Local Test Caregiver",
+            forKey: CaregiverIdentityService.currentCaregiverNameKey
+        )
+        defaults.set(
+            Date(timeIntervalSince1970: 600),
+            forKey: CaregiverIdentityService.lastModifiedAtKey
+        )
+        let data = try XCTUnwrap(CaregiverIdentityService.iCloudPayloadData(
+            currentName: "Cloud Test Caregiver",
+            primaryName: "Cloud Test Caregiver",
+            updatedAt: Date(timeIntervalSince1970: 500)
+        ))
+
+        XCTAssertFalse(CaregiverIdentityService.applyICloudPayloadData(data, defaults: defaults))
+        XCTAssertEqual(
+            defaults.string(forKey: CaregiverIdentityService.currentCaregiverNameKey),
+            "Local Test Caregiver"
+        )
+    }
+
+    func testCaregiverIdentityRecoversOnlyOneNonDefaultHistoricalName() {
+        XCTAssertEqual(
+            CaregiverIdentityService.recoverableHistoricalName(
+                from: ["Caregiver 1", " Test Caregiver ", "test caregiver", nil]
+            ),
+            "Test Caregiver"
+        )
+        XCTAssertNil(CaregiverIdentityService.recoverableHistoricalName(
+            from: ["Test Caregiver", "Second Caregiver"]
+        ))
+    }
+
+    @MainActor
+    func testCaregiverIdentityRoundTripsThroughJSONBackupButNotFamilyDataset() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        context.insert(BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown))
+        try context.save()
+
+        let sourceSuite = "CaregiverIdentityBackupSource-\(UUID().uuidString)"
+        let targetSuite = "CaregiverIdentityBackupTarget-\(UUID().uuidString)"
+        let sourceDefaults = try XCTUnwrap(UserDefaults(suiteName: sourceSuite))
+        let targetDefaults = try XCTUnwrap(UserDefaults(suiteName: targetSuite))
+        defer {
+            sourceDefaults.removePersistentDomain(forName: sourceSuite)
+            targetDefaults.removePersistentDomain(forName: targetSuite)
+        }
+        PersistenceService.setFamilySyncMode(.localOnly, defaults: sourceDefaults)
+        PersistenceService.setFamilySyncMode(.localOnly, defaults: targetDefaults)
+        CaregiverIdentityService.storeIdentity(
+            currentName: "Test Caregiver",
+            primaryName: "Test Caregiver",
+            defaults: sourceDefaults,
+            now: Date(timeIntervalSince1970: 500)
+        )
+
+        let backup = try DataExportImportService.exportData(
+            context: context,
+            defaults: sourceDefaults
+        )
+        let backupObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: backup) as? [String: Any]
+        )
+        let identity = try XCTUnwrap(backupObject["caregiverIdentity"] as? [String: Any])
+        XCTAssertEqual(identity["currentName"] as? String, "Test Caregiver")
+
+        let familyData = try DataExportImportService.exportData(
+            context: context,
+            defaults: sourceDefaults,
+            includeCaregiverIdentity: false
+        )
+        let familyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: familyData) as? [String: Any]
+        )
+        XCTAssertNil(familyObject["caregiverIdentity"])
+
+        try DataExportImportService.importData(
+            backup,
+            context: context,
+            recordLocalSave: false,
+            createRecoveryBackup: false,
+            defaults: targetDefaults
+        )
+        XCTAssertEqual(
+            targetDefaults.string(forKey: CaregiverIdentityService.currentCaregiverNameKey),
+            "Test Caregiver"
         )
     }
 

@@ -1498,6 +1498,646 @@ struct FoodInsightMetric: Identifiable, Equatable {
     var systemImage: String
 }
 
+enum TodayHomeSummaryCategory: String, CaseIterable, Identifiable {
+    case todos
+    case shopping
+    case kitchen
+    case trips
+    case returns
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .todos: "To-Do"
+        case .shopping: "Shopping"
+        case .kitchen: "Kitchen"
+        case .trips: "Trips"
+        case .returns: "Returns"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .todos: "checklist"
+        case .shopping: "cart.fill"
+        case .kitchen: "takeoutbag.and.cup.and.straw.fill"
+        case .trips: "suitcase.rolling.fill"
+        case .returns: "shippingbox.fill"
+        }
+    }
+
+    var route: FoodRouteCommand {
+        switch self {
+        case .todos: .todos
+        case .shopping: .shopping
+        case .kitchen: .mealPrep
+        case .trips: .trips
+        case .returns: .returns
+        }
+    }
+}
+
+enum TodayHomeSummaryUrgency: Int, Equatable {
+    case normal
+    case attention
+    case urgent
+}
+
+struct TodayHomeSummaryItem: Identifiable, Equatable {
+    var id: String
+    var category: TodayHomeSummaryCategory
+    var title: String
+    var detail: String
+    var badge: String?
+    var systemImage: String
+    var urgency: TodayHomeSummaryUrgency = .normal
+    var route: FoodRouteCommand
+    var sortDate: Date?
+}
+
+struct TodayHomeSummarySection: Identifiable, Equatable {
+    var id: TodayHomeSummaryCategory { category }
+    var category: TodayHomeSummaryCategory
+    var countLabel: String
+    var summary: String
+    var items: [TodayHomeSummaryItem]
+    var remainderText: String?
+    var emptyMessage: String
+}
+
+struct TodayHomeSummary: Equatable {
+    var attentionItems: [TodayHomeSummaryItem]
+    var sections: [TodayHomeSummarySection]
+
+    var isQuiet: Bool {
+        attentionItems.isEmpty && sections.allSatisfy { $0.items.isEmpty }
+    }
+}
+
+@MainActor
+enum TodayHomeSummaryService {
+    static let visibleItemLimit = 3
+    static let attentionItemLimit = 5
+
+    static func summary(
+        householdID: UUID,
+        currentCaregiverName: String,
+        todoLists: [HomeTodoList],
+        todoItems: [HomeTodoItem],
+        shoppingLists: [ShoppingList],
+        shoppingItems: [ShoppingListItem],
+        inventoryItems: [InventoryItem],
+        mealPrepItems: [MealPrepItem],
+        mealPrepUsages: [MealPrepUsage],
+        packingTrips: [PackingTrip],
+        packingItems: [PackingItem],
+        itineraryItems: [TripItineraryItem],
+        returnRequests: [ReturnRequest],
+        returnItems: [ReturnItem],
+        returnPackages: [ReturnPackage],
+        reminders: [FoodReminder],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> TodayHomeSummary {
+        let dayStart = calendar.startOfDay(for: now)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? now.addingTimeInterval(86_400)
+
+        let todoSection = todoSummary(
+            householdID: householdID,
+            caregiverName: currentCaregiverName,
+            lists: todoLists,
+            items: todoItems,
+            dayStart: dayStart,
+            dayEnd: dayEnd
+        )
+        let shoppingSection = shoppingSummary(
+            householdID: householdID,
+            lists: shoppingLists,
+            items: shoppingItems,
+            dayStart: dayStart,
+            dayEnd: dayEnd
+        )
+        let kitchenResult = kitchenSummary(
+            householdID: householdID,
+            inventoryItems: inventoryItems,
+            mealPrepItems: mealPrepItems,
+            usages: mealPrepUsages,
+            dayStart: dayStart,
+            dayEnd: dayEnd
+        )
+        let tripResult = tripSummary(
+            householdID: householdID,
+            trips: packingTrips,
+            packingItems: packingItems,
+            itineraryItems: itineraryItems,
+            dayStart: dayStart,
+            dayEnd: dayEnd,
+            calendar: calendar
+        )
+        let returnResult = returnsSummary(
+            householdID: householdID,
+            requests: returnRequests,
+            items: returnItems,
+            packages: returnPackages,
+            dayStart: dayStart,
+            dayEnd: dayEnd
+        )
+        let reminderAttention = reminderItems(
+            householdID: householdID,
+            reminders: reminders,
+            dayStart: dayStart,
+            dayEnd: dayEnd
+        )
+        let attention = (reminderAttention + kitchenResult.attention + tripResult.attention + returnResult.attention)
+            .sorted {
+                if $0.urgency != $1.urgency {
+                    return $0.urgency.rawValue > $1.urgency.rawValue
+                }
+                return ($0.sortDate ?? .distantFuture) < ($1.sortDate ?? .distantFuture)
+            }
+
+        return TodayHomeSummary(
+            attentionItems: Array(attention.prefix(attentionItemLimit)),
+            sections: [
+                todoSection,
+                shoppingSection,
+                kitchenResult.section,
+                tripResult.section,
+                returnResult.section
+            ]
+        )
+    }
+
+    private static func todoSummary(
+        householdID: UUID,
+        caregiverName: String,
+        lists: [HomeTodoList],
+        items: [HomeTodoItem],
+        dayStart: Date,
+        dayEnd: Date
+    ) -> TodayHomeSummarySection {
+        let activeLists = lists.filter { $0.householdID == householdID && !$0.isArchived }
+        let listsByID = Dictionary(uniqueKeysWithValues: activeLists.map { ($0.id, $0) })
+        let scopedItems = items.filter {
+            $0.householdID == householdID && listsByID[$0.todoListID] != nil
+        }
+        let completedToday = scopedItems.filter {
+            $0.isCompleted && isInDay($0.completedAt, start: dayStart, end: dayEnd)
+        }
+        let normalizedCaregiver = caregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let openItems = scopedItems.filter { !$0.isCompleted }.sorted { lhs, rhs in
+            let lhsIsCurrent = !normalizedCaregiver.isEmpty && lhs.assignedCaregiverName == normalizedCaregiver
+            let rhsIsCurrent = !normalizedCaregiver.isEmpty && rhs.assignedCaregiverName == normalizedCaregiver
+            if lhsIsCurrent != rhsIsCurrent { return lhsIsCurrent }
+            let lhsOrder = lhs.sortOrder ?? Int.max
+            let rhsOrder = rhs.sortOrder ?? Int.max
+            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        let visible = openItems.prefix(visibleItemLimit).map { item in
+            let listName = listsByID[item.todoListID]?.name ?? "To-Do"
+            let assignee = item.assignedCaregiverName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = [listName, assignee.flatMap { $0.isEmpty ? nil : "Assigned to \($0)" }]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+            return TodayHomeSummaryItem(
+                id: "todo-\(item.id.uuidString)",
+                category: .todos,
+                title: item.title,
+                detail: detail,
+                systemImage: "circle",
+                route: .todoList(item.todoListID),
+                sortDate: item.updatedAt
+            )
+        }
+
+        return TodayHomeSummarySection(
+            category: .todos,
+            countLabel: countText(openItems.count, singular: "open", plural: "open"),
+            summary: "\(countText(activeLists.count, singular: "active list", plural: "active lists")) · \(completedToday.count) completed today",
+            items: Array(visible),
+            remainderText: remainderText(openItems.count - visible.count, noun: "task"),
+            emptyMessage: "No open household to-dos."
+        )
+    }
+
+    private static func shoppingSummary(
+        householdID: UUID,
+        lists: [ShoppingList],
+        items: [ShoppingListItem],
+        dayStart: Date,
+        dayEnd: Date
+    ) -> TodayHomeSummarySection {
+        let activeLists = lists.filter { $0.householdID == householdID && !$0.isArchived }
+        let listIDs = Set(activeLists.map(\.id))
+        let scopedItems = items.filter {
+            $0.householdID == householdID && listIDs.contains($0.shoppingListID)
+        }
+        let openItems = scopedItems.filter { !$0.isChecked }
+        let checkedToday = scopedItems.filter {
+            $0.isChecked && isInDay($0.checkedAt, start: dayStart, end: dayEnd)
+        }
+        let openByList = Dictionary(grouping: openItems, by: \.shoppingListID)
+        let listsWithItems = activeLists.filter { !(openByList[$0.id] ?? []).isEmpty }.sorted { lhs, rhs in
+            let lhsItems = openByList[lhs.id] ?? []
+            let rhsItems = openByList[rhs.id] ?? []
+            let lhsHigh = lhsItems.filter { $0.priority == .high }.count
+            let rhsHigh = rhsItems.filter { $0.priority == .high }.count
+            if lhsHigh != rhsHigh { return lhsHigh > rhsHigh }
+            if lhsItems.count != rhsItems.count { return lhsItems.count > rhsItems.count }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        let visible = listsWithItems.prefix(visibleItemLimit).map { list in
+            let listItems = (openByList[list.id] ?? []).sorted { lhs, rhs in
+                if lhs.priority != rhs.priority { return lhs.priority == .high }
+                return (lhs.sortOrder ?? Int.max) < (rhs.sortOrder ?? Int.max)
+            }
+            let names = listItems.prefix(2).map(\.name).joined(separator: ", ")
+            let extra = max(0, listItems.count - 2)
+            let detail = extra > 0 ? "\(names) + \(extra) more" : names
+            let highCount = listItems.filter { $0.priority == .high }.count
+            return TodayHomeSummaryItem(
+                id: "shopping-\(list.id.uuidString)",
+                category: .shopping,
+                title: list.name,
+                detail: detail,
+                badge: highCount > 0 ? countText(highCount, singular: "high priority", plural: "high priority") : nil,
+                systemImage: "cart",
+                urgency: highCount > 0 ? .attention : .normal,
+                route: .shoppingList(list.id),
+                sortDate: list.updatedAt
+            )
+        }
+
+        return TodayHomeSummarySection(
+            category: .shopping,
+            countLabel: countText(openItems.count, singular: "item", plural: "items"),
+            summary: "\(countText(listsWithItems.count, singular: "active list", plural: "active lists")) · \(checkedToday.count) checked today",
+            items: Array(visible),
+            remainderText: remainderText(listsWithItems.count - visible.count, noun: "list"),
+            emptyMessage: "Shopping lists are clear."
+        )
+    }
+
+    private static func kitchenSummary(
+        householdID: UUID,
+        inventoryItems: [InventoryItem],
+        mealPrepItems: [MealPrepItem],
+        usages: [MealPrepUsage],
+        dayStart: Date,
+        dayEnd: Date
+    ) -> (section: TodayHomeSummarySection, attention: [TodayHomeSummaryItem]) {
+        let activePrep = mealPrepItems.filter { $0.householdID == householdID && !$0.isArchived }
+        let todayUsages = usages.filter {
+            $0.householdID == householdID && isInDay($0.dateTime, start: dayStart, end: dayEnd)
+        }
+        let usageByItem = Dictionary(grouping: todayUsages, by: \.mealPrepItemID)
+        let usedUpInventory = inventoryItems.filter {
+            $0.householdID == householdID && $0.status == .usedUp
+        }.sorted { $0.updatedAt > $1.updatedAt }
+        let sortedPrep = activePrep.sorted { lhs, rhs in
+            if lhs.servingsRemaining != rhs.servingsRemaining {
+                return lhs.servingsRemaining < rhs.servingsRemaining
+            }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        var representativeItems = sortedPrep.map { item in
+            let usedToday = (usageByItem[item.id] ?? []).reduce(0) { $0 + $1.servingsUsed }
+            let usageDetail = usedToday > 0 ? " · \(formatted(usedToday)) used today" : ""
+            return TodayHomeSummaryItem(
+                id: "meal-prep-\(item.id.uuidString)",
+                category: .kitchen,
+                title: item.name,
+                detail: "\(item.servingsText)\(usageDetail)",
+                badge: item.servingsRemaining <= 2 ? "Low" : nil,
+                systemImage: "takeoutbag.and.cup.and.straw",
+                urgency: item.servingsRemaining <= 0 ? .urgent : (item.servingsRemaining <= 2 ? .attention : .normal),
+                route: .mealPrepItem(item.id),
+                sortDate: item.updatedAt
+            )
+        }
+        if representativeItems.count < visibleItemLimit {
+            representativeItems.append(contentsOf: usedUpInventory.prefix(visibleItemLimit - representativeItems.count).map { item in
+                TodayHomeSummaryItem(
+                    id: "inventory-\(item.id.uuidString)",
+                    category: .kitchen,
+                    title: item.name,
+                    detail: "Marked used up",
+                    badge: "Inventory",
+                    systemImage: "cabinet",
+                    urgency: .attention,
+                    route: .inventoryItem(item.id),
+                    sortDate: item.updatedAt
+                )
+            })
+        }
+        let visible = Array(representativeItems.prefix(visibleItemLimit))
+        let totalServings = activePrep.reduce(0) { $0 + $1.servingsRemaining }
+        let usedToday = todayUsages.reduce(0) { $0 + $1.servingsUsed }
+        let lowPrepAttention = sortedPrep.filter { $0.servingsRemaining <= 2 }.prefix(2).map { item in
+            TodayHomeSummaryItem(
+                id: "attention-meal-prep-\(item.id.uuidString)",
+                category: .kitchen,
+                title: item.servingsRemaining <= 0 ? "\(item.name) is finished" : "\(item.name) is running low",
+                detail: item.servingsText,
+                badge: "Meal Prep",
+                systemImage: "exclamationmark.triangle.fill",
+                urgency: item.servingsRemaining <= 0 ? .urgent : .attention,
+                route: .mealPrepItem(item.id),
+                sortDate: item.updatedAt
+            )
+        }
+
+        return (
+            TodayHomeSummarySection(
+                category: .kitchen,
+                countLabel: countText(activePrep.count, singular: "prepared item", plural: "prepared items"),
+                summary: "\(formatted(totalServings)) servings ready · \(formatted(usedToday)) used today · \(usedUpInventory.count) used up",
+                items: visible,
+                remainderText: remainderText(max(0, activePrep.count + usedUpInventory.count - visible.count), noun: "item"),
+                emptyMessage: "No meal prep or inventory items need attention."
+            ),
+            Array(lowPrepAttention)
+        )
+    }
+
+    private static func tripSummary(
+        householdID: UUID,
+        trips: [PackingTrip],
+        packingItems: [PackingItem],
+        itineraryItems: [TripItineraryItem],
+        dayStart: Date,
+        dayEnd: Date,
+        calendar: Calendar
+    ) -> (section: TodayHomeSummarySection, attention: [TodayHomeSummaryItem]) {
+        let activeTrips = trips.filter {
+            $0.householdID == householdID && !$0.isArchived && $0.status == .upcoming && $0.completedAt == nil
+        }.sorted { lhs, rhs in
+            let lhsCurrent = lhs.startDate < dayEnd && lhs.endDate >= dayStart
+            let rhsCurrent = rhs.startDate < dayEnd && rhs.endDate >= dayStart
+            if lhsCurrent != rhsCurrent { return lhsCurrent }
+            return lhs.startDate < rhs.startDate
+        }
+        let activeTripIDs = Set(activeTrips.map(\.id))
+        let packingByTrip = Dictionary(
+            grouping: packingItems.filter { $0.householdID == householdID && activeTripIDs.contains($0.tripID) },
+            by: \.tripID
+        )
+        let todayItinerary = itineraryItems.filter {
+            guard $0.householdID == householdID, activeTripIDs.contains($0.tripID), !$0.isCompleted else {
+                return false
+            }
+            return isInDay($0.scheduledDay, start: dayStart, end: dayEnd)
+                || isInDay($0.startDate, start: dayStart, end: dayEnd)
+        }.sorted {
+            ($0.startDate ?? $0.scheduledDay ?? .distantFuture)
+                < ($1.startDate ?? $1.scheduledDay ?? .distantFuture)
+        }
+        var representative = todayItinerary.prefix(2).map { item in
+            TodayHomeSummaryItem(
+                id: "itinerary-\(item.id.uuidString)",
+                category: .trips,
+                title: item.title,
+                detail: "Today · \(activeTrips.first(where: { $0.id == item.tripID })?.title ?? "Trip itinerary")",
+                badge: item.kind.displayName,
+                systemImage: item.kind.systemImage,
+                route: .itineraryItem(item.tripID, item.id),
+                sortDate: item.startDate ?? item.scheduledDay
+            )
+        }
+        for trip in activeTrips where representative.count < visibleItemLimit {
+            let tripItems = packingByTrip[trip.id] ?? []
+            let relevantItems = tripItems.filter { $0.state != .notNeeded }
+            let packedCount = relevantItems.filter { $0.state == .packed }.count
+            let isCurrent = trip.startDate < dayEnd && trip.endDate >= dayStart
+            let daysUntil = calendar.dateComponents(
+                [.day],
+                from: dayStart,
+                to: calendar.startOfDay(for: trip.startDate)
+            ).day ?? 0
+            let timing: String
+            if isCurrent {
+                timing = "Happening now"
+            } else if daysUntil == 1 {
+                timing = "Starts tomorrow"
+            } else if daysUntil > 1 {
+                timing = "Starts in \(daysUntil) days"
+            } else {
+                timing = "Starts today"
+            }
+            representative.append(TodayHomeSummaryItem(
+                id: "trip-\(trip.id.uuidString)",
+                category: .trips,
+                title: trip.title,
+                detail: "\(timing) · \(packedCount) of \(relevantItems.count) packed",
+                badge: isCurrent ? "Today" : nil,
+                systemImage: "suitcase.rolling",
+                urgency: isCurrent ? .attention : .normal,
+                route: .packingTrip(trip.id),
+                sortDate: trip.startDate
+            ))
+        }
+        let attention = activeTrips.compactMap { trip -> TodayHomeSummaryItem? in
+            let tripItems = packingByTrip[trip.id] ?? []
+            let neededEssentials = tripItems.filter { $0.state == .needed && $0.priority == .essential }.count
+            let checkDate = [trip.finalCheckDate, trip.reminderDate].compactMap { $0 }.min()
+            let startsSoon = trip.startDate < (calendar.date(byAdding: .day, value: 3, to: dayStart) ?? dayEnd)
+            guard isBeforeEndOfDay(checkDate, dayEnd: dayEnd) || (startsSoon && neededEssentials > 0) else {
+                return nil
+            }
+            let isOverdue = checkDate.map { $0 < dayStart } == true
+            let detail = neededEssentials > 0
+                ? countText(neededEssentials, singular: "essential item still needed", plural: "essential items still needed")
+                : "Trip check is due"
+            return TodayHomeSummaryItem(
+                id: "attention-trip-\(trip.id.uuidString)",
+                category: .trips,
+                title: "Review \(trip.title)",
+                detail: detail,
+                badge: "Trip",
+                systemImage: "suitcase.rolling.fill",
+                urgency: isOverdue ? .urgent : .attention,
+                route: .packingList(trip.id),
+                sortDate: checkDate ?? trip.startDate
+            )
+        }
+        let todayCount = activeTrips.filter { $0.startDate < dayEnd && $0.endDate >= dayStart }.count
+
+        return (
+            TodayHomeSummarySection(
+                category: .trips,
+                countLabel: countText(activeTrips.count, singular: "active trip", plural: "active trips"),
+                summary: "\(todayCount) happening today · \(countText(todayItinerary.count, singular: "itinerary item today", plural: "itinerary items today"))",
+                items: Array(representative.prefix(visibleItemLimit)),
+                remainderText: remainderText(max(0, activeTrips.count + todayItinerary.count - representative.count), noun: "trip item"),
+                emptyMessage: "No active or upcoming trips."
+            ),
+            attention
+        )
+    }
+
+    private static func returnsSummary(
+        householdID: UUID,
+        requests: [ReturnRequest],
+        items: [ReturnItem],
+        packages: [ReturnPackage],
+        dayStart: Date,
+        dayEnd: Date
+    ) -> (section: TodayHomeSummarySection, attention: [TodayHomeSummaryItem]) {
+        let scopedRequests = requests.filter { $0.householdID == householdID && !$0.isArchived }
+        let scopedItems = items.filter { $0.householdID == householdID }
+        let scopedPackages = packages.filter { $0.householdID == householdID }
+        let itemsByRequest = Dictionary(grouping: scopedItems, by: \.returnRequestID)
+        let packagesByRequest = Dictionary(grouping: scopedPackages, by: \.returnRequestID)
+        let active = scopedRequests.compactMap { request -> (ReturnRequest, ReturnRequestStatus, Date?)? in
+            let requestPackages = packagesByRequest[request.id] ?? []
+            let status = ReturnTrackingService.status(for: request, packages: requestPackages)
+            guard status != .completed && status != .archived else { return nil }
+            return (request, status, requestPackages.compactMap(\.returnByDate).min())
+        }.sorted { lhs, rhs in
+            let lhsUrgent = lhs.2.map { $0 < dayEnd } ?? false
+            let rhsUrgent = rhs.2.map { $0 < dayEnd } ?? false
+            if lhsUrgent != rhsUrgent { return lhsUrgent }
+            return (lhs.2 ?? .distantFuture) < (rhs.2 ?? .distantFuture)
+        }
+        let visible = active.prefix(visibleItemLimit).map { request, status, returnByDate in
+            let title = returnTitle(
+                items: itemsByRequest[request.id] ?? [],
+                packages: packagesByRequest[request.id] ?? []
+            )
+            let deadline = returnByDate.map { " · Return by \(DateFormatting.day.string(from: $0))" } ?? ""
+            let urgency: TodayHomeSummaryUrgency = returnByDate.map {
+                $0 < dayStart ? .urgent : ($0 < dayEnd ? .attention : .normal)
+            } ?? .normal
+            return TodayHomeSummaryItem(
+                id: "return-\(request.id.uuidString)",
+                category: .returns,
+                title: title,
+                detail: "\(status.displayName)\(deadline)",
+                badge: urgency == .urgent ? "Overdue" : (urgency == .attention ? "Due today" : nil),
+                systemImage: "shippingbox",
+                urgency: urgency,
+                route: .returnRequest(request.id),
+                sortDate: returnByDate ?? request.updatedAt
+            )
+        }
+        let attention = active.compactMap { request, status, returnByDate -> TodayHomeSummaryItem? in
+            guard let returnByDate, returnByDate < dayEnd else { return nil }
+            let overdue = returnByDate < dayStart
+            return TodayHomeSummaryItem(
+                id: "attention-return-\(request.id.uuidString)",
+                category: .returns,
+                title: returnTitle(
+                    items: itemsByRequest[request.id] ?? [],
+                    packages: packagesByRequest[request.id] ?? []
+                ),
+                detail: overdue ? "Return deadline has passed" : "Return is due today · \(status.displayName)",
+                badge: overdue ? "Overdue" : "Due today",
+                systemImage: "shippingbox.fill",
+                urgency: overdue ? .urgent : .attention,
+                route: .returnRequest(request.id),
+                sortDate: returnByDate
+            )
+        }
+        let dueSoonCount = active.filter { $0.2.map { $0 < dayEnd } ?? false }.count
+
+        return (
+            TodayHomeSummarySection(
+                category: .returns,
+                countLabel: countText(active.count, singular: "active return", plural: "active returns"),
+                summary: "\(dueSoonCount) due or overdue · \(active.filter { $0.1 == .readyToDropOff }.count) ready to drop off",
+                items: Array(visible),
+                remainderText: remainderText(active.count - visible.count, noun: "return"),
+                emptyMessage: "No active returns."
+            ),
+            attention
+        )
+    }
+
+    private static func reminderItems(
+        householdID: UUID,
+        reminders: [FoodReminder],
+        dayStart: Date,
+        dayEnd: Date
+    ) -> [TodayHomeSummaryItem] {
+        reminders.filter {
+            $0.householdID == householdID && $0.isEnabled && $0.dateTime < dayEnd
+        }.map { reminder in
+            let overdue = reminder.dateTime < dayStart
+            let category = category(for: reminder)
+            return TodayHomeSummaryItem(
+                id: "reminder-\(reminder.id.uuidString)",
+                category: category,
+                title: reminder.title,
+                detail: overdue
+                    ? "Home reminder is overdue"
+                    : "Home reminder at \(DateFormatting.time.string(from: reminder.dateTime))",
+                badge: overdue ? "Overdue" : "Today",
+                systemImage: "bell.badge.fill",
+                urgency: overdue ? .urgent : .attention,
+                route: route(for: reminder),
+                sortDate: reminder.dateTime
+            )
+        }
+    }
+
+    private static func category(for reminder: FoodReminder) -> TodayHomeSummaryCategory {
+        switch reminder.type {
+        case .todos: .todos
+        case .shopping: .shopping
+        case .mealPrep: .kitchen
+        case .returns: .returns
+        case .custom: .todos
+        }
+    }
+
+    private static func route(for reminder: FoodReminder) -> FoodRouteCommand {
+        if let id = reminder.relatedTodoListID { return .todoList(id) }
+        if let id = reminder.relatedShoppingListID { return .shoppingList(id) }
+        if let id = reminder.relatedMealPrepItemID { return .mealPrepItem(id) }
+        if let id = reminder.relatedReturnRequestID { return .returnRequest(id) }
+        switch reminder.type {
+        case .todos, .custom: return .todos
+        case .shopping: return .shopping
+        case .mealPrep: return .mealPrep
+        case .returns: return .returns
+        }
+    }
+
+    private static func returnTitle(items: [ReturnItem], packages: [ReturnPackage]) -> String {
+        if let first = items.sorted(by: { ($0.sortOrder ?? 0, $0.name) < ($1.sortOrder ?? 0, $1.name) }).first {
+            return items.count == 1 ? first.name : "\(first.name) + \(items.count - 1)"
+        }
+        if let package = packages.sorted(by: { ($0.sortOrder ?? 0, $0.displayName) < ($1.sortOrder ?? 0, $1.displayName) }).first {
+            return "Return at \(package.displayName)"
+        }
+        return "Return"
+    }
+
+    private static func isInDay(_ date: Date?, start: Date, end: Date) -> Bool {
+        guard let date else { return false }
+        return date >= start && date < end
+    }
+
+    private static func isBeforeEndOfDay(_ date: Date?, dayEnd: Date) -> Bool {
+        date.map { $0 < dayEnd } ?? false
+    }
+
+    private static func countText(_ count: Int, singular: String, plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
+    }
+
+    private static func remainderText(_ count: Int, noun: String) -> String? {
+        guard count > 0 else { return nil }
+        return "+ \(count) more \(noun)\(count == 1 ? "" : "s")"
+    }
+
+    private static func formatted(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    }
+}
+
 @MainActor
 enum FoodInsightsService {
     static func metrics(

@@ -510,6 +510,25 @@ struct FoodHomeView: View {
             } else {
                 MissingFoodRouteView()
             }
+        case .packingList(let id):
+            if let trip = data.packingTrips.first(where: { $0.id == id }) {
+                PackingTripDetailView(
+                    trip: trip,
+                    allTrips: data.packingTrips,
+                    allTravelers: data.tripTravelers,
+                    allBags: data.packingBags,
+                    allItems: data.packingItems,
+                    itineraryChoiceGroups: data.itineraryChoiceGroups,
+                    itineraryItems: data.itineraryItems,
+                    itineraryLinks: data.itineraryLinks,
+                    profiles: profiles.filter { !$0.isArchived },
+                    shoppingLists: data.shoppingLists,
+                    shoppingItems: data.shoppingItems,
+                    startsInPacking: true
+                )
+            } else {
+                MissingFoodRouteView()
+            }
         case .itineraryItem(let tripID, let itemID):
             if let trip = data.packingTrips.first(where: { $0.id == tripID }),
                data.itineraryItems.contains(where: { $0.id == itemID && $0.tripID == tripID }) {
@@ -686,6 +705,9 @@ struct FoodHomeView: View {
         case .packingTrip(let id):
             deferredFoodCommand = nil
             replaceNavigation(with: .trips, route: .packingTrip(id))
+        case .packingList(let id):
+            deferredFoodCommand = nil
+            replaceNavigation(with: .trips, route: .packingList(id))
         case .itineraryItem(let tripID, let itemID):
             deferredFoodCommand = nil
             replaceNavigation(with: .trips, route: .itineraryItem(tripID, itemID))
@@ -770,7 +792,7 @@ struct FoodHomeView: View {
             return !data.todoLists.contains { $0.id == id }
         case .shoppingList(let id), .shoppingMode(let id):
             return !data.shoppingLists.contains { $0.id == id }
-        case .packingTrip(let id):
+        case .packingTrip(let id), .packingList(let id):
             return !data.packingTrips.contains { $0.id == id }
         case .itineraryItem(let tripID, _):
             return !data.packingTrips.contains { $0.id == tripID }
@@ -815,7 +837,7 @@ struct FoodHomeView: View {
             return .solids
         case .shopping, .shoppingList, .shoppingMode, .quickAdd:
             return .shopping
-        case .trips, .packingTrip, .itineraryItem:
+        case .trips, .packingTrip, .packingList, .itineraryItem:
             return .trips
         case .inventory, .inventoryItem:
             return .inventory
@@ -897,7 +919,7 @@ private struct FoodHomeDataScope {
 
     var packingTripID: UUID? {
         switch activeRoute {
-        case .packingTrip(let id), .itineraryItem(let id, _): id
+        case .packingTrip(let id), .packingList(let id), .itineraryItem(let id, _): id
         default: nil
         }
     }

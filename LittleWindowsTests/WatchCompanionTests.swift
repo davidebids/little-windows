@@ -400,6 +400,34 @@ final class WatchCompanionTests: XCTestCase {
     }
 
     @MainActor
+    func testWatchStateToleratesDuplicateProfileIdentifiers() throws {
+        let container = try makeInMemoryContainer()
+        let profileID = UUID()
+        let firstProfile = BabyProfile(
+            id: profileID,
+            name: "Test Child",
+            birthDate: Date().addingTimeInterval(-180 * 86_400),
+            createdAt: Date().addingTimeInterval(-60)
+        )
+        let duplicateProfile = BabyProfile(
+            id: profileID,
+            name: "Sibling",
+            birthDate: Date().addingTimeInterval(-120 * 86_400),
+            createdAt: Date()
+        )
+        container.mainContext.insert(firstProfile)
+        container.mainContext.insert(duplicateProfile)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(firstProfile)
+
+        let state = WatchStateFactory.make(context: container.mainContext)
+
+        XCTAssertEqual(state.selectedProfileID, profileID)
+        XCTAssertEqual(state.profiles.map(\.id), [profileID])
+        XCTAssertEqual(state.profiles.first?.name, "Test Child")
+    }
+
+    @MainActor
     func testWatchStateIncludesEveryTimerForSelectedProfile() throws {
         let container = try makeInMemoryContainer()
         let profile = BabyProfile(

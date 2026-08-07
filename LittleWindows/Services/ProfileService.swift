@@ -25,21 +25,27 @@ final class ProfileService: ObservableObject {
     }
 
     func allActiveProfiles(in profiles: [CareProfile]) -> [CareProfile] {
-        profiles
-            .filter { !$0.isArchived }
-            .sorted { $0.createdAt < $1.createdAt }
+        allProfiles(in: profiles).filter { !$0.isArchived }
     }
 
     func allChildProfiles(in profiles: [CareProfile]) -> [CareProfile] {
-        profiles
-            .filter { $0.profileType == .child && !$0.isArchived }
-            .sorted { $0.createdAt < $1.createdAt }
+        allActiveProfiles(in: profiles).filter { $0.profileType == .child }
     }
 
     func allDogProfiles(in profiles: [CareProfile]) -> [CareProfile] {
-        profiles
-            .filter { $0.profileType == .dog && !$0.isArchived }
-            .sorted { $0.createdAt < $1.createdAt }
+        allActiveProfiles(in: profiles).filter { $0.profileType == .dog }
+    }
+
+    func allProfiles(in profiles: [CareProfile]) -> [CareProfile] {
+        var seenProfileIDs = Set<UUID>()
+        return profiles
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt {
+                    return lhs.createdAt < rhs.createdAt
+                }
+                return lhs.updatedAt > rhs.updatedAt
+            }
+            .filter { seenProfileIDs.insert($0.id).inserted }
     }
 
     func ensureSelection(in profiles: [CareProfile]) -> CareProfile? {
@@ -261,6 +267,234 @@ final class ProfileService: ObservableObject {
         ((try? context.fetch(FetchDescriptor<Record>())) ?? [])
             .filter { $0[keyPath: profileIDKeyPath] == profileID }
             .forEach { context.delete($0) }
+    }
+}
+
+@MainActor
+enum ProfileDuplicateRepairService {
+    private static let minimumSetupShellAgeDifference: TimeInterval = 60
+
+    @discardableResult
+    static func repair(
+        context: ModelContext,
+        profiles: [CareProfile]? = nil,
+        saveChanges: Bool = true
+    ) -> Int {
+        let fetchedProfiles = profiles
+            ?? ((try? context.fetch(FetchDescriptor<CareProfile>())) ?? [])
+        guard fetchedProfiles.count > 1 else { return 0 }
+
+        let sortedProfiles = fetchedProfiles.sorted { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        var canonicalProfileByID: [UUID: CareProfile] = [:]
+        var removedObjectIDs = Set<ObjectIdentifier>()
+
+        // SwiftData/CloudKit can contain multiple model objects carrying the
+        // same app-level UUID. All profile-scoped data already points to that
+        // UUID, so only the extra profile object needs to be removed.
+        for profile in sortedProfiles {
+            if canonicalProfileByID[profile.id] == nil {
+                canonicalProfileByID[profile.id] = profile
+            } else {
+                removedObjectIDs.insert(ObjectIdentifier(profile))
+            }
+        }
+
+        let uniqueProfiles = sortedProfiles.filter {
+            !removedObjectIDs.contains(ObjectIdentifier($0))
+        }
+        let linkedDataByProfileID = Dictionary(uniqueKeysWithValues: uniqueProfiles.compactMap {
+            profile -> (UUID, Bool)? in
+            guard let hasLinkedData = hasLinkedData(
+                profileID: profile.id,
+                context: context
+            ) else { return nil }
+            return (profile.id, hasLinkedData)
+        })
+        let profilesWithLinkedData = Set(linkedDataByProfileID.compactMap {
+            $0.value ? $0.key : nil
+        })
+        let profilesConfirmedEmpty = Set(linkedDataByProfileID.compactMap {
+            $0.value ? nil : $0.key
+        })
+        var replacementByRemovedProfileID: [UUID: CareProfile] = [:]
+
+        // A reinstall can create a new onboarding profile before the original
+        // profile finishes downloading from iCloud. Only remove a newer,
+        // otherwise-empty setup shell when it has exactly one matching older
+        // profile that already owns user data.
+        for shell in uniqueProfiles where profilesConfirmedEmpty.contains(shell.id) {
+            guard isEmptySetupShell(shell) else { continue }
+            let matches = uniqueProfiles.filter { candidate in
+                candidate.id != shell.id
+                    && profilesWithLinkedData.contains(candidate.id)
+                    && candidate.createdAt.addingTimeInterval(minimumSetupShellAgeDifference)
+                        <= shell.createdAt
+                    && profilesRepresentSamePerson(candidate, shell)
+            }
+            guard matches.count == 1, let canonical = matches.first else { continue }
+            removedObjectIDs.insert(ObjectIdentifier(shell))
+            replacementByRemovedProfileID[shell.id] = canonical
+        }
+
+        let removedProfiles = fetchedProfiles.filter {
+            removedObjectIDs.contains(ObjectIdentifier($0))
+        }
+        guard !removedProfiles.isEmpty else { return 0 }
+
+        if let selectedProfileID = ProfileService.shared.selectedProfileID,
+           let replacement = replacementByRemovedProfileID[selectedProfileID] {
+            ProfileService.shared.switchProfile(replacement)
+        }
+        removedProfiles.forEach(context.delete)
+
+        if saveChanges, !PersistenceService.save(context: context) {
+            return 0
+        }
+        if saveChanges {
+            SystemIntegrationReconciler.requestReconciliation()
+        }
+        return removedProfiles.count
+    }
+
+    private static func profilesRepresentSamePerson(
+        _ lhs: CareProfile,
+        _ rhs: CareProfile
+    ) -> Bool {
+        guard lhs.profileType == rhs.profileType,
+              normalized(lhs.name) == normalized(rhs.name),
+              lhs.sex == rhs.sex,
+              Calendar.current.isDate(lhs.birthDate, inSameDayAs: rhs.birthDate),
+              lhs.isArchived == rhs.isArchived else {
+            return false
+        }
+        guard lhs.profileType == .dog else { return true }
+        return optionalDatesAreCompatible(lhs.adoptionDate, rhs.adoptionDate)
+            && optionalTextIsCompatible(lhs.breed, rhs.breed)
+    }
+
+    private static func optionalDatesAreCompatible(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        guard let lhs, let rhs else { return true }
+        return Calendar.current.isDate(lhs, inSameDayAs: rhs)
+    }
+
+    private static func optionalTextIsCompatible(_ lhs: String?, _ rhs: String?) -> Bool {
+        let lhs = normalized(lhs ?? "")
+        let rhs = normalized(rhs ?? "")
+        return lhs.isEmpty || rhs.isEmpty || lhs == rhs
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private static func isEmptySetupShell(_ profile: CareProfile) -> Bool {
+        profile.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && profile.birthWeightKilograms == nil
+            && profile.birthLengthCentimeters == nil
+            && profile.birthHeadCircumferenceCentimeters == nil
+            && profile.profilePhotoAttachmentID == nil
+            && normalized(profile.microchipNumber ?? "").isEmpty
+            && normalized(profile.vetName ?? "").isEmpty
+            && normalized(profile.vetClinic ?? "").isEmpty
+            && normalized(profile.vetPhone ?? "").isEmpty
+            && normalized(profile.emergencyVet ?? "").isEmpty
+    }
+
+    private static func hasLinkedData(profileID: UUID, context: ModelContext) -> Bool? {
+        guard let hasBabyEvents = hasRecord(
+            FetchDescriptor<BabyEvent>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasBabyEvents { return true }
+        guard let hasPredictions = hasRecord(
+            FetchDescriptor<SleepPredictionRecord>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasPredictions { return true }
+        guard let hasMilestones = hasRecord(
+            FetchDescriptor<MilestoneEntry>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasMilestones { return true }
+        guard let hasAppointments = hasRecord(
+            FetchDescriptor<DoctorAppointment>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasAppointments { return true }
+        guard let hasAgeGuideStates = hasRecord(
+            FetchDescriptor<AgeGuideReadState>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasAgeGuideStates { return true }
+        guard let hasPuppyGuideStates = hasRecord(
+            FetchDescriptor<PuppyStageGuideReadState>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasPuppyGuideStates { return true }
+        guard let hasSolidsState = hasRecord(
+            FetchDescriptor<SolidsProfileState>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasSolidsState { return true }
+        guard let hasFoodProgress = hasRecord(
+            FetchDescriptor<SolidFoodProgress>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasFoodProgress { return true }
+        guard let hasFoodEventItems = hasRecord(
+            FetchDescriptor<SolidFoodEventItem>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasFoodEventItems { return true }
+        guard let hasAllergenProgress = hasRecord(
+            FetchDescriptor<SolidAllergenProgress>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasAllergenProgress { return true }
+        guard let hasPlannedMeals = hasRecord(
+            FetchDescriptor<PlannedSolidMeal>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasPlannedMeals { return true }
+        guard let hasPhotos = hasRecord(
+            FetchDescriptor<PhotoAttachment>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasPhotos { return true }
+        guard let hasTripTravelers = hasRecord(
+            FetchDescriptor<TripTraveler>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasTripTravelers { return true }
+        guard let hasRoutines = hasRecord(
+            FetchDescriptor<CareRoutine>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasRoutines { return true }
+        return hasRecord(
+            FetchDescriptor<CareRoutineRun>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        )
+    }
+
+    private static func hasRecord<Record: PersistentModel>(
+        _ descriptor: FetchDescriptor<Record>,
+        context: ModelContext
+    ) -> Bool? {
+        var descriptor = descriptor
+        descriptor.fetchLimit = 1
+        do {
+            return try context.fetchCount(descriptor) > 0
+        } catch {
+            return nil
+        }
     }
 }
 

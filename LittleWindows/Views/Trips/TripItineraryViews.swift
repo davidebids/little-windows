@@ -24,12 +24,24 @@ struct PackingTripDetailView: View {
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
     var initialItineraryItemID: UUID? = nil
+    var startsInPacking = false
 
-    @State private var workspace = TripDetailWorkspace.itinerary
+    @State private var workspaceOverride: TripDetailWorkspace?
+
+    private var workspace: TripDetailWorkspace {
+        workspaceOverride ?? (startsInPacking ? .packing : .itinerary)
+    }
+
+    private var workspaceSelection: Binding<TripDetailWorkspace> {
+        Binding(
+            get: { workspace },
+            set: { workspaceOverride = $0 }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Trip workspace", selection: $workspace) {
+            Picker("Trip workspace", selection: workspaceSelection) {
                 ForEach(TripDetailWorkspace.allCases) { value in
                     Text(value.title).tag(value)
                 }

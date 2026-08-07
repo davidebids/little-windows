@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import SwiftData
 
 @MainActor
 final class SyncStatusService {
@@ -109,5 +110,139 @@ final class SyncStatusService {
             lastCheckedAt: lastCheckedAt,
             userFriendlyErrorMessage: userFriendlyErrorMessage
         )
+    }
+}
+
+enum ICloudRestoreEligibility: Equatable {
+    case ready
+    case unavailable(String)
+}
+
+enum ICloudRestoreOutcome: Equatable {
+    case restored(profileCount: Int)
+    case noDataArrived
+    case unavailable(String)
+    case failed(String)
+}
+
+@MainActor
+enum ICloudRestoreService {
+    static let defaultWaitDuration: Duration = .seconds(45)
+    static let defaultPollInterval: Duration = .seconds(1)
+
+    nonisolated static func eligibility(
+        syncMode: FamilySyncMode,
+        isUsingCloudKitStore: Bool,
+        availability: ICloudSyncAvailability
+    ) -> ICloudRestoreEligibility {
+        guard syncMode == .privateICloudSync else {
+            return .unavailable(
+                "This install is not using Private iCloud Sync. You can import a JSON backup or continue with a new setup."
+            )
+        }
+        guard isUsingCloudKitStore else {
+            return .unavailable(
+                "Little Windows could not open its private iCloud store on this launch. Check iCloud and reopen the app, or import a JSON backup."
+            )
+        }
+
+        switch availability {
+        case .available:
+            return .ready
+        case .checking:
+            return .unavailable("Little Windows is still checking iCloud. Please try again.")
+        case .disabled:
+            return .unavailable(
+                "Private iCloud Sync is turned off. You can import a JSON backup or continue with a new setup."
+            )
+        case .unavailable(let message):
+            return .unavailable(message)
+        }
+    }
+
+    static func restore(
+        context: ModelContext
+    ) async -> ICloudRestoreOutcome {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment[
+            "LITTLE_WINDOWS_UI_TEST_ICLOUD_RESTORE_WAITING"
+        ] == "1" {
+            do {
+                try await Task.sleep(for: .seconds(5))
+            } catch {
+                return .noDataArrived
+            }
+            return .noDataArrived
+        }
+        #endif
+
+        return await restore(
+            context: context,
+            statusService: SyncStatusService(),
+            waitDuration: defaultWaitDuration,
+            pollInterval: defaultPollInterval
+        )
+    }
+
+    static func restore(
+        context: ModelContext,
+        statusService: SyncStatusService,
+        waitDuration: Duration,
+        pollInterval: Duration
+    ) async -> ICloudRestoreOutcome {
+        let storeEligibility = eligibility(
+            syncMode: PersistenceService.syncModeAtStartup,
+            isUsingCloudKitStore: PersistenceService.isUsingCloudKitStore,
+            availability: .available
+        )
+        if case .unavailable(let message) = storeEligibility {
+            return .unavailable(message)
+        }
+
+        await statusService.refreshStatus(force: true)
+        switch eligibility(
+            syncMode: PersistenceService.syncModeAtStartup,
+            isUsingCloudKitStore: PersistenceService.isUsingCloudKitStore,
+            availability: statusService.availability
+        ) {
+        case .ready:
+            return await waitForImportedProfiles(
+                context: context,
+                waitDuration: waitDuration,
+                pollInterval: pollInterval
+            )
+        case .unavailable(let message):
+            return .unavailable(message)
+        }
+    }
+
+    static func waitForImportedProfiles(
+        context: ModelContext,
+        waitDuration: Duration,
+        pollInterval: Duration
+    ) async -> ICloudRestoreOutcome {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: waitDuration)
+
+        while !Task.isCancelled {
+            do {
+                let profiles = try context.fetch(FetchDescriptor<CareProfile>())
+                if !profiles.isEmpty {
+                    _ = ProfileService.shared.ensureSelection(in: profiles)
+                    return .restored(profileCount: profiles.count)
+                }
+            } catch {
+                return .failed("Little Windows could not read the restored data: \(error.localizedDescription)")
+            }
+
+            guard clock.now < deadline else { break }
+            do {
+                try await Task.sleep(for: pollInterval)
+            } catch {
+                break
+            }
+        }
+
+        return .noDataArrived
     }
 }
