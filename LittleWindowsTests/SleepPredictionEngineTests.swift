@@ -3618,6 +3618,74 @@ final class SleepPredictionEngineTests: XCTestCase {
         ))
     }
 
+    func testFirstRunICloudRestoreRequiresPrivateCloudStoreAndAvailableAccount() {
+        XCTAssertEqual(
+            ICloudRestoreService.eligibility(
+                syncMode: .privateICloudSync,
+                isUsingCloudKitStore: true,
+                availability: .available
+            ),
+            .ready
+        )
+
+        for eligibility in [
+            ICloudRestoreService.eligibility(
+                syncMode: .localOnly,
+                isUsingCloudKitStore: false,
+                availability: .available
+            ),
+            ICloudRestoreService.eligibility(
+                syncMode: .privateICloudSync,
+                isUsingCloudKitStore: false,
+                availability: .available
+            ),
+            ICloudRestoreService.eligibility(
+                syncMode: .privateICloudSync,
+                isUsingCloudKitStore: true,
+                availability: .unavailable("No iCloud account")
+            )
+        ] {
+            guard case .unavailable(let message) = eligibility else {
+                XCTFail("Expected iCloud restore to be unavailable")
+                continue
+            }
+            XCTAssertFalse(message.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testFirstRunICloudRestoreDetectsImportedProfilesWithoutWriting() async throws {
+        let container = try makeInMemoryContainer()
+        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        container.mainContext.insert(profile)
+
+        let outcome = await ICloudRestoreService.waitForImportedProfiles(
+            context: container.mainContext,
+            waitDuration: .zero,
+            pollInterval: .zero
+        )
+
+        XCTAssertEqual(outcome, .restored(profileCount: 1))
+        XCTAssertEqual(
+            try container.mainContext.fetch(FetchDescriptor<CareProfile>()).map(\.id),
+            [profile.id]
+        )
+    }
+
+    @MainActor
+    func testFirstRunICloudRestoreLeavesEmptyStoreUnchangedWhenNothingArrives() async throws {
+        let container = try makeInMemoryContainer()
+
+        let outcome = await ICloudRestoreService.waitForImportedProfiles(
+            context: container.mainContext,
+            waitDuration: .zero,
+            pollInterval: .zero
+        )
+
+        XCTAssertEqual(outcome, .noDataArrived)
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<CareProfile>()).isEmpty)
+    }
+
     @MainActor
     func testFoodHomeBootstrapDoesNotCreateDefaultFoodData() throws {
         let container = try makeInMemoryContainer()

@@ -3,6 +3,35 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testFirstRunOffersRestoreFromICloud() {
+        continueAfterFailure = false
+
+        launch(
+            startURL: "littlewindows://debug/reset-empty",
+            additionalEnvironment: [
+                "LITTLE_WINDOWS_UI_TEST_ICLOUD_RESTORE_WAITING": "1"
+            ]
+        )
+
+        let restoreButton = app.buttons["firstRun.restoreFromICloud"]
+        XCTAssertTrue(
+            restoreButton.waitForExistence(timeout: 4),
+            "A returning user should be able to restore Private iCloud Sync data from onboarding."
+        )
+        XCTAssertTrue(
+            app.staticTexts["Already use Little Windows?"].exists
+        )
+
+        restoreButton.tap()
+        XCTAssertTrue(
+            app.otherElements["firstRun.iCloudRestoreProgress"]
+                .waitForExistence(timeout: 2),
+            "iCloud restore should show progress while synced data is arriving."
+        )
+        XCTAssertTrue(app.staticTexts["Restoring from iCloud…"].exists)
+        XCTAssertTrue(app.buttons["Cancel"].exists)
+    }
+
     func testProductionScaleStoreKeepsPrimaryNavigationResponsive() {
         continueAfterFailure = false
 
@@ -2460,12 +2489,17 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
     }
 
-    private func launch(startURL: String) {
+    private func launch(
+        startURL: String,
+        additionalEnvironment: [String: String] = [:]
+    ) {
         app.terminate()
-        app.launchEnvironment = [
+        var launchEnvironment = [
             "LITTLE_WINDOWS_UI_TESTING": "1",
             "LITTLE_WINDOWS_START_URL": startURL
         ]
+        launchEnvironment.merge(additionalEnvironment) { _, newValue in newValue }
+        app.launchEnvironment = launchEnvironment
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
 

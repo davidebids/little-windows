@@ -643,6 +643,9 @@ struct RootView: View {
 
     private func markOnboardingCompleteForExistingData() {
         guard !hasCompletedInitialOnboarding, !profiles.isEmpty else { return }
+        if !CaregiverIdentityService.hasExplicitCurrentCaregiverName() {
+            needsLogNamePrompt = true
+        }
         hasCompletedInitialOnboarding = true
     }
 
@@ -778,6 +781,18 @@ private enum FirstRunOnboardingStep: Int {
     case profile
 }
 
+private enum FirstRunICloudRestoreState: Equatable {
+    case idle
+    case restoring
+    case noDataArrived
+    case unavailable(String)
+    case failed(String)
+
+    var isWorking: Bool {
+        self == .restoring
+    }
+}
+
 private struct FirstRunOnboardingView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
@@ -796,6 +811,8 @@ private struct FirstRunOnboardingView: View {
     @State private var adoptionDate = Date()
     @State private var breed = ""
     @State private var validationMessage: String?
+    @State private var iCloudRestoreState = FirstRunICloudRestoreState.idle
+    @State private var iCloudRestoreTask: Task<Void, Never>?
 
     private var trimmedPrimaryCaregiverName: String {
         primaryCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -853,6 +870,9 @@ private struct FirstRunOnboardingView: View {
                 Text(validationMessage ?? "")
             }
         }
+        .onDisappear {
+            iCloudRestoreTask?.cancel()
+        }
     }
 
     private var header: some View {
@@ -879,6 +899,8 @@ private struct FirstRunOnboardingView: View {
 
     private var caregiverStep: some View {
         VStack(alignment: .leading, spacing: 18) {
+            iCloudRestoreSection
+
             VStack(alignment: .leading, spacing: 12) {
                 Text("Caregiver")
                     .font(.headline)
@@ -908,9 +930,10 @@ private struct FirstRunOnboardingView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(!isCaregiverStepValid)
+            .disabled(!isCaregiverStepValid || iCloudRestoreState.isWorking)
 
             Button {
+                iCloudRestoreTask?.cancel()
                 importBackupInstead()
             } label: {
                 Label("Import JSON backup instead", systemImage: "square.and.arrow.down")
@@ -919,10 +942,135 @@ private struct FirstRunOnboardingView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+            .disabled(iCloudRestoreState.isWorking)
         }
         .onAppear {
             if primaryCaregiverName.isEmpty, caregiverOne != "Caregiver 1" {
                 primaryCaregiverName = caregiverOne
+            }
+        }
+    }
+
+    private var iCloudRestoreSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Already use Little Windows?", systemImage: "icloud.and.arrow.down")
+                .font(.headline)
+                .foregroundStyle(AppTheme.accent)
+
+            Text("Look for Little Windows data previously synced with Private iCloud Sync on this Apple Account.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if iCloudRestoreState.isWorking {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Restoring from iCloud…")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Keep Little Windows open while synced data arrives.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("firstRun.iCloudRestoreProgress")
+
+                Button("Cancel") {
+                    iCloudRestoreTask?.cancel()
+                    iCloudRestoreState = .idle
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button {
+                    beginICloudRestore()
+                } label: {
+                    Label("Restore from iCloud", systemImage: "arrow.clockwise.icloud.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .accessibilityIdentifier("firstRun.restoreFromICloud")
+            }
+
+            iCloudRestoreResult
+
+            Text("Only data that finished syncing to iCloud can return this way. JSON backups remain the most complete manual recovery option.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .appSurface()
+    }
+
+    @ViewBuilder
+    private var iCloudRestoreResult: some View {
+        switch iCloudRestoreState {
+        case .idle, .restoring:
+            EmptyView()
+        case .noDataArrived:
+            restoreMessage(
+                title: "No synced profiles arrived yet",
+                detail: "Confirm this device uses the same Apple Account, check the connection, and try again. Little Windows did not create or overwrite any data.",
+                systemImage: "icloud.slash",
+                color: .orange
+            )
+        case .unavailable(let message):
+            restoreMessage(
+                title: "iCloud restore is unavailable",
+                detail: message,
+                systemImage: "exclamationmark.icloud",
+                color: .orange
+            )
+        case .failed(let message):
+            restoreMessage(
+                title: "Restore could not finish",
+                detail: message,
+                systemImage: "exclamationmark.triangle",
+                color: .red
+            )
+        }
+    }
+
+    private func restoreMessage(
+        title: String,
+        detail: String,
+        systemImage: String,
+        color: Color
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(color)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func beginICloudRestore() {
+        iCloudRestoreTask?.cancel()
+        iCloudRestoreState = .restoring
+        iCloudRestoreTask = Task { @MainActor in
+            let outcome = await ICloudRestoreService.restore(context: modelContext)
+            guard !Task.isCancelled else { return }
+
+            switch outcome {
+            case .restored:
+                completeOnboarding()
+            case .noDataArrived:
+                iCloudRestoreState = .noDataArrived
+            case .unavailable(let message):
+                iCloudRestoreState = .unavailable(message)
+            case .failed(let message):
+                iCloudRestoreState = .failed(message)
             }
         }
     }

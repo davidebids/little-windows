@@ -10,7 +10,7 @@ The app is built around dense daily care workflows: quick logging, active timers
 2. Select the `LittleWindows` scheme.
 3. Run on an iOS 17+ simulator or signed device.
 
-First launch presents onboarding for a new empty store. It does not create default child profiles, care history, shopping lists, or personal archives automatically. SwiftUI previews and debug-only seed helpers use neutral sample child and dog data.
+First launch presents onboarding for a new empty store. Returning users can choose **Restore from iCloud** to wait for data previously synced through Private iCloud Sync on the same Apple Account, or open Settings to import a JSON backup. The iCloud option does not create or overwrite data when no synced profiles arrive, and it does not represent a separate server-side backup snapshot. The app does not create default child profiles, care history, shopping lists, or personal archives automatically. SwiftUI previews and debug-only seed helpers use neutral sample child and dog data.
 
 ## App Areas
 
