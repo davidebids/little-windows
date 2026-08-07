@@ -596,7 +596,7 @@ struct ManageProfilesView: View {
     @State private var showingAdd = false
 
     private var sortedProfiles: [CareProfile] {
-        allProfiles.sorted { $0.createdAt < $1.createdAt }
+        profileService.allProfiles(in: allProfiles)
     }
 
     private var activeProfiles: [CareProfile] {

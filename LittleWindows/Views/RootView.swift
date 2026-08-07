@@ -606,6 +606,20 @@ struct RootView: View {
             markOnboardingCompleteForExistingData()
             hasCheckedInitialOnboardingState = true
         }
+        .task(id: "profile-duplicate-repair-\(profiles.count)") {
+            guard profiles.count > 1 else { return }
+            for retryDelaySeconds in [0, 3, 12, 30] {
+                if retryDelaySeconds > 0 {
+                    do {
+                        try await Task.sleep(for: .seconds(retryDelaySeconds))
+                    } catch {
+                        return
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                _ = ProfileDuplicateRepairService.repair(context: modelContext)
+            }
+        }
         .onChange(of: hasCompletedInitialOnboarding) { _, completed in
             guard completed, shouldOpenSettingsAfterOnboarding else { return }
             shouldOpenSettingsAfterOnboarding = false

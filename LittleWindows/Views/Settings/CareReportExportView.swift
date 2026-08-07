@@ -24,12 +24,16 @@ struct CareReportExportView: View {
     @State private var defaultFilename = "Little-Windows-Care-Report.pdf"
     @State private var statusMessage: String?
 
+    private var uniqueProfiles: [BabyProfile] {
+        ProfileService.shared.allProfiles(in: profiles)
+    }
+
     private var activeProfiles: [BabyProfile] {
-        profiles.filter { !$0.isArchived }
+        ProfileService.shared.allActiveProfiles(in: profiles)
     }
 
     private var selectedProfile: BabyProfile? {
-        let candidates = activeProfiles.isEmpty ? profiles : activeProfiles
+        let candidates = activeProfiles.isEmpty ? uniqueProfiles : activeProfiles
         if let selectedProfileID,
            let profile = candidates.first(where: { $0.id == selectedProfileID }) {
             return profile
@@ -40,7 +44,7 @@ struct CareReportExportView: View {
     var body: some View {
         Form {
             Section {
-                if activeProfiles.isEmpty && profiles.isEmpty {
+                if activeProfiles.isEmpty && uniqueProfiles.isEmpty {
                     ContentUnavailableView(
                         "No Profiles",
                         systemImage: "person.crop.circle.badge.exclamationmark",
@@ -51,7 +55,7 @@ struct CareReportExportView: View {
                         get: { selectedProfile?.id },
                         set: { selectedProfileID = $0 }
                     )) {
-                        ForEach(activeProfiles.isEmpty ? profiles : activeProfiles) { profile in
+                        ForEach(activeProfiles.isEmpty ? uniqueProfiles : activeProfiles) { profile in
                             Text(profile.name).tag(Optional(profile.id))
                         }
                     }

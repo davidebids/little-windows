@@ -1340,6 +1340,126 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testProfileDuplicateRepairRemovesRepeatedIdentifierAndPreservesHistory() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profileID = UUID()
+        let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
+        let original = BabyProfile(
+            id: profileID,
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
+        )
+        let duplicate = BabyProfile(
+            id: profileID,
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 300_000)
+        )
+        let event = BabyEvent(
+            profileID: profileID,
+            type: .feed,
+            startDate: Date(timeIntervalSinceReferenceDate: 400_000)
+        )
+        context.insert(original)
+        context.insert(duplicate)
+        context.insert(event)
+        try context.save()
+
+        XCTAssertEqual(ProfileService.shared.allProfiles(in: [duplicate, original]).count, 1)
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 1)
+
+        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        let events = try context.fetch(FetchDescriptor<BabyEvent>())
+        XCTAssertEqual(profiles.count, 1)
+        XCTAssertEqual(profiles.first?.id, profileID)
+        XCTAssertEqual(profiles.first?.createdAt, original.createdAt)
+        XCTAssertEqual(events.map(\.profileID), [profileID])
+    }
+
+    @MainActor
+    func testProfileDuplicateRepairRemovesNewEmptySetupShellAfterHistorySyncs() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
+        let restoredProfile = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
+        )
+        let setupShell = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 400_000),
+            displayColor: "indigo"
+        )
+        context.insert(restoredProfile)
+        context.insert(setupShell)
+        try context.save()
+        ProfileService.shared.switchProfile(setupShell)
+
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BabyProfile>()), 2)
+
+        let restoredEvent = BabyEvent(
+            profileID: restoredProfile.id,
+            type: .diaper,
+            startDate: Date(timeIntervalSinceReferenceDate: 300_000)
+        )
+        context.insert(restoredEvent)
+        try context.save()
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 1)
+
+        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        XCTAssertEqual(profiles.map(\.id), [restoredProfile.id])
+        XCTAssertEqual(ProfileService.shared.selectedProfileID, restoredProfile.id)
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<BabyEvent>()).map(\.profileID),
+            [restoredProfile.id]
+        )
+    }
+
+    @MainActor
+    func testProfileDuplicateRepairPreservesMatchingProfilesWhenBothHaveHistory() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
+        let firstProfile = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
+        )
+        let secondProfile = BabyProfile(
+            name: "Test Child",
+            birthDate: birthDate,
+            sex: .unknown,
+            createdAt: Date(timeIntervalSinceReferenceDate: 400_000)
+        )
+        context.insert(firstProfile)
+        context.insert(secondProfile)
+        context.insert(BabyEvent(
+            profileID: firstProfile.id,
+            type: .feed,
+            startDate: Date(timeIntervalSinceReferenceDate: 300_000)
+        ))
+        context.insert(BabyEvent(
+            profileID: secondProfile.id,
+            type: .diaper,
+            startDate: Date(timeIntervalSinceReferenceDate: 500_000)
+        ))
+        try context.save()
+
+        XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BabyProfile>()), 2)
+    }
+
+    @MainActor
     func testProfileSelectionFallsBackToActiveChild() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
