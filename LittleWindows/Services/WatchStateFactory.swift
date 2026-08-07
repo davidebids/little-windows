@@ -56,10 +56,14 @@ enum WatchFavoritePreferenceStore {
 @MainActor
 enum WatchStateFactory {
     static func make(context: ModelContext, now: Date = Date()) -> WatchCompanionState {
-        let profiles = ((try? context.fetch(FetchDescriptor<BabyProfile>(
+        let fetchedProfiles = ((try? context.fetch(FetchDescriptor<BabyProfile>(
             predicate: #Predicate { !$0.isArchived },
             sortBy: [SortDescriptor(\BabyProfile.createdAt)]
         ))) ?? [])
+        var seenProfileIDs = Set<UUID>()
+        let profiles = fetchedProfiles.filter {
+            seenProfileIDs.insert($0.id).inserted
+        }
         let selectedProfile = ProfileService.shared.selectedProfile(in: profiles)
             ?? profiles.first
         guard let selectedProfile else {
