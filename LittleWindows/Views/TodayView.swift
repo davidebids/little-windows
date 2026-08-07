@@ -793,11 +793,17 @@ struct TodayView: View {
                 .background(AppTheme.background)
         }
 
-        VStack(spacing: 0) {
-            TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
-            Divider()
+        let effectiveDisplayMode: TodayDisplayMode = profile == nil
+            ? .home
+            : deepLinkRouter.todayDisplayMode
 
-            if deepLinkRouter.todayDisplayMode == .care {
+        VStack(spacing: 0) {
+            if profile != nil {
+                TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
+                Divider()
+            }
+
+            if effectiveDisplayMode == .care {
                 listContent
             } else if let householdID = households.first?.id {
                 TodayHomeSummaryDataLoader(
@@ -810,9 +816,9 @@ struct TodayView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    "Home isn’t ready yet",
+                    "Preparing your home",
                     systemImage: "house",
-                    description: Text("Little Windows is preparing the household workspace.")
+                    description: Text("Little Windows is setting up your household workspace.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(AppTheme.background)
@@ -830,14 +836,16 @@ struct TodayView: View {
                     if let profile {
                         ProfileAvatarView(profile: profile, size: 32)
                     } else {
-                        Image(systemName: "person.crop.circle")
-                            .font(.title2)
+                        Image(systemName: "gearshape.fill")
+                            .font(.headline)
                             .foregroundStyle(AppTheme.accent)
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(profile?.name ?? "Profile") settings")
-                .accessibilityHint("Opens settings where you can switch profiles")
+                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
+                .accessibilityHint(profile == nil
+                    ? "Opens household settings and care profile options"
+                    : "Opens settings where you can switch profiles")
             }
         }
         .sheet(item: $editorRoute) { route in

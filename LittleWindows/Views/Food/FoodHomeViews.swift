@@ -68,11 +68,18 @@ struct FoodHomeView: View {
             .toolbarBackground(AppTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     NavigationLink(value: FoodRoute.reminders) {
                         Image(systemName: "bell.badge")
                     }
                     .accessibilityLabel("Food reminders")
+
+                    Button {
+                        router.presentSettings()
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                    }
+                    .accessibilityLabel("Settings")
                 }
             }
             .task {

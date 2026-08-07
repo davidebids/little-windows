@@ -140,12 +140,15 @@ final class ProfileService: ObservableObject {
     ) {
         guard !profile.isArchived else { return }
         let active = allActiveProfiles(in: profiles)
-        guard active.count > 1 else { return }
+        guard active.contains(where: { $0.id == profile.id }) else { return }
         profile.isArchived = true
         profile.updatedAt = Date()
         if selectedProfileID == profile.id {
             if let fallback = active.first(where: { $0.id != profile.id }) {
                 switchProfile(fallback)
+            } else {
+                selectedProfileID = nil
+                UserDefaults.standard.removeObject(forKey: selectedProfileKey)
             }
         }
         guard PersistenceService.save(context: context) else { return }

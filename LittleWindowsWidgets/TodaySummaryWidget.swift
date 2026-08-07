@@ -41,26 +41,36 @@ private struct TodaySummaryWidgetView: View {
     let snapshot: WidgetSnapshot
 
     var body: some View {
-        Link(destination: URL(string: "littlewindows://today")!) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        WidgetBrandLabel()
-                        Text("\(snapshot.babyName)'s day")
-                            .font(.headline)
-                    }
-                    Spacer()
-                    Text(snapshot.generatedAt, style: .time)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.48))
-                }
-                HStack(spacing: 10) {
-                    ForEach(widgetMetrics) { item in
-                        metric(item.value, item.title, item.systemImage, tint(named: item.tintName))
-                    }
-                }
+        if snapshot.profileID == nil {
+            Link(destination: URL(string: "littlewindows://reports/summary")!) {
+                CareProfileRequiredWidgetState(
+                    title: "Care summary",
+                    detail: "Add a child or dog to see daily care at a glance.",
+                    systemImage: "heart.text.clipboard.fill"
+                )
             }
-            .foregroundStyle(.white)
+        } else {
+            Link(destination: URL(string: "littlewindows://today")!) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            WidgetBrandLabel()
+                            Text("\(snapshot.babyName)'s day")
+                                .font(.headline)
+                        }
+                        Spacer()
+                        Text(snapshot.generatedAt, style: .time)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.48))
+                    }
+                    HStack(spacing: 10) {
+                        ForEach(widgetMetrics) { item in
+                            metric(item.value, item.title, item.systemImage, tint(named: item.tintName))
+                        }
+                    }
+                }
+                .foregroundStyle(.white)
+            }
         }
     }
 

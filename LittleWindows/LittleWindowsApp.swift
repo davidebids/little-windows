@@ -83,8 +83,11 @@ final class PersistenceStartupController: ObservableObject {
                     let hasProfiles = !((try? container.mainContext.fetch(
                         FetchDescriptor<CareProfile>()
                     )) ?? []).isEmpty
+                    let hasHouseholds = !((try? container.mainContext.fetch(
+                        FetchDescriptor<Household>()
+                    )) ?? []).isEmpty
                     UserDefaults.standard.set(
-                        hasProfiles,
+                        hasProfiles || hasHouseholds,
                         forKey: FirstRunOnboarding.completedKey
                     )
                 } else {

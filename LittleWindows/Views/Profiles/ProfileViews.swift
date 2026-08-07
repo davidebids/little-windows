@@ -629,7 +629,9 @@ struct ManageProfilesView: View {
         }
         .navigationTitle("Profiles")
         .safeAreaInset(edge: .bottom) {
-            Text("Tap an active profile to switch. Use the pencil to edit details.")
+            Text(activeProfiles.isEmpty
+                ? "Add or restore a profile whenever you want to return to care tracking."
+                : "Tap an active profile to switch. Use the pencil to edit details.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -676,6 +678,11 @@ struct ManageProfilesView: View {
     }
 
     private var profileActionMessage: String {
+        if let profileToArchive,
+           !profileToArchive.isArchived,
+           activeProfiles.count == 1 {
+            return "This pauses care tracking and returns Little Windows to Home, Food, and Night Light. The profile and all of its history stay safely archived."
+        }
         if profileToArchive != nil {
             return "This hides the profile from daily tracking, but keeps all history available."
         }
@@ -692,10 +699,13 @@ struct ManageProfilesView: View {
 
     private var profileActionOptions: [AppActionSheetOption] {
         if let profile = profileToArchive {
+            let archivesLastActiveProfile = !profile.isArchived && activeProfiles.count == 1
             return [
                 AppActionSheetOption(
                     title: "Archive Profile",
-                    subtitle: "Hide this profile from daily tracking.",
+                    subtitle: archivesLastActiveProfile
+                        ? "Pause care tracking and continue with household tools."
+                        : "Hide this profile from daily tracking.",
                     systemImage: "archivebox.fill",
                     tint: .orange
                 ) {
@@ -820,7 +830,6 @@ struct ManageProfilesView: View {
                         Label("Archive", systemImage: "archivebox.fill")
                     }
                     .tint(.orange)
-                    .disabled(activeProfiles.count <= 1)
                 }
             }
         }

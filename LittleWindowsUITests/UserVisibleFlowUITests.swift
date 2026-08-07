@@ -3,6 +3,43 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testHouseholdOnlySetupAndCareDeepLinkPrompt() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+
+        let nameField = app.textFields["Your name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 4))
+        nameField.tap()
+        nameField.typeText("Test Caregiver")
+
+        let householdChoice = app.buttons["firstRun.householdOnly"]
+        XCTAssertTrue(householdChoice.waitForExistence(timeout: 4))
+        householdChoice.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Today"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Night Light"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Care"].exists)
+        XCTAssertFalse(app.segmentedControls.buttons["Care"].exists)
+
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.staticTexts["Add a care profile"].waitForExistence(timeout: 8))
+        let addProfile = app.buttons["profile-required.add-profile"]
+        XCTAssertTrue(addProfile.exists)
+        XCTAssertTrue(app.staticTexts["Care logging"].exists)
+
+        app.open(URL(string: "littlewindows://reports/summary")!)
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+        XCTAssertTrue(addProfile.waitForExistence(timeout: 5))
+
+        addProfile.tap()
+        XCTAssertTrue(app.navigationBars["Add Profile"].waitForExistence(timeout: 5))
+    }
+
     func testFirstRunOffersRestoreFromICloud() {
         continueAfterFailure = false
 
@@ -2495,20 +2532,24 @@ final class UserVisibleFlowUITests: XCTestCase {
     ) {
         app.terminate()
         var launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": startURL
+            "LITTLE_WINDOWS_UI_TESTING": "1"
         ]
         launchEnvironment.merge(additionalEnvironment) { _, newValue in newValue }
         app.launchEnvironment = launchEnvironment
+        app.launchArguments = ["--little-windows-ui-testing"]
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        app.open(URL(string: startURL)!)
 
         // Foregrounding only proves that the process launched; it does not prove
         // that RootView has consumed the debug route and committed its store
         // mutation. Wait for the route's stable destination before terminating
         // the process for the next step in a reset -> seed -> deep-link flow.
         if startURL == "littlewindows://debug/reset-empty" {
-            XCTAssertTrue(app.navigationBars["Welcome"].waitForExistence(timeout: 12))
+            XCTAssertTrue(
+                app.navigationBars["Welcome"].waitForExistence(timeout: 12),
+                "Expected empty-store onboarding after reset.\n\(app.debugDescription)"
+            )
         } else if startURL == "littlewindows://debug/seed-smoke"
                     || startURL == "littlewindows://debug/seed-performance" {
             XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 25))
@@ -2518,15 +2559,16 @@ final class UserVisibleFlowUITests: XCTestCase {
     private func visit(name: String, startURL: String, expectedText: [String]) {
         app.terminate()
         app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": startURL
+            "LITTLE_WINDOWS_UI_TESTING": "1"
         ]
+        app.launchArguments = ["--little-windows-ui-testing"]
         app.launch()
 
         XCTAssertTrue(
             app.wait(for: .runningForeground, timeout: 8),
             "Expected app to foreground for \(name)"
         )
+        app.open(URL(string: startURL)!)
         let foundExpectedText = waitForAnyText(expectedText, timeout: 8)
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
