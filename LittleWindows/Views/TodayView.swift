@@ -793,7 +793,31 @@ struct TodayView: View {
                 .background(AppTheme.background)
         }
 
-        listContent
+        VStack(spacing: 0) {
+            TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
+            Divider()
+
+            if deepLinkRouter.todayDisplayMode == .care {
+                listContent
+            } else if let householdID = households.first?.id {
+                TodayHomeSummaryDataLoader(
+                    householdID: householdID,
+                    currentCaregiverName: activeCaregiverName
+                ) { summary in
+                    TodayHomeSummaryView(summary: summary) { command in
+                        deepLinkRouter.openFood(command)
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "Home isn’t ready yet",
+                    systemImage: "house",
+                    description: Text("Little Windows is preparing the household workspace.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AppTheme.background)
+            }
+        }
         .navigationTitle("Today")
         .navigationDestination(for: FoodRoute.self) { route in
             todaySolidsDestination(route, state: state)
@@ -3323,5 +3347,381 @@ private struct DogSummaryCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct TodayDisplayModePicker: View {
+    @Binding var selection: TodayDisplayMode
+
+    var body: some View {
+        Picker("Today view", selection: $selection) {
+            ForEach(TodayDisplayMode.allCases) { mode in
+                Text(mode.title)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("today.mode-toggle")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(AppTheme.background)
+    }
+}
+
+private struct TodayHomeSummaryDataLoader<Content: View>: View {
+    @Query private var todoLists: [HomeTodoList]
+    @Query private var todoItems: [HomeTodoItem]
+    @Query private var shoppingLists: [ShoppingList]
+    @Query private var shoppingItems: [ShoppingListItem]
+    @Query private var inventoryItems: [InventoryItem]
+    @Query private var mealPrepItems: [MealPrepItem]
+    @Query private var mealPrepUsages: [MealPrepUsage]
+    @Query private var packingTrips: [PackingTrip]
+    @Query private var packingItems: [PackingItem]
+    @Query private var itineraryItems: [TripItineraryItem]
+    @Query private var returnRequests: [ReturnRequest]
+    @Query private var returnItems: [ReturnItem]
+    @Query private var returnPackages: [ReturnPackage]
+    @Query private var reminders: [FoodReminder]
+
+    private let householdID: UUID
+    private let currentCaregiverName: String
+    private let content: (TodayHomeSummary) -> Content
+
+    init(
+        householdID: UUID,
+        currentCaregiverName: String,
+        @ViewBuilder content: @escaping (TodayHomeSummary) -> Content
+    ) {
+        self.householdID = householdID
+        self.currentCaregiverName = currentCaregiverName
+        self.content = content
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let upcomingTripState = PackingTripStatus.upcoming.rawValue
+
+        var todoListDescriptor = FetchDescriptor<HomeTodoList>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\HomeTodoList.sortOrder), SortDescriptor(\HomeTodoList.updatedAt, order: .reverse)]
+        )
+        todoListDescriptor.fetchLimit = 100
+        _todoLists = Query(todoListDescriptor)
+
+        var todoItemDescriptor = FetchDescriptor<HomeTodoItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\HomeTodoItem.updatedAt, order: .reverse)]
+        )
+        todoItemDescriptor.fetchLimit = 750
+        _todoItems = Query(todoItemDescriptor)
+
+        var shoppingListDescriptor = FetchDescriptor<ShoppingList>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\ShoppingList.updatedAt, order: .reverse)]
+        )
+        shoppingListDescriptor.fetchLimit = 100
+        _shoppingLists = Query(shoppingListDescriptor)
+
+        var shoppingItemDescriptor = FetchDescriptor<ShoppingListItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\ShoppingListItem.updatedAt, order: .reverse)]
+        )
+        shoppingItemDescriptor.fetchLimit = 1_000
+        _shoppingItems = Query(shoppingItemDescriptor)
+
+        var inventoryDescriptor = FetchDescriptor<InventoryItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
+        )
+        inventoryDescriptor.fetchLimit = 500
+        _inventoryItems = Query(inventoryDescriptor)
+
+        var mealPrepDescriptor = FetchDescriptor<MealPrepItem>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
+        )
+        mealPrepDescriptor.fetchLimit = 200
+        _mealPrepItems = Query(mealPrepDescriptor)
+
+        var usageDescriptor = FetchDescriptor<MealPrepUsage>(
+            predicate: #Predicate { $0.householdID == householdID && $0.dateTime >= todayStart },
+            sortBy: [SortDescriptor(\MealPrepUsage.dateTime, order: .reverse)]
+        )
+        usageDescriptor.fetchLimit = 200
+        _mealPrepUsages = Query(usageDescriptor)
+
+        var tripDescriptor = FetchDescriptor<PackingTrip>(
+            predicate: #Predicate {
+                $0.householdID == householdID && !$0.isArchived && $0.statusRawValue == upcomingTripState
+            },
+            sortBy: [SortDescriptor(\PackingTrip.startDate)]
+        )
+        tripDescriptor.fetchLimit = 100
+        _packingTrips = Query(tripDescriptor)
+
+        var packingDescriptor = FetchDescriptor<PackingItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\PackingItem.updatedAt, order: .reverse)]
+        )
+        packingDescriptor.fetchLimit = 1_500
+        _packingItems = Query(packingDescriptor)
+
+        var itineraryDescriptor = FetchDescriptor<TripItineraryItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\TripItineraryItem.startDate), SortDescriptor(\TripItineraryItem.sortOrder)]
+        )
+        itineraryDescriptor.fetchLimit = 750
+        _itineraryItems = Query(itineraryDescriptor)
+
+        var returnRequestDescriptor = FetchDescriptor<ReturnRequest>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived && $0.completedAt == nil },
+            sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
+        )
+        returnRequestDescriptor.fetchLimit = 200
+        _returnRequests = Query(returnRequestDescriptor)
+
+        var returnItemDescriptor = FetchDescriptor<ReturnItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\ReturnItem.updatedAt, order: .reverse)]
+        )
+        returnItemDescriptor.fetchLimit = 500
+        _returnItems = Query(returnItemDescriptor)
+
+        var returnPackageDescriptor = FetchDescriptor<ReturnPackage>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\ReturnPackage.updatedAt, order: .reverse)]
+        )
+        returnPackageDescriptor.fetchLimit = 500
+        _returnPackages = Query(returnPackageDescriptor)
+
+        var reminderDescriptor = FetchDescriptor<FoodReminder>(
+            predicate: #Predicate { $0.householdID == householdID && $0.isEnabled },
+            sortBy: [SortDescriptor(\FoodReminder.dateTime)]
+        )
+        reminderDescriptor.fetchLimit = 200
+        _reminders = Query(reminderDescriptor)
+    }
+
+    var body: some View {
+        content(TodayHomeSummaryService.summary(
+            householdID: householdID,
+            currentCaregiverName: currentCaregiverName,
+            todoLists: todoLists,
+            todoItems: todoItems,
+            shoppingLists: shoppingLists,
+            shoppingItems: shoppingItems,
+            inventoryItems: inventoryItems,
+            mealPrepItems: mealPrepItems,
+            mealPrepUsages: mealPrepUsages,
+            packingTrips: packingTrips,
+            packingItems: packingItems,
+            itineraryItems: itineraryItems,
+            returnRequests: returnRequests,
+            returnItems: returnItems,
+            returnPackages: returnPackages,
+            reminders: reminders
+        ))
+    }
+}
+
+private struct TodayHomeSummaryView: View {
+    let summary: TodayHomeSummary
+    let open: (FoodRouteCommand) -> Void
+
+    var body: some View {
+        List {
+            if summary.isQuiet {
+                Section {
+                    ContentUnavailableView(
+                        "Home is all clear",
+                        systemImage: "house.fill",
+                        description: Text("There are no open household items to surface right now.")
+                    )
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            if !summary.attentionItems.isEmpty {
+                Section {
+                    TodayHomeAttentionCard(items: summary.attentionItems, open: open)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } header: {
+                    AppSectionHeader(title: "Needs attention", subtitle: "\(summary.attentionItems.count)")
+                }
+            }
+
+            ForEach(summary.sections) { section in
+                Section {
+                    TodayHomeSummaryCard(section: section, open: open)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .accessibilityIdentifier("today.home.summary")
+    }
+}
+
+private struct TodayHomeAttentionCard: View {
+    let items: [TodayHomeSummaryItem]
+    let open: (FoodRouteCommand) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 { Divider().padding(.leading, 50) }
+                TodayHomeSummaryRow(item: item) { open(item.route) }
+            }
+        }
+        .padding(.horizontal, 12)
+        .appSurface(cornerRadius: 20)
+    }
+}
+
+private struct TodayHomeSummaryCard: View {
+    let section: TodayHomeSummarySection
+    let open: (FoodRouteCommand) -> Void
+
+    private var tint: Color { section.category.tint }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: section.category.systemImage)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(tint.gradient, in: RoundedRectangle(cornerRadius: 12))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(section.category.title)
+                        .font(.headline)
+                    Text(section.countLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                }
+
+                Spacer()
+
+                Button {
+                    open(section.category.route)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Open")
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(tint)
+                .accessibilityLabel("Open \(section.category.title) in Home")
+            }
+
+            Text(section.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 10)
+
+            if section.items.isEmpty {
+                Text(section.emptyMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(section.items.enumerated()), id: \.element.id) { index, item in
+                        Divider()
+                            .padding(.leading, 50)
+                            .opacity(index == 0 ? 0 : 1)
+                        TodayHomeSummaryRow(item: item) { open(item.route) }
+                    }
+                }
+                .padding(.top, 5)
+            }
+
+            if let remainderText = section.remainderText {
+                Text(remainderText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .padding(.top, 6)
+                    .padding(.leading, 50)
+            }
+        }
+        .padding(14)
+        .appSurface(cornerRadius: 20)
+        .accessibilityIdentifier("today.home.section.\(section.category.rawValue)")
+    }
+}
+
+private struct TodayHomeSummaryRow: View {
+    let item: TodayHomeSummaryItem
+    let action: () -> Void
+
+    private var tint: Color {
+        switch item.urgency {
+        case .normal: item.category.tint
+        case .attention: .orange
+        case .urgent: .red
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: item.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 36, height: 36)
+                    .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 11))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                        if let badge = item.badge {
+                            Text(badge)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(tint)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(tint.opacity(0.1), in: Capsule())
+                        }
+                    }
+                    Text(item.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens this item in the Home tab")
+    }
+}
+
+private extension TodayHomeSummaryCategory {
+    var tint: Color {
+        switch self {
+        case .todos: .indigo
+        case .shopping: .blue
+        case .kitchen: .green
+        case .trips: .cyan
+        case .returns: .orange
+        }
     }
 }

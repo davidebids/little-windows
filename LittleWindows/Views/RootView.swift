@@ -682,20 +682,20 @@ struct RootView: View {
             DebugSimulatorSmokeSeedService.resetEmpty(context: modelContext)
             hasCompletedInitialOnboarding = false
             hasCheckedInitialOnboardingState = true
-            router.selectedTab = .today
+            router.selectTodayCare()
             return
         }
         if DebugSimulatorSmokeSeedService.isPerformanceSeed(url),
            DebugSimulatorSmokeSeedService.isEnabled {
             DebugSimulatorSmokeSeedService.seedPerformanceDataIfNeeded(context: modelContext)
             hasCompletedInitialOnboarding = true
-            router.selectedTab = .today
+            router.selectTodayCare()
             return
         }
         if DebugSimulatorSmokeSeedService.canHandle(url), DebugSimulatorSmokeSeedService.isEnabled {
             DebugSimulatorSmokeSeedService.seedIfNeeded(context: modelContext)
             hasCompletedInitialOnboarding = true
-            router.selectedTab = .today
+            router.selectTodayCare()
             return
         }
         #endif
@@ -739,7 +739,7 @@ struct RootView: View {
         if path.count == 3, let eventID = UUID(uuidString: path[2]) {
             router.openToday(action: .showEvent(eventID))
         } else {
-            router.selectedTab = .today
+            router.selectTodayCare()
         }
     }
 

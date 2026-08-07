@@ -7026,6 +7026,205 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testTodayHomeSummaryPrioritizesUsefulRowsAndRoutesToHomeDetails() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 5,
+            hour: 12
+        )))
+        let dayStart = calendar.startOfDay(for: now)
+        let household = Household(name: "Test Home")
+        let otherHousehold = Household(name: "Other Home")
+
+        let todoList = HomeTodoList(householdID: household.id, name: "House Tasks")
+        let todoItems = [
+            HomeTodoItem(
+                householdID: household.id,
+                todoListID: todoList.id,
+                title: "Assigned first",
+                assignedCaregiverName: "Caregiver 1",
+                updatedAt: now.addingTimeInterval(-300),
+                sortOrder: 5
+            ),
+            HomeTodoItem(householdID: household.id, todoListID: todoList.id, title: "Second", sortOrder: 0),
+            HomeTodoItem(householdID: household.id, todoListID: todoList.id, title: "Third", sortOrder: 1),
+            HomeTodoItem(householdID: household.id, todoListID: todoList.id, title: "Fourth", sortOrder: 2),
+            HomeTodoItem(
+                householdID: household.id,
+                todoListID: todoList.id,
+                title: "Completed today",
+                isCompleted: true,
+                completedAt: now.addingTimeInterval(-600)
+            )
+        ]
+
+        let shoppingList = ShoppingList(householdID: household.id, name: "Groceries")
+        let shoppingItems = [
+            ShoppingListItem(
+                householdID: household.id,
+                shoppingListID: shoppingList.id,
+                name: "Milk",
+                priority: .high
+            ),
+            ShoppingListItem(
+                householdID: household.id,
+                shoppingListID: shoppingList.id,
+                name: "Bread"
+            ),
+            ShoppingListItem(
+                householdID: household.id,
+                shoppingListID: shoppingList.id,
+                name: "Apples",
+                isChecked: true,
+                checkedAt: now.addingTimeInterval(-900)
+            )
+        ]
+
+        let locationID = UUID()
+        let lowMealPrep = MealPrepItem(
+            householdID: household.id,
+            name: "Soup",
+            locationID: locationID,
+            servingsTotal: 4,
+            servingsRemaining: 1
+        )
+        let usage = MealPrepUsage(
+            householdID: household.id,
+            mealPrepItemID: lowMealPrep.id,
+            dateTime: now.addingTimeInterval(-1_200),
+            servingsUsed: 1
+        )
+        let usedUpInventory = InventoryItem(
+            householdID: household.id,
+            name: "Rice",
+            quantity: 0,
+            locationID: locationID,
+            status: .usedUp
+        )
+
+        let trip = PackingTrip(
+            householdID: household.id,
+            title: "Day Trip",
+            startDate: dayStart,
+            endDate: dayStart.addingTimeInterval(2 * 86_400),
+            finalCheckDate: now.addingTimeInterval(-3_600)
+        )
+        let essential = PackingItem(
+            householdID: household.id,
+            tripID: trip.id,
+            title: "Tickets",
+            priority: .essential,
+            state: .needed
+        )
+        let itinerary = TripItineraryItem(
+            householdID: household.id,
+            tripID: trip.id,
+            title: "Museum",
+            scheduledDay: dayStart
+        )
+
+        let returnRequest = ReturnRequest(householdID: household.id)
+        let returnItem = ReturnItem(
+            householdID: household.id,
+            returnRequestID: returnRequest.id,
+            name: "Shoes"
+        )
+        let returnPackage = ReturnPackage(
+            householdID: household.id,
+            returnRequestID: returnRequest.id,
+            name: "Drop-off",
+            returnByDate: dayStart.addingTimeInterval(-86_400)
+        )
+        let reminder = FoodReminder(
+            householdID: household.id,
+            type: .shopping,
+            title: "Pick up groceries",
+            relatedShoppingListID: shoppingList.id,
+            dateTime: now.addingTimeInterval(1_800)
+        )
+        let ignoredList = HomeTodoList(householdID: otherHousehold.id, name: "Ignore")
+        let ignoredItem = HomeTodoItem(
+            householdID: otherHousehold.id,
+            todoListID: ignoredList.id,
+            title: "Other household"
+        )
+
+        let summary = TodayHomeSummaryService.summary(
+            householdID: household.id,
+            currentCaregiverName: "Caregiver 1",
+            todoLists: [todoList, ignoredList],
+            todoItems: todoItems + [ignoredItem],
+            shoppingLists: [shoppingList],
+            shoppingItems: shoppingItems,
+            inventoryItems: [usedUpInventory],
+            mealPrepItems: [lowMealPrep],
+            mealPrepUsages: [usage],
+            packingTrips: [trip],
+            packingItems: [essential],
+            itineraryItems: [itinerary],
+            returnRequests: [returnRequest],
+            returnItems: [returnItem],
+            returnPackages: [returnPackage],
+            reminders: [reminder],
+            now: now,
+            calendar: calendar
+        )
+
+        let todos = try XCTUnwrap(summary.sections.first { $0.category == .todos })
+        XCTAssertEqual(todos.countLabel, "4 open")
+        XCTAssertEqual(todos.items.count, TodayHomeSummaryService.visibleItemLimit)
+        XCTAssertEqual(todos.items.first?.title, "Assigned first")
+        XCTAssertEqual(todos.items.first?.route, .todoList(todoList.id))
+        XCTAssertEqual(todos.remainderText, "+ 1 more task")
+        XCTAssertTrue(todos.summary.contains("1 completed today"))
+
+        let shopping = try XCTUnwrap(summary.sections.first { $0.category == .shopping })
+        XCTAssertEqual(shopping.countLabel, "2 items")
+        XCTAssertEqual(shopping.items.first?.route, .shoppingList(shoppingList.id))
+        XCTAssertEqual(shopping.items.first?.badge, "1 high priority")
+
+        let kitchen = try XCTUnwrap(summary.sections.first { $0.category == .kitchen })
+        XCTAssertEqual(kitchen.items.first?.route, .mealPrepItem(lowMealPrep.id))
+        XCTAssertTrue(kitchen.summary.contains("1 used today"))
+
+        let trips = try XCTUnwrap(summary.sections.first { $0.category == .trips })
+        XCTAssertEqual(trips.items.first?.route, .itineraryItem(trip.id, itinerary.id))
+        XCTAssertTrue(trips.summary.contains("1 itinerary item today"))
+
+        let returns = try XCTUnwrap(summary.sections.first { $0.category == .returns })
+        XCTAssertEqual(returns.items.first?.title, "Shoes")
+        XCTAssertEqual(returns.items.first?.route, .returnRequest(returnRequest.id))
+        XCTAssertEqual(returns.items.first?.badge, "Overdue")
+
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .shoppingList(shoppingList.id) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .mealPrepItem(lowMealPrep.id) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .packingTrip(trip.id) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .returnRequest(returnRequest.id) })
+        XCTAssertFalse(summary.sections.flatMap(\.items).contains { $0.title == "Other household" })
+    }
+
+    @MainActor
+    func testTodayDisplayModePersistsForTabChangesButTodayRoutesResetToCare() throws {
+        let router = DeepLinkRouter.shared
+        router.todayDisplayMode = .home
+        router.selectedTab = .reports
+        router.selectedTab = .today
+        XCTAssertEqual(router.todayDisplayMode, .home)
+
+        router.route(try XCTUnwrap(URL(string: "littlewindows://today")))
+        XCTAssertEqual(router.selectedTab, .today)
+        XCTAssertEqual(router.todayDisplayMode, .care)
+
+        router.todayDisplayMode = .home
+        router.openToday(action: .logEvent(.feed))
+        XCTAssertEqual(router.todayDisplayMode, .care)
+        XCTAssertEqual(router.consumeAction(), .logEvent(.feed))
+    }
+
+    @MainActor
     func testFoodHomeInsightsSeparatePackingTripsFromShoppingListHistory() {
         let household = Household(name: "Home")
         let usedShoppingList = ShoppingList(
