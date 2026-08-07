@@ -108,6 +108,7 @@ enum FoodRoute: Hashable, Codable {
     case shoppingList(UUID)
     case shoppingMode(UUID)
     case packingTrip(UUID)
+    case packingList(UUID)
     case itineraryItem(UUID, UUID)
     case inventoryItem(UUID)
     case mealPrepItem(UUID)
@@ -121,7 +122,7 @@ enum FoodRoute: Hashable, Codable {
              .solidsPlan, .plannedSolidMeal, .solidsTracker, .solidFoodHistory, .solidMeal,
              .solidsAllergens, .solidAllergen, .solidsRecipes, .solidsRecipe:
             true
-        case .todoList, .shoppingList, .shoppingMode, .packingTrip, .itineraryItem, .inventoryItem,
+        case .todoList, .shoppingList, .shoppingMode, .packingTrip, .packingList, .itineraryItem, .inventoryItem,
              .mealPrepItem, .returnRequest, .store, .reminders:
             false
         }
@@ -175,6 +176,7 @@ enum FoodRouteCommand: Equatable {
     case shoppingMode(UUID)
     case trips
     case packingTrip(UUID)
+    case packingList(UUID)
     case itineraryItem(UUID, UUID)
     case inventory
     case inventoryItem(UUID)

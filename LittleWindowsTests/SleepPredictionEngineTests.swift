@@ -7201,7 +7201,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         XCTAssertTrue(summary.attentionItems.contains { $0.route == .shoppingList(shoppingList.id) })
         XCTAssertTrue(summary.attentionItems.contains { $0.route == .mealPrepItem(lowMealPrep.id) })
-        XCTAssertTrue(summary.attentionItems.contains { $0.route == .packingTrip(trip.id) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .packingList(trip.id) })
         XCTAssertTrue(summary.attentionItems.contains { $0.route == .returnRequest(returnRequest.id) })
         XCTAssertFalse(summary.sections.flatMap(\.items).contains { $0.title == "Other household" })
     }

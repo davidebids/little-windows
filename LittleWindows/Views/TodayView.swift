@@ -1448,7 +1448,7 @@ struct TodayView: View {
         case .solidsRecipes: .solidsRecipes
         case .solidsRecipe(let id): .solidsRecipe(id)
         case .solidFoodHistory, .todoList, .shoppingList, .shoppingMode,
-             .packingTrip, .itineraryItem, .inventoryItem, .mealPrepItem, .returnRequest,
+             .packingTrip, .packingList, .itineraryItem, .inventoryItem, .mealPrepItem, .returnRequest,
              .store, .reminders:
             nil
         }

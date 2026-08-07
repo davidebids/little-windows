@@ -1958,7 +1958,7 @@ enum TodayHomeSummaryService {
                 badge: "Trip",
                 systemImage: "suitcase.rolling.fill",
                 urgency: isOverdue ? .urgent : .attention,
-                route: .packingTrip(trip.id),
+                route: .packingList(trip.id),
                 sortDate: checkDate ?? trip.startDate
             )
         }
