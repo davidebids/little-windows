@@ -8,8 +8,9 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         launch(startURL: "littlewindows://debug/reset-empty")
 
-        let nameField = app.textFields["Your name"]
+        let nameField = app.textFields["firstRun.caregiverName"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 4))
+        XCTAssertEqual(nameField.value as? String, "Enter name here")
         nameField.tap()
         nameField.typeText("Test Caregiver")
 

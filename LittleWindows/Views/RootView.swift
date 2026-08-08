@@ -1194,10 +1194,15 @@ private struct FirstRunOnboardingView: View {
                 Text("Your name")
                     .font(.headline)
 
-                TextField("Your name", text: $primaryCaregiverName)
+                TextField(
+                    "Your name",
+                    text: $primaryCaregiverName,
+                    prompt: Text("Enter name here")
+                )
                     .textContentType(.name)
                     .submitLabel(.done)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("firstRun.caregiverName")
 
                 Text("This name appears on household assignments and activity. If you add a care profile, it also appears on new care entries.")
                     .font(.footnote)
@@ -1240,11 +1245,6 @@ private struct FirstRunOnboardingView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(iCloudRestoreState.isWorking)
-        }
-        .onAppear {
-            if primaryCaregiverName.isEmpty, caregiverOne != "Caregiver 1" {
-                primaryCaregiverName = caregiverOne
-            }
         }
     }
 
