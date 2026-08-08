@@ -42,6 +42,8 @@ struct ProfileAvatarView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipped()
             } else {
                 Text(profile.initials)
                     .font(.system(size: size * 0.34, weight: .bold))
@@ -615,6 +617,8 @@ private struct ProfilePhotoPreview: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .frame(width: 72, height: 72)
+                    .clipped()
             } else {
                 Text(profile?.initials ?? initials)
                     .font(.title3.bold())
