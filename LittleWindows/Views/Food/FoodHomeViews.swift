@@ -355,10 +355,11 @@ struct FoodHomeView: View {
             } else {
                 MissingFoodRouteView()
             }
-        case .solidsTracker:
+        case .solidsTracker(let initialFilter):
             if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
                 SolidsTrackerView(
                     profile: selectedProfile,
+                    initialFilter: initialFilter,
                     events: careEvents,
                     progress: solidFoodProgress,
                     eventItems: solidFoodEventItems,
@@ -679,8 +680,8 @@ struct FoodHomeView: View {
             openSolidsRoute(.solidsPlan)
         case .plannedSolidMeal(let id):
             openSolidsRoute(.plannedSolidMeal(id))
-        case .solidsTracker:
-            openSolidsRoute(.solidsTracker)
+        case .solidsTracker(let initialFilter):
+            openSolidsRoute(.solidsTracker(initialFilter))
         case .solidMeal(let id):
             openSolidsRoute(.solidMeal(id))
         case .solidsAllergens:

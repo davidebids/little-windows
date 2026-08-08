@@ -422,7 +422,7 @@ final class DeepLinkRouter: ObservableObject {
                 openSolids(.plannedSolidMeal(uuid), returningTo: nil)
             }
         } else if components == ["food", "solids", "tracker"] {
-            openSolids(.solidsTracker, returningTo: nil)
+            openSolids(.solidsTracker(.all), returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",

@@ -178,9 +178,24 @@ struct SolidsHomeView: View {
         let visiblePlans = upcomingPlans
         return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
-                metric(value: "\(visibleProgress.lazy.filter { $0.status == .tried }.count)", label: "Foods tried")
-                metric(value: "\(visibleProgress.lazy.filter { $0.status == .wantToTry }.count)", label: "Want to try")
-                metric(value: "\(visiblePlans.count)", label: "Planned")
+                metric(
+                    value: "\(visibleProgress.lazy.filter { $0.status == .tried }.count)",
+                    label: "Foods tried",
+                    route: .solidsTracker(.tried),
+                    accessibilityIdentifier: "solids.metric.tried"
+                )
+                metric(
+                    value: "\(visibleProgress.lazy.filter { $0.status == .wantToTry }.count)",
+                    label: "Want to try",
+                    route: .solidsTracker(.wantToTry),
+                    accessibilityIdentifier: "solids.metric.want-to-try"
+                )
+                metric(
+                    value: "\(visiblePlans.count)",
+                    label: "Planned",
+                    route: .solidsPlan,
+                    accessibilityIdentifier: "solids.metric.planned"
+                )
             }
 
             Button {
@@ -199,7 +214,7 @@ struct SolidsHomeView: View {
                 destinationCard("Guided solids", "A practical next step", "point.forward.to.point.capsulepath", .solidsGuided)
                 destinationCard("Food database", "400+ foods", "books.vertical.fill", .solidsDatabase)
                 destinationCard("Plan meals", visiblePlans.isEmpty ? "Build the next plate" : "\(visiblePlans.count) upcoming", "calendar.badge.plus", .solidsPlan)
-                destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker)
+                destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker(.all))
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
                 destinationCard("Recipes", "400+ simple ideas", "fork.knife", .solidsRecipes)
             }
@@ -245,17 +260,30 @@ struct SolidsHomeView: View {
         }
     }
 
-    private func metric(value: String, label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value).font(.title3.bold())
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+    private func metric(
+        value: String,
+        label: String,
+        route: FoodRoute,
+        accessibilityIdentifier: String
+    ) -> some View {
+        Button {
+            open(route)
+        } label: {
+            VStack(spacing: 3) {
+                Text(value).font(.title3.bold())
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+            .appSurface(cornerRadius: 15)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .appSurface(cornerRadius: 15)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityHint("Opens the corresponding list")
     }
 
     private func destinationCard(
@@ -3678,25 +3706,6 @@ struct PlannedSolidMealDetailView: View {
     }
 }
 
-private enum SolidsTrackerFilter: String, CaseIterable, Identifiable {
-    case all
-    case tried
-    case favorites
-    case wantToTry
-    case reactions
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .all: "All"
-        case .tried: "Tried"
-        case .favorites: "Favorites"
-        case .wantToTry: "Want to try"
-        case .reactions: "Reactions"
-        }
-    }
-}
-
 private enum SolidsTrackerSort: String, CaseIterable, Identifiable {
     case recentlyTried
     case firstTried
@@ -3722,10 +3731,28 @@ struct SolidsTrackerView: View {
     let openFoodHistory: (String, String) -> Void
     let openMeal: (UUID) -> Void
 
-    @State private var filter: SolidsTrackerFilter = .all
+    @State private var filter: SolidsTrackerFilter
     @State private var sort: SolidsTrackerSort = .recentlyTried
     @State private var effectiveSearchText = ""
     @State private var showingSortOptions = false
+
+    init(
+        profile: CareProfile,
+        initialFilter: SolidsTrackerFilter = .all,
+        events: [CareEvent],
+        progress: [SolidFoodProgress],
+        eventItems: [SolidFoodEventItem],
+        openFoodHistory: @escaping (String, String) -> Void,
+        openMeal: @escaping (UUID) -> Void
+    ) {
+        self.profile = profile
+        self.events = events
+        self.progress = progress
+        self.eventItems = eventItems
+        self.openFoodHistory = openFoodHistory
+        self.openMeal = openMeal
+        _filter = State(initialValue: initialFilter)
+    }
 
     private var scopedProgress: [SolidFoodProgress] {
         let query = effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3788,6 +3815,8 @@ struct SolidsTrackerView: View {
                                 .font(.caption.weight(.semibold))
                                 .buttonStyle(.bordered)
                                 .tint(filter == value ? .orange : .secondary)
+                                .accessibilityIdentifier("solids.tracker.filter.\(value.rawValue)")
+                                .accessibilityValue(filter == value ? "Selected" : "Not selected")
                         }
                     }
                 }
@@ -3801,7 +3830,7 @@ struct SolidsTrackerView: View {
             }
             Section("Foods") {
                 if visibleProgress.isEmpty {
-                    Text("Foods logged from a solid feed event will appear here.")
+                    Text(emptyFoodsMessage)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(visibleProgress) { item in
@@ -3863,6 +3892,21 @@ struct SolidsTrackerView: View {
                 }
             }
         )
+    }
+
+    private var emptyFoodsMessage: String {
+        switch filter {
+        case .all:
+            "Foods logged from a solid feed event or saved for later will appear here."
+        case .tried:
+            "No foods have been marked tried yet."
+        case .favorites:
+            "No foods have been marked as favorites yet."
+        case .wantToTry:
+            "No foods are saved to Want to try yet."
+        case .reactions:
+            "No foods with suspected reactions have been logged."
+        }
     }
 
     private func sortSystemImage(_ value: SolidsTrackerSort) -> String {

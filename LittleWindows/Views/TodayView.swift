@@ -1459,7 +1459,7 @@ struct TodayView: View {
         case .customSolidFood(let id): .customSolidFood(id)
         case .solidsPlan: .solidsPlan
         case .plannedSolidMeal(let id): .plannedSolidMeal(id)
-        case .solidsTracker: .solidsTracker
+        case .solidsTracker(let initialFilter): .solidsTracker(initialFilter)
         case .solidMeal(let id): .solidMeal(id)
         case .solidsAllergens: .solidsAllergens
         case .solidAllergen(let id): .solidAllergen(id)

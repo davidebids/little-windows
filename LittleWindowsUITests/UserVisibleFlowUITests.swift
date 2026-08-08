@@ -643,6 +643,41 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["1 active filter"].exists)
     }
 
+    func testSolidsSummaryCardsOpenMatchingLists() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 5) {
+            activate.tap()
+            XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 5))
+        }
+
+        let tried = app.buttons["solids.metric.tried"]
+        XCTAssertTrue(tried.waitForExistence(timeout: 4))
+        tried.tap()
+        XCTAssertTrue(app.navigationBars["Food Tracker"].waitForExistence(timeout: 4))
+        XCTAssertEqual(app.buttons["solids.tracker.filter.tried"].value as? String, "Selected")
+        XCTAssertTrue(app.staticTexts["No foods have been marked tried yet."].exists)
+
+        app.navigationBars["Food Tracker"].buttons.element(boundBy: 0).tap()
+        let wantToTry = app.buttons["solids.metric.want-to-try"]
+        XCTAssertTrue(wantToTry.waitForExistence(timeout: 4))
+        wantToTry.tap()
+        XCTAssertTrue(app.navigationBars["Food Tracker"].waitForExistence(timeout: 4))
+        XCTAssertEqual(app.buttons["solids.tracker.filter.wantToTry"].value as? String, "Selected")
+        XCTAssertTrue(app.staticTexts["No foods are saved to Want to try yet."].exists)
+
+        app.navigationBars["Food Tracker"].buttons.element(boundBy: 0).tap()
+        let planned = app.buttons["solids.metric.planned"]
+        XCTAssertTrue(planned.waitForExistence(timeout: 4))
+        planned.tap()
+        XCTAssertTrue(app.navigationBars["Plan Meals"].waitForExistence(timeout: 4))
+    }
+
     func testPreparationWalkthroughUsesAnInteractiveChecklist() {
         continueAfterFailure = false
 

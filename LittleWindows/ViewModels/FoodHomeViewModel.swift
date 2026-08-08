@@ -89,6 +89,26 @@ enum InventorySort: String, CaseIterable, Identifiable {
     }
 }
 
+enum SolidsTrackerFilter: String, CaseIterable, Identifiable, Hashable, Codable {
+    case all
+    case tried
+    case favorites
+    case wantToTry
+    case reactions
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .tried: "Tried"
+        case .favorites: "Favorites"
+        case .wantToTry: "Want to try"
+        case .reactions: "Reactions"
+        }
+    }
+}
+
 enum FoodRoute: Hashable, Codable {
     case solidsHome
     case solidsDatabase
@@ -97,7 +117,7 @@ enum FoodRoute: Hashable, Codable {
     case customSolidFood(UUID)
     case solidsPlan
     case plannedSolidMeal(UUID)
-    case solidsTracker
+    case solidsTracker(SolidsTrackerFilter)
     case solidFoodHistory(String, String)
     case solidMeal(UUID)
     case solidsAllergens
@@ -163,7 +183,7 @@ enum FoodRouteCommand: Equatable {
     case customSolidFood(UUID)
     case solidsPlan
     case plannedSolidMeal(UUID)
-    case solidsTracker
+    case solidsTracker(SolidsTrackerFilter)
     case solidMeal(UUID)
     case solidsAllergens
     case solidAllergen(String)

@@ -1454,6 +1454,12 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(FoodRoute.self, from: encoded), route)
     }
 
+    func testFilteredFoodTrackerRouteRestoresItsSelection() throws {
+        let route = FoodRoute.solidsTracker(.wantToTry)
+        let encoded = try JSONEncoder().encode(route)
+        XCTAssertEqual(try JSONDecoder().decode(FoodRoute.self, from: encoded), route)
+    }
+
     @MainActor
     func testAllergenProgressCountsUniqueMealsAndMarksThreeAsTolerated() throws {
         let container = try ModelContainer(

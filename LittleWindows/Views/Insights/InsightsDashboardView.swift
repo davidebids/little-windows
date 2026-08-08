@@ -592,7 +592,7 @@ private struct FeedingInsightsDataView: View {
         FeedingInsightsView(
             snapshot: snapshot,
             solids: solidsReport,
-            openSolidsTracker: { openSolids(.solidsTracker) },
+            openSolidsTracker: { openSolids(.solidsTracker(.all)) },
             openAllergens: { openSolids(.solidsAllergens) }
         )
         .task(id: profile.id) {
