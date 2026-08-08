@@ -609,6 +609,10 @@ struct ManageProfilesView: View {
 
     var body: some View {
         List {
+            if sortedProfiles.isEmpty {
+                firstProfileEmptyState
+            }
+
             if !activeProfiles.filter({ $0.profileType == .child }).isEmpty {
                 Section("Children") {
                     manageRows(activeProfiles.filter { $0.profileType == .child })
@@ -629,16 +633,18 @@ struct ManageProfilesView: View {
         }
         .navigationTitle("Profiles")
         .safeAreaInset(edge: .bottom) {
-            Text(activeProfiles.isEmpty
-                ? "Add or restore a profile whenever you want to return to care tracking."
-                : "Tap an active profile to switch. Use the pencil to edit details.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity)
-                .background(.bar)
+            if !sortedProfiles.isEmpty {
+                Text(activeProfiles.isEmpty
+                    ? "Add or restore a profile whenever you want to return to care tracking."
+                    : "Tap an active profile to switch. Use the pencil to edit details.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(.bar)
+            }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -665,6 +671,50 @@ struct ManageProfilesView: View {
                 clearPendingProfileAction()
             }
         )
+    }
+
+    private var firstProfileEmptyState: some View {
+        VStack(spacing: 22) {
+            ZStack {
+                Circle()
+                    .fill(AppTheme.accent.opacity(0.09))
+                    .frame(width: 116, height: 116)
+                Circle()
+                    .fill(AppTheme.accent.opacity(0.14))
+                    .frame(width: 82, height: 82)
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+            .accessibilityHidden(true)
+
+            VStack(spacing: 9) {
+                Text("No care profiles yet")
+                    .font(.title2.bold())
+                Text("Add a child or dog when you want to track care, timers, reports, guides, and appointments. Your Home, Food, and Night Light setup stays just as it is.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                showingAdd = true
+            } label: {
+                Label("Add Child or Dog", systemImage: "plus.circle.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .accessibilityIdentifier("profiles.empty.add")
+        }
+        .frame(maxWidth: .infinity, minHeight: 430)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 24)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
     }
 
     private var profileActionTitle: String {

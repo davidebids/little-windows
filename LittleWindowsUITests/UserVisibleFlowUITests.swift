@@ -26,6 +26,23 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.tabBars.buttons["Care"].exists)
         XCTAssertFalse(app.segmentedControls.buttons["Care"].exists)
 
+        let settingsButton = app.buttons["Settings"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 4))
+        settingsButton.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        let profilesLink = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(profilesLink.waitForExistence(timeout: 4))
+        profilesLink.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No care profiles yet"].exists)
+        XCTAssertTrue(app.buttons["profiles.empty.add"].exists)
+        let emptyProfilesAttachment = XCTAttachment(screenshot: app.screenshot())
+        emptyProfilesAttachment.name = "Household-only empty profiles"
+        emptyProfilesAttachment.lifetime = .keepAlways
+        add(emptyProfilesAttachment)
+
         launch(startURL: "littlewindows://quick-log/sleep")
 
         XCTAssertTrue(app.staticTexts["Add a care profile"].waitForExistence(timeout: 8))
