@@ -734,10 +734,10 @@ struct ManageProfilesView: View {
         if let profileToArchive,
            !profileToArchive.isArchived,
            activeProfiles.count == 1 {
-            return "This pauses care tracking and returns Little Windows to Home, Food, and Night Light. The profile and all of its history stay safely archived."
+            return "This saves any open timer, pauses care tracking, and returns Little Windows to Home, Food, and Night Light. The profile and all of its history stay safely archived."
         }
         if profileToArchive != nil {
-            return "This hides the profile from daily tracking, but keeps all history available."
+            return "This saves any open timer and hides the profile from daily tracking, but keeps all history available."
         }
         return "This permanently deletes the profile and its events, appointments, milestones, predictions, and guide progress."
     }

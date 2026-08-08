@@ -230,7 +230,7 @@ struct WatchHomeView: View {
 
     private var unavailableView: some View {
         ContentUnavailableView {
-            Label("Care tracking is ready", systemImage: "heart.text.clipboard")
+            Label("Add care when you’re ready", systemImage: "heart.text.clipboard")
         } description: {
             Text("Add or restore a child or dog in Little Windows on your iPhone, then refresh this watch.")
         } actions: {

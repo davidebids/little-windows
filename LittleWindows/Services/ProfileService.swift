@@ -141,8 +141,19 @@ final class ProfileService: ObservableObject {
         guard !profile.isArchived else { return }
         let active = allActiveProfiles(in: profiles)
         guard active.contains(where: { $0.id == profile.id }) else { return }
+        let archivesFinalActiveProfile = active.count == 1
+        let archivedAt = Date()
+        let profileID = profile.id
+        let openTimers = (try? context.fetch(FetchDescriptor<BabyEvent>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.endDate == nil
+            }
+        ))) ?? []
+        for timer in openTimers where timer.isTimerDraft {
+            EventTimerService.save(timer, context: context, at: archivedAt)
+        }
         profile.isArchived = true
-        profile.updatedAt = Date()
+        profile.updatedAt = archivedAt
         if selectedProfileID == profile.id {
             if let fallback = active.first(where: { $0.id != profile.id }) {
                 switchProfile(fallback)
@@ -152,6 +163,21 @@ final class ProfileService: ObservableObject {
             }
         }
         guard PersistenceService.save(context: context) else { return }
+        ActiveSleepPlanService.clear(profileID: profileID)
+        if archivesFinalActiveProfile {
+            WidgetSnapshotService.refresh(
+                profile: nil,
+                events: [],
+                prediction: nil
+            )
+            WatchConnectivityService.shared.publishCurrentState()
+            Task {
+                await LiveActivityManager.shared.synchronize(profile: nil, events: [])
+            }
+        }
+        Task {
+            await NotificationManager.shared.cancelCareAlerts(profileID: profileID)
+        }
         SystemIntegrationReconciler.requestReconciliation()
     }
 
@@ -181,11 +207,12 @@ final class ProfileService: ObservableObject {
         context: ModelContext
     ) {
         guard canDeleteProfile(profile, profiles: profiles) else { return }
+        let profileID = profile.id
         let activeFallback = allActiveProfiles(in: profiles).first { $0.id != profile.id }
-        deleteProfileScopedRecords(profileID: profile.id, context: context)
-        PhotoAttachmentStore.deleteAttachments(profileID: profile.id, context: context)
+        deleteProfileScopedRecords(profileID: profileID, context: context)
+        PhotoAttachmentStore.deleteAttachments(profileID: profileID, context: context)
         context.delete(profile)
-        if selectedProfileID == profile.id {
+        if selectedProfileID == profileID {
             if let activeFallback {
                 switchProfile(activeFallback)
             } else {
@@ -194,6 +221,10 @@ final class ProfileService: ObservableObject {
             }
         }
         guard PersistenceService.save(context: context) else { return }
+        ActiveSleepPlanService.clear(profileID: profileID)
+        Task {
+            await NotificationManager.shared.cancelCareAlerts(profileID: profileID)
+        }
         SystemIntegrationReconciler.requestReconciliation()
     }
 

@@ -95,6 +95,20 @@ enum CareProfileRequirement: String, Identifiable, Equatable {
 }
 
 enum AppNavigationPolicy {
+    static func isHouseholdRoute(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = destinationComponents(for: url)
+        guard let destination = components.first else { return true }
+        return ["today", "food", "night-light", "settings"].contains(destination)
+            && careProfileRequirement(for: url) == nil
+    }
+
+    static func isSettingsRoute(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = destinationComponents(for: url)
+        return components.first == "settings"
+    }
+
     static func careProfileRequirement(for url: URL) -> CareProfileRequirement? {
         guard url.scheme == "littlewindows" else { return nil }
         var components = [url.host].compactMap { $0 }
@@ -133,6 +147,17 @@ enum AppNavigationPolicy {
         default:
             return nil
         }
+    }
+
+    private static func destinationComponents(for url: URL) -> [String] {
+        var components = [url.host].compactMap { $0 }
+            + url.pathComponents.filter { $0 != "/" }
+        if components.count >= 2,
+           components[0] == "profile",
+           UUID(uuidString: components[1]) != nil {
+            components.removeFirst(2)
+        }
+        return components
     }
 }
 
@@ -308,6 +333,9 @@ final class DeepLinkRouter: ObservableObject {
 
     func route(_ url: URL) {
         guard url.scheme == "littlewindows" else { return }
+        if AppNavigationPolicy.isHouseholdRoute(url) {
+            discardCareNavigationRequest()
+        }
         lastRequestedURL = url
         defer { recordNavigationRequest(url) }
         pendingSolidsOrigin = nil
@@ -624,6 +652,11 @@ final class DeepLinkRouter: ObservableObject {
     }
 
     func presentCareProfileRequirement(_ requirement: CareProfileRequirement) {
+        discardCareNavigationRequest()
+        careProfileRequirement = requirement
+    }
+
+    func discardCareNavigationRequest() {
         if pendingAction != nil { pendingAction = nil }
         if pendingAppointmentCommand != nil { pendingAppointmentCommand = nil }
         if pendingAgeGuideCommand != nil { pendingAgeGuideCommand = nil }
@@ -635,9 +668,10 @@ final class DeepLinkRouter: ObservableObject {
         if pendingFeedingInsightsMode != nil { pendingFeedingInsightsMode = nil }
         if pendingProfileID != nil { pendingProfileID = nil }
         lastRequestedURL = nil
-        if careProfileRequirement == nil {
-            careProfileRequirement = requirement
-        }
+    }
+
+    func clearLastRequestedURL() {
+        lastRequestedURL = nil
     }
 
     private func recordNavigationRequest(_ url: URL?) {

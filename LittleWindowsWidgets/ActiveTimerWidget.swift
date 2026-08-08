@@ -47,7 +47,9 @@ private struct ActiveTimerWidgetView: View {
     let snapshot: WidgetSnapshot
 
     var body: some View {
-        if let timer = snapshot.activeTimer {
+        if snapshot.profileID == nil {
+            missingProfileContent
+        } else if let timer = snapshot.activeTimer {
             switch family {
             case .accessoryInline:
                 Label {
@@ -127,6 +129,40 @@ private struct ActiveTimerWidgetView: View {
                         .foregroundStyle(.white.opacity(0.66))
                 }
                 .foregroundStyle(.white)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var missingProfileContent: some View {
+        let destination = URL(string: "littlewindows://active-timer")!
+        switch family {
+        case .accessoryInline:
+            Link(destination: destination) {
+                Label("Add care profile", systemImage: "person.crop.circle.badge.plus")
+                    .widgetAccentable()
+            }
+        case .accessoryRectangular:
+            Link(destination: destination) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Care timers")
+                            .font(.headline)
+                        Text("Add a child or dog")
+                            .font(.caption)
+                    }
+                } icon: {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .widgetAccentable()
+                }
+            }
+        default:
+            Link(destination: destination) {
+                CareProfileRequiredWidgetState(
+                    title: "Care timers",
+                    detail: "Add a child or dog to start and manage care timers.",
+                    systemImage: "timer"
+                )
             }
         }
     }

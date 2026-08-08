@@ -4,7 +4,7 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 
 ## Included surfaces
 
-- Active Timer widget: small, medium, Lock Screen rectangular, and Lock Screen inline.
+- Active Timer widget: small, medium, Lock Screen rectangular, and Lock Screen inline, with an add-profile state when no care profile is active.
 - Next Sleep Window widget: small, medium, and Lock Screen rectangular, with an add-child state when no care profile is active.
 - Today Summary widget: medium, including unified child care summary metrics for sleep, feeding, nursing, pumping, diapers, potty, medicine, temperature, growth, and activities when present, plus an add-profile state when care tracking has not been set up.
 - Quick Log widget: medium, backed by profile-scoped ranked smart actions, hidden-category preferences, and user-pinned actions from Today, plus an add-profile state when care tracking has not been set up.
@@ -15,7 +15,7 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - App Shortcuts for repeat-last logging, solids and other high-frequency quick logging, timer control, and dog care.
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
 - A dependent watchOS 10+ companion app with profile switching, six profile-aware smart or customized favorites, a watch-safe All Actions list, timer controls, today metrics, and sleep-window predictions.
-- Apple Watch complications and Smart Stack widgets for the active timer, next sleep window, and today summary.
+- Apple Watch complications and Smart Stack widgets for the active timer, next sleep window, and today summary, with add-profile states when care tracking is not active.
 - Apple Watch App Intents for the most common child and dog actions.
 - Local notifications for sleep windows, routine reminders, appointment reminders, monthly guide reminders, itinerary items, trip packing and final-check reminders, and user-created Food & Home reminders.
 - WeatherKit forecasts and Apple Weather attribution for trip packing suggestions.
@@ -119,7 +119,7 @@ Settings resolves destructive Data actions from the store that is actually open,
 
 On a new empty install, onboarding offers **Restore from iCloud** when the app has opened its Private iCloud Sync store. The flow verifies iCloud account availability and waits for SwiftData's automatic CloudKit import to deliver either a household or a care profile. It never queries or decodes SwiftData's private CloudKit records directly, creates replacement records, or treats sync as a point-in-time backup. If no app data arrives during the bounded wait, the user can retry, continue with a new setup, or import a JSON backup. Only data that completed a previous iCloud sync can return through this flow. Startup and later profile imports also repair repeated SwiftData profile rows carrying the same app-level profile ID. If someone continues through new setup before the original profile downloads, the app removes the newer onboarding shell only when it is empty, matches exactly one older profile identity, and that older profile already owns care data; it does not merge matching profiles when both own history.
 
-New setup can create a household workspace without a child or dog. In that mode, the root tab bar contains Today, Home, and Night Light; Today opens directly to its household summary. Adding the first active care profile adds Reports and Care and switches Today to Care. Archiving the final active profile removes those care-only destinations, clears the active selection, preserves archived history, and returns Today to Home.
+New setup can create a household workspace without a child or dog. In that mode, the root tab bar contains Today, Home, and Night Light; Today opens directly to its household summary. Adding the first active care profile adds Reports and Care and switches Today to Care. Archiving the final active profile saves any open timer into history, removes profile-scoped alerts and care-only destinations, clears the active selection, preserves archived history, and returns Today to Home.
 
 If neither the configured CloudKit store nor its local fallback can open, the app shows Data Recovery instead of terminating. Retry leaves the store untouched. Restore and empty-start options first copy the SQLite store, WAL/SHM sidecars, and SwiftData support directory into a dated unreadable-store archive, then open a new local-only store. Automatic backups are validated before the unreadable store is moved. Recovery clears stale widget and Live Activity timer state. Trace collection is handled separately from this user-facing recovery flow.
 

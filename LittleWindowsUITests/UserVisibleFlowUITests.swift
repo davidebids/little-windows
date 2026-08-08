@@ -80,9 +80,69 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.open(URL(string: "littlewindows://reports/summary")!)
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
         XCTAssertTrue(addProfile.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Care reports"].waitForExistence(timeout: 5))
+
+        // A newer household link must dismiss both an already-visible prompt
+        // and any delayed prompt that has not presented yet.
+        app.open(URL(string: "littlewindows://food")!)
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
+        XCTAssertTrue(addProfile.waitForNonExistence(timeout: 5))
+
+        app.open(URL(string: "littlewindows://quick-log/sleep")!)
+        app.open(URL(string: "littlewindows://night-light")!)
+        XCTAssertTrue(app.navigationBars["Night Light"].waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(1.2))
+        XCTAssertFalse(addProfile.exists)
+
+        // Care navigation arriving over Settings must dismiss Settings first so
+        // SwiftUI has a single sheet presenter for the profile requirement.
+        app.open(URL(string: "littlewindows://settings")!)
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.open(URL(string: "littlewindows://reports/summary")!)
+        XCTAssertTrue(addProfile.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Care reports"].exists)
 
         addProfile.tap()
         XCTAssertTrue(app.navigationBars["Add Profile"].waitForExistence(timeout: 5))
+        let childName = app.textFields["Child name"]
+        XCTAssertTrue(childName.waitForExistence(timeout: 3))
+        childName.tap()
+        childName.typeText("Test Child")
+        app.navigationBars["Add Profile"].buttons["Save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Reports"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Care"].exists)
+        XCTAssertTrue(app.segmentedControls.buttons["Care"].isSelected)
+
+        // The inverse transition should be just as complete: archiving the last
+        // profile preserves it in Settings and immediately restores Home mode.
+        app.open(URL(string: "littlewindows://settings")!)
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        let careProfiles = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(careProfiles.waitForExistence(timeout: 4))
+        careProfiles.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+        let profileRow = app.buttons.containing(
+            .staticText,
+            identifier: "Test Child"
+        ).firstMatch
+        XCTAssertTrue(profileRow.waitForExistence(timeout: 4))
+        profileRow.swipeLeft()
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 3))
+        app.buttons["Archive"].tap()
+        XCTAssertTrue(app.buttons["Archive Profile"].waitForExistence(timeout: 3))
+        app.buttons["Archive Profile"].tap()
+        XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 5))
+
+        app.open(URL(string: "littlewindows://today")!)
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Care"].exists)
+        XCTAssertFalse(app.segmentedControls.buttons["Care"].exists)
     }
 
     func testFirstRunOffersRestoreFromICloud() {

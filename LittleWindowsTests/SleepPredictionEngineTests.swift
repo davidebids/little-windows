@@ -1507,7 +1507,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let event = BabyEvent(
             profileID: testChild.id,
             type: .sleep,
-            startDate: Date(timeIntervalSinceReferenceDate: 1_000)
+            startDate: Date().addingTimeInterval(-120)
         )
         context.insert(testChild)
         context.insert(event)
@@ -1527,6 +1527,9 @@ final class SleepPredictionEngineTests: XCTestCase {
             try context.fetch(FetchDescriptor<BabyEvent>()).map(\.id),
             [event.id]
         )
+        XCTAssertNotNil(event.endDate)
+        XCTAssertFalse(event.isTimerDraft)
+        XCTAssertGreaterThanOrEqual(event.duration ?? 0, 119)
     }
 
     @MainActor
@@ -3166,6 +3169,17 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         XCTAssertEqual(activePlan.targetNapCount, 3)
         XCTAssertEqual(restoredPlan?.targetNapCount, 3)
+
+        ActiveSleepPlanService.clearIfProfileIsInactive(
+            activeProfileIDs: [UUID()],
+            defaults: defaults
+        )
+        XCTAssertNil(ActiveSleepPlanService.activePlan(
+            for: profile.id,
+            now: today,
+            calendar: calendar,
+            defaults: defaults
+        ))
     }
 
     func testBackwardsPlanShowsFullDayEvenAfterEarlierNapsPassed() throws {
@@ -7502,31 +7516,78 @@ final class SleepPredictionEngineTests: XCTestCase {
         let householdURLs = [
             "littlewindows://today",
             "littlewindows://food",
+            "littlewindows://food/todos",
+            "littlewindows://food/quick-add",
             "littlewindows://food/shopping/00000000-0000-0000-0000-000000000501",
+            "littlewindows://food/trips/00000000-0000-0000-0000-000000000401",
+            "littlewindows://food/inventory",
+            "littlewindows://food/meal-prep",
+            "littlewindows://food/returns",
             "littlewindows://night-light/diaper-change",
-            "littlewindows://settings"
+            "littlewindows://night-light/stop",
+            "littlewindows://settings",
+            "littlewindows://settings/family-sync",
+            "littlewindows://profile/00000000-0000-0000-0000-000000000101/food",
+            "littlewindows://profile/00000000-0000-0000-0000-000000000101/night-light"
         ]
         for value in householdURLs {
-            XCTAssertNil(AppNavigationPolicy.careProfileRequirement(
-                for: try XCTUnwrap(URL(string: value))
-            ))
+            let url = try XCTUnwrap(URL(string: value))
+            XCTAssertNil(AppNavigationPolicy.careProfileRequirement(for: url))
+            XCTAssertTrue(AppNavigationPolicy.isHouseholdRoute(url))
         }
 
         let careRoutes: [(String, CareProfileRequirement)] = [
             ("littlewindows://quick-log/sleep", .logging),
+            ("littlewindows://quick-log/nursing-left", .logging),
+            ("littlewindows://quick-log/medicine", .logging),
+            ("littlewindows://action/stop-active", .logging),
+            ("littlewindows://active-timer", .logging),
+            ("littlewindows://event/00000000-0000-0000-0000-000000000201", .logging),
+            ("littlewindows://profile/00000000-0000-0000-0000-000000000101/today", .logging),
+            ("littlewindows://history", .reports),
             ("littlewindows://reports/summary", .reports),
+            ("littlewindows://insights/feeding", .reports),
+            ("littlewindows://medical", .reports),
+            ("littlewindows://prediction", .reports),
             ("littlewindows://care/solids", .care),
+            ("littlewindows://food/solids/allergens", .care),
+            ("littlewindows://milestones", .care),
+            ("littlewindows://memories", .care),
+            ("littlewindows://age-guide/6", .care),
+            ("littlewindows://puppy-guide", .care),
+            ("littlewindows://appointments", .appointments),
+            ("littlewindows://visits", .appointments),
             ("littlewindows://appointment/00000000-0000-0000-0000-000000000301", .appointments),
             ("littlewindows://routines", .routines)
         ]
         for (value, expectedRequirement) in careRoutes {
+            let url = try XCTUnwrap(URL(string: value))
             XCTAssertEqual(
-                AppNavigationPolicy.careProfileRequirement(
-                    for: try XCTUnwrap(URL(string: value))
-                ),
+                AppNavigationPolicy.careProfileRequirement(for: url),
                 expectedRequirement
             )
+            XCTAssertFalse(AppNavigationPolicy.isHouseholdRoute(url))
         }
+
+        XCTAssertTrue(AppNavigationPolicy.isSettingsRoute(
+            try XCTUnwrap(URL(string: "littlewindows://settings/family-sync"))
+        ))
+        XCTAssertFalse(AppNavigationPolicy.isSettingsRoute(
+            try XCTUnwrap(URL(string: "littlewindows://food"))
+        ))
+    }
+
+    @MainActor
+    func testHouseholdNavigationDiscardsAnOverriddenCareCommand() throws {
+        let router = DeepLinkRouter.shared
+        router.route(try XCTUnwrap(URL(string: "littlewindows://quick-log/sleep")))
+        XCTAssertNotNil(router.pendingAction)
+
+        router.route(try XCTUnwrap(URL(string: "littlewindows://food")))
+
+        XCTAssertNil(router.pendingAction)
+        XCTAssertNil(router.pendingProfileID)
+        XCTAssertEqual(router.selectedTab, .food)
     }
 
     @MainActor

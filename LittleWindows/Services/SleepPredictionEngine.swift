@@ -634,6 +634,18 @@ enum ActiveSleepPlanService {
         defaults.removeObject(forKey: defaultsKey)
     }
 
+    static func clearIfProfileIsInactive(
+        activeProfileIDs: Set<UUID>,
+        defaults: UserDefaults = .standard
+    ) {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let plan = try? JSONDecoder().decode(ActiveSleepPlan.self, from: data),
+              !activeProfileIDs.contains(plan.profileID) else {
+            return
+        }
+        defaults.removeObject(forKey: defaultsKey)
+    }
+
     static func wakeAlert(
         for activePlan: ActiveSleepPlan?,
         profile: BabyProfile?,

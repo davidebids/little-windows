@@ -787,13 +787,17 @@ struct RootView: View {
 
         if let url = router.lastRequestedURL,
            let requirement = AppNavigationPolicy.careProfileRequirement(for: url) {
-            normalizeNavigationForCurrentExperience()
-            scheduleCareProfileRequirement(requirement)
+            prepareForCareProfileRequirement(requirement)
             return
         }
         if let requirement = pendingCareProfileRequirement {
+            prepareForCareProfileRequirement(requirement)
+            return
+        }
+        if let url = router.lastRequestedURL,
+           AppNavigationPolicy.isHouseholdRoute(url) {
+            prepareForHouseholdNavigation(to: url)
             normalizeNavigationForCurrentExperience()
-            scheduleCareProfileRequirement(requirement)
             return
         }
         normalizeNavigationForCurrentExperience()
@@ -884,7 +888,14 @@ struct RootView: View {
         }
         #endif
         guard !presentCareProfileRequirementIfNeeded(for: url) else { return }
+        prepareForHouseholdNavigation(to: url)
         router.route(url)
+        if experienceMode == .householdOnly {
+            // Profile-prefixed Home or Night Light links can outlive an archived
+            // profile. Neither destination is profile-scoped, so do not let that
+            // stale identifier affect a later care navigation request.
+            router.pendingProfileID = nil
+        }
     }
 
     private func consumePendingSystemAction() {
@@ -893,6 +904,7 @@ struct RootView: View {
                 if presentCareProfileRequirementIfNeeded(for: url) {
                     continue
                 }
+                prepareForHouseholdNavigation(to: url)
                 if await IntegrationCommandStore.deliverToRunningApp(url) {
                     presentProcessedSystemAction(url)
                     continue
@@ -909,6 +921,7 @@ struct RootView: View {
                 IntegrationCommandStore.clearPendingURL(matching: url)
                 return
             }
+            prepareForHouseholdNavigation(to: url)
             if await IntegrationCommandStore.deliverToRunningApp(url) {
                 IntegrationCommandStore.clearPendingURL(matching: url)
                 presentProcessedSystemAction(url)
@@ -924,9 +937,20 @@ struct RootView: View {
               let requirement = AppNavigationPolicy.careProfileRequirement(for: url) else {
             return false
         }
+        // The URL is intentionally not routed while no profile exists. Clear any
+        // older request so its destination cannot cancel this delayed prompt.
+        router.clearLastRequestedURL()
+        prepareForCareProfileRequirement(requirement)
+        return true
+    }
+
+    private func prepareForCareProfileRequirement(_ requirement: CareProfileRequirement) {
+        // A system link can arrive while Settings is already presented. Dismiss
+        // it first so the contextual profile prompt has one unambiguous presenter.
+        router.showingSettings = false
+        router.showingFamilySyncSettings = false
         normalizeNavigationForCurrentExperience()
         scheduleCareProfileRequirement(requirement)
-        return true
     }
 
     private func scheduleCareProfileRequirement(_ requirement: CareProfileRequirement) {
@@ -937,7 +961,18 @@ struct RootView: View {
             try? await Task.sleep(for: .milliseconds(750))
             guard !Task.isCancelled, experienceMode == .householdOnly else { return }
             router.presentCareProfileRequirement(requirement)
+            careProfilePresentationTask = nil
         }
+    }
+
+    private func prepareForHouseholdNavigation(to url: URL) {
+        careProfilePresentationTask?.cancel()
+        careProfilePresentationTask = nil
+        router.careProfileRequirement = nil
+        router.discardCareNavigationRequest()
+        guard !AppNavigationPolicy.isSettingsRoute(url) else { return }
+        router.showingSettings = false
+        router.showingFamilySyncSettings = false
     }
 
     private func presentProcessedSystemAction(_ url: URL) {
