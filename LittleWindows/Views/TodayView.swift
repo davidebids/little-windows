@@ -810,7 +810,10 @@ struct TodayView: View {
                     householdID: householdID,
                     currentCaregiverName: activeCaregiverName
                 ) { summary in
-                    TodayHomeSummaryView(summary: summary) { command in
+                    TodayHomeSummaryView(
+                        summary: summary,
+                        caregiverName: activeCaregiverName
+                    ) { command in
                         deepLinkRouter.openFood(command)
                     }
                 }
@@ -3532,16 +3535,28 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
 
 private struct TodayHomeSummaryView: View {
     let summary: TodayHomeSummary
+    let caregiverName: String
     let open: (FoodRouteCommand) -> Void
+
+    private var greetingTitle: String {
+        let name = caregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let placeholderNames = ["caregiver", "caregiver 1", "caregiver 2"]
+        guard !name.isEmpty,
+              let normalizedName = CaregiverIdentityService.normalizedName(name),
+              !placeholderNames.contains(normalizedName) else {
+            return "Welcome home"
+        }
+        return "Welcome, \(name)"
+    }
 
     var body: some View {
         List {
             if summary.isQuiet {
                 Section {
                     ContentUnavailableView(
-                        "Home is all clear",
+                        greetingTitle,
                         systemImage: "house.fill",
-                        description: Text("There are no open household items to surface right now.")
+                        description: Text("Your home is all clear—there are no open household items to surface right now.")
                     )
                     .listRowBackground(Color.clear)
                 }

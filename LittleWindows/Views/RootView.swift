@@ -1312,7 +1312,10 @@ private struct FirstRunOnboardingView: View {
             return false
         }
         caregiverOne = trimmedPrimaryCaregiverName
-        CaregiverIdentityService.seedCurrentCaregiverNameIfNeeded(from: trimmedPrimaryCaregiverName)
+        CaregiverIdentityService.storeIdentity(
+            currentName: trimmedPrimaryCaregiverName,
+            primaryName: trimmedPrimaryCaregiverName
+        )
         return true
     }
 

@@ -19,6 +19,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         householdChoice.tap()
 
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Welcome, Test Caregiver"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.tabBars.buttons["Today"].exists)
         XCTAssertTrue(app.tabBars.buttons["Home"].exists)
         XCTAssertTrue(app.tabBars.buttons["Night Light"].exists)
