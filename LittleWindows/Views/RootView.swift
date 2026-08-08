@@ -1226,7 +1226,7 @@ private struct FirstRunOnboardingView: View {
 
                 setupChoice(
                     title: "Add a Child or Dog",
-                    detail: "Set up care logging, timers, reports, guides, appointments, and memories.",
+                    detail: "Add a care profile now for daily tracking and a personalized Care workspace.",
                     systemImage: "person.crop.circle.badge.plus",
                     tint: .teal,
                     accessibilityIdentifier: "firstRun.addCareProfile",

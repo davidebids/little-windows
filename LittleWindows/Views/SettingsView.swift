@@ -230,7 +230,7 @@ struct SettingsView: View {
                 }
             }
 
-            SyncSettingsSection()
+            SyncSettingsSection(hasActiveCareProfile: selectedProfile != nil)
 
             if selectedProfile != nil {
                 WatchSettingsSection(profile: selectedProfile)
@@ -2054,6 +2054,8 @@ private struct WatchFavoritesSettingsView: View {
 }
 
 private struct SyncSettingsSection: View {
+    let hasActiveCareProfile: Bool
+
     @AppStorage(PersistenceService.iCloudSyncEnabledKey) private var isICloudSyncEnabled = true
     @AppStorage(PersistenceService.familySyncModeKey) private var syncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
     @AppStorage(CloudKitSharingService.inactiveReasonKey) private var inactiveReasonRawValue = ""
@@ -2096,7 +2098,11 @@ private struct SyncSettingsSection: View {
         } header: {
             Text("Sync")
         } footer: {
-            Text("Private iCloud Sync covers the same Apple Account. Family Sync shares Little Windows data with accepted iCloud caregivers across Apple Accounts.")
+            if hasActiveCareProfile {
+                Text("Private iCloud Sync covers the same Apple Account. Family Sync shares Little Windows data with accepted iCloud caregivers across Apple Accounts.")
+            } else {
+                Text("Private iCloud Sync keeps your household data available on devices using the same Apple Account. Family Sync shares it with accepted people across Apple Accounts.")
+            }
         }
     }
 }

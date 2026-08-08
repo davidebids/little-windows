@@ -16,6 +16,11 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         let householdChoice = app.buttons["firstRun.householdOnly"]
         XCTAssertTrue(householdChoice.waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            app.staticTexts[
+                "Add a care profile now for daily tracking and a personalized Care workspace."
+            ].exists
+        )
         householdChoice.tap()
 
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
@@ -31,6 +36,22 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(settingsButton.waitForExistence(timeout: 4))
         settingsButton.tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+
+        app.open(URL(string: "littlewindows://settings/family-sync")!)
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+        XCTAssertTrue(app.navigationBars["Family Sync"].waitForExistence(timeout: 5))
+        let householdSharingDescription = app.staticTexts.matching(
+            NSPredicate(
+                format: "label BEGINSWITH %@",
+                "Home, Food, trips, returns, reminders, and other household data"
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            householdSharingDescription.waitForExistence(timeout: 5)
+        )
+        app.navigationBars["Family Sync"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+
         let profilesLink = app.buttons.matching(
             NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
         ).firstMatch
@@ -38,6 +59,11 @@ final class UserVisibleFlowUITests: XCTestCase {
         profilesLink.tap()
         XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No care profiles yet"].exists)
+        XCTAssertTrue(
+            app.staticTexts[
+                "Add a child or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is."
+            ].exists
+        )
         XCTAssertTrue(app.buttons["profiles.empty.add"].exists)
         let emptyProfilesAttachment = XCTAttachment(screenshot: app.screenshot())
         emptyProfilesAttachment.name = "Household-only empty profiles"

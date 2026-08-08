@@ -691,7 +691,7 @@ struct ManageProfilesView: View {
             VStack(spacing: 9) {
                 Text("No care profiles yet")
                     .font(.title2.bold())
-                Text("Add a child or dog when you want to track care, timers, reports, guides, and appointments. Your Home, Food, and Night Light setup stays just as it is.")
+                Text("Add a child or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

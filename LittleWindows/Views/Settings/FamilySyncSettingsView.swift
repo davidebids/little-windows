@@ -5,6 +5,7 @@ import UIKit
 
 struct FamilySyncSettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
     @StateObject private var viewModel = FamilySyncViewModel()
     @AppStorage("familySyncActivityNotificationsEnabled")
     private var activityNotificationsEnabled = true
@@ -18,6 +19,10 @@ struct FamilySyncSettingsView: View {
     @State private var deleteLocalDataOnLeave = false
     @State private var isConfirmingLeave = false
 
+    private var hasActiveCareProfile: Bool {
+        profiles.contains { !$0.isArchived }
+    }
+
     var body: some View {
         List {
             Section("Current mode") {
@@ -28,7 +33,7 @@ struct FamilySyncSettingsView: View {
                 LabeledContent("Owner", value: viewModel.state.ownerDescription)
                 if viewModel.state.role == .owner {
                     LabeledContent(
-                        "Accepted caregivers",
+                        hasActiveCareProfile ? "Accepted caregivers" : "Accepted people",
                         value: "\(viewModel.state.participantCount)"
                     )
                 } else {
@@ -41,7 +46,9 @@ struct FamilySyncSettingsView: View {
             Section("How family sync works") {
                 Text("Family Sync uses an iCloud shared record between Apple Accounts. It is separate from Apple Family Sharing membership.")
                     .foregroundStyle(.secondary)
-                Text("Profiles, timers, events, appointments, milestones, photos, guide state, predictions, and Food & Home data are shared with accepted caregivers.")
+                Text(hasActiveCareProfile
+                    ? "Home, Food, and care profile data are shared with accepted caregivers."
+                    : "Home, Food, trips, returns, reminders, and other household data are shared with accepted people. Care profile data, if present now or later, uses the same share.")
                     .foregroundStyle(.secondary)
                 Text("Private iCloud Sync remains available for devices signed into the same Apple Account.")
                     .foregroundStyle(.secondary)
@@ -118,8 +125,8 @@ struct FamilySyncSettingsView: View {
                     } label: {
                         Label(
                             viewModel.activeOperation == .manage
-                                ? "Opening Caregivers"
-                                : "Manage Caregivers",
+                                ? (hasActiveCareProfile ? "Opening Caregivers" : "Opening People")
+                                : (hasActiveCareProfile ? "Manage Caregivers" : "Manage People"),
                             systemImage: viewModel.activeOperation == .manage
                                 ? "hourglass"
                                 : "person.2"
@@ -149,7 +156,9 @@ struct FamilySyncSettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Manually checks the shared iCloud family record, downloads newer caregiver changes, and uploads local edits from this device.")
+                        Text(hasActiveCareProfile
+                            ? "Manually checks the shared iCloud family record, downloads newer caregiver changes, and uploads local edits from this device."
+                            : "Manually checks the shared iCloud family record, downloads newer household changes, and uploads local edits from this device.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -192,7 +201,9 @@ struct FamilySyncSettingsView: View {
 
             Section("Your name") {
                 CaregiverNameFields(
-                    detail: "Name on this device appears on new care entries you log here. Family Sync share name labels the shared family space; most people can keep both names the same.",
+                    detail: hasActiveCareProfile
+                        ? "Name on this device appears on new care entries you log here. Family Sync share name labels the shared family space; most people can keep both names the same."
+                        : "Name on this device appears on household assignments and activity. Family Sync share name labels the shared household space; most people can keep both names the same.",
                     clearsFamilySyncPrompt: true
                 )
             }
@@ -209,7 +220,9 @@ struct FamilySyncSettingsView: View {
                             _ = await NotificationManager.shared.requestAuthorization()
                         }
                     }
-                    Text("Show alerts when another caregiver's synced changes arrive on this device.")
+                    Text(hasActiveCareProfile
+                        ? "Show alerts when another caregiver's synced changes arrive on this device."
+                        : "Show alerts when another person's synced household changes arrive on this device.")
                         .foregroundStyle(.secondary)
 
                     Toggle(
@@ -223,7 +236,9 @@ struct FamilySyncSettingsView: View {
                             _ = await NotificationManager.shared.requestAuthorization()
                         }
                     }
-                    Text("Alert when another caregiver adds, completes, reopens, or edits Home to-do items.")
+                    Text(hasActiveCareProfile
+                        ? "Alert when another caregiver adds, completes, reopens, or edits Home to-do items."
+                        : "Alert when another person adds, completes, reopens, or edits Home to-do items.")
                         .foregroundStyle(.secondary)
 
                     Toggle(
