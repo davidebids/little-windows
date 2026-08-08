@@ -1,6 +1,6 @@
 # Little Windows
 
-Little Windows is a local-first SwiftUI home organizer and optional care tracker for children and dogs. It targets iOS 17+, stores the main history with SwiftData, uses App Group snapshots for widgets and Live Activities, and can sync signed builds through Apple-native CloudKit.
+Little Windows is a local-first SwiftUI home organizer and optional care tracker for children, adults, and dogs. Adult profiles can represent yourself or someone you care for, such as a parent or grandparent. It targets iOS 17+, stores the main history with SwiftData, uses App Group snapshots for widgets and Live Activities, and can sync signed builds through Apple-native CloudKit.
 
 The app is built around dense daily care workflows: quick logging, active timers, customizable Today actions, sleep planning, routines, reports, guides, appointments, Food & Home lists, and private or shared iCloud-backed data modes.
 
@@ -10,16 +10,17 @@ The app is built around dense daily care workflows: quick logging, active timers
 2. Select the `LittleWindows` scheme.
 3. Run on an iOS 17+ simulator or signed device.
 
-First launch presents onboarding for a new empty store. A user can begin with **Home, Food & Night Light** without creating a child or dog, or add a care profile during setup. Household-only mode presents Today, Home, and Night Light as the primary app areas; adding the first active child or dog expands navigation to Reports and Care and opens Today in its Care mode. Archiving the last active care profile saves any open timer, clears profile-scoped alerts, and returns to the household-only layout without deleting that profile or its history.
+First launch presents onboarding for a new empty store. A user can begin with **Home, Food & Night Light** without creating a care profile, or add a child, adult, or dog profile during setup. Household-only mode presents Today, Home, and Night Light as the primary app areas; adding the first active care profile expands navigation to Reports and Care and opens Today in its Care mode. Archiving the last active care profile saves any open timer, clears profile-scoped alerts, and returns to the household-only layout without deleting that profile or its history.
 
-Returning users can choose **Restore from iCloud** to wait for data previously synced through Private iCloud Sync on the same Apple Account, or open Settings to import a JSON backup. The iCloud option does not create or overwrite data when no synced household or profile arrives, and it does not represent a separate server-side backup snapshot. If someone completes new setup before their original profile finishes downloading, the app can remove the newer empty matching setup shell in favor of the historical profile; it leaves profiles alone when both own history. The caregiver name for new entries uses iCloud key-value storage so it can follow the same Apple Account without becoming a shared Family Sync household value; older installs can recover one unambiguous non-default name from synced care history. The app does not create default child profiles, care history, shopping lists, or personal archives automatically. SwiftUI previews and debug-only seed helpers use neutral sample child and dog data.
+Returning users can choose **Restore from iCloud** to wait for data previously synced through Private iCloud Sync on the same Apple Account, or open Settings to import a JSON backup. The iCloud option does not create or overwrite data when no synced household or profile arrives, and it does not represent a separate server-side backup snapshot. If someone completes new setup before their original profile finishes downloading, the app can remove the newer empty matching setup shell in favor of the historical profile; it leaves profiles alone when both own history. The caregiver name for new entries uses iCloud key-value storage so it can follow the same Apple Account without becoming a shared Family Sync household value; older installs can recover one unambiguous non-default name from synced care history. The app does not create default care profiles, care history, shopping lists, or personal archives automatically. SwiftUI previews and debug-only seed helpers use neutral sample data.
 
 ## App Areas
 
 - Today: a household overview for Home and Food, plus profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep day-ahead planning, and system integration refresh when a care profile is active.
-- Profiles: child and dog profiles with switching, colors, archival support, dog-specific details, and optional profile photos.
-- History and Reports: day and list history, event editing, filtering, summaries, charts, and prediction accuracy review.
-- Milestones, Memories, and Solids: profile-scoped entries and age prompts, plus a child-only solids workspace for preparation, planning, allergens, recipes, and tracking.
+- Profiles: child, adult, and dog profiles with switching, colors, archival support, relationship-aware adult details, dog-specific details, optional profile photos, and private-by-default Family Sync opt-in.
+- History and Reports: day and list history, event editing, filtering, summaries, charts, prediction accuracy review for children, and adult health trends.
+- Medications: medication details, daily and complex schedules, taken/skipped history, as-needed interval and daily-limit guardrails, adherence summaries, supply/refill tracking, local reminders with optional follow-ups and notification logging actions, and an Apple Watch upcoming-dose card with Taken, Skipped, and 10-minute Snooze controls.
+- Milestones, Memories, and Solids: profile-scoped entries and age prompts, adult-appropriate memories and milestones, plus a child-only solids workspace for preparation, planning, allergens, recipes, and tracking.
 - Appointments and Visits: questions, notes, summaries, follow-up instructions, medications, vaccines, measurements, and reminders.
 - Guides: monthly child age guides, source-backed Sleep Basics lessons, and puppy-stage guide content with read state and reminder support.
 - Food & Home: household to-do lists, shopping lists, trip itineraries and packing, store layouts and sections, shopping mode, recurring staples, inventory locations, meal prep tracking, return tracking, and reminders.
@@ -40,6 +41,12 @@ The child care form keeps pumping, solids, potty, and the rest of the child acti
 
 Dog logs cover food, water, treat, potty, walk, rest, training, grooming, medicine, symptoms, growth, temperature, vaccines, glucose, and custom events.
 
+Adult logs cover medications, symptoms, blood pressure, pulse, oxygen saturation, respiratory rate, blood glucose, temperature, weight/height, pain, sleep, activity, and custom notes. The adult health dashboard charts entered values without diagnosing or interpreting them. Medication doses, symptoms, and measured vitals require a fresh entry or managed dose action instead of being cloned by Repeat Last. Adult appointment presets include primary care, specialists, labs, therapy, dental, imaging, procedures, eye care, and urgent care.
+
+Medication schedules support daily doses, selected weekdays, every-N-days routines, fixed courses, on/off cycles, alternating doses, tapers, and as-needed use. Reminders follow either local time or the home time zone, refresh on foreground reconciliation, share one bounded rolling request budget across all active medications while preserving room already used by other app reminders, and support snooze, optional 30-minute follow-up, and managed Taken/Skipped actions. Reminder actions are checked against the current schedule, and an active snooze is preserved through unrelated refreshes but removed after the dose is logged or its schedule changes. Little Windows records the instructions entered by the user; it does not validate doses, interactions, contraindications, or clinical decisions.
+
+For adult profiles, the Apple Watch companion shows the nearest unlogged scheduled dose from the prior 12 hours or upcoming seven days. Taken and Skipped actions use the same managed dose, timeline, supply, and conflict-handling path as the iPhone. Snooze is available within 30 minutes of the scheduled time when that regimen's reminders are enabled and stays disabled until the snoozed reminder fires; disconnected actions queue with their original tap time and stale or conflicting commands are rejected safely by the iPhone.
+
 Sleep, feed, nursing, pumping, activity, walk, rest, training, grooming, and custom logs can run as active timers. Stopped timer drafts can be reviewed, resumed, saved, or discarded before they enter the permanent history.
 
 Care events store concrete start and end time-zone identifiers. A timer can therefore begin in one zone and end in another without changing its real elapsed duration, while Today, History, summaries, insights, widgets, backups, Family Sync, and report exports continue to use each entry's recorded local day and clock time.
@@ -50,7 +57,7 @@ Quick repeat and backup/import preserve the production care details above, inclu
 
 Today is the main operational screen for care. It includes:
 
-- A profile-aware Log Something section with child and dog actions appropriate to the active profile.
+- A profile-aware Log Something section with child, adult, and dog actions appropriate to the active profile.
 - Smart quick actions ranked from recent history, active timers, prediction context, and user-pinned actions.
 - Per-profile Today action customization so caregivers can hide categories they do not use without affecting history, reports, backup/import, widgets, or other profiles.
 - Active timer cards and saved timer drafts for review before logging.
@@ -89,11 +96,11 @@ Insights support short lookback ranges, previous-period comparison, plain-langua
 
 ## Food & Home
 
-Food & Home tracks household food routines separately from child and dog care events. It includes:
+Food & Home tracks household food routines separately from profile-scoped care events. It includes:
 
 - Shopping lists with store-specific sections, priorities, quantities, notes, recurring staples, checked state, smart history reactivation, bulk entry, reusable list duplication, and reordering helpers.
 - Named home to-do lists with active and completed sections, added/completed caregiver tracking, and optional assignment to yourself or an accepted Family Sync caregiver.
-- Trip workspaces with a manual, day-by-day itinerary alongside packing. Itinerary entries support specific or flexible times, ideas without a day, activities, transportation, flights, lodging, meals, tasks, and notes; booking status and confirmation details; multiple web links; mapped places and directions; per-caregiver assignments and reminders; and mutually exclusive option groups for weather-dependent or undecided plans. Packing supports trip-local adults plus linked child and dog profiles, duration-aware starter suggestions, traveler and bag grouping, quantities, essential items, per-caregiver responsibility, targeted reminders, packed-by attribution, completion progress, duplication, and shopping-list handoff.
+- Trip workspaces with a manual, day-by-day itinerary alongside packing. Itinerary entries support specific or flexible times, ideas without a day, activities, transportation, flights, lodging, meals, tasks, and notes; booking status and confirmation details; multiple web links; mapped places and directions; per-caregiver assignments and reminders; and mutually exclusive option groups for weather-dependent or undecided plans. Packing supports trip-local adults plus linked child, adult, and dog profiles, duration-aware starter suggestions, traveler and bag grouping, quantities, essential items, per-caregiver responsibility, targeted reminders, packed-by attribution, completion progress, duplication, and shopping-list handoff.
 - Per-destination WeatherKit forecast guidance with explicit full or partial trip-day coverage and reviewable rain, cold-weather, heat, and high-UV additions. Forecasts automatically become available as each destination's dates enter the forecast window.
 - Store layouts with default sections such as Produce, Refrigerated, Frozen, Pantry, Household, and Other.
 - Inventory locations and items with quantity, unit, status, expiration, and notes.
@@ -134,11 +141,11 @@ System surfaces pass commands back to the app and read lightweight App Group sna
 
 ## Backup, Report Export, Import, And Fixtures
 
-Settings supports JSON backup export/import and full data deletion/reset. The confirmation identifies whether the action affects only this device, private iCloud devices on the same Apple Account, or every caregiver in a Family Sync space. Only a confirmed Family Sync owner can replace or erase the complete shared dataset. Both operations create a local automatic recovery backup first. Backups include the caregiver identity used for new entries, profiles, events and their recorded time zones, prediction records, appointments, milestones, photo attachments, the custom solid-food catalog, guide state, Home data, and related local metadata. Import restores the backed-up caregiver identity only when the receiving install does not already have an explicit one.
+Settings supports JSON backup export/import and full data deletion/reset. The confirmation identifies whether the action affects only this device, private iCloud devices on the same Apple Account, or every caregiver in a Family Sync space. Only a confirmed Family Sync owner can replace or erase the complete shared dataset. Both operations create a local automatic recovery backup first. Backups include the caregiver identity used for new entries, profiles, events and structured health observations, medications and dose history, prediction records, appointments, milestones, photo attachments, the custom solid-food catalog, guide state, Home data, and related local metadata. Import restores the backed-up caregiver identity only when the receiving install does not already have an explicit one.
 
 If the SwiftData store cannot open, Little Windows presents a recovery screen instead of terminating. It can retry without changing the store, restore a validated automatic backup, or preserve the unreadable store and start empty. Recovery archives all store artifacts before opening a new local-only copy, so it does not silently delete iCloud or Family Sync data.
 
-Settings also supports profile-scoped CSV and PDF care report export for doctor visits and caregiver handoff. Report export includes selectable 7-day, 30-day, and custom date ranges, optional notes and caregiver names, and care-profile events with appointments and milestones when enabled. CSV/PDF reports are human-readable only; JSON remains the restore/import format.
+Settings also supports profile-scoped CSV and PDF care report export for doctor visits and caregiver handoff. Report export includes selectable 7-day, 30-day, and custom date ranges, optional notes and caregiver names, the current medication plan, and care-profile events with appointments and milestones when enabled. CSV/PDF reports are human-readable only; JSON remains the restore/import format.
 
 The repository includes a neutral legacy import fixture for development and test validation:
 
@@ -168,7 +175,7 @@ Supported modes:
 
 - Local only: data stays on this device.
 - Private iCloud Sync: data syncs through the private CloudKit database for devices signed into the same Apple Account.
-- Shared Family Sync: accepted caregivers on different Apple Accounts can share one Little Windows dataset through a CloudKit shared record and `CKShare` invitation.
+- Shared Family Sync: accepted caregivers on different Apple Accounts can share household data and only the care profiles explicitly opted in by their owner. New profiles are private by default, and a shared-data refresh preserves private profiles and their records locally.
 
 Family Sync is separate from Apple Family Sharing membership. It requires iCloud availability, signed builds with the configured CloudKit container, and real-device testing before production use.
 

@@ -114,6 +114,16 @@ struct MilestoneTemplate: Identifiable, Hashable {
         .init(title: "Favorite toy discovered", category: .favoriteThings),
         .init(title: "First trip", category: .travel)
     ]
+
+    static let adultSuggested: [MilestoneTemplate] = [
+        .init(title: "Started a new care routine", category: .health),
+        .init(title: "Completed a course of treatment", category: .health),
+        .init(title: "Reached a personal goal", category: .custom),
+        .init(title: "Returned to a favorite activity", category: .favoriteThings),
+        .init(title: "Special family day", category: .family),
+        .init(title: "Memorable trip", category: .travel),
+        .init(title: "A moment worth remembering", category: .custom)
+    ]
 }
 
 struct AutomaticMilestoneActivitySummary: Identifiable, Hashable {
@@ -307,12 +317,16 @@ enum PhotoAttachmentStore {
 
 enum AutomaticMilestoneSummaryService {
     static func summaries(
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        events: [CareEvent],
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [AutomaticMilestoneSummary] {
-        let birthDay = calendar.startOfDay(for: profile.birthDate)
+        guard profile.profileType == .child,
+              let birthDate = profile.birthDate else {
+            return []
+        }
+        let birthDay = calendar.startOfDay(for: birthDate)
         let today = calendar.startOfDay(for: now)
         guard today >= birthDay else { return [] }
 
@@ -363,6 +377,7 @@ enum AutomaticMilestoneSummaryService {
                 kind: $0.kind,
                 date: $0.date,
                 profile: profile,
+                birthDate: birthDate,
                 events: events,
                 calendar: calendar
             )
@@ -374,11 +389,12 @@ enum AutomaticMilestoneSummaryService {
         id: String,
         kind: AutomaticMilestoneSummary.Kind,
         date: Date,
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        birthDate: Date,
+        events: [CareEvent],
         calendar: Calendar
     ) -> AutomaticMilestoneSummary {
-        let birthDay = calendar.startOfDay(for: profile.birthDate)
+        let birthDay = calendar.startOfDay(for: birthDate)
         let cutoff = calendar.startOfNextDay(for: date)
         let completed = events.filter {
             !$0.isTimerDraft
@@ -461,7 +477,7 @@ enum AutomaticMilestoneSummaryService {
         )
     }
 
-    private static func isPumpingEvent(_ event: BabyEvent) -> Bool {
+    private static func isPumpingEvent(_ event: CareEvent) -> Bool {
         guard event.type == .custom else { return false }
         let searchable = [event.title, event.notes]
             .compactMap { $0 }
@@ -471,7 +487,7 @@ enum AutomaticMilestoneSummaryService {
     }
 
     private static func clippedDuration(
-        of event: BabyEvent,
+        of event: CareEvent,
         from lowerBound: Date,
         through upperBound: Date
     ) -> TimeInterval {
@@ -482,8 +498,8 @@ enum AutomaticMilestoneSummaryService {
     }
 
     private static func weightGain(
-        profile: BabyProfile,
-        events: [BabyEvent]
+        profile: CareProfile,
+        events: [CareEvent]
     ) -> Double? {
         let measurements = events.filter { $0.type == .growth }
             .compactMap { event -> (Date, Double)? in

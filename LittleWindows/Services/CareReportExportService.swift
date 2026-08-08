@@ -80,18 +80,20 @@ struct CareReportDocument: FileDocument {
 }
 
 struct CareReport {
-    var profile: BabyProfile
+    var profile: CareProfile
     var options: CareReportExportOptions
-    var events: [BabyEvent]
+    var events: [CareEvent]
     var appointments: [DoctorAppointment]
     var milestones: [MilestoneEntry]
+    var medications: [Medication] = []
+    var medicationRegimens: [MedicationRegimen] = []
     var generatedAt: Date
 }
 
 @MainActor
 enum CareReportExportService {
     static func export(
-        profile: BabyProfile,
+        profile: CareProfile,
         format: CareReportFormat,
         options: CareReportExportOptions,
         context: ModelContext
@@ -106,7 +108,7 @@ enum CareReportExportService {
     }
 
     static func makeReport(
-        profile: BabyProfile,
+        profile: CareProfile,
         options: CareReportExportOptions,
         context: ModelContext,
         calendar: Calendar = .current,
@@ -120,7 +122,7 @@ enum CareReportExportService {
         // event's recorded local calendar day.
         let eventFetchLowerBound = lowerBound.addingTimeInterval(-30 * 60 * 60)
         let eventFetchUpperBound = upperBound.addingTimeInterval(30 * 60 * 60)
-        let events = try context.fetch(FetchDescriptor<BabyEvent>(
+        let events = try context.fetch(FetchDescriptor<CareEvent>(
             predicate: #Predicate {
                 $0.profileID == profileID &&
                     $0.startDate >= eventFetchLowerBound &&
@@ -151,6 +153,13 @@ enum CareReportExportService {
                 sortBy: [SortDescriptor(\.date)]
             ))
             : []
+        let medications = try context.fetch(FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.profileID == profileID && !$0.isArchived },
+            sortBy: [SortDescriptor(\.name)]
+        ))
+        let medicationIDs = Set(medications.map(\.id))
+        let medicationRegimens = try context.fetch(FetchDescriptor<MedicationRegimen>())
+            .filter { $0.isActive && medicationIDs.contains($0.medicationID) }
 
         var normalizedOptions = options
         normalizedOptions.startDate = range.lowerBound
@@ -161,6 +170,8 @@ enum CareReportExportService {
             events: events,
             appointments: appointments,
             milestones: milestones,
+            medications: medications,
+            medicationRegimens: medicationRegimens,
             generatedAt: now
         )
     }
@@ -245,6 +256,25 @@ enum CareReportExportService {
                 ])
             }
         }
+        rows += report.medications.map { medication in
+            let regimen = report.medicationRegimens.first { $0.medicationID == medication.id }
+            return (report.generatedAt, [
+                report.profile.name,
+                report.profile.profileType.displayName,
+                dateFormatter.string(from: report.generatedAt),
+                "",
+                "",
+                "",
+                "Medication Plan",
+                medication.form.displayName,
+                medication.strengthDescription ?? "",
+                medicationPlanDetails(medication: medication, regimen: regimen),
+                "",
+                "",
+                "",
+                ""
+            ])
+        }
         let sortedRows = rows.sorted { first, second in
             if first.date == second.date {
                 return first.columns[6] < second.columns[6]
@@ -275,6 +305,19 @@ enum CareReportExportService {
 
             drawSection("Summary", cursor: &cursor, context: context)
             drawKeyValues(summaryRows(for: report), cursor: &cursor, context: context)
+
+            if !report.medications.isEmpty {
+                drawSection("Current Medications", cursor: &cursor, context: context)
+                for medication in report.medications {
+                    let regimen = report.medicationRegimens.first { $0.medicationID == medication.id }
+                    drawCompactRecord(
+                        title: medication.name,
+                        details: medicationPlanDetails(medication: medication, regimen: regimen),
+                        cursor: &cursor,
+                        context: context
+                    )
+                }
+            }
 
             if report.events.isEmpty {
                 drawSection("Care Logs", cursor: &cursor, context: context)
@@ -331,7 +374,7 @@ enum CareReportExportService {
         }
     }
 
-    static func defaultFilename(profile: BabyProfile, format: CareReportFormat, startDate: Date, endDate: Date) -> String {
+    static func defaultFilename(profile: CareProfile, format: CareReportFormat, startDate: Date, endDate: Date) -> String {
         let normalized = normalizedDisplayRange(startDate: startDate, endDate: endDate)
         let profileName = profile.name
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -364,7 +407,7 @@ enum CareReportExportService {
         return "\"\(safe)\""
     }
 
-    static func subtypeText(for event: BabyEvent) -> String {
+    static func subtypeText(for event: CareEvent) -> String {
         switch event.type {
         case .sleep:
             return event.sleepKind?.displayName ?? ""
@@ -390,7 +433,9 @@ enum CareReportExportService {
         case .grooming:
             return event.dogDetails.groomingType?.displayName ?? ""
         case .symptom:
-            return event.dogDetails.symptomType?.displayName ?? ""
+            return event.profileTypeSnapshot == .adult
+                ? event.healthObservationDetails.symptomName ?? ""
+                : event.dogDetails.symptomType?.displayName ?? ""
         case .vaccine:
             return event.dogDetails.vaccineType?.displayName ?? ""
         default:
@@ -398,7 +443,7 @@ enum CareReportExportService {
         }
     }
 
-    static func amountText(for event: BabyEvent) -> String {
+    static func amountText(for event: CareEvent) -> String {
         switch event.type {
         case .feed, .pumping:
             return event.amountOz.map { measurementFormatter.string(from: $0, unit: "oz") } ?? ""
@@ -430,14 +475,35 @@ enum CareReportExportService {
             let details = event.dogDetails
             return details.distance.map { measurementFormatter.string(from: $0, unit: details.distanceUnit?.displayName ?? "") } ?? ""
         case .glucose:
+            if event.profileTypeSnapshot == .adult {
+                let details = event.healthObservationDetails
+                return details.bloodGlucoseValue.map {
+                    measurementFormatter.string(from: $0, unit: details.bloodGlucoseUnit?.displayName ?? "")
+                } ?? ""
+            }
             let details = event.dogDetails
             return details.glucoseValue.map { measurementFormatter.string(from: $0, unit: details.glucoseUnit?.displayName ?? "") } ?? ""
+        case .bloodPressure:
+            let details = event.healthObservationDetails
+            guard let systolic = details.systolicBloodPressure,
+                  let diastolic = details.diastolicBloodPressure else { return "" }
+            return "\(systolic)/\(diastolic) mmHg"
+        case .heartRate:
+            return event.healthObservationDetails.heartRateBPM.map { "\($0) bpm" } ?? ""
+        case .oxygenSaturation:
+            return event.healthObservationDetails.oxygenSaturationPercent.map {
+                measurementFormatter.string(from: $0, unit: "%")
+            } ?? ""
+        case .respiratoryRate:
+            return event.healthObservationDetails.respiratoryRatePerMinute.map { "\($0) breaths/min" } ?? ""
+        case .pain:
+            return event.healthObservationDetails.painScore.map { "\($0)/10" } ?? ""
         default:
             return ""
         }
     }
 
-    static func detailsText(for event: BabyEvent) -> String {
+    static func detailsText(for event: CareEvent) -> String {
         var parts: [String] = []
         switch event.type {
         case .feed:
@@ -494,19 +560,63 @@ enum CareReportExportService {
             parts.appendIfPresent(details.trainingSkill.map { "Skill: \($0)" })
             parts.appendIfPresent(details.trainingOutcome.map { "Outcome: \($0.displayName)" })
         case .symptom:
-            let details = event.dogDetails
-            parts.appendIfPresent(details.symptomSeverity.map { "Severity: \($0.displayName)" })
-            if details.symptomResolved == true { parts.append("Resolved") }
+            if event.profileTypeSnapshot == .adult {
+                let details = event.healthObservationDetails
+                parts.appendIfPresent(details.symptomSeverity.map { "Severity: \($0)/10" })
+                parts.appendIfPresent(details.symptomBodyLocation.map { "Location: \($0)" })
+                if details.symptomResolved == true { parts.append("Resolved") }
+            } else {
+                let details = event.dogDetails
+                parts.appendIfPresent(details.symptomSeverity.map { "Severity: \($0.displayName)" })
+                if details.symptomResolved == true { parts.append("Resolved") }
+            }
         case .vaccine:
             let details = event.dogDetails
             parts.appendIfPresent(details.vaccineDueDate.map { "Next due: \(dateFormatter.string(from: $0))" })
             parts.appendIfPresent(details.vaccineLotNumber.map { "Lot: \($0)" })
             parts.appendIfPresent(details.vaccineClinic.map { "Clinic: \($0)" })
         case .glucose:
-            parts.appendIfPresent(event.dogDetails.glucoseMealRelation.map { "Meal relation: \($0.displayName)" })
+            if event.profileTypeSnapshot == .adult {
+                parts.appendIfPresent(event.healthObservationDetails.bloodGlucoseContext.map { "Context: \($0.displayName)" })
+            } else {
+                parts.appendIfPresent(event.dogDetails.glucoseMealRelation.map { "Meal relation: \($0.displayName)" })
+            }
+        case .pain:
+            parts.appendIfPresent(event.healthObservationDetails.painLocation.map { "Location: \($0)" })
         default:
             break
         }
+        return compactJoined(parts)
+    }
+
+    static func medicationPlanDetails(
+        medication: Medication,
+        regimen: MedicationRegimen?
+    ) -> String {
+        var parts = [
+            medication.strengthDescription.map { "Strength: \($0)" },
+            "Form: \(medication.form.displayName)",
+            "Route: \(medication.route.displayName)",
+            medication.reasonForTaking.nilIfBlank.map { "For: \($0)" }
+        ].compactMap { $0 }
+        if let regimen {
+            parts.append("Schedule: \(regimen.scheduleSummary)")
+            parts.append(
+                "Dose: \(regimen.doseAmount.formatted(.number.precision(.fractionLength(0...2)))) \(regimen.doseUnit)"
+            )
+            if !regimen.doseTimes.isEmpty {
+                parts.append("Times: \(regimen.doseTimes.map(\.id).joined(separator: ", "))")
+            }
+            if regimen.remindersEnabled {
+                parts.append(regimen.followUpRemindersEnabled
+                    ? "Reminders: scheduled and 30-minute follow-up"
+                    : "Reminders: scheduled")
+                parts.append("Travel timing: \(regimen.timeZoneBehavior.displayName)")
+            }
+        }
+        parts.appendIfPresent(medication.instructions.nilIfBlank.map { "Instructions: \($0)" })
+        parts.appendIfPresent(medication.prescriber.nilIfBlank.map { "Prescriber: \($0)" })
+        parts.appendIfPresent(medication.pharmacy.nilIfBlank.map { "Pharmacy: \($0)" })
         return compactJoined(parts)
     }
 
@@ -523,7 +633,7 @@ enum CareReportExportService {
         ])
     }
 
-    static func durationText(for event: BabyEvent) -> String {
+    static func durationText(for event: CareEvent) -> String {
         guard let endDate = event.endDate else { return "" }
         return durationText(seconds: max(0, endDate.timeIntervalSince(event.startDate)))
     }
@@ -542,7 +652,8 @@ enum CareReportExportService {
         var rows: [(String, String)] = [
             ("Total events", "\(report.events.count)"),
             ("Appointments", "\(report.appointments.count)"),
-            ("Milestones", "\(report.milestones.count)")
+            ("Milestones", "\(report.milestones.count)"),
+            ("Current medications", "\(report.medications.count)")
         ]
         let sleepMinutes = report.events
             .filter { $0.type == .sleep }
@@ -655,6 +766,21 @@ enum CareReportExportService {
                 ("Medicine", .medicine),
                 ("Temperature", .temperature),
                 ("Growth", .growth),
+                ("Activity", .activity)
+            ]
+        case .adult:
+            return [
+                ("Medicine", .medicine),
+                ("Symptoms", .symptom),
+                ("Blood Pressure", .bloodPressure),
+                ("Heart Rate", .heartRate),
+                ("Oxygen Saturation", .oxygenSaturation),
+                ("Respiratory Rate", .respiratoryRate),
+                ("Blood Glucose", .glucose),
+                ("Temperature", .temperature),
+                ("Pain", .pain),
+                ("Growth and Weight", .growth),
+                ("Sleep", .sleep),
                 ("Activity", .activity)
             ]
         case .dog:
@@ -871,7 +997,7 @@ enum CareReportExportService {
     }
 
     private static func drawEvent(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         options: CareReportExportOptions,
         cursor: inout PDFCursor,
         context: UIGraphicsPDFRendererContext
@@ -1128,10 +1254,15 @@ enum CareReportExportService {
         )
     }
 
-    private static func profileSubtitle(for profile: BabyProfile) -> String {
+    private static func profileSubtitle(for profile: CareProfile) -> String {
         switch profile.profileType {
         case .child:
             return "Age: \(profile.ageDescription)"
+        case .adult:
+            return compactJoined([
+                profile.adultRelationship.map { "Relationship: \($0.displayName)" },
+                profile.birthDate.map { _ in "Age: \(profile.ageDescription)" }
+            ], separator: " - ")
         case .dog:
             return compactJoined([
                 profile.breed.map { "Breed: \($0)" },

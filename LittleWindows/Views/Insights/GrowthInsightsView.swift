@@ -2,13 +2,13 @@ import Charts
 import SwiftUI
 
 struct GrowthInsightsView: View {
-    let profile: BabyProfile?
-    let events: [BabyEvent]
+    let profile: CareProfile?
+    let events: [CareEvent]
     @State private var detailedPercentiles = false
 
     private let service = GrowthReferenceService.shared
 
-    private var growthEvents: [BabyEvent] {
+    private var growthEvents: [CareEvent] {
         events.filter { $0.type == .growth }.sorted { $0.startDate < $1.startDate }
     }
 
@@ -45,7 +45,7 @@ struct GrowthInsightsView: View {
         }
     }
 
-    private func controls(profile: BabyProfile) -> some View {
+    private func controls(profile: CareProfile) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -84,7 +84,7 @@ struct GrowthInsightsView: View {
         .appSurface()
     }
 
-    private func latestSummary(profile: BabyProfile) -> some View {
+    private func latestSummary(profile: CareProfile) -> some View {
         let summaries = GrowthChartType.allCases.map {
             GrowthLatestSummary(
                 chartType: $0,
@@ -132,7 +132,9 @@ struct GrowthInsightsView: View {
                     }
                     Spacer()
                     if let latest = summary.latest {
-                        Text(DateFormatting.age(from: profile.birthDate, to: latest.date))
+                        Text(profile.birthDate.map {
+                            DateFormatting.age(from: $0, to: latest.date)
+                        } ?? "Age unavailable")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -149,8 +151,8 @@ struct GrowthInsightsView: View {
 
 private struct GrowthPercentileChart: View {
     let chartType: GrowthChartType
-    let profile: BabyProfile
-    let entries: [BabyEvent]
+    let profile: CareProfile
+    let entries: [CareEvent]
     let percentiles: [Double]
     let service: GrowthReferenceService
     @State private var selectedAgeMonths: Double?
@@ -305,7 +307,9 @@ private struct GrowthPercentileChart: View {
                 Text(point.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text(DateFormatting.age(from: profile.birthDate, to: point.date))
+                Text(profile.birthDate.map {
+                    DateFormatting.age(from: $0, to: point.date)
+                } ?? "Age unavailable")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -3,7 +3,7 @@ import SwiftUI
 
 struct MilestoneInsightsView: View {
     let milestones: [MilestoneEntry]
-    let profile: BabyProfile?
+    let profile: CareProfile?
     let period: ClosedRange<Date>
     let readStates: [AgeGuideReadState]
 
@@ -72,7 +72,7 @@ struct MilestoneInsightsView: View {
             InsightMetricGrid(metrics: [
                 InsightMetric(
                     title: "Current age",
-                    value: profile.map { DateFormatting.age(from: $0.birthDate) } ?? "Not set",
+                    value: profile?.ageDescription ?? "Not set",
                     interpretation: currentGuide.map {
                         isCurrentGuideUnread
                             ? "\($0.ageLabel) guide is ready to read."

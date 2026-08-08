@@ -59,10 +59,14 @@ final class UserVisibleFlowUITests: XCTestCase {
         profilesLink.tap()
         XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No care profiles yet"].exists)
+        let emptyProfilesDescription = app.staticTexts.matching(
+            NSPredicate(
+                format: "label == %@",
+                "Add a child, adult, or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is."
+            )
+        ).firstMatch
         XCTAssertTrue(
-            app.staticTexts[
-                "Add a child or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is."
-            ].exists
+            emptyProfilesDescription.waitForExistence(timeout: 3)
         )
         XCTAssertTrue(app.buttons["profiles.empty.add"].exists)
         let emptyProfilesAttachment = XCTAttachment(screenshot: app.screenshot())
@@ -318,8 +322,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         addItem.tap()
 
         let title = app.textFields["home.todo.title"]
-        XCTAssertTrue(title.waitForExistence(timeout: 4))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        // The keyboard is the focus success condition. Waiting for the field and
+        // keyboard separately double-counts XCUI's polling delay in this budget.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 4))
+        XCTAssertTrue(title.exists)
         XCTAssertLessThan(
             focusStartedAt.duration(to: .now),
             .seconds(4),
@@ -458,20 +464,24 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
         XCTAssertTrue(reviewStep.waitForExistence(timeout: 3))
 
-        let recipeLink = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "solids.guided.recipe.")
+        let previewLink = app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
+                "solids.guided.food.",
+                "solids.guided.recipe."
+            )
         ).firstMatch
-        for _ in 0..<8 where !recipeLink.exists {
+        for _ in 0..<8 where !previewLink.exists {
             app.swipeUp()
         }
-        XCTAssertTrue(recipeLink.waitForExistence(timeout: 4))
-        let recipeTitle = recipeLink.label
-        recipeLink.tap()
+        XCTAssertTrue(previewLink.waitForExistence(timeout: 4))
+        let previewTitle = previewLink.label
+        previewLink.tap()
         XCTAssertTrue(
-            app.navigationBars[recipeTitle].waitForExistence(timeout: 4),
-            "A guided recipe title should open the recipe, not its first ingredient."
+            app.navigationBars[previewTitle].waitForExistence(timeout: 4),
+            "A guided meal title should open its preparation guidance."
         )
-        app.navigationBars[recipeTitle].buttons.element(boundBy: 0).tap()
+        app.navigationBars[previewTitle].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.navigationBars["Guided Solids"].waitForExistence(timeout: 4))
 
         let buildJourney = app.buttons["solids.guided.build-journey"]
@@ -499,7 +509,11 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/foods/avocado")
         XCTAssertTrue(app.navigationBars["Avocado"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.images["solids.serving-photo.mashed"].waitForExistence(timeout: 4))
+        let servingPhoto = app.images["solids.serving-photo.mashed"]
+        for _ in 0..<8 where !servingPhoto.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(servingPhoto.waitForExistence(timeout: 4))
 
         launch(startURL: "littlewindows://care/solids/guided")
         XCTAssertTrue(app.navigationBars["Guided Solids"].waitForExistence(timeout: 8))

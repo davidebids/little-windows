@@ -155,7 +155,7 @@ private enum SettingsRoute: Hashable {
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
 
     @StateObject private var profileService = ProfileService.shared
     @StateObject private var router = DeepLinkRouter.shared
@@ -168,7 +168,7 @@ struct SettingsView: View {
     @AppStorage(PersistenceService.familySyncModeKey)
     private var currentSyncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
 
-    private var selectedProfile: BabyProfile? {
+    private var selectedProfile: CareProfile? {
         profileService.selectedProfile(in: profiles)
     }
 
@@ -200,7 +200,7 @@ struct SettingsView: View {
                     LabeledContent {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(selectedProfile?.name ?? "Not tracking care")
-                            Text(selectedProfile == nil ? "Add a child or dog" : "Switch or edit")
+                            Text(selectedProfile == nil ? "Add a care profile" : "Switch or edit")
                                 .font(.caption2)
                         }
                         .foregroundStyle(.secondary)
@@ -212,7 +212,7 @@ struct SettingsView: View {
                 Label("Care Profiles", systemImage: "person.crop.circle")
             } footer: {
                 if selectedProfile == nil {
-                    Text("Home, Food, and Night Light work without a care profile. Add one whenever you want to track a child or dog.")
+                    Text("Home, Food, and Night Light work without a care profile. Add one whenever you want to track care for a child, adult, or dog.")
                 }
             }
 
@@ -633,7 +633,7 @@ private struct ChildSleepSettingsRenderState {
 }
 
 private struct ChildSleepSettingsNavigationSection: View {
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     var body: some View {
         Section {
@@ -653,7 +653,7 @@ private struct ChildSleepSettingsNavigationSection: View {
 }
 
 private struct ChildSleepSettingsView: View {
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     var body: some View {
         Form {
@@ -669,10 +669,10 @@ private struct ChildSleepSettingsView: View {
 private struct ChildSleepSettingsSections: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
-    @Query private var events: [BabyEvent]
+    @Query private var events: [CareEvent]
     @Query private var records: [SleepPredictionRecord]
 
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
@@ -694,7 +694,7 @@ private struct ChildSleepSettingsSections: View {
     @State private var cachedRenderState = ChildSleepSettingsRenderState.placeholder
     @State private var renderRefreshTask: Task<Void, Never>?
 
-    init(profile: BabyProfile?) {
+    init(profile: CareProfile?) {
         self.profile = profile
         let selectedProfileID = profile?.id
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
@@ -704,11 +704,11 @@ private struct ChildSleepSettingsSections: View {
             value: -45,
             to: Calendar.current.startOfDay(for: Date())
         ) ?? Date()
-        var eventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
+        var eventDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
                 event.profileID == selectedProfileID && event.startDate >= recentCutoff
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         eventDescriptor.fetchLimit = 900
         _events = Query(eventDescriptor)
@@ -941,7 +941,7 @@ private struct ChildSleepSettingsSections: View {
         profile?.id
     }
 
-    private var scopedEventsForProfile: [BabyEvent] {
+    private var scopedEventsForProfile: [CareEvent] {
         events.filter { $0.matchesProfile(profileID) }
     }
 
@@ -1135,9 +1135,9 @@ private struct AppointmentSettingsSection: View {
     @AppStorage("appointmentRemindersEnabled") private var appointmentRemindersEnabled = true
     @StateObject private var notificationManager = NotificationManager.shared
 
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
-    init(profile: BabyProfile?) {
+    init(profile: CareProfile?) {
         self.profile = profile
 
         if let profileID = profile?.id {
@@ -1195,7 +1195,7 @@ private struct AppointmentSettingsSection: View {
 }
 
 private struct AppointmentSettingsNavigationSection: View {
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     var body: some View {
         Section {
@@ -1215,7 +1215,7 @@ private struct AppointmentSettingsNavigationSection: View {
 }
 
 private struct AppointmentSettingsView: View {
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     var body: some View {
         Form {
@@ -1233,7 +1233,7 @@ private struct MonthlyAgeGuideSettingsSection: View {
     @Environment(\.openURL) private var openURL
     @Query private var ageGuideReadStates: [AgeGuideReadState]
 
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     @AppStorage("monthlyAgeGuideNotificationsEnabled") private var monthlyAgeGuideNotificationsEnabled = false
     @AppStorage("monthlyAgeGuideNotificationTiming") private var monthlyAgeGuideNotificationTimingRawValue =
@@ -1241,7 +1241,7 @@ private struct MonthlyAgeGuideSettingsSection: View {
     @StateObject private var notificationManager = NotificationManager.shared
     @State private var showingPermissionDenied = false
 
-    init(profile: BabyProfile?) {
+    init(profile: CareProfile?) {
         self.profile = profile
 
         if let profileID = profile?.id {
@@ -1375,7 +1375,7 @@ private struct MonthlyAgeGuideSettingsNavigationSection: View {
 }
 
 private struct MonthlyAgeGuideSettingsView: View {
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     var body: some View {
         Form {
@@ -1498,7 +1498,7 @@ private struct FoodReminderSettingsDataView: View {
 }
 
 private struct WatchSettingsSection: View {
-    let profile: BabyProfile?
+    let profile: CareProfile?
 
     @State private var status = WatchConnectivityService.shared.statusSnapshot()
 
@@ -1558,12 +1558,12 @@ private struct WatchSettingsSection: View {
 }
 
 private struct AppleWatchSettingsView: View {
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @StateObject private var profileService = ProfileService.shared
     @State private var status = WatchConnectivityService.shared.statusSnapshot()
     @State private var refreshMessage: String?
 
-    private var selectedProfile: BabyProfile? {
+    private var selectedProfile: CareProfile? {
         profileService.selectedProfile(in: profiles)
     }
 
@@ -1758,7 +1758,7 @@ private struct AppleWatchSettingsView: View {
         return status.isReachable ? "Connected now" : "Background delivery"
     }
 
-    private func favoriteModeText(for profile: BabyProfile) -> String {
+    private func favoriteModeText(for profile: CareProfile) -> String {
         guard let ids = WatchFavoritePreferenceStore.customActionIDs(
             profileID: profile.id
         ) else {
@@ -1801,12 +1801,12 @@ private struct WatchSyncContentRow: View {
 }
 
 private struct WatchFavoritesSettingsView: View {
-    let profile: BabyProfile
+    let profile: CareProfile
 
     @State private var usesSmartFavorites: Bool
     @State private var selectedActionIDs: [String]
 
-    init(profile: BabyProfile) {
+    init(profile: CareProfile) {
         self.profile = profile
         let customIDs = WatchFavoritePreferenceStore.customActionIDs(
             profileID: profile.id
@@ -2108,12 +2108,12 @@ private struct SyncSettingsSection: View {
 }
 
 private struct ProfileSettingsSection: View {
-    @Bindable var profile: BabyProfile
+    @Bindable var profile: CareProfile
     @State private var draftName = ""
     @State private var draftNotes = ""
     @State private var pendingSave: Task<Void, Never>?
 
-    init(profile: BabyProfile) {
+    init(profile: CareProfile) {
         self.profile = profile
         _draftName = State(initialValue: profile.name)
         _draftNotes = State(initialValue: profile.notes)
@@ -2127,7 +2127,7 @@ private struct ProfileSettingsSection: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(draftName.isEmpty ? profile.name : draftName)
                         .font(.headline)
-                    Text(DateFormatting.age(from: profile.birthDate))
+                    Text(profile.ageDescription)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -2137,24 +2137,38 @@ private struct ProfileSettingsSection: View {
             TextField("Name", text: $draftName)
                 .onSubmit(saveNow)
                 .onChange(of: draftName) { _, _ in scheduleSave() }
-            DatePicker("Birthdate", selection: $profile.birthDate, in: ...Date(), displayedComponents: .date)
-                .onChange(of: profile.birthDate) { _, _ in profile.updatedAt = Date() }
-            Picker("Sex for growth charts", selection: Binding(
-                get: { profile.sex },
-                set: {
-                    profile.sex = $0
-                    profile.updatedAt = Date()
-                }
-            )) {
-                ForEach(BabySex.allCases) {
-                    Text($0.displayName).tag($0)
+            if let birthDate = profile.birthDate {
+                DatePicker(
+                    profile.profileType == .adult ? "Birthdate" : "Birthday",
+                    selection: Binding(
+                        get: { birthDate },
+                        set: {
+                            profile.birthDate = $0
+                            profile.updatedAt = Date()
+                        }
+                    ),
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+            }
+            if profile.profileType != .adult {
+                Picker("Sex for growth charts", selection: Binding(
+                    get: { profile.sex },
+                    set: {
+                        profile.sex = $0
+                        profile.updatedAt = Date()
+                    }
+                )) {
+                    ForEach(ProfileSex.allCases) {
+                        Text($0.displayName).tag($0)
+                    }
                 }
             }
             TextField("Notes", text: $draftNotes, axis: .vertical)
                 .onSubmit(saveNow)
                 .onChange(of: draftNotes) { _, _ in scheduleSave() }
         } header: {
-            Label("Baby profile", systemImage: "face.smiling")
+            Label("Care profile", systemImage: profile.profileType.systemImage)
         }
         .onAppear(perform: syncDraftsFromProfile)
         .onChange(of: profile.id) { _, _ in syncDraftsFromProfile() }

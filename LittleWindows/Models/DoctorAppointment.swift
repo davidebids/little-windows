@@ -3,6 +3,7 @@ import SwiftData
 
 enum AppointmentType: String, Codable, CaseIterable, Identifiable {
     case pediatrician
+    case primaryCare
     case wellnessCheck
     case vaccine
     case sickVisit
@@ -11,6 +12,10 @@ enum AppointmentType: String, Codable, CaseIterable, Identifiable {
     case dental
     case lactation
     case urgentCare
+    case therapy
+    case imaging
+    case procedure
+    case optometry
     case vetWellness
     case emergencyVet
     case grooming
@@ -24,6 +29,7 @@ enum AppointmentType: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .pediatrician: "Pediatrician"
+        case .primaryCare: "Primary Care"
         case .wellnessCheck: "Wellness Check"
         case .vaccine: "Vaccine"
         case .sickVisit: "Sick Visit"
@@ -32,6 +38,10 @@ enum AppointmentType: String, Codable, CaseIterable, Identifiable {
         case .dental: "Dental"
         case .lactation: "Lactation"
         case .urgentCare: "Urgent Care"
+        case .therapy: "Therapy"
+        case .imaging: "Imaging"
+        case .procedure: "Procedure"
+        case .optometry: "Eye Care"
         case .vetWellness: "Vet Wellness"
         case .emergencyVet: "Emergency Vet"
         case .grooming: "Grooming"
@@ -45,6 +55,7 @@ enum AppointmentType: String, Codable, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .pediatrician: "stethoscope"
+        case .primaryCare: "stethoscope"
         case .wellnessCheck: "heart.text.square.fill"
         case .vaccine: "syringe.fill"
         case .sickVisit: "facemask.fill"
@@ -53,6 +64,10 @@ enum AppointmentType: String, Codable, CaseIterable, Identifiable {
         case .dental: "mouth.fill"
         case .lactation: "figure.and.child.holdinghands"
         case .urgentCare: "cross.case.fill"
+        case .therapy: "person.2.fill"
+        case .imaging: "waveform.path.ecg.rectangle.fill"
+        case .procedure: "cross.vial.fill"
+        case .optometry: "eye.fill"
         case .vetWellness: "pawprint.fill"
         case .emergencyVet: "cross.case.fill"
         case .grooming: "comb.fill"

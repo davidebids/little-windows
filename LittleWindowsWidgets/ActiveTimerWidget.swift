@@ -148,7 +148,7 @@ private struct ActiveTimerWidgetView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Care timers")
                             .font(.headline)
-                        Text("Add a child or dog")
+                        Text("Add a care profile")
                             .font(.caption)
                     }
                 } icon: {
@@ -160,7 +160,7 @@ private struct ActiveTimerWidgetView: View {
             Link(destination: destination) {
                 CareProfileRequiredWidgetState(
                     title: "Care timers",
-                    detail: "Add a child or dog to start and manage care timers.",
+                    detail: "Add a care profile to start and manage care timers.",
                     systemImage: "timer"
                 )
             }

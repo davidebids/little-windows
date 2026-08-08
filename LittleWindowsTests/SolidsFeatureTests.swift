@@ -4,7 +4,7 @@ import XCTest
 
 final class SolidsFeatureTests: XCTestCase {
     func testTodayFeedQuickActionShowsLatestSolidFoodNamesCompactly() {
-        let event = BabyEvent(type: .feed)
+        let event = CareEvent(type: .feed)
         event.feedKind = .solid
         event.solidFoodDetails = [
             SolidFoodLogDetail(foodID: "huckleberry", foodName: "Huckleberry"),
@@ -19,7 +19,7 @@ final class SolidsFeatureTests: XCTestCase {
     }
 
     func testTodayFeedQuickActionFallsBackToLegacySolidFoodDescription() {
-        let event = BabyEvent(type: .feed)
+        let event = CareEvent(type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Huckleberry, Yogurt"
 
@@ -546,7 +546,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedRecipeSuggestionsContainTheFoodsInTheirLinkedRecipe() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -12, to: now)!
         )
@@ -697,25 +697,25 @@ final class SolidsFeatureTests: XCTestCase {
         let fiveMonthsOld = calendar.date(byAdding: .month, value: -5, to: now)!
         let sixMonthsOld = calendar.date(byAdding: .month, value: -6, to: now)!
 
-        let infant = BabyProfile(name: "Test Child", birthDate: oneMonthOld)
+        let infant = CareProfile(name: "Test Child", birthDate: oneMonthOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: infant, events: [], state: nil, now: now, calendar: calendar),
             .hidden
         )
 
-        let previewChild = BabyProfile(name: "Test Child", birthDate: fiveMonthsOld)
+        let previewChild = CareProfile(name: "Test Child", birthDate: fiveMonthsOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: previewChild, events: [], state: nil, now: now, calendar: calendar),
             .readinessPreview
         )
 
-        let eligibleChild = BabyProfile(name: "Test Child", birthDate: sixMonthsOld)
+        let eligibleChild = CareProfile(name: "Test Child", birthDate: sixMonthsOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: eligibleChild, events: [], state: nil, now: now, calendar: calendar),
             .full
         )
 
-        let dog = BabyProfile(profileType: .dog, name: "Test Dog", birthDate: sixMonthsOld)
+        let dog = CareProfile(profileType: .dog, name: "Test Dog", birthDate: sixMonthsOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: dog, events: [], state: nil, now: now, calendar: calendar),
             .hidden
@@ -731,14 +731,14 @@ final class SolidsFeatureTests: XCTestCase {
         let periodStart = calendar.startOfDay(for: firstDay)
         let periodEnd = calendar.startOfDay(for: secondDay)
 
-        let firstMeal = BabyEvent(
+        let firstMeal = CareEvent(
             profileID: profileID,
             type: .feed,
             startDate: firstDay,
             startTimeZoneIdentifier: "UTC"
         )
         firstMeal.feedKind = .solid
-        let secondMeal = BabyEvent(
+        let secondMeal = CareEvent(
             profileID: profileID,
             type: .feed,
             startDate: secondDay,
@@ -815,11 +815,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: configuration
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado, Egg"
         context.insert(profile)
@@ -853,14 +853,14 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -12, to: Date())!
         )
         context.insert(profile)
         let start = Date(timeIntervalSince1970: 2_000_000_000)
         let events = (0..<24).map { index in
-            let event = BabyEvent(
+            let event = CareEvent(
                 profileID: profile.id,
                 type: .feed,
                 startDate: start.addingTimeInterval(Double(index) * 86_400)
@@ -918,11 +918,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado, Egg"
         event.solidFoodDetails = [
@@ -985,11 +985,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Egg"
         event.solidFoodDetails = [
@@ -1025,11 +1025,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Egg"
         event.solidFoodDetails = [
@@ -1077,11 +1077,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let source = BabyEvent(profileID: profile.id, type: .feed)
+        let source = CareEvent(profileID: profile.id, type: .feed)
         source.feedKind = .solid
         source.endDate = source.startDate
         source.foodDescription = "Egg"
@@ -1125,13 +1125,13 @@ final class SolidsFeatureTests: XCTestCase {
         let profileID = UUID()
         let olderDate = Date(timeIntervalSince1970: 2_000_000_000)
         let newerDate = olderDate.addingTimeInterval(86_400)
-        let older = BabyEvent(profileID: profileID, type: .feed, startDate: olderDate)
+        let older = CareEvent(profileID: profileID, type: .feed, startDate: olderDate)
         older.feedKind = .solid
         older.foodDescription = "Egg"
         older.solidFoodDetails = [
             SolidFoodLogDetail(foodID: "egg", foodName: "Egg", preference: .liked)
         ]
-        let newer = BabyEvent(profileID: profileID, type: .feed, startDate: newerDate)
+        let newer = CareEvent(profileID: profileID, type: .feed, startDate: newerDate)
         newer.feedKind = .solid
         newer.foodDescription = "Egg"
         newer.solidFoodDetails = [
@@ -1184,7 +1184,7 @@ final class SolidsFeatureTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(byAdding: .month, value: -9, to: now)!
         )
@@ -1238,7 +1238,7 @@ final class SolidsFeatureTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let startDate = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: try XCTUnwrap(calendar.date(byAdding: .month, value: -6, to: startDate))
         )
@@ -1279,7 +1279,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedAllergensFollowAStableOrderAndCompleteEachSeries() {
         let startDate = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -6, to: startDate)!
         )
@@ -1323,7 +1323,7 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: Date())!
         )
@@ -1461,7 +1461,7 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: Date())!
         )
@@ -1470,7 +1470,7 @@ final class SolidsFeatureTests: XCTestCase {
 
         for day in 0..<3 {
             let date = Calendar.current.date(byAdding: .day, value: day, to: baseDate)!
-            let event = BabyEvent(profileID: profile.id, type: .feed, startDate: date)
+            let event = CareEvent(profileID: profile.id, type: .feed, startDate: date)
             event.feedKind = .solid
             event.foodDescription = "Egg"
             event.solidFoodDetails = [
@@ -1515,7 +1515,7 @@ final class SolidsFeatureTests: XCTestCase {
 
         for day in 0..<3 {
             let date = Calendar.current.date(byAdding: .day, value: day, to: baseDate)!
-            let event = BabyEvent(profileID: profileID, type: .feed, startDate: date)
+            let event = CareEvent(profileID: profileID, type: .feed, startDate: date)
             event.feedKind = .solid
             event.foodDescription = "Egg"
             event.solidFoodDetails = [
@@ -1616,7 +1616,7 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(egg.status, .tolerated)
         XCTAssertEqual(egg.statusOverride, .tolerated)
 
-        let newReaction = BabyEvent(profileID: profileID, type: .feed)
+        let newReaction = CareEvent(profileID: profileID, type: .feed)
         newReaction.feedKind = .solid
         newReaction.foodDescription = "Egg"
         newReaction.solidFoodDetails = [
@@ -1971,7 +1971,7 @@ final class SolidsFeatureTests: XCTestCase {
         )
         let profileID = UUID()
         let startDate = Date(timeIntervalSince1970: 2_010_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: startDate)!
         )
@@ -2145,7 +2145,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedJourneyCanBuildACompleteFirstHundred() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -6, to: now)!
         )
@@ -2170,7 +2170,7 @@ final class SolidsFeatureTests: XCTestCase {
         let scheduledAt = try XCTUnwrap(
             calendar.date(from: DateComponents(year: 2026, month: 7, day: 28, hour: 11, minute: 30))
         )
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: try XCTUnwrap(calendar.date(byAdding: .month, value: -12, to: scheduledAt))
         )
@@ -2203,7 +2203,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedAllergenStepsOnlyCountConfirmedIntroductionPortions() throws {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: now)!
         )
@@ -2236,7 +2236,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedSuggestionsUseObservedSkillsAndSubstituteForBlockedAllergens() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -12, to: now)!
         )
@@ -2325,7 +2325,7 @@ final class SolidsFeatureTests: XCTestCase {
         )
         let context = container.mainContext
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: now)!
         )
@@ -2460,7 +2460,7 @@ final class SolidsFeatureTests: XCTestCase {
         let context = container.mainContext
         let profileID = UUID()
         let customID = "custom-test-spread"
-        let event = BabyEvent(profileID: profileID, type: .feed)
+        let event = CareEvent(profileID: profileID, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Test spread"
         context.insert(event)
@@ -2575,7 +2575,7 @@ final class SolidsFeatureTests: XCTestCase {
         )
         let context = container.mainContext
         let profileID = UUID()
-        let event = BabyEvent(profileID: profileID, type: .feed)
+        let event = CareEvent(profileID: profileID, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado"
         event.solidFoodDetails = [
@@ -2710,11 +2710,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let sourceContext = source.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado"
         event.solidFoodDetails = [
@@ -2897,7 +2897,7 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let profileID = UUID()
-        let event = BabyEvent(profileID: profileID, type: .feed)
+        let event = CareEvent(profileID: profileID, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Egg"
         event.solidFoodDetails = [

@@ -21,6 +21,11 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
     case symptom
     case vaccine
     case glucose
+    case bloodPressure
+    case heartRate
+    case oxygenSaturation
+    case respiratoryRate
+    case pain
     case custom
 
     var id: String { rawValue }
@@ -47,6 +52,11 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
         case .symptom: "Symptom"
         case .vaccine: "Vaccine"
         case .glucose: "Glucose"
+        case .bloodPressure: "Blood Pressure"
+        case .heartRate: "Pulse"
+        case .oxygenSaturation: "Oxygen Saturation"
+        case .respiratoryRate: "Respiratory Rate"
+        case .pain: "Pain"
         case .custom: "Custom"
         }
     }
@@ -73,6 +83,11 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
         case .symptom: "exclamationmark.triangle.fill"
         case .vaccine: "syringe.fill"
         case .glucose: "drop.triangle.fill"
+        case .bloodPressure: "heart.text.square.fill"
+        case .heartRate: "waveform.path.ecg"
+        case .oxygenSaturation: "lungs.fill"
+        case .respiratoryRate: "wind"
+        case .pain: "bandage.fill"
         case .custom: "sparkles"
         }
     }
@@ -105,6 +120,10 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
         switch profileType {
         case .child:
             return [.sleep, .feed, .nursing, .pumping, .diaper, .potty, .medicine, .growth, .temperature, .activity, .custom]
+        case .adult:
+            return [.medicine, .symptom, .bloodPressure, .heartRate, .oxygenSaturation,
+                    .respiratoryRate, .glucose, .temperature, .growth, .pain, .sleep,
+                    .activity, .custom]
         case .dog:
             return [.food, .water, .treat, .potty, .walk, .rest, .training, .grooming, .medicine, .symptom, .growth, .temperature, .vaccine, .glucose, .custom]
         }

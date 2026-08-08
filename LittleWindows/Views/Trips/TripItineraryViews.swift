@@ -20,7 +20,7 @@ struct PackingTripDetailView: View {
     let itineraryChoiceGroups: [TripItineraryChoiceGroup]
     let itineraryItems: [TripItineraryItem]
     let itineraryLinks: [TripItineraryLink]
-    let profiles: [BabyProfile]
+    let profiles: [CareProfile]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
     var initialItineraryItemID: UUID? = nil

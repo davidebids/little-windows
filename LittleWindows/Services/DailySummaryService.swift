@@ -45,10 +45,15 @@ struct DailySummary {
     var symptomCount: Int = 0
     var vaccineCount: Int = 0
     var glucoseCount: Int = 0
+    var bloodPressureCount: Int = 0
+    var heartRateCount: Int = 0
+    var oxygenSaturationCount: Int = 0
+    var respiratoryRateCount: Int = 0
+    var painCount: Int = 0
 }
 
 enum DailySummaryService {
-    static func summary(for events: [BabyEvent]) -> DailySummary {
+    static func summary(for events: [CareEvent]) -> DailySummary {
         var result = DailySummary()
         var napDurations = [TimeInterval]()
         for event in events {
@@ -153,6 +158,16 @@ enum DailySummaryService {
                 result.vaccineCount += 1
             case .glucose:
                 result.glucoseCount += 1
+            case .bloodPressure:
+                result.bloodPressureCount += 1
+            case .heartRate:
+                result.heartRateCount += 1
+            case .oxygenSaturation:
+                result.oxygenSaturationCount += 1
+            case .respiratoryRate:
+                result.respiratoryRateCount += 1
+            case .pain:
+                result.painCount += 1
             case .growth:
                 result.growthCount += 1
             case .temperature:

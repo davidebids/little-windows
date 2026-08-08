@@ -21,16 +21,16 @@ enum EventTimerService {
         sleepKind: SleepKind? = nil,
         activityType: ActivityType? = nil,
         caregiverName: String?,
-        events: [BabyEvent],
+        events: [CareEvent],
         context: ModelContext,
         profileID: UUID? = nil,
         profileType: CareProfileType? = nil,
         at date: Date = Date()
-    ) -> BabyEvent? {
+    ) -> CareEvent? {
         guard type.supportsTimer else { return nil }
         guard !events.contains(where: { $0.type == type && $0.isTimerDraft }) else { return nil }
 
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profileID,
             type: type,
             startDate: date,
@@ -52,7 +52,7 @@ enum EventTimerService {
     }
 
     static func stop(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date()
     ) {
@@ -65,7 +65,7 @@ enum EventTimerService {
     }
 
     static func resume(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date()
     ) {
@@ -77,7 +77,7 @@ enum EventTimerService {
     }
 
     static func reset(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date()
     ) {
@@ -93,7 +93,7 @@ enum EventTimerService {
     }
 
     static func save(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date(),
         endDate: Date? = nil
@@ -119,7 +119,7 @@ enum EventTimerService {
     }
 
     static func switchNursingSide(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date()
     ) {
@@ -134,7 +134,7 @@ enum EventTimerService {
     }
 
     static func setNursingSide(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         to side: NursingSide,
         context: ModelContext,
         at date: Date = Date()
@@ -151,7 +151,7 @@ enum EventTimerService {
 
     @discardableResult
     static func adjustStartDate(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         to requestedDate: Date,
         at now: Date = Date()
     ) -> Date {
@@ -185,8 +185,8 @@ enum EventTimerService {
         return newStart
     }
 
-    static func primaryActiveEvent(in events: [BabyEvent]) -> BabyEvent? {
-        var bestEvent: BabyEvent?
+    static func primaryActiveEvent(in events: [CareEvent]) -> CareEvent? {
+        var bestEvent: CareEvent?
         var bestPriority = priority.count
         for event in events where event.isTimerRunning {
             guard let eventPriority = priority.firstIndex(of: event.type) else { continue }
@@ -199,7 +199,7 @@ enum EventTimerService {
         return bestEvent
     }
 
-    private static func accrueCurrentSegment(_ event: BabyEvent, until date: Date) {
+    private static func accrueCurrentSegment(_ event: CareEvent, until date: Date) {
         let reference = event.activeTimerSegmentStartDate ?? event.startDate
         let elapsed = max(0, date.timeIntervalSince(reference))
         event.timerAccumulatedSeconds = (event.timerAccumulatedSeconds ?? 0) + elapsed
@@ -215,7 +215,7 @@ enum EventTimerService {
     }
 
     private static func adjustActiveNursingDuration(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         oldStart: Date,
         newStart: Date
     ) {

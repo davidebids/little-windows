@@ -119,6 +119,7 @@ struct OpenSolidsIntent: LittleWindowsURLIntent {
 
 struct LogMedicineIntent: LittleWindowsURLIntent {
     static let title: LocalizedStringResource = "Log Medicine"
+    static let description = IntentDescription("Opens Medications to record a scheduled or as-needed dose.")
     var destinationURL: URL { URL(string: "littlewindows://quick-log/medicine")! }
 }
 

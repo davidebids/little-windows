@@ -3,7 +3,7 @@ import SwiftUI
 
 struct CareReportExportView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
 
     @AppStorage("careReportRangePreset") private var storedRangePreset = CareReportDateRangePreset.last30Days.rawValue
     @AppStorage("careReportFormat") private var storedFormat = CareReportFormat.pdf.rawValue
@@ -24,15 +24,15 @@ struct CareReportExportView: View {
     @State private var defaultFilename = "Little-Windows-Care-Report.pdf"
     @State private var statusMessage: String?
 
-    private var uniqueProfiles: [BabyProfile] {
+    private var uniqueProfiles: [CareProfile] {
         ProfileService.shared.allProfiles(in: profiles)
     }
 
-    private var activeProfiles: [BabyProfile] {
+    private var activeProfiles: [CareProfile] {
         ProfileService.shared.allActiveProfiles(in: profiles)
     }
 
-    private var selectedProfile: BabyProfile? {
+    private var selectedProfile: CareProfile? {
         let candidates = activeProfiles.isEmpty ? uniqueProfiles : activeProfiles
         if let selectedProfileID,
            let profile = candidates.first(where: { $0.id == selectedProfileID }) {
@@ -70,7 +70,7 @@ struct CareReportExportView: View {
             } header: {
                 Label("Report", systemImage: "doc.text.magnifyingglass")
             } footer: {
-                Text("CSV and PDF reports are for sharing logged facts at visits. JSON backup remains the restore/import format.")
+                Text("CSV and PDF reports include logged facts and the current medication plan for sharing at visits. JSON backup remains the restore/import format.")
             }
 
             Section {

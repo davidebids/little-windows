@@ -26,7 +26,7 @@ struct GrowthReferenceService {
     ) throws -> [ReferenceKey: [GrowthReferencePoint]] {
         var result: [ReferenceKey: [GrowthReferencePoint]] = [:]
         for chartType in GrowthChartType.allCases {
-            for sex in [BabySex.male, .female] {
+            for sex in [ProfileSex.male, .female] {
                 let filename = resourceName(chartType: chartType, sex: sex)
                 guard let url = bundle.url(
                     forResource: filename,
@@ -45,7 +45,7 @@ struct GrowthReferenceService {
 
     func referenceSeries(
         chartType: GrowthChartType,
-        sex: BabySex,
+        sex: ProfileSex,
         percentiles: [Double]
     ) -> [GrowthReferenceSeriesPoint] {
         guard let points = referencePoints(chartType: chartType, sex: sex) else { return [] }
@@ -64,7 +64,7 @@ struct GrowthReferenceService {
 
     func percentileForMeasurement(
         chartType: GrowthChartType,
-        sex: BabySex,
+        sex: ProfileSex,
         ageInDays: Int,
         value: Double
     ) -> GrowthPercentileResult? {
@@ -96,7 +96,7 @@ struct GrowthReferenceService {
 
     func zScoreForMeasurement(
         chartType: GrowthChartType,
-        sex: BabySex,
+        sex: ProfileSex,
         ageInDays: Int,
         value: Double
     ) -> Double? {
@@ -110,7 +110,7 @@ struct GrowthReferenceService {
 
     func valueForPercentile(
         chartType: GrowthChartType,
-        sex: BabySex,
+        sex: ProfileSex,
         ageInDays: Int,
         percentile: Double
     ) -> Double? {
@@ -126,7 +126,7 @@ struct GrowthReferenceService {
 
     func interpolateReferenceValue(
         chartType: GrowthChartType,
-        sex: BabySex,
+        sex: ProfileSex,
         ageInDays: Double,
         percentile: Double
     ) -> Double? {
@@ -149,16 +149,20 @@ struct GrowthReferenceService {
     }
 
     func chartDataForGrowthEntries(
-        _ entries: [BabyEvent],
+        _ entries: [CareEvent],
         chartType: GrowthChartType,
-        profile: BabyProfile
+        profile: CareProfile
     ) -> [GrowthMeasurementChartPoint] {
-        entries
+        guard profile.profileType.capabilities.supportsPediatricGrowthReferences,
+              let birthDate = profile.birthDate else {
+            return []
+        }
+        return entries
             .filter { $0.type == .growth }
             .compactMap { event in
                 guard let value = event.canonicalMeasurement(for: chartType) else { return nil }
                 let age = GrowthUnitConversion.ageInDays(
-                    birthDate: profile.birthDate,
+                    birthDate: birthDate,
                     measurementDate: event.startDate
                 )
                 let sex = event.growthSex == .unknown ? profile.sex : event.growthSex
@@ -182,7 +186,7 @@ struct GrowthReferenceService {
 
     func referencePoints(
         chartType: GrowthChartType,
-        sex: BabySex
+        sex: ProfileSex
     ) -> [GrowthReferencePoint]? {
         guard sex != .unknown else { return nil }
         return pointsByKey[ReferenceKey(chartType: chartType, sex: sex)]
@@ -190,7 +194,7 @@ struct GrowthReferenceService {
 
     func interpolatedReference(
         chartType: GrowthChartType,
-        sex: BabySex,
+        sex: ProfileSex,
         ageInDays: Double
     ) -> GrowthReferencePoint? {
         guard ageInDays >= 0,
@@ -324,7 +328,7 @@ struct GrowthReferenceService {
 
     private static func resourceName(
         chartType: GrowthChartType,
-        sex: BabySex
+        sex: ProfileSex
     ) -> String {
         let sexName = sex == .male ? "boys" : "girls"
         let chartName: String
@@ -339,7 +343,7 @@ struct GrowthReferenceService {
     private static func parseCSV(
         _ csv: String,
         chartType: GrowthChartType,
-        sex: BabySex
+        sex: ProfileSex
     ) throws -> [GrowthReferencePoint] {
         let lines = csv
             .replacingOccurrences(of: "\u{feff}", with: "")
@@ -369,5 +373,5 @@ struct GrowthReferenceService {
 
 struct ReferenceKey: Hashable {
     var chartType: GrowthChartType
-    var sex: BabySex
+    var sex: ProfileSex
 }

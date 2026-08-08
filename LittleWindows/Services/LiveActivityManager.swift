@@ -19,7 +19,7 @@ final class LiveActivityManager {
         ))
     }
 
-    func synchronize(profile: BabyProfile?, events: [BabyEvent]) async {
+    func synchronize(profile: CareProfile?, events: [CareEvent]) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             await endAll()
             return

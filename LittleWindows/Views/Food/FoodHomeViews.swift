@@ -7,7 +7,7 @@ struct FoodHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var router = DeepLinkRouter.shared
     @Query(sort: \Household.createdAt) private var households: [Household]
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
 
     @StateObject private var profileService = ProfileService.shared
 
@@ -17,11 +17,11 @@ struct FoodHomeView: View {
     @State private var deferredFoodCommand: FoodRouteCommand?
 
     private var household: Household? { households.first }
-    private var selectedProfile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var selectedProfile: CareProfile? { profileService.selectedProfile(in: profiles) }
     // Solids routes are handed to Care before Food's navigation stack is used.
     // Keep the unreachable destination switch source-compatible without
     // installing CloudKit observers for solids history on every Home screen.
-    private var careEvents: [BabyEvent] { [] }
+    private var careEvents: [CareEvent] { [] }
     private var solidFoodProgress: [SolidFoodProgress] { [] }
     private var solidFoodEventItems: [SolidFoodEventItem] { [] }
     private var solidAllergenProgress: [SolidAllergenProgress] { [] }
@@ -2033,7 +2033,6 @@ private struct HomeTodoItemEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             guard item == nil else { return }
-            await Task.yield()
             isTitleFocused = true
         }
         .toolbar {

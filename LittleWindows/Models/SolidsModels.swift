@@ -590,7 +590,7 @@ final class PlannedSolidMeal {
     }
 }
 
-extension BabyEvent {
+extension CareEvent {
     var solidFoodDetails: [SolidFoodLogDetail] {
         get {
             guard let solidFoodDetailsJSON,

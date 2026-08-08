@@ -9,11 +9,11 @@ enum EventMutationService {
         sleepKind: SleepKind? = nil,
         activityType: ActivityType? = nil,
         caregiverName: String?,
-        events: [BabyEvent],
+        events: [CareEvent],
         profileID: UUID? = nil,
         profileType: CareProfileType? = nil,
         context: ModelContext
-    ) -> BabyEvent? {
+    ) -> CareEvent? {
         EventTimerService.start(
             type: type,
             nursingSide: nursingSide,
@@ -28,38 +28,40 @@ enum EventMutationService {
     }
 
     static func quickRepeatCandidate(
-        in events: [BabyEvent],
+        in events: [CareEvent],
         profileID: UUID?
-    ) -> BabyEvent? {
+    ) -> CareEvent? {
         events
             .filter { $0.matchesProfile(profileID) && canQuickRepeat($0) }
             .max { $0.startDate < $1.startDate }
     }
 
-    static func canQuickRepeat(_ event: BabyEvent) -> Bool {
+    static func canQuickRepeat(_ event: CareEvent) -> Bool {
         guard !event.isTimerDraft else { return false }
         switch event.type {
-        case .feed, .pumping, .diaper, .medicine, .temperature, .activity,
-             .food, .water, .treat, .potty, .grooming, .symptom, .glucose:
+        case .feed, .pumping, .diaper, .temperature, .activity,
+             .food, .water, .treat, .potty, .grooming:
             return true
-        case .sleep, .nursing, .growth, .walk, .rest, .training, .vaccine, .custom:
+        case .sleep, .nursing, .growth, .walk, .rest, .training, .vaccine,
+             .medicine, .symptom, .glucose, .bloodPressure, .heartRate, .oxygenSaturation,
+             .respiratoryRate, .pain, .custom:
             return false
         }
     }
 
     static func repeatEvent(
-        _ source: BabyEvent,
+        _ source: CareEvent,
         caregiverName: String?,
         profileID: UUID?,
         profileType: CareProfileType?,
         context: ModelContext,
         at date: Date = Date()
-    ) -> BabyEvent? {
+    ) -> CareEvent? {
         guard canQuickRepeat(source) else { return nil }
         let duration = source.duration ?? 0
         let endDate = duration > 0 ? date.addingTimeInterval(duration) : date
         let timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: source.profileID ?? profileID,
             type: source.type,
             title: source.title,
@@ -77,7 +79,7 @@ enum EventMutationService {
     }
 
     static func stopTimer(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date()
     ) {
@@ -85,7 +87,7 @@ enum EventMutationService {
     }
 
     static func resumeTimer(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date()
     ) {
@@ -93,7 +95,7 @@ enum EventMutationService {
     }
 
     static func resetTimer(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date()
     ) {
@@ -101,7 +103,7 @@ enum EventMutationService {
     }
 
     static func saveTimer(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date(),
         endDate: Date? = nil
@@ -111,7 +113,7 @@ enum EventMutationService {
 
     @discardableResult
     static func discardTimer(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         context: ModelContext
     ) -> Bool {
         guard event.isTimerDraft, !event.isTimerRunning else { return false }
@@ -120,9 +122,9 @@ enum EventMutationService {
     }
 
     static func delete(
-        _ event: BabyEvent,
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        _ event: CareEvent,
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         context: ModelContext,
         settings: PredictionSettings,
@@ -152,6 +154,10 @@ enum EventMutationService {
                 persist: false
             )
         }
+        let removedMedicationDose = MedicationService.prepareForCareEventDeletion(
+            eventID: event.id,
+            context: context
+        )
         context.delete(event)
         let remainingEvents = events.filter { $0.id != event.id }
         let prediction = affectsSleepPredictionRefresh(event)
@@ -164,6 +170,9 @@ enum EventMutationService {
             )
             : currentPrediction(in: records)
         guard PersistenceService.save(context: context) else { return }
+        if removedMedicationDose {
+            SystemIntegrationReconciler.requestReconciliation()
+        }
         if needsAllergenReconciliation, let profileID = deletedEventProfileID {
             SolidsTrackingService.scheduleAllergenReconciliation(
                 profileID: profileID,
@@ -187,9 +196,9 @@ enum EventMutationService {
     }
 
     static func eventDidChange(
-        _ event: BabyEvent,
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        _ event: CareEvent,
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         context: ModelContext,
         settings: PredictionSettings,
@@ -265,8 +274,8 @@ enum EventMutationService {
     }
 
     static func refreshPrediction(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         context: ModelContext,
         settings: PredictionSettings,
@@ -296,7 +305,7 @@ enum EventMutationService {
         }
     }
 
-    private static func copyRepeatableDetails(from source: BabyEvent, to event: BabyEvent) {
+    private static func copyRepeatableDetails(from source: CareEvent, to event: CareEvent) {
         event.sleepKind = source.sleepKind
         event.feedKind = source.feedKind
         event.amountOz = source.amountOz
@@ -334,8 +343,8 @@ enum EventMutationService {
     }
 
     private static func replacePrediction(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         context: ModelContext,
         settings: PredictionSettings
@@ -378,8 +387,8 @@ enum EventMutationService {
     }
 
     private static func refreshSystemIntegrations(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         prediction: SleepPrediction?,
         scheduleNotification: Bool,
         notificationsEnabled: Bool,
@@ -417,11 +426,11 @@ enum EventMutationService {
         await LiveActivityManager.shared.synchronize(profile: profile, events: events)
     }
 
-    private static func affectsSleepPredictionRefresh(_ event: BabyEvent) -> Bool {
+    private static func affectsSleepPredictionRefresh(_ event: CareEvent) -> Bool {
         event.isSleepBlock || (event.type.affectsSleepPrediction && event.type != .sleep)
     }
 
-    static func shouldRefreshLittleWindowAlert(after event: BabyEvent) -> Bool {
+    static func shouldRefreshLittleWindowAlert(after event: CareEvent) -> Bool {
         affectsSleepPredictionRefresh(event)
     }
 }

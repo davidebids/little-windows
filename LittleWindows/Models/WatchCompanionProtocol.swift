@@ -1,7 +1,7 @@
 import Foundation
 
 enum WatchCompanionProtocol {
-    static let schemaVersion = 3
+    static let schemaVersion = 4
     static let appGroupIdentifier = "group.com.debidia.LittleWindows"
     static let stateFilename = "watch-companion-state.json"
     static let outboxFilename = "watch-companion-outbox.json"
@@ -214,6 +214,21 @@ struct WatchMetricSnapshot: Codable, Hashable, Identifiable {
     var tintName: String
 }
 
+struct WatchMedicationSnapshot: Codable, Hashable, Identifiable {
+    var profileID: UUID
+    var medicationID: UUID
+    var regimenID: UUID
+    var phaseID: UUID?
+    var occurrenceKey: String
+    var medicationName: String
+    var scheduledAt: Date
+    var doseAmount: Double
+    var doseUnit: String
+    var snoozeAvailable: Bool
+
+    var id: String { occurrenceKey }
+}
+
 struct WatchCompanionState: Codable, Hashable {
     var schemaVersion: Int
     var generatedAt: Date
@@ -225,6 +240,7 @@ struct WatchCompanionState: Codable, Hashable {
     var todayMetrics: [WatchMetricSnapshot]
     var favoriteActions: [WatchActionSnapshot]
     var allActions: [WatchActionSnapshot]
+    var upcomingMedication: WatchMedicationSnapshot? = nil
 
     static let empty = WatchCompanionState(
         schemaVersion: WatchCompanionProtocol.schemaVersion,
@@ -283,6 +299,9 @@ enum WatchCommandKind: String, Codable, Hashable {
     case discardTimer
     case resumeTimer
     case switchNursingSide
+    case logMedicationTaken
+    case logMedicationSkipped
+    case snoozeMedication
 }
 
 struct WatchCommand: Codable, Hashable, Identifiable {
@@ -297,6 +316,7 @@ struct WatchCommand: Codable, Hashable, Identifiable {
     var timerStartDate: Date?
     var timeZoneIdentifier: String
     var expectedEventUpdatedAt: Date?
+    var medication: WatchMedicationSnapshot?
 
     init(
         id: UUID = UUID(),
@@ -309,7 +329,8 @@ struct WatchCommand: Codable, Hashable, Identifiable {
         issuedAt: Date = Date(),
         timerStartDate: Date? = nil,
         timeZoneIdentifier: String = TimeZone.autoupdatingCurrent.identifier,
-        expectedEventUpdatedAt: Date? = nil
+        expectedEventUpdatedAt: Date? = nil,
+        medication: WatchMedicationSnapshot? = nil
     ) {
         self.id = id
         self.schemaVersion = schemaVersion
@@ -322,6 +343,7 @@ struct WatchCommand: Codable, Hashable, Identifiable {
         self.timerStartDate = timerStartDate
         self.timeZoneIdentifier = timeZoneIdentifier
         self.expectedEventUpdatedAt = expectedEventUpdatedAt
+        self.medication = medication
     }
 }
 
@@ -366,7 +388,11 @@ struct WatchAcknowledgement: Codable, Hashable {
 
 enum WatchActionCatalog {
     static func actions(profileTypeRawValue: String) -> [WatchActionSnapshot] {
-        profileTypeRawValue == "dog" ? dogActions : childActions
+        switch profileTypeRawValue {
+        case "adult": adultActions
+        case "dog": dogActions
+        default: childActions
+        }
     }
 
     static func canonicalActionID(for actionID: String) -> String {
@@ -442,6 +468,17 @@ enum WatchActionCatalog {
         action("rest", "Rest", "Timer", "bed.double.fill", "indigo", "rest"),
         action("training", "Training", "Timer", "graduationcap.fill", "purple", "training"),
         action("grooming", "Grooming", "Timer", "comb.fill", "cyan", "grooming")
+    ]
+
+    private static let adultActions: [WatchActionSnapshot] = [
+        action(
+            "sleep", "Sleep", "Timer", "moon.stars.fill", "indigo", "sleep",
+            options: [
+                option("nap", "Rest or nap", "bed.double.fill"),
+                option("nightSleep", "Night sleep", "moon.fill")
+            ]
+        ),
+        action("activity", "Activity", "Timer", "figure.walk", "green", "activity")
     ]
 
     private static func action(

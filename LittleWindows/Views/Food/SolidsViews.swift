@@ -33,9 +33,9 @@ private struct SolidsDrawerSelectionButton: View {
 struct SolidsHomeView: View {
     @Environment(\.modelContext) private var modelContext
 
-    let profile: BabyProfile
+    let profile: CareProfile
     let accessLevel: SolidsAccessLevel
-    let events: [BabyEvent]
+    let events: [CareEvent]
     let eventItems: [SolidFoodEventItem]
     let progress: [SolidFoodProgress]
     let plans: [PlannedSolidMeal]
@@ -51,7 +51,7 @@ struct SolidsHomeView: View {
         SolidsTrackingService.ageMonths(for: profile)
     }
 
-    private var scopedEvents: [BabyEvent] {
+    private var scopedEvents: [CareEvent] {
         events.filter { $0.profileID == profile.id && $0.type == .feed && $0.feedKind == .solid }
     }
 
@@ -331,7 +331,7 @@ struct SolidsHomeView: View {
 
 struct SolidsGuidedPathView: View {
     @Environment(\.modelContext) private var modelContext
-    let profile: BabyProfile
+    let profile: CareProfile
     let progress: [SolidFoodProgress]
     let eventItems: [SolidFoodEventItem]
     let allergenProgress: [SolidAllergenProgress]
@@ -377,7 +377,8 @@ struct SolidsGuidedPathView: View {
     private var earliestGuidedStartDate: Date {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let sixMonthDate = calendar.date(byAdding: .month, value: 6, to: profile.birthDate) ?? today
+        guard let birthDate = profile.birthDate else { return today }
+        let sixMonthDate = calendar.date(byAdding: .month, value: 6, to: birthDate) ?? today
         return max(today, calendar.startOfDay(for: sixMonthDate))
     }
 
@@ -1045,7 +1046,7 @@ private struct SolidsFeedingSkillRow: View {
 
 private struct SolidsSuggestionPreparationText: View {
     let suggestion: SolidsGuidedMealSuggestion
-    let profile: BabyProfile
+    let profile: CareProfile
     let profileState: SolidsProfileState?
 
     var body: some View {
@@ -1060,7 +1061,7 @@ private struct SolidsSuggestionPreparationText: View {
 }
 
 struct SolidsFoodDatabaseView: View {
-    let profile: BabyProfile
+    let profile: CareProfile
     let progress: [SolidFoodProgress]
     let customFoods: [SolidFoodCatalogItem]
     let photoAttachments: [PhotoAttachment]
@@ -1516,7 +1517,7 @@ struct SolidsFoodDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     let food: SolidsReferenceFood
-    let profile: BabyProfile
+    let profile: CareProfile
     let progress: [SolidFoodProgress]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
@@ -1886,7 +1887,7 @@ struct CustomSolidFoodDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     let food: SolidFoodCatalogItem
-    let profile: BabyProfile
+    let profile: CareProfile
     let photo: PhotoAttachment?
     let allFoods: [SolidFoodCatalogItem]
     let progress: [SolidFoodProgress]
@@ -2671,7 +2672,7 @@ private struct SolidsPreparationWalkthroughView: View {
 
 struct SolidsPlannerView: View {
     @Environment(\.modelContext) private var modelContext
-    let profile: BabyProfile
+    let profile: CareProfile
     let plans: [PlannedSolidMeal]
     let openPlan: (UUID) -> Void
 
@@ -2918,7 +2919,7 @@ struct NewSolidMealPlanView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \SolidFoodCatalogItem.name) private var customFoods: [SolidFoodCatalogItem]
-    let profile: BabyProfile
+    let profile: CareProfile
     let plan: PlannedSolidMeal?
 
     @State private var scheduledAt: Date
@@ -2948,15 +2949,13 @@ struct NewSolidMealPlanView: View {
         )
     }
 
-    init(profile: BabyProfile, plan: PlannedSolidMeal? = nil) {
+    init(profile: CareProfile, plan: PlannedSolidMeal? = nil) {
         self.profile = profile
         self.plan = plan
         let now = Date()
-        let sixMonthDate = Calendar.current.date(
-            byAdding: .month,
-            value: 6,
-            to: profile.birthDate
-        ) ?? now
+        let sixMonthDate = profile.birthDate.flatMap {
+            Calendar.current.date(byAdding: .month, value: 6, to: $0)
+        } ?? now
         _scheduledAt = State(initialValue: plan?.scheduledAt ?? max(now, sixMonthDate))
         _selectedFoodIDs = State(initialValue: Set(plan?.foodIDs ?? []))
         _notesDraft = State(initialValue: SolidPlanNotesDraft(plan?.notes ?? ""))
@@ -3319,10 +3318,11 @@ struct NewSolidMealPlanView: View {
     }
 
     private func eligibilityDate(for food: SolidPlanFoodChoice) -> Date {
-        Calendar.current.date(
+        guard let birthDate = profile.birthDate else { return scheduledAt }
+        return Calendar.current.date(
             byAdding: .month,
             value: food.minimumAgeMonths,
-            to: profile.birthDate
+            to: birthDate
         ) ?? scheduledAt
     }
 
@@ -3422,7 +3422,7 @@ private enum PlannedSolidMealAlert: Identifiable {
 
 struct PlannedSolidMealDetailView: View {
     let plan: PlannedSolidMeal
-    let profile: BabyProfile
+    let profile: CareProfile
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
     let inventoryItems: [InventoryItem]
@@ -3715,8 +3715,8 @@ private enum SolidsTrackerSort: String, CaseIterable, Identifiable {
 }
 
 struct SolidsTrackerView: View {
-    let profile: BabyProfile
-    let events: [BabyEvent]
+    let profile: CareProfile
+    let events: [CareEvent]
     let progress: [SolidFoodProgress]
     let eventItems: [SolidFoodEventItem]
     let openFoodHistory: (String, String) -> Void
@@ -3765,7 +3765,7 @@ struct SolidsTrackerView: View {
         }
     }
 
-    private var scopedMeals: [BabyEvent] {
+    private var scopedMeals: [CareEvent] {
         events.filter { $0.profileID == profile.id && $0.type == .feed && $0.feedKind == .solid }
             .sorted { $0.startDate > $1.startDate }
     }
@@ -3876,10 +3876,10 @@ struct SolidsTrackerView: View {
 }
 
 struct SolidFoodHistoryView: View {
-    let profile: BabyProfile
+    let profile: CareProfile
     let foodID: String
     let foodName: String
-    let events: [BabyEvent]
+    let events: [CareEvent]
     let eventItems: [SolidFoodEventItem]
     let openMeal: (UUID) -> Void
 
@@ -3888,7 +3888,7 @@ struct SolidFoodHistoryView: View {
             .sorted { $0.createdAt > $1.createdAt }
     }
 
-    private var eventByID: [UUID: BabyEvent] {
+    private var eventByID: [UUID: CareEvent] {
         Dictionary(uniqueKeysWithValues: events.filter { $0.profileID == profile.id }.map { ($0.id, $0) })
     }
 
@@ -3948,7 +3948,7 @@ struct SolidFoodHistoryView: View {
 }
 
 struct SolidMealDetailView: View {
-    let event: BabyEvent
+    let event: CareEvent
     let items: [SolidFoodEventItem]
     let editEvent: () -> Void
 
@@ -3999,7 +3999,7 @@ struct SolidMealDetailView: View {
 }
 
 struct SolidsAllergensView: View {
-    let profile: BabyProfile
+    let profile: CareProfile
     let eventItems: [SolidFoodEventItem]
     let progress: [SolidAllergenProgress]
     let openAllergen: (String) -> Void
@@ -4071,7 +4071,7 @@ struct SolidsAllergensView: View {
 struct SolidsAllergenDetailView: View {
     @Environment(\.modelContext) private var modelContext
     let allergen: SolidsAllergen
-    let profile: BabyProfile
+    let profile: CareProfile
     let eventItems: [SolidFoodEventItem]
     let progress: SolidAllergenProgress?
     let allProgress: [SolidAllergenProgress]
@@ -4092,7 +4092,7 @@ struct SolidsAllergenDetailView: View {
 
     init(
         allergen: SolidsAllergen,
-        profile: BabyProfile,
+        profile: CareProfile,
         eventItems: [SolidFoodEventItem],
         progress: SolidAllergenProgress?,
         allProgress: [SolidAllergenProgress],
@@ -4552,7 +4552,7 @@ private struct SolidsAllergenNotesEditor: View {
 
 struct SolidsRecipesView: View {
     @Environment(\.modelContext) private var modelContext
-    let profile: BabyProfile
+    let profile: CareProfile
     let profileState: SolidsProfileState?
     let openRecipe: (String) -> Void
 
@@ -4987,7 +4987,7 @@ struct SolidsRecipesView: View {
 struct SolidsRecipeDetailView: View {
     @Environment(\.modelContext) private var modelContext
     let recipe: SolidsReferenceRecipe
-    let profile: BabyProfile
+    let profile: CareProfile
     let profileState: SolidsProfileState?
     let plannedMeals: [PlannedSolidMeal]
     let household: Household?
@@ -5013,7 +5013,7 @@ struct SolidsRecipeDetailView: View {
     @State private var mealPrepWriter: SolidsMealPrepWriter?
     init(
         recipe: SolidsReferenceRecipe,
-        profile: BabyProfile,
+        profile: CareProfile,
         profileState: SolidsProfileState?,
         plannedMeals: [PlannedSolidMeal],
         household: Household?,

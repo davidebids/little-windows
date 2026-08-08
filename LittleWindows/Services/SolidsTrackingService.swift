@@ -366,7 +366,7 @@ actor SolidsBackfillWriter {
     func backfill(profileID: UUID) async -> (count: Int, error: String?) {
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
-        let eventDescriptor = FetchDescriptor<BabyEvent>(
+        let eventDescriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate {
                 $0.profileID == profileID
                     && $0.typeRawValue == feedRawValue
@@ -377,13 +377,13 @@ actor SolidsBackfillWriter {
         let completionKey = "solids.backfill.v2.\(profileID.uuidString).eventCount"
         let latestUpdateKey = "solids.backfill.v2.\(profileID.uuidString).latestUpdate"
         let defaults = UserDefaults.standard
-        var latestDescriptor = FetchDescriptor<BabyEvent>(
+        var latestDescriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate {
                 $0.profileID == profileID
                     && $0.typeRawValue == feedRawValue
                     && $0.feedKindRawValue == solidRawValue
             },
-            sortBy: [SortDescriptor(\BabyEvent.updatedAt, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.updatedAt, order: .reverse)]
         )
         latestDescriptor.fetchLimit = 1
         let latestUpdate = (try? modelContext.fetch(latestDescriptor).first)?
@@ -1626,29 +1626,34 @@ enum SolidsAccessLevel: Equatable {
 enum SolidsTrackingService {
     private static var pendingAllergenReconciliationTasks: [UUID: Task<Void, Never>] = [:]
     static func accessLevel(
-        for profile: BabyProfile?,
-        events: [BabyEvent],
+        for profile: CareProfile?,
+        events: [CareEvent],
         state: SolidsProfileState?,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> SolidsAccessLevel {
-        guard let profile, profile.profileType == .child else { return .hidden }
+        guard let profile,
+              profile.profileType.capabilities.supportsSolids,
+              let birthDate = profile.birthDate else {
+            return .hidden
+        }
         let hasSolidHistory = events.contains {
             $0.profileID == profile.id && $0.type == .feed && $0.feedKind == .solid
         }
         if hasSolidHistory || state?.isActivated == true { return .full }
-        let months = calendar.dateComponents([.month], from: profile.birthDate, to: now).month ?? 0
+        let months = calendar.dateComponents([.month], from: birthDate, to: now).month ?? 0
         if months < 4 { return .hidden }
         if months < 6 { return .readinessPreview }
         return .full
     }
 
     static func ageMonths(
-        for profile: BabyProfile,
+        for profile: CareProfile,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> Int {
-        max(0, calendar.dateComponents([.month], from: profile.birthDate, to: now).month ?? 0)
+        guard let birthDate = profile.birthDate else { return 0 }
+        return max(0, calendar.dateComponents([.month], from: birthDate, to: now).month ?? 0)
     }
 
     @discardableResult
@@ -1856,7 +1861,7 @@ enum SolidsTrackingService {
     }
 
     static func guidedSuggestions(
-        for profile: BabyProfile,
+        for profile: CareProfile,
         progress: [SolidFoodProgress],
         eventItems: [SolidFoodEventItem],
         allergenProgress: [SolidAllergenProgress],
@@ -1880,7 +1885,7 @@ enum SolidsTrackingService {
     }
 
     static func guidedSuggestionSnapshot(
-        for profile: BabyProfile,
+        for profile: CareProfile,
         progress: [SolidFoodProgress],
         eventItems: [SolidFoodEventItem],
         allergenProgress: [SolidAllergenProgress],
@@ -1924,7 +1929,7 @@ enum SolidsTrackingService {
         }
         return SolidsGuidedSuggestionSnapshot(
             isChild: profile.profileType == .child,
-            birthDate: profile.birthDate,
+            birthDate: profile.birthDate ?? startDate,
             triedFoodIDs: triedFoodIDs,
             plannedFoodIDs: plannedFoodIDs,
             blockedAllergenIDs: blockedAllergenIDs,
@@ -2235,7 +2240,7 @@ enum SolidsTrackingService {
     /// expensive food, recipe, and allergen planning pass.
     static func applyingFeedingSkills(
         to suggestions: [SolidsGuidedMealSuggestion],
-        for profile: BabyProfile,
+        for profile: CareProfile,
         completedSkillIDs: Set<String>,
         calendar: Calendar = .current
     ) -> [SolidsGuidedMealSuggestion] {
@@ -2253,7 +2258,7 @@ enum SolidsTrackingService {
 
     static func preparationNotes(
         for suggestion: SolidsGuidedMealSuggestion,
-        profile: BabyProfile,
+        profile: CareProfile,
         completedSkillIDs: Set<String>,
         calendar: Calendar = .current
     ) -> String {
@@ -2385,7 +2390,7 @@ enum SolidsTrackingService {
 
     static func allergenPlanWrites(
         for allergen: SolidsAllergen,
-        profile: BabyProfile,
+        profile: CareProfile,
         progress: SolidAllergenProgress?,
         allProgress: [SolidAllergenProgress],
         existingPlans: [PlannedSolidMeal],
@@ -2469,7 +2474,7 @@ enum SolidsTrackingService {
     @discardableResult
     static func buildAllergenPlan(
         for allergen: SolidsAllergen,
-        profile: BabyProfile,
+        profile: CareProfile,
         progress: SolidAllergenProgress?,
         allProgress: [SolidAllergenProgress],
         existingPlans: [PlannedSolidMeal],
@@ -3182,7 +3187,7 @@ enum SolidsTrackingService {
     }
 
     static func reconcileSolidFeed(
-        event: BabyEvent,
+        event: CareEvent,
         preset: SolidFeedEditorPreset? = nil,
         context: ModelContext,
         now: Date = Date(),
@@ -3217,7 +3222,7 @@ enum SolidsTrackingService {
     }
 
     static func recordSolidFeed(
-        event: BabyEvent,
+        event: CareEvent,
         preset: SolidFeedEditorPreset?,
         eventItems: [SolidFoodEventItem],
         progress: [SolidFoodProgress],
@@ -3403,7 +3408,7 @@ enum SolidsTrackingService {
 
     static func backfillProgress(
         profileID: UUID,
-        events: [BabyEvent],
+        events: [CareEvent],
         eventItems: [SolidFoodEventItem],
         progress: [SolidFoodProgress],
         plans: [PlannedSolidMeal],

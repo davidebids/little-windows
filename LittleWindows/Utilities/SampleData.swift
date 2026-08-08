@@ -28,8 +28,8 @@ enum SampleData {
 
     @MainActor
     static func createStarterProfile(in context: ModelContext) {
-        context.insert(BabyProfile(name: "Sample Child", birthDate: defaultBirthDate, sex: .unknown))
-        if let profile = try? context.fetch(FetchDescriptor<BabyProfile>()).first {
+        context.insert(CareProfile(name: "Sample Child", birthDate: defaultBirthDate, sex: .unknown))
+        if let profile = try? context.fetch(FetchDescriptor<CareProfile>()).first {
             ProfileService.shared.switchProfile(profile)
         }
         _ = PersistenceService.save(context: context)
@@ -62,8 +62,8 @@ enum SampleData {
     @MainActor
     static func previewContainer() -> ModelContainer {
         let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
+            CareProfile.self,
+            CareEvent.self,
             DoctorAppointment.self,
             MilestoneEntry.self,
             AgeGuideReadState.self,
@@ -92,17 +92,17 @@ enum SampleData {
         let context = container.mainContext
         let calendar = Calendar.current
         let now = Date()
-        let profile = BabyProfile(name: "Sample Child", birthDate: defaultBirthDate, sex: .unknown)
+        let profile = CareProfile(name: "Sample Child", birthDate: defaultBirthDate, sex: .unknown)
         profile.displayColor = "indigo"
         context.insert(profile)
-        let sampleBaby = BabyProfile(
-            name: "Sample Baby",
+        let sampleChild = CareProfile(
+            name: "Sibling",
             birthDate: calendar.date(byAdding: .month, value: -2, to: now) ?? now,
             sex: .unknown,
             displayColor: "teal"
         )
-        context.insert(sampleBaby)
-        let sampleDog = BabyProfile(
+        context.insert(sampleChild)
+        let sampleDog = CareProfile(
             profileType: .dog,
             name: "Sample Dog",
             birthDate: calendar.date(byAdding: .weekOfYear, value: -12, to: now) ?? now,
@@ -122,17 +122,17 @@ enum SampleData {
         let napEnd = calendar.date(bySettingHour: 10, minute: 3, second: 0, of: now) ?? now
         let feedDate = calendar.date(bySettingHour: 10, minute: 20, second: 0, of: now) ?? now
 
-        let night = BabyEvent(type: .sleep, startDate: calendar.date(byAdding: .hour, value: -10, to: wake) ?? wake, endDate: wake)
+        let night = CareEvent(type: .sleep, startDate: calendar.date(byAdding: .hour, value: -10, to: wake) ?? wake, endDate: wake)
         night.profileID = profile.id
         night.sleepKind = .nightSleep
         context.insert(night)
 
-        let nap = BabyEvent(type: .sleep, startDate: napStart, endDate: napEnd)
+        let nap = CareEvent(type: .sleep, startDate: napStart, endDate: napEnd)
         nap.profileID = profile.id
         nap.sleepKind = .nap
         context.insert(nap)
 
-        let feed = BabyEvent(type: .feed, startDate: feedDate, endDate: feedDate)
+        let feed = CareEvent(type: .feed, startDate: feedDate, endDate: feedDate)
         feed.profileID = profile.id
         feed.feedKind = .bottle
         feed.amountOz = 5
@@ -146,12 +146,13 @@ enum SampleData {
             ("Lifted neck", 42, MilestoneCategory.motor),
             ("Holding hands at center", 90, MilestoneCategory.motor)
         ]
+        let profileBirthDate = profile.birthDate ?? profile.createdAt
         for (title, dayOffset, category) in examples {
             let date = calendar.date(
                 byAdding: .day,
                 value: dayOffset,
-                to: profile.birthDate
-            ) ?? profile.birthDate
+                to: profileBirthDate
+            ) ?? profileBirthDate
             context.insert(MilestoneEntry(
                 profileID: profile.id,
                 title: title,

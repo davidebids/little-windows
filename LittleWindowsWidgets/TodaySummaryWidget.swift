@@ -45,7 +45,7 @@ private struct TodaySummaryWidgetView: View {
             Link(destination: URL(string: "littlewindows://reports/summary")!) {
                 CareProfileRequiredWidgetState(
                     title: "Care summary",
-                    detail: "Add a child or dog to see daily care at a glance.",
+                    detail: "Add a care profile to see daily care at a glance.",
                     systemImage: "heart.text.clipboard.fill"
                 )
             }

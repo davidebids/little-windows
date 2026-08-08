@@ -1,6 +1,6 @@
 import Foundation
 
-enum BabySex: String, Codable, CaseIterable, Identifiable {
+enum ProfileSex: String, Codable, CaseIterable, Identifiable {
     case male
     case female
     case unknown
@@ -11,11 +11,19 @@ enum BabySex: String, Codable, CaseIterable, Identifiable {
 
 enum GrowthMeasurementSource: String, Codable, CaseIterable, Identifiable {
     case pediatrician
+    case medicalVisit
     case home
     case other
 
     var id: String { rawValue }
-    var displayName: String { rawValue.capitalized }
+    var displayName: String {
+        switch self {
+        case .pediatrician: "Pediatrician"
+        case .medicalVisit: "Medical visit"
+        case .home: "Home"
+        case .other: "Other"
+        }
+    }
 }
 
 enum GrowthChartType: String, Codable, CaseIterable, Identifiable {
@@ -43,7 +51,7 @@ enum GrowthChartType: String, Codable, CaseIterable, Identifiable {
 
 struct GrowthReferencePoint: Identifiable, Hashable {
     var chartType: GrowthChartType
-    var sex: BabySex
+    var sex: ProfileSex
     var ageInMonths: Double
     var l: Double
     var m: Double

@@ -5,14 +5,16 @@ struct AppointmentDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Bindable var appointment: DoctorAppointment
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
+    @Query(sort: \Medication.name) private var allMedications: [Medication]
+    @Query(sort: \MedicationRegimen.createdAt) private var allMedicationRegimens: [MedicationRegimen]
     @StateObject private var profileService = ProfileService.shared
 
     @State private var showingEditor = false
     @State private var eventRoute: EventEditorRoute?
     @State private var milestoneTemplate: MilestoneTemplate?
     @State private var showingDeleteConfirmation = false
-    @State private var events: [BabyEvent] = []
+    @State private var events: [CareEvent] = []
     @State private var visitSummaryDraft = ""
     @State private var followUpInstructionsDraft = ""
     @State private var vaccinesGivenDraft = ""
@@ -20,11 +22,21 @@ struct AppointmentDetailView: View {
     @State private var hasLoadedVisitJournalDrafts = false
     @State private var pendingVisitJournalSave: Task<Void, Never>?
 
-    private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
-    private var growthEntryTitle: String {
-        profile?.profileType == .dog ? "Add vet growth entry" : "Add pediatrician growth entry"
+    private var profile: CareProfile? {
+        if let profileID = appointment.profileID,
+           let appointmentProfile = profiles.first(where: { $0.id == profileID }) {
+            return appointmentProfile
+        }
+        return profileService.selectedProfile(in: profiles)
     }
-    private var scopedEvents: [BabyEvent] {
+    private var growthEntryTitle: String {
+        switch profile?.profileType {
+        case .adult: "Add weight or height entry"
+        case .dog: "Add vet growth entry"
+        default: "Add pediatrician growth entry"
+        }
+    }
+    private var scopedEvents: [CareEvent] {
         events.filter { $0.matchesProfile(appointment.profileID ?? profile?.id) }
     }
     private var appointmentTimeSummary: String {
@@ -105,6 +117,8 @@ struct AppointmentDetailView: View {
                     .lineLimit(2...5)
             }
 
+            currentMedicationsSection
+
             Section("Related health info") {
                 if let growth = latestGrowth {
                     HealthContextRow(
@@ -143,9 +157,6 @@ struct AppointmentDetailView: View {
                 }
                 Button("Add temperature entry", systemImage: "thermometer.medium") {
                     eventRoute = EventEditorRoute(type: .temperature)
-                }
-                Button("Add medicine entry", systemImage: "cross.case.fill") {
-                    eventRoute = EventEditorRoute(type: .medicine)
                 }
                 Button("Add milestone", systemImage: "heart.text.clipboard.fill") {
                     milestoneTemplate = MilestoneTemplate(
@@ -189,7 +200,7 @@ struct AppointmentDetailView: View {
             NavigationStack {
                 AppointmentEditorView(
                     appointment: appointment,
-                    babyName: profile?.name ?? "Baby",
+                    babyName: profile?.name ?? "Profile",
                     profileID: appointment.profileID ?? profile?.id,
                     profileType: profile?.profileType ?? .child
                 )
@@ -198,10 +209,16 @@ struct AppointmentDetailView: View {
         .sheet(item: $eventRoute) { route in
             NavigationStack {
                 EventEditorView(type: route.type, event: route.event) { event in
-                    event.profileID = event.profileID ?? appointment.profileID ?? profile?.id
+                    if let appointmentProfileID = appointment.profileID ?? profile?.id {
+                        event.profileID = appointmentProfileID
+                    }
                     if event.type == .growth {
                         event.startDate = appointment.startDate
-                        event.growthSource = .pediatrician
+                        switch profile?.profileType {
+                        case .child: event.growthSource = .pediatrician
+                        case .adult: event.growthSource = .medicalVisit
+                        default: event.growthSource = .other
+                        }
                         appointment.growthEntryID = event.id
                     } else if event.type == .temperature {
                         event.startDate = appointment.startDate
@@ -214,7 +231,10 @@ struct AppointmentDetailView: View {
         }
         .sheet(item: $milestoneTemplate) { template in
             NavigationStack {
-                MilestoneEditorView(template: template)
+                MilestoneEditorView(
+                    template: template,
+                    profileID: appointment.profileID ?? profile?.id
+                )
             }
         }
         .confirmationDialog(
@@ -231,22 +251,63 @@ struct AppointmentDetailView: View {
         }
     }
 
-    private var latestGrowth: BabyEvent? {
+    private var latestGrowth: CareEvent? {
         scopedEvents.first { $0.type == .growth }
     }
 
-    private var latestTemperature: BabyEvent? {
+    private var latestTemperature: CareEvent? {
         scopedEvents.first {
             $0.type == .temperature &&
             Date().timeIntervalSince($0.startDate) <= 14 * 24 * 60 * 60
         }
     }
 
-    private var recentMedicines: [BabyEvent] {
+    private var recentMedicines: [CareEvent] {
         scopedEvents.filter {
             $0.type == .medicine &&
             Date().timeIntervalSince($0.startDate) <= 30 * 24 * 60 * 60
         }
+    }
+
+    private var currentMedications: [Medication] {
+        let profileID = appointment.profileID ?? profile?.id
+        return allMedications.filter { $0.profileID == profileID && !$0.isArchived }
+    }
+
+    @ViewBuilder
+    private var currentMedicationsSection: some View {
+        if let profile, profile.profileType.capabilities.supportsMedications {
+            Section("Current medications") {
+                if currentMedications.isEmpty {
+                    Text("No current medications added.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(currentMedications.prefix(8)) { medication in
+                        HealthContextRow(
+                            title: medication.name,
+                            value: currentMedicationSummary(medication),
+                            icon: "pills.fill",
+                            tint: .red
+                        )
+                    }
+                }
+                NavigationLink {
+                    MedicationsView(profile: profile)
+                } label: {
+                    Label("Review or add medications", systemImage: "pills.fill")
+                }
+            }
+        }
+    }
+
+    private func currentMedicationSummary(_ medication: Medication) -> String {
+        let regimen = allMedicationRegimens.first {
+            $0.medicationID == medication.id && $0.isActive
+        }
+        return [medication.strengthDescription, regimen?.scheduleSummary]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+            .nilIfBlank ?? medication.form.displayName
     }
 
     private var healthContextRefreshToken: String {
@@ -263,64 +324,64 @@ struct AppointmentDetailView: View {
         let medicineCutoff = now.addingTimeInterval(-30 * 24 * 60 * 60)
 
         do {
-            let growthEvents: [BabyEvent]
-            let temperatureEvents: [BabyEvent]
-            let medicineEvents: [BabyEvent]
+            let growthEvents: [CareEvent]
+            let temperatureEvents: [CareEvent]
+            let medicineEvents: [CareEvent]
             if let selectedProfileID {
-                var growthDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var growthDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == selectedProfileID && event.typeRawValue == "growth"
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 growthDescriptor.fetchLimit = 1
                 growthEvents = try modelContext.fetch(growthDescriptor)
 
-                var temperatureDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var temperatureDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == selectedProfileID &&
                             event.typeRawValue == "temperature" &&
                             event.startDate >= temperatureCutoff
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 temperatureDescriptor.fetchLimit = 1
                 temperatureEvents = try modelContext.fetch(temperatureDescriptor)
 
-                var medicineDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var medicineDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == selectedProfileID &&
                             event.typeRawValue == "medicine" &&
                             event.startDate >= medicineCutoff
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 medicineDescriptor.fetchLimit = 3
                 medicineEvents = try modelContext.fetch(medicineDescriptor)
             } else {
-                var growthDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var growthDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.typeRawValue == "growth"
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 growthDescriptor.fetchLimit = 1
                 growthEvents = try modelContext.fetch(growthDescriptor)
 
-                var temperatureDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var temperatureDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.typeRawValue == "temperature" && event.startDate >= temperatureCutoff
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 temperatureDescriptor.fetchLimit = 1
                 temperatureEvents = try modelContext.fetch(temperatureDescriptor)
 
-                var medicineDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var medicineDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.typeRawValue == "medicine" && event.startDate >= medicineCutoff
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 medicineDescriptor.fetchLimit = 3
                 medicineEvents = try modelContext.fetch(medicineDescriptor)
@@ -355,7 +416,7 @@ struct AppointmentDetailView: View {
         }
     }
 
-    private func growthSummary(_ event: BabyEvent) -> String {
+    private func growthSummary(_ event: CareEvent) -> String {
         var pieces = [String]()
         if let weight = event.canonicalWeightKilograms {
             let pounds = GrowthUnitConversion.kilogramsToPoundsAndOunces(weight)
@@ -367,7 +428,7 @@ struct AppointmentDetailView: View {
         return pieces.isEmpty ? "Measurement logged" : pieces.joined(separator: " / ")
     }
 
-    private func temperatureSummary(_ event: BabyEvent) -> String {
+    private func temperatureSummary(_ event: CareEvent) -> String {
         guard let value = event.temperatureValue(in: .fahrenheit) else {
             return "Temperature logged"
         }

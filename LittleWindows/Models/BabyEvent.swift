@@ -24,18 +24,21 @@ enum CareTimeZoneSettings {
     static let modeKey = "careTimeZoneMode"
     static let manualIdentifierKey = "careTimeZoneManualIdentifier"
 
+    static func manualOverrideTimeZone(
+        defaults: UserDefaults = .standard
+    ) -> TimeZone? {
+        guard CareTimeZoneMode(rawValue: defaults.string(forKey: modeKey) ?? "") == .manual,
+              let identifier = defaults.string(forKey: manualIdentifierKey) else {
+            return nil
+        }
+        return TimeZone(identifier: identifier)
+    }
+
     static func effectiveTimeZone(
         defaults: UserDefaults = .standard,
         automaticTimeZone: TimeZone = .autoupdatingCurrent
     ) -> TimeZone {
-        let mode = CareTimeZoneMode(rawValue: defaults.string(forKey: modeKey) ?? "")
-            ?? .automatic
-        guard mode == .manual,
-              let identifier = defaults.string(forKey: manualIdentifierKey),
-              let selected = TimeZone(identifier: identifier) else {
-            return automaticTimeZone
-        }
-        return selected
+        manualOverrideTimeZone(defaults: defaults) ?? automaticTimeZone
     }
 
     static func effectiveIdentifier(
@@ -79,8 +82,110 @@ enum CareTimeZoneSettings {
     }
 }
 
+enum BloodGlucoseUnit: String, Codable, CaseIterable, Identifiable {
+    case milligramsPerDeciliter
+    case millimolesPerLiter
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .milligramsPerDeciliter: "mg/dL"
+        case .millimolesPerLiter: "mmol/L"
+        }
+    }
+
+    func milligramsPerDeciliter(from value: Double) -> Double {
+        switch self {
+        case .milligramsPerDeciliter: value
+        case .millimolesPerLiter: value * 18.0182
+        }
+    }
+}
+
+enum BloodGlucoseContext: String, Codable, CaseIterable, Identifiable {
+    case unspecified
+    case fasting
+    case beforeMeal
+    case afterMeal
+    case bedtime
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .unspecified: "Not specified"
+        case .fasting: "Fasting"
+        case .beforeMeal: "Before meal"
+        case .afterMeal: "After meal"
+        case .bedtime: "Bedtime"
+        case .other: "Other"
+        }
+    }
+}
+
+struct HealthObservationDetails: Codable, Equatable {
+    var symptomName: String?
+    var symptomSeverity: Int?
+    var symptomBodyLocation: String?
+    var symptomResolved: Bool?
+    var systolicBloodPressure: Int?
+    var diastolicBloodPressure: Int?
+    var heartRateBPM: Int?
+    var oxygenSaturationPercent: Double?
+    var respiratoryRatePerMinute: Int?
+    var bloodGlucoseValue: Double?
+    var bloodGlucoseUnitRawValue: String?
+    var bloodGlucoseContextRawValue: String?
+    var painScore: Int?
+    var painLocation: String?
+
+    init(
+        symptomName: String? = nil,
+        symptomSeverity: Int? = nil,
+        symptomBodyLocation: String? = nil,
+        symptomResolved: Bool? = nil,
+        systolicBloodPressure: Int? = nil,
+        diastolicBloodPressure: Int? = nil,
+        heartRateBPM: Int? = nil,
+        oxygenSaturationPercent: Double? = nil,
+        respiratoryRatePerMinute: Int? = nil,
+        bloodGlucoseValue: Double? = nil,
+        bloodGlucoseUnitRawValue: String? = nil,
+        bloodGlucoseContextRawValue: String? = nil,
+        painScore: Int? = nil,
+        painLocation: String? = nil
+    ) {
+        self.symptomName = symptomName
+        self.symptomSeverity = symptomSeverity
+        self.symptomBodyLocation = symptomBodyLocation
+        self.symptomResolved = symptomResolved
+        self.systolicBloodPressure = systolicBloodPressure
+        self.diastolicBloodPressure = diastolicBloodPressure
+        self.heartRateBPM = heartRateBPM
+        self.oxygenSaturationPercent = oxygenSaturationPercent
+        self.respiratoryRatePerMinute = respiratoryRatePerMinute
+        self.bloodGlucoseValue = bloodGlucoseValue
+        self.bloodGlucoseUnitRawValue = bloodGlucoseUnitRawValue
+        self.bloodGlucoseContextRawValue = bloodGlucoseContextRawValue
+        self.painScore = painScore
+        self.painLocation = painLocation
+    }
+
+    var bloodGlucoseUnit: BloodGlucoseUnit? {
+        get { bloodGlucoseUnitRawValue.flatMap(BloodGlucoseUnit.init(rawValue:)) }
+        set { bloodGlucoseUnitRawValue = newValue?.rawValue }
+    }
+
+    var bloodGlucoseContext: BloodGlucoseContext? {
+        get { bloodGlucoseContextRawValue.flatMap(BloodGlucoseContext.init(rawValue:)) }
+        set { bloodGlucoseContextRawValue = newValue?.rawValue }
+    }
+}
+
 @Model
-final class BabyEvent {
+final class CareEvent {
     var id: UUID = UUID()
     var profileID: UUID?
     var profileTypeSnapshotRawValue: String?
@@ -143,6 +248,7 @@ final class BabyEvent {
     var temperatureUnitRawValue: String?
     var temperatureMethodRawValue: String?
     var dogDetailsData: Data?
+    var healthObservationDetailsData: Data?
 
     init(
         id: UUID = UUID(),
@@ -265,6 +371,22 @@ final class BabyEvent {
         }
         set {
             dogDetailsData = try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    var healthObservationDetails: HealthObservationDetails {
+        get {
+            guard let healthObservationDetailsData,
+                  let value = try? JSONDecoder().decode(
+                    HealthObservationDetails.self,
+                    from: healthObservationDetailsData
+                  ) else {
+                return HealthObservationDetails()
+            }
+            return value
+        }
+        set {
+            healthObservationDetailsData = try? JSONEncoder().encode(newValue)
         }
     }
 
@@ -395,8 +517,8 @@ final class BabyEvent {
         return Double(weightPounds ?? 0) * 16 + (weightOunces ?? 0)
     }
 
-    var growthSex: BabySex {
-        get { growthSexRawValue.flatMap(BabySex.init(rawValue:)) ?? .unknown }
+    var growthSex: ProfileSex {
+        get { growthSexRawValue.flatMap(ProfileSex.init(rawValue:)) ?? .unknown }
         set { growthSexRawValue = newValue.rawValue }
     }
 
@@ -538,11 +660,25 @@ final class BabyEvent {
         case .grooming:
             dogGroomingSummary
         case .symptom:
-            "Symptom: \(dogSymptomSummary)"
+            profileTypeSnapshot == .dog
+                ? "Symptom: \(dogSymptomSummary)"
+                : "Symptom: \(healthSymptomSummary)"
         case .vaccine:
             "Vaccine: \(dogVaccineSummary)"
         case .glucose:
-            "Glucose: \(dogGlucoseSummary)"
+            profileTypeSnapshot == .dog
+                ? "Glucose: \(dogGlucoseSummary)"
+                : "Glucose: \(healthGlucoseSummary)"
+        case .bloodPressure:
+            "Blood Pressure: \(bloodPressureSummary)"
+        case .heartRate:
+            "Pulse: \(healthObservationDetails.heartRateBPM.map { "\($0) bpm" } ?? "Pulse")"
+        case .oxygenSaturation:
+            "Oxygen Saturation: \(healthObservationDetails.oxygenSaturationPercent.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" } ?? "Oxygen Saturation")"
+        case .respiratoryRate:
+            "Respiratory Rate: \(healthObservationDetails.respiratoryRatePerMinute.map { "\($0)/min" } ?? "Respiratory Rate")"
+        case .pain:
+            "Pain: \(painSummary)"
         case .custom:
             nonBlankTitle ?? type.displayName
         }
@@ -814,5 +950,53 @@ final class BabyEvent {
             parts.append(relation.displayName.lowercased())
         }
         return parts.joined(separator: ", ")
+    }
+
+    private var healthSymptomSummary: String {
+        let details = healthObservationDetails
+        var parts = [details.symptomName?.nilIfBlank ?? "Symptom"]
+        if let severity = details.symptomSeverity {
+            parts.append("\(severity)/10")
+        }
+        if let location = details.symptomBodyLocation?.nilIfBlank {
+            parts.append(location)
+        }
+        if details.symptomResolved == true {
+            parts.append("resolved")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var healthGlucoseSummary: String {
+        let details = healthObservationDetails
+        guard let value = details.bloodGlucoseValue else { return "Glucose" }
+        var parts = [
+            "\(value.formatted(.number.precision(.fractionLength(0...1)))) \(details.bloodGlucoseUnit?.displayName ?? BloodGlucoseUnit.milligramsPerDeciliter.displayName)"
+        ]
+        if let context = details.bloodGlucoseContext, context != .unspecified {
+            parts.append(context.displayName.lowercased())
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var bloodPressureSummary: String {
+        let details = healthObservationDetails
+        guard let systolic = details.systolicBloodPressure,
+              let diastolic = details.diastolicBloodPressure else {
+            return "Blood Pressure"
+        }
+        return "\(systolic)/\(diastolic) mmHg"
+    }
+
+    private var painSummary: String {
+        let details = healthObservationDetails
+        var parts: [String] = []
+        if let score = details.painScore {
+            parts.append("\(score)/10")
+        }
+        if let location = details.painLocation?.nilIfBlank {
+            parts.append(location)
+        }
+        return parts.isEmpty ? "Pain" : parts.joined(separator: " · ")
     }
 }

@@ -280,7 +280,7 @@ private struct SleepGuideLessonView: View {
 
 struct AgeGuideDetailView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query(sort: \AgeGuideReadState.updatedAt) private var readStates: [AgeGuideReadState]
 
     let guide: AgeGuide
@@ -298,7 +298,7 @@ struct AgeGuideDetailView: View {
         ))
     }
 
-    private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var profile: CareProfile? { profileService.selectedProfile(in: profiles) }
     private var babyName: String { profile?.name ?? "Baby" }
     private var scopedReadStates: [AgeGuideReadState] {
         readStates.filter { $0.matchesProfile(profile?.id) }
@@ -369,7 +369,7 @@ struct AgeGuideDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selectedTemplate) { template in
             NavigationStack {
-                MilestoneEditorView(template: template)
+                MilestoneEditorView(template: template, profileID: profile?.id)
             }
         }
         .task {
@@ -396,7 +396,7 @@ struct AgeGuideDetailView: View {
                 for: profile,
                 ageMonth: guide.ageMonth
                ) {
-                Text("Reached this age on \(reachedDate.formatted(date: .abbreviated, time: .omitted)). \(babyName) is \(DateFormatting.age(from: profile.birthDate)).")
+                Text("Reached this age on \(reachedDate.formatted(date: .abbreviated, time: .omitted)). \(babyName) is \(profile.ageDescription).")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

@@ -4,7 +4,7 @@ import SwiftUI
 struct AppointmentsListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @State private var showingEditor = false
     @State private var appointmentPendingDelete: DoctorAppointment?
     @State private var showingDeleteConfirmation = false
@@ -19,7 +19,7 @@ struct AppointmentsListView: View {
         ))
     }
 
-    private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var profile: CareProfile? { profileService.selectedProfile(in: profiles) }
     private var scopedAppointments: [DoctorAppointment] {
         appointments.filter { $0.matchesProfile(profile?.id) }
     }
@@ -42,7 +42,7 @@ struct AppointmentsListView: View {
                 ContentUnavailableView(
                     "No appointments yet",
                     systemImage: "stethoscope",
-                    description: Text("Add pediatrician visits, vaccines, checkups, and follow-ups here.")
+                    description: Text(emptyDescription)
                 )
                 .listRowBackground(Color.clear)
             } else {
@@ -71,7 +71,7 @@ struct AppointmentsListView: View {
         .sheet(isPresented: $showingEditor) {
             NavigationStack {
                 AppointmentEditorView(
-                    babyName: profile?.name ?? "Baby",
+                    babyName: profile?.name ?? "Profile",
                     profileID: profile?.id,
                     profileType: profile?.profileType ?? .child
                 )
@@ -93,6 +93,14 @@ struct AppointmentsListView: View {
             }
         } message: {
             Text("This permanently removes the appointment and cancels its reminders.")
+        }
+    }
+
+    private var emptyDescription: String {
+        switch profile?.profileType {
+        case .adult: "Add primary care, specialist, lab, therapy, dental, and follow-up visits here."
+        case .dog: "Add vet wellness, vaccine, grooming, and follow-up visits here."
+        default: "Add pediatrician visits, vaccines, checkups, and follow-ups here."
         }
     }
 
@@ -259,8 +267,21 @@ struct AppointmentEditorView: View {
         self.babyName = babyName
         self.profileID = profileID
         self.profileType = profileType
-        _title = State(initialValue: appointment?.title ?? (profileType == .dog ? "Vet visit" : "Pediatrician visit"))
-        _appointmentType = State(initialValue: appointment?.appointmentType ?? (profileType == .dog ? .vetWellness : .pediatrician))
+        let defaultTitle: String
+        let defaultType: AppointmentType
+        switch profileType {
+        case .child:
+            defaultTitle = "Pediatrician visit"
+            defaultType = .pediatrician
+        case .adult:
+            defaultTitle = "Primary care visit"
+            defaultType = .primaryCare
+        case .dog:
+            defaultTitle = "Vet visit"
+            defaultType = .vetWellness
+        }
+        _title = State(initialValue: appointment?.title ?? defaultTitle)
+        _appointmentType = State(initialValue: appointment?.appointmentType ?? defaultType)
         _startDate = State(initialValue: appointment?.startDate ?? Date().addingTimeInterval(24 * 60 * 60))
         _endDate = State(initialValue: appointment?.endDate ?? Date().addingTimeInterval(25 * 60 * 60))
         _hasEndDate = State(initialValue: appointment?.endDate != nil)
@@ -323,6 +344,13 @@ struct AppointmentEditorView: View {
                             presetButton("Grooming", .grooming)
                             presetButton("Training", .training)
                             presetButton("Boarding", .boarding)
+                        } else if profileType == .adult {
+                            presetButton("Primary care", .primaryCare)
+                            presetButton("Specialist visit", .specialist)
+                            presetButton("Lab work", .lab)
+                            presetButton("Therapy", .therapy)
+                            presetButton("Dental visit", .dental)
+                            presetButton("Imaging", .imaging)
                         } else {
                             presetButton("Pediatrician visit", .pediatrician)
                             presetButton("Wellness check", .wellnessCheck)
@@ -388,6 +416,11 @@ struct AppointmentEditorView: View {
     private var appointmentTypes: [AppointmentType] {
         if profileType == .dog {
             return [.vetWellness, .vaccine, .sickVisit, .emergencyVet, .dental, .grooming, .training, .boarding, .daycare, .other]
+        }
+        if profileType == .adult {
+            return [.primaryCare, .wellnessCheck, .sickVisit, .specialist, .lab,
+                    .imaging, .procedure, .therapy, .dental, .optometry,
+                    .vaccine, .urgentCare, .other]
         }
         return [.pediatrician, .wellnessCheck, .vaccine, .sickVisit, .specialist, .lab, .dental, .lactation, .urgentCare, .other]
     }

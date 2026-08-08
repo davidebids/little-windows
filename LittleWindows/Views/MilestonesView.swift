@@ -49,8 +49,8 @@ struct CareView: View {
     @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var profileService = ProfileService.shared
 
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @Query(sort: \BabyEvent.startDate, order: .reverse) private var careEvents: [BabyEvent]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
+    @Query(sort: \CareEvent.startDate, order: .reverse) private var careEvents: [CareEvent]
     @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
 
     @State private var path: [FoodRoute] = []
@@ -61,13 +61,13 @@ struct CareView: View {
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
-        var accessEventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
+        var accessEventDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
                 event.profileID == selectedProfileID
                     && event.typeRawValue == feedRawValue
                     && event.feedKindRawValue == solidRawValue
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         accessEventDescriptor.fetchLimit = 1
         _careEvents = Query(accessEventDescriptor)
@@ -77,7 +77,7 @@ struct CareView: View {
         ))
     }
 
-    private var profile: BabyProfile? {
+    private var profile: CareProfile? {
         profileService.selectedProfile(in: profiles)
     }
 
@@ -541,7 +541,7 @@ struct CareView: View {
 }
 
 private struct CareSolidsRouteData {
-    let careEvents: [BabyEvent]
+    let careEvents: [CareEvent]
     let households: [Household]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
@@ -631,7 +631,7 @@ private struct CareSolidsDataScope {
 
 private struct CareSolidsRouteDataLoader<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var careEvents: [BabyEvent]
+    @Query private var careEvents: [CareEvent]
     @Query private var households: [Household]
     @Query private var shoppingLists: [ShoppingList]
     @Query private var shoppingItems: [ShoppingListItem]
@@ -666,13 +666,13 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
         let planProfileID = scope.loadsPlans ? selectedProfileID : unloadedID
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
-        _careEvents = Query(FetchDescriptor<BabyEvent>(
+        _careEvents = Query(FetchDescriptor<CareEvent>(
             predicate: #Predicate { event in
                 event.profileID == eventProfileID
                     && event.typeRawValue == feedRawValue
                     && event.feedKindRawValue == solidRawValue
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         ))
         _solidFoodProgress = Query(FetchDescriptor<SolidFoodProgress>(
             predicate: #Predicate { $0.profileID == progressProfileID },
@@ -803,7 +803,7 @@ struct MilestonesView: View {
     @Query(sort: \MilestoneEntry.date, order: .reverse) private var allMilestones: [MilestoneEntry]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
-    let profile: BabyProfile?
+    let profile: CareProfile?
     let solidsAccessLevel: SolidsAccessLevel
     let openSolids: (FoodRoute) -> Void
     @State private var searchText = ""
@@ -819,14 +819,15 @@ struct MilestonesView: View {
     @State private var selectedAgeGuide: AgeGuide?
     @State private var selectedPuppyStageGuideID: String?
     @State private var showingAgeGuides = false
-    @State private var events: [BabyEvent] = []
+    @State private var showingMedications = false
+    @State private var events: [CareEvent] = []
     @State private var foodsTriedCount = 0
     @State private var upcomingSolidsPlanCount = 0
     @State private var milestonePendingDelete: MilestoneEntry?
     @State private var showingDeleteConfirmation = false
 
     init(
-        profile: BabyProfile?,
+        profile: CareProfile?,
         solidsAccessLevel: SolidsAccessLevel,
         openSolids: @escaping (FoodRoute) -> Void = { _ in }
     ) {
@@ -865,11 +866,11 @@ struct MilestonesView: View {
         MilestoneCategory.categories(for: profile?.profileType ?? .child)
     }
     private var currentAgeGuide: AgeGuide? {
-        guard !isDogProfile else { return nil }
+        guard profile?.profileType.capabilities.supportsAgeGuide == true else { return nil }
         return profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
     }
     private var currentAgeMonth: Int? {
-        guard !isDogProfile else { return nil }
+        guard profile?.profileType.capabilities.supportsAgeGuide == true else { return nil }
         return profile.map { AgeGuideService.shared.ageMonth(for: $0) }
     }
     private var currentPuppyStageGuide: PuppyStageGuide? {
@@ -931,6 +932,10 @@ struct MilestonesView: View {
     var body: some View {
         let timelineItems = self.timelineItems
         List {
+            medicationsSection
+
+            adultHealthSection
+
             solidsSection
 
             Section {
@@ -971,7 +976,8 @@ struct MilestonesView: View {
             NavigationStack {
                 MilestoneEditorView(
                     milestone: editingMilestone,
-                    template: selectedTemplate
+                    template: selectedTemplate,
+                    profileID: profile?.id
                 )
             }
         }
@@ -979,6 +985,7 @@ struct MilestonesView: View {
             refreshSolidsSummaryCounts()
             await refreshAutomaticSummaries()
             handlePendingAgeGuideDeepLink()
+            handlePendingMedicationsDeepLink()
         }
         .navigationDestination(item: $selectedAutomaticSummary) { summary in
             AutomaticMilestoneSummaryDetailView(summary: summary)
@@ -998,11 +1005,24 @@ struct MilestonesView: View {
                 readStates: readStates
             )
         }
+        .navigationDestination(isPresented: $showingMedications) {
+            if let profile {
+                MedicationsView(profile: profile)
+            } else {
+                CareUnavailableView()
+            }
+        }
         .onChange(of: deepLinkRouter.pendingAgeGuideCommand) { _, _ in
             handlePendingAgeGuideDeepLink()
         }
+        .onChange(of: deepLinkRouter.pendingMedications) { _, _ in
+            handlePendingMedicationsDeepLink()
+        }
         .onChange(of: deepLinkRouter.isDataReady) { _, ready in
-            if ready { handlePendingAgeGuideDeepLink() }
+            if ready {
+                handlePendingAgeGuideDeepLink()
+                handlePendingMedicationsDeepLink()
+            }
         }
         .confirmationDialog(
             "Delete memory?",
@@ -1020,6 +1040,76 @@ struct MilestonesView: View {
             }
         } message: {
             Text("This permanently removes the memory from the timeline.")
+        }
+    }
+
+    private func handlePendingMedicationsDeepLink() {
+        guard deepLinkRouter.pendingMedications,
+              deepLinkRouter.isDataReady,
+              profile != nil else { return }
+        deepLinkRouter.pendingMedications = false
+        showingMedications = true
+    }
+
+    @ViewBuilder
+    private var adultHealthSection: some View {
+        if let profile, profile.profileType == .adult {
+            Section {
+                NavigationLink {
+                    AdultHealthOverviewView(profile: profile)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "waveform.path.ecg.rectangle.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(Color.purple.gradient, in: RoundedRectangle(cornerRadius: 13))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Symptoms & Vitals")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Record symptoms, core vitals, pain, weight, and trends")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .accessibilityIdentifier("care.adult-health")
+            } header: {
+                AppSectionHeader(title: "Health log", subtitle: "Recorded values")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var medicationsSection: some View {
+        if let profile, profile.profileType.capabilities.supportsMedications {
+            Section {
+                NavigationLink {
+                    MedicationsView(profile: profile)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "pills.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(Color.red.gradient, in: RoundedRectangle(cornerRadius: 13))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Medications")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Schedules, dose history, reminders, and refill tracking")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .accessibilityIdentifier("care.medications")
+            } header: {
+                AppSectionHeader(title: "Daily care", subtitle: profile.name)
+            }
         }
     }
 
@@ -1098,7 +1188,7 @@ struct MilestonesView: View {
 
     @ViewBuilder
     private var ageGuidesLinkSection: some View {
-        if !isDogProfile {
+        if profile?.profileType.capabilities.supportsAgeGuide == true {
             Section {
                 NavigationLink {
                     AgeGuidesListView(
@@ -1151,7 +1241,7 @@ struct MilestonesView: View {
         ContentUnavailableView {
             Label(
                 milestones.isEmpty && automaticSummaries.isEmpty
-                    ? "A place for the little things"
+                    ? emptyTimelineTitle
                     : "No memories found",
                 systemImage: "heart.text.clipboard"
             )
@@ -1171,10 +1261,24 @@ struct MilestonesView: View {
         }
     }
 
+    private var emptyTimelineTitle: String {
+        switch profile?.profileType {
+        case .adult: "A place for moments and goals"
+        case .dog: "A place for favorite moments"
+        default: "A place for the little things"
+        }
+    }
+
     private var emptyTimelineDescription: String {
         if milestones.isEmpty && automaticSummaries.isEmpty {
-            let fallback = isDogProfile ? "your dog" : "your baby"
-            return "Capture \(profile?.name ?? fallback)'s firsts, funny moments, and little life changes here."
+            switch profile?.profileType {
+            case .adult:
+                return "Capture \(profile?.name ?? "this person")'s meaningful moments, goals, care changes, and life events here."
+            case .dog:
+                return "Capture \(profile?.name ?? "your dog")'s firsts, funny moments, and life changes here."
+            default:
+                return "Capture \(profile?.name ?? "your child")'s firsts, funny moments, and little life changes here."
+            }
         }
         return "Try clearing a filter or searching for something else."
     }
@@ -1256,7 +1360,8 @@ struct MilestonesView: View {
             automaticSummaries = []
             return
         }
-        guard !isDogProfile else {
+        guard profile.profileType == .child,
+              let birthDateValue = profile.birthDate else {
             events = []
             automaticSummaries = []
             return
@@ -1264,7 +1369,7 @@ struct MilestonesView: View {
 
         await Task.yield()
         do {
-            let birthDate = Calendar.current.startOfDay(for: profile.birthDate)
+            let birthDate = Calendar.current.startOfDay(for: birthDateValue)
             let endDate = Calendar.current.startOfNextDay(for: Date())
             let profileID = profile.id
             let fetchedEvents = try await automaticSummaryEvents(
@@ -1287,8 +1392,8 @@ struct MilestonesView: View {
         profileID: UUID,
         startDate: Date,
         endDate: Date
-    ) async throws -> [BabyEvent] {
-        var values: [BabyEvent] = []
+    ) async throws -> [CareEvent] {
+        var values: [CareEvent] = []
         for type in [
             EventType.sleep,
             .nursing,
@@ -1302,14 +1407,14 @@ struct MilestonesView: View {
             while !Task.isCancelled {
                 await AppInteractionMonitor.waitUntilIdle()
                 try Task.checkCancellation()
-                var descriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var descriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == profileID &&
                             event.startDate >= startDate &&
                             event.startDate < endDate &&
                             event.typeRawValue == typeRawValue
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate)]
                 )
                 descriptor.fetchLimit = 200
                 descriptor.fetchOffset = offset
@@ -1327,10 +1432,12 @@ struct MilestonesView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("\(profile?.name ?? "Baby")'s little big moments")
+                    Text(profile?.profileType == .adult
+                        ? "\(profile?.name ?? "Adult")'s moments and goals"
+                        : "\(profile?.name ?? "Child")'s little big moments")
                         .font(.title2.bold())
-                    if let profile {
-                        Text("\(profile.name) is \(DateFormatting.age(from: profile.birthDate))")
+                    if let profile, let birthDate = profile.birthDate {
+                        Text("\(profile.name) is \(DateFormatting.age(from: birthDate))")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -2197,13 +2304,14 @@ private struct PhotoThumbnailImage: View {
 struct MilestoneEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
     @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
     @StateObject private var profileService = ProfileService.shared
 
     let milestone: MilestoneEntry?
+    let targetProfileID: UUID?
     @State private var title: String
     @State private var date: Date
     @State private var approximateDate: Bool
@@ -2222,8 +2330,13 @@ struct MilestoneEditorView: View {
         )
     }
 
-    init(milestone: MilestoneEntry? = nil, template: MilestoneTemplate? = nil) {
+    init(
+        milestone: MilestoneEntry? = nil,
+        template: MilestoneTemplate? = nil,
+        profileID: UUID? = nil
+    ) {
         self.milestone = milestone
+        targetProfileID = profileID
         let attachmentIDs = milestone?.photoAttachmentIDs ?? []
         let milestonePhotoKind = PhotoAttachmentOwnerKind.milestone.rawValue
         _photoAttachments = Query(FetchDescriptor<PhotoAttachment>(
@@ -2242,13 +2355,24 @@ struct MilestoneEditorView: View {
         _attachmentIDs = State(initialValue: milestone?.photoAttachmentIDs ?? [])
     }
 
-    private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var profile: CareProfile? {
+        let profileID = milestone?.profileID ?? targetProfileID
+        if let profileID,
+           let matchingProfile = profiles.first(where: { $0.id == profileID }) {
+            return matchingProfile
+        }
+        return profileService.selectedProfile(in: profiles)
+    }
     private var activeProfileType: CareProfileType { profile?.profileType ?? .child }
     private var availableCategories: [MilestoneCategory] {
         MilestoneCategory.categories(for: activeProfileType, preserving: category)
     }
     private var suggestedTemplates: [MilestoneTemplate] {
-        activeProfileType == .dog ? MilestoneTemplate.dogSuggested : MilestoneTemplate.suggested
+        switch activeProfileType {
+        case .child: MilestoneTemplate.suggested
+        case .adult: MilestoneTemplate.adultSuggested
+        case .dog: MilestoneTemplate.dogSuggested
+        }
     }
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -2371,22 +2495,28 @@ struct MilestoneEditorView: View {
     }
 
     private var dateRange: ClosedRange<Date> {
+        let fallbackYears = switch profile?.profileType {
+        case .adult: -120
+        case .dog: -30
+        default: -5
+        }
         let lowerBound = profile?.birthDate ?? Calendar.current.date(
             byAdding: .year,
-            value: -5,
+            value: fallbackYears,
             to: Date()
         ) ?? Date()
         return min(lowerBound, Date())...Date()
     }
 
-    private func agePreview(profile: BabyProfile) -> String {
+    private func agePreview(profile: CareProfile) -> String {
         let preview = MilestoneEntry(
             title: title,
             date: date,
             approximateDate: approximateDate,
             category: category
         )
-        return preview.ageSentence(babyName: profile.name, birthDate: profile.birthDate)
+        guard let birthDate = profile.birthDate else { return "Date recorded" }
+        return preview.ageSentence(babyName: profile.name, birthDate: birthDate)
     }
 
     private func save() {
@@ -2495,7 +2625,7 @@ struct MilestoneEditorView: View {
 struct MilestoneDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
     let milestone: MilestoneEntry
     @State private var showingEditor = false
@@ -2515,7 +2645,7 @@ struct MilestoneDetailView: View {
         ))
     }
 
-    private var profile: BabyProfile? {
+    private var profile: CareProfile? {
         if let profileID = milestone.profileID,
            let matching = profiles.first(where: { $0.id == profileID }) {
             return matching
@@ -2546,10 +2676,10 @@ struct MilestoneDetailView: View {
                         Text(milestone.approximateDate ? "Around \(dateText)" : dateText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        if let profile {
+                        if let profile, let birthDate = profile.birthDate {
                             Text(milestone.ageSentence(
                                 babyName: profile.name,
-                                birthDate: profile.birthDate
+                                birthDate: birthDate
                             ))
                             .font(.headline)
                             .foregroundStyle(MilestonePalette.accent)
@@ -2681,6 +2811,10 @@ extension MilestoneCategory {
             categories = [
                 .firsts, .motor, .social, .communication, .feeding, .sleep,
                 .growth, .health, .travel, .family, .funny, .diapering, .custom
+            ]
+        case .adult:
+            categories = [
+                .health, .family, .travel, .favoriteThings, .funny, .custom
             ]
         case .dog:
             categories = [

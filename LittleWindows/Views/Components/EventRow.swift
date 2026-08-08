@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct EventRow: View {
-    let event: BabyEvent
+    let event: CareEvent
 
     var body: some View {
         HStack(spacing: 14) {

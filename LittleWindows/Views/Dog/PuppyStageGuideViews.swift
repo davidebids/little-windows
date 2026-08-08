@@ -183,7 +183,7 @@ struct PuppyStageGuideDetailView: View {
         }
         .sheet(item: $selectedMilestoneTemplate) { template in
             NavigationStack {
-                MilestoneEditorView(template: template)
+                MilestoneEditorView(template: template, profileID: profile?.id)
             }
         }
         .task {

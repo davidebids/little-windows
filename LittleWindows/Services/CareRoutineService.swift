@@ -655,6 +655,8 @@ private extension CareRoutineService {
                 ),
                 medicineTemplate(scope: .profile, profileType: .child)
             ]
+        case .adult:
+            return [medicineTemplate(scope: .profile, profileType: .adult)]
         case .dog:
             return [
                 CareRoutineTemplate(

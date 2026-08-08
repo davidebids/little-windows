@@ -79,8 +79,8 @@ enum WidgetSnapshotService {
     private static var pendingFoodRefreshTask: Task<Void, Never>?
 
     static func refresh(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         prediction: SleepPrediction?,
         solidsState: SolidsProfileState? = nil
     ) {
@@ -98,7 +98,7 @@ enum WidgetSnapshotService {
 
     @discardableResult
     static func refreshActiveTimer(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         at date: Date = Date()
     ) -> ActiveTimerSnapshot {
         var snapshot = read()
@@ -123,7 +123,7 @@ enum WidgetSnapshotService {
         profileBirthDate: Date? = nil,
         solidsWorkspaceActivated: Bool = false,
         babyName: String,
-        events: [BabyEvent],
+        events: [CareEvent],
         prediction: SleepPrediction?,
         now: Date = Date(),
         calendar: Calendar = .current
@@ -231,6 +231,18 @@ enum WidgetSnapshotService {
                 metric("activity", "Activity", "\(daily.activityCount)", "figure.play", "green", .activity),
                 metric("custom", "Custom", "\(daily.customCount)", "sparkles", "gray", .custom)
             ]
+        case .adult:
+            return [
+                metric("medicine", "Medicine", "\(daily.medicineNames.count)", "cross.case.fill", "red", .medicine),
+                metric("symptoms", "Symptoms", "\(daily.symptomCount)", "waveform.path.ecg", "orange", .symptom),
+                metric("blood-pressure", "Blood pressure", "\(daily.bloodPressureCount)", "heart.text.square.fill", "red", .bloodPressure),
+                metric("heart-rate", "Heart rate", "\(daily.heartRateCount)", "heart.fill", "pink", .heartRate),
+                metric("oxygen", "Oxygen", "\(daily.oxygenSaturationCount)", "lungs.fill", "cyan", .oxygenSaturation),
+                metric("glucose", "Glucose", "\(daily.glucoseCount)", "drop.triangle.fill", "purple", .glucose),
+                metric("temperature", "Temp", "\(daily.temperatureCount)", "thermometer.medium", "orange", .temperature),
+                metric("pain", "Pain", "\(daily.painCount)", "bolt.heart.fill", "indigo", .pain),
+                metric("custom", "Custom", "\(daily.customCount)", "sparkles", "gray", .custom)
+            ]
         case .dog:
             return [
                 metric("food", "Food", "\(daily.dogFoodCount)", "fork.knife", "orange", .food),
@@ -271,7 +283,7 @@ enum WidgetSnapshotService {
     static func makeQuickActions(
         profileID: UUID? = nil,
         profileType: CareProfileType,
-        events: [BabyEvent],
+        events: [CareEvent],
         activeTimer: ActiveTimerSnapshot? = nil,
         pinnedActionIDs: [String] = [],
         now: Date = Date(),
@@ -288,7 +300,7 @@ enum WidgetSnapshotService {
         }
         var activeTypes: Set<EventType> = []
         var stats = candidates.map { _ in (recentCount: 0, lastDate: Optional<Date>.none) }
-        var repeatSource: BabyEvent?
+        var repeatSource: CareEvent?
 
         for event in events {
             guard event.matchesProfile(profileID) else { continue }
@@ -548,7 +560,7 @@ enum WidgetSnapshotService {
     }
 
     static func activeSnapshot(
-        event: BabyEvent,
+        event: CareEvent,
         profileID: UUID? = nil,
         babyName: String,
         additionalActiveCount: Int,
@@ -663,7 +675,7 @@ enum WidgetSnapshotService {
         var eventType: EventType
         var startsTimer: Bool
         var baseScore: Double
-        var matches: (BabyEvent) -> Bool
+        var matches: (CareEvent) -> Bool
     }
 
     private static func quickActionCandidates(for profileType: CareProfileType) -> [QuickLogActionCandidate] {
@@ -682,6 +694,17 @@ enum WidgetSnapshotService {
                 },
                 candidate("medicine", "Medicine", nil, "cross.case.fill", "red", "quick-log/medicine", .medicine, baseScore: 5.2),
                 candidate("temperature", "Temp", nil, "thermometer.medium", "red", "quick-log/temperature", .temperature, baseScore: 4.8)
+            ]
+        case .adult:
+            [
+                candidate("medicine", "Medicine", nil, "cross.case.fill", "red", "quick-log/medicine", .medicine, baseScore: 8.0),
+                candidate("symptom", "Symptom", nil, "waveform.path.ecg", "orange", "quick-log/symptom", .symptom, baseScore: 7.5),
+                candidate("blood-pressure", "Blood pressure", nil, "heart.text.square.fill", "red", "quick-log/blood-pressure", .bloodPressure, baseScore: 7.0),
+                candidate("heart-rate", "Heart rate", nil, "heart.fill", "pink", "quick-log/heart-rate", .heartRate, baseScore: 6.8),
+                candidate("oxygen", "Oxygen", nil, "lungs.fill", "cyan", "quick-log/oxygen-saturation", .oxygenSaturation, baseScore: 6.6),
+                candidate("glucose", "Glucose", nil, "drop.triangle.fill", "purple", "quick-log/glucose", .glucose, baseScore: 6.4),
+                candidate("temperature", "Temp", nil, "thermometer.medium", "orange", "quick-log/temperature", .temperature, baseScore: 6.0),
+                candidate("pain", "Pain", nil, "bolt.heart.fill", "indigo", "quick-log/pain", .pain, baseScore: 5.8)
             ]
         case .dog:
             [
@@ -710,7 +733,7 @@ enum WidgetSnapshotService {
         _ eventType: EventType,
         startsTimer: Bool = false,
         baseScore: Double,
-        matches: @escaping (BabyEvent) -> Bool
+        matches: @escaping (CareEvent) -> Bool
     ) -> QuickLogActionCandidate {
         QuickLogActionCandidate(
             action: QuickLogActionSnapshot(
@@ -752,7 +775,7 @@ enum WidgetSnapshotService {
         ) { $0.type == eventType }
     }
 
-    private static func groupedCareSessions(_ events: [BabyEvent]) -> [Date] {
+    private static func groupedCareSessions(_ events: [CareEvent]) -> [Date] {
         let dates = events.filter {
             $0.type == .feed || $0.type == .nursing
         }.map(\.startDate).sorted()
@@ -766,7 +789,7 @@ enum WidgetSnapshotService {
         return sessions
     }
 
-    private static func runningLabel(for event: BabyEvent) -> String {
+    private static func runningLabel(for event: CareEvent) -> String {
         switch event.type {
         case .sleep: "Sleeping"
         case .nursing: "Nursing"

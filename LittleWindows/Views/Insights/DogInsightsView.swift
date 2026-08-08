@@ -3,20 +3,20 @@ import SwiftUI
 
 struct DogInsightsView: View {
     let profile: CareProfile?
-    let events: [BabyEvent]
+    let events: [CareEvent]
     let period: ClosedRange<Date>
 
-    private var periodEvents: [BabyEvent] {
+    private var periodEvents: [CareEvent] {
         events.filter { event in
             let day = event.localStartDay()
             return day >= period.lowerBound && day <= period.upperBound && !event.isTimerDraft
         }
     }
 
-    private var walks: [BabyEvent] { periodEvents.filter { $0.type == .walk } }
-    private var pottyEvents: [BabyEvent] { periodEvents.filter { $0.type == .potty } }
-    private var trainingEvents: [BabyEvent] { periodEvents.filter { $0.type == .training } }
-    private var symptomEvents: [BabyEvent] { periodEvents.filter { $0.type == .symptom } }
+    private var walks: [CareEvent] { periodEvents.filter { $0.type == .walk } }
+    private var pottyEvents: [CareEvent] { periodEvents.filter { $0.type == .potty } }
+    private var trainingEvents: [CareEvent] { periodEvents.filter { $0.type == .training } }
+    private var symptomEvents: [CareEvent] { periodEvents.filter { $0.type == .symptom } }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -165,7 +165,7 @@ struct DogInsightsView: View {
 
     private func dailyPoints(
         kind: String = "Potty",
-        value: ([BabyEvent]) -> Double
+        value: ([CareEvent]) -> Double
     ) -> [DogChartPoint] {
         var result: [DogChartPoint] = []
         var day = Calendar.current.startOfDay(for: period.lowerBound)

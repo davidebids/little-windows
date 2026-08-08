@@ -33,7 +33,7 @@ struct QuickLogWidget: Widget {
                 }
         }
         .configurationDisplayName("Quick Log")
-        .description("Start common timers with one tap.")
+        .description("Open common care actions with one tap.")
         .supportedFamilies([.systemMedium])
     }
 }
@@ -54,7 +54,7 @@ private struct QuickLogWidgetView: View {
             Link(destination: URL(string: "littlewindows://care")!) {
                 CareProfileRequiredWidgetState(
                     title: "Quick care logging",
-                    detail: "Add a child or dog to start timers and record care.",
+                    detail: "Add a care profile to start timers and record care.",
                     systemImage: "bolt.heart.fill"
                 )
             }

@@ -32,9 +32,9 @@ enum SyncDiagnosticsService {
     }
 
     static func snapshot(context: ModelContext) -> SyncDiagnosticSnapshot {
-        let profiles = (try? context.fetch(FetchDescriptor<BabyProfile>())) ?? []
+        let profiles = (try? context.fetch(FetchDescriptor<CareProfile>())) ?? []
         let profileIDs = Set(profiles.map(\.id))
-        let eventCount = count(BabyEvent.self, context: context)
+        let eventCount = count(CareEvent.self, context: context)
         let recordCount = count(SleepPredictionRecord.self, context: context)
         let milestoneCount = count(MilestoneEntry.self, context: context)
         let appointmentCount = count(DoctorAppointment.self, context: context)
@@ -45,10 +45,15 @@ enum SyncDiagnosticsService {
         let solidFoodEventItemCount = count(SolidFoodEventItem.self, context: context)
         let solidAllergenProgressCount = count(SolidAllergenProgress.self, context: context)
         let plannedSolidMealCount = count(PlannedSolidMeal.self, context: context)
+        let medicationCount = count(Medication.self, context: context)
+        let medicationRegimenCount = count(MedicationRegimen.self, context: context)
+        let medicationPhaseCount = count(MedicationSchedulePhase.self, context: context)
+        let medicationDoseCount = count(MedicationDoseRecord.self, context: context)
+        let medicationSupplyLogCount = count(MedicationSupplyLog.self, context: context)
 
         let orphanedCount =
             orphanedCount(total: eventCount, profileIDs: profileIDs) { profileID in
-                count(BabyEvent.self, profileID: profileID, context: context)
+                count(CareEvent.self, profileID: profileID, context: context)
             }
             + orphanedCount(total: recordCount, profileIDs: profileIDs) { profileID in
                 count(SleepPredictionRecord.self, profileID: profileID, context: context)
@@ -80,6 +85,11 @@ enum SyncDiagnosticsService {
             + orphanedCount(total: plannedSolidMealCount, profileIDs: profileIDs) { profileID in
                 count(PlannedSolidMeal.self, profileID: profileID, context: context)
             }
+            + orphanedProfileScopedCount(Medication.self, profileIDs: profileIDs, context: context)
+            + orphanedProfileScopedCount(MedicationRegimen.self, profileIDs: profileIDs, context: context)
+            + orphanedProfileScopedCount(MedicationSchedulePhase.self, profileIDs: profileIDs, context: context)
+            + orphanedProfileScopedCount(MedicationDoseRecord.self, profileIDs: profileIDs, context: context)
+            + orphanedProfileScopedCount(MedicationSupplyLog.self, profileIDs: profileIDs, context: context)
 
         let duplicateChildProfiles = Dictionary(grouping: profiles.filter {
             !$0.isArchived
@@ -106,6 +116,11 @@ enum SyncDiagnosticsService {
                 SyncDiagnosticCount(name: "Solid food event items", count: solidFoodEventItemCount),
                 SyncDiagnosticCount(name: "Solid allergen progress", count: solidAllergenProgressCount),
                 SyncDiagnosticCount(name: "Planned solid meals", count: plannedSolidMealCount),
+                SyncDiagnosticCount(name: "Medications", count: medicationCount),
+                SyncDiagnosticCount(name: "Medication regimens", count: medicationRegimenCount),
+                SyncDiagnosticCount(name: "Medication phases", count: medicationPhaseCount),
+                SyncDiagnosticCount(name: "Medication doses", count: medicationDoseCount),
+                SyncDiagnosticCount(name: "Medication supply logs", count: medicationSupplyLogCount),
                 SyncDiagnosticCount(name: "Households", count: count(Household.self, context: context)),
                 SyncDiagnosticCount(name: "Food stores", count: count(FoodStore.self, context: context)),
                 SyncDiagnosticCount(name: "Store sections", count: count(FoodStoreSection.self, context: context)),
@@ -148,12 +163,22 @@ enum SyncDiagnosticsService {
         max(0, total - profileIDs.reduce(0) { $0 + validCount($1) })
     }
 
+    private static func orphanedProfileScopedCount<Record: PersistentModel & ProfileScopedRecord>(
+        _ type: Record.Type,
+        profileIDs: Set<UUID>,
+        context: ModelContext
+    ) -> Int {
+        ((try? context.fetch(FetchDescriptor<Record>())) ?? []).filter {
+            $0.profileID.map(profileIDs.contains) != true
+        }.count
+    }
+
     private static func count(
-        _ type: BabyEvent.Type,
+        _ type: CareEvent.Type,
         profileID: UUID,
         context: ModelContext
     ) -> Int {
-        (try? context.fetchCount(FetchDescriptor<BabyEvent>(
+        (try? context.fetchCount(FetchDescriptor<CareEvent>(
             predicate: #Predicate { $0.profileID == profileID }
         ))) ?? 0
     }

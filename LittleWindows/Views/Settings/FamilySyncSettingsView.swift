@@ -5,7 +5,7 @@ import UIKit
 
 struct FamilySyncSettingsView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @StateObject private var viewModel = FamilySyncViewModel()
     @AppStorage("familySyncActivityNotificationsEnabled")
     private var activityNotificationsEnabled = true
@@ -21,6 +21,14 @@ struct FamilySyncSettingsView: View {
 
     private var hasActiveCareProfile: Bool {
         profiles.contains { !$0.isArchived }
+    }
+
+    private var sharedProfileCount: Int {
+        profiles.filter { !$0.isArchived && $0.sharingScope == .family }.count
+    }
+
+    private var privateProfileCount: Int {
+        profiles.filter { !$0.isArchived && $0.sharingScope == .privateOnly }.count
     }
 
     var body: some View {
@@ -47,9 +55,16 @@ struct FamilySyncSettingsView: View {
                 Text("Family Sync uses an iCloud shared record between Apple Accounts. It is separate from Apple Family Sharing membership.")
                     .foregroundStyle(.secondary)
                 Text(hasActiveCareProfile
-                    ? "Home, Food, and care profile data are shared with accepted caregivers."
-                    : "Home, Food, trips, returns, reminders, and other household data are shared with accepted people. Care profile data, if present now or later, uses the same share.")
+                    ? "Home and Food data are shared with accepted caregivers. Only care profiles you explicitly opt in—and their care records—are included."
+                    : "Home, Food, trips, returns, reminders, and other household data are shared with accepted people. New care profiles stay private until you opt them in.")
                     .foregroundStyle(.secondary)
+                if hasActiveCareProfile {
+                    LabeledContent("Shared care profiles", value: "\(sharedProfileCount)")
+                    LabeledContent("Private care profiles", value: "\(privateProfileCount)")
+                    Text("Change a profile’s setting under Settings → Care Profiles. Private profile data stays out of the family share and remains in this device’s local app data and backups while Family Sync is active.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Text("Private iCloud Sync remains available for devices signed into the same Apple Account.")
                     .foregroundStyle(.secondary)
             }
