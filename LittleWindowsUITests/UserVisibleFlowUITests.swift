@@ -3,6 +3,51 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testMedicationEditorKeepsLabelsVisibleForPopulatedValues() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://medications")
+
+        XCTAssertTrue(app.navigationBars["Medications"].waitForExistence(timeout: 8))
+        let addMedication = app.buttons["Add Medication"]
+        XCTAssertTrue(addMedication.waitForExistence(timeout: 4))
+        addMedication.tap()
+
+        XCTAssertTrue(app.navigationBars["Add Medication"].waitForExistence(timeout: 4))
+        for label in ["Name", "Strength", "Strength unit", "Dose", "Dose unit"] {
+            XCTAssertTrue(
+                app.staticTexts[label].exists,
+                "The \(label) label should remain visible independently of its input value."
+            )
+        }
+
+        let supplyToggle = app.switches["Track quantity on hand"]
+        for _ in 0..<5 where !supplyToggle.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(supplyToggle.waitForExistence(timeout: 3))
+        supplyToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let supplyEnabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"),
+            object: supplyToggle
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [supplyEnabled], timeout: 3), .completed)
+
+        let quantityLabel = app.staticTexts["Quantity on hand"]
+        for _ in 0..<3 where !quantityLabel.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(quantityLabel.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Refill alert at"].exists)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Medication editor persistent labels"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testHouseholdOnlySetupAndCareDeepLinkPrompt() {
         continueAfterFailure = false
 

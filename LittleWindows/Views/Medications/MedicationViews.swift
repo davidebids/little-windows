@@ -631,15 +631,21 @@ private struct MedicationDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Quantity", value: $supply, format: .number)
-                        .keyboardType(.decimalPad)
+                    LabeledContent("Quantity on hand") {
+                        TextField("Required", value: $supply, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                     Picker("Reason", selection: $supplyReason) {
                         ForEach(supplyUpdateReasons) { reason in
                             Text(reason.displayName).tag(reason)
                         }
                     }
-                    TextField("Notes (optional)", text: $supplyNotes, axis: .vertical)
-                        .lineLimit(2...4)
+                    LabeledContent("Notes") {
+                        TextField("Optional", text: $supplyNotes, axis: .vertical)
+                            .lineLimit(2...4)
+                            .multilineTextAlignment(.trailing)
+                    }
                 } header: {
                     Text("Supply on hand")
                 } footer: {
@@ -797,22 +803,34 @@ private struct MedicationEditorView: View {
     var body: some View {
         Form {
             Section("Medication") {
-                TextField("Medication name", text: $name)
+                LabeledContent("Name") {
+                    TextField("Required", text: $name)
+                        .multilineTextAlignment(.trailing)
+                }
                 Picker("Form", selection: $form) {
                     ForEach(MedicationForm.allCases) { Text($0.displayName).tag($0) }
                 }
-                HStack {
-                    TextField("Strength", value: $strength, format: .number)
+                LabeledContent("Strength") {
+                    TextField("Optional", value: $strength, format: .number)
                         .keyboardType(.decimalPad)
-                    TextField("Unit", text: $strengthUnit)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Strength unit") {
+                    TextField("Optional", text: $strengthUnit)
                         .multilineTextAlignment(.trailing)
                 }
                 Picker("Route", selection: $route) {
                     ForEach(MedicationRoute.allCases) { Text($0.displayName).tag($0) }
                 }
-                TextField("What it is for (optional)", text: $reasonForTaking)
-                TextField("Instructions (optional)", text: $instructions, axis: .vertical)
-                    .lineLimit(2...4)
+                LabeledContent("Purpose") {
+                    TextField("Optional", text: $reasonForTaking)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Instructions") {
+                    TextField("Optional", text: $instructions, axis: .vertical)
+                        .lineLimit(2...4)
+                        .multilineTextAlignment(.trailing)
+                }
             }
 
             Section("Schedule") {
@@ -821,10 +839,13 @@ private struct MedicationEditorView: View {
                 }
                 DatePicker("Starts", selection: $startDate, displayedComponents: .date)
                     .environment(\.timeZone, scheduleTimeZone)
-                HStack {
-                    TextField("Dose", value: $doseAmount, format: .number)
+                LabeledContent("Dose") {
+                    TextField("Required", value: $doseAmount, format: .number)
                         .keyboardType(.decimalPad)
-                    TextField("Dose unit", text: $doseUnit)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Dose unit") {
+                    TextField("Required", text: $doseUnit)
                         .multilineTextAlignment(.trailing)
                 }
                 scheduleFields
@@ -874,16 +895,28 @@ private struct MedicationEditorView: View {
             Section("Supply and refill") {
                 Toggle("Track quantity on hand", isOn: $tracksSupply)
                 if tracksSupply {
-                    TextField("Quantity on hand", value: $currentSupply, format: .number)
-                        .keyboardType(.decimalPad)
-                    TextField("Show refill soon at", value: $refillThreshold, format: .number)
-                        .keyboardType(.decimalPad)
+                    LabeledContent("Quantity on hand") {
+                        TextField("Required", value: $currentSupply, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Refill alert at") {
+                        TextField("Required", value: $refillThreshold, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
             }
 
             Section("Care team (optional)") {
-                TextField("Prescriber", text: $prescriber)
-                TextField("Pharmacy", text: $pharmacy)
+                LabeledContent("Prescriber") {
+                    TextField("Optional", text: $prescriber)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Pharmacy") {
+                    TextField("Optional", text: $pharmacy)
+                        .multilineTextAlignment(.trailing)
+                }
             }
         }
         .navigationTitle(medication == nil ? "Add Medication" : "Edit Medication")
@@ -932,13 +965,19 @@ private struct MedicationEditorView: View {
             Stepper("\(cycleOffDays) days off", value: $cycleOffDays, in: 1...90)
         case .alternating:
             Stepper("Switch every \(alternateEveryDays) day(s)", value: $alternateEveryDays, in: 1...14)
-            TextField("Alternate dose", value: $alternateDose, format: .number)
-                .keyboardType(.decimalPad)
+            LabeledContent("Alternate dose") {
+                TextField("Required", value: $alternateDose, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+            }
         case .taper:
             Stepper("\(taperPhaseCount) phases", value: $taperPhaseCount, in: 2...12)
             Stepper("Change every \(taperStepDays) days", value: $taperStepDays, in: 1...30)
-            TextField("Reduce dose each phase", value: $taperReduction, format: .number)
-                .keyboardType(.decimalPad)
+            LabeledContent("Reduction per phase") {
+                TextField("Required", value: $taperReduction, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+            }
         case .asNeeded:
             Stepper("At least \(minimumHoursBetweenDoses.formatted(.number.precision(.fractionLength(0...1)))) hours apart", value: $minimumHoursBetweenDoses, in: 0.5...48, step: 0.5)
             Stepper("Up to \(maximumDosesPerDay) doses per day", value: $maximumDosesPerDay, in: 1...24)

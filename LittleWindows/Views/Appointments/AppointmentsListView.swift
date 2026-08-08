@@ -307,7 +307,10 @@ struct AppointmentEditorView: View {
     var body: some View {
         Form {
             Section("Appointment") {
-                TextField("Title", text: $title)
+                LabeledContent("Title") {
+                    TextField("Required", text: $title)
+                        .multilineTextAlignment(.trailing)
+                }
                 Picker("Type", selection: $appointmentType) {
                     ForEach(appointmentTypes) {
                         Label($0.displayName, systemImage: $0.systemImage).tag($0)
@@ -364,18 +367,36 @@ struct AppointmentEditorView: View {
             }
 
             Section(profileType == .dog ? "Vet and place" : "People and place") {
-                TextField(profileType == .dog ? "Veterinarian name" : "Doctor name", text: $doctorName)
-                TextField("Clinic name", text: $clinicName)
-                TextField("Location name", text: $locationName)
-                TextField("Address", text: $address, axis: .vertical)
-                    .lineLimit(2...3)
-                TextField("Phone number", text: $phoneNumber)
-                    .keyboardType(.phonePad)
+                LabeledContent(profileType == .dog ? "Veterinarian" : "Doctor") {
+                    TextField("Optional", text: $doctorName)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Clinic") {
+                    TextField("Optional", text: $clinicName)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Location") {
+                    TextField("Optional", text: $locationName)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Address") {
+                    TextField("Optional", text: $address, axis: .vertical)
+                        .lineLimit(2...3)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Phone") {
+                    TextField("Optional", text: $phoneNumber)
+                        .keyboardType(.phonePad)
+                        .multilineTextAlignment(.trailing)
+                }
             }
 
             Section("Visit prep") {
-                TextField("Notes", text: $notes, axis: .vertical)
-                    .lineLimit(3...6)
+                LabeledContent("Notes") {
+                    TextField("Optional", text: $notes, axis: .vertical)
+                        .lineLimit(3...6)
+                        .multilineTextAlignment(.trailing)
+                }
             }
 
             AppointmentQuestionsEditor(questionDrafts: $questionDrafts)

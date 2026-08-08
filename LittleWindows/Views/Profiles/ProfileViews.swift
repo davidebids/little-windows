@@ -326,7 +326,10 @@ struct ProfileEditorView: View {
                     }
                     .pickerStyle(.segmented)
                 }
-                TextField(namePrompt, text: $name)
+                LabeledContent("Name") {
+                    TextField(namePrompt, text: $name)
+                        .multilineTextAlignment(.trailing)
+                }
                 if profileType == .adult {
                     Picker("Relationship", selection: $adultRelationship) {
                         ForEach(AdultCareRelationship.allCases) { relationship in

@@ -107,14 +107,26 @@ struct AppointmentDetailView: View {
                             }
                         }
                     }
-                TextField("Visit summary", text: $visitSummaryDraft, axis: .vertical)
-                    .lineLimit(3...8)
-                TextField("Follow-up instructions", text: $followUpInstructionsDraft, axis: .vertical)
-                    .lineLimit(3...8)
-                TextField("Vaccines given", text: $vaccinesGivenDraft, axis: .vertical)
-                    .lineLimit(2...5)
-                TextField("Medications discussed", text: $medicationsDiscussedDraft, axis: .vertical)
-                    .lineLimit(2...5)
+                LabeledContent("Summary") {
+                    TextField("Optional", text: $visitSummaryDraft, axis: .vertical)
+                        .lineLimit(3...8)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Follow-up") {
+                    TextField("Optional", text: $followUpInstructionsDraft, axis: .vertical)
+                        .lineLimit(3...8)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Vaccines given") {
+                    TextField("Optional", text: $vaccinesGivenDraft, axis: .vertical)
+                        .lineLimit(2...5)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Medications discussed") {
+                    TextField("Optional", text: $medicationsDiscussedDraft, axis: .vertical)
+                        .lineLimit(2...5)
+                        .multilineTextAlignment(.trailing)
+                }
             }
 
             currentMedicationsSection

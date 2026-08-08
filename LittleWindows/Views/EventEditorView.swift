@@ -744,7 +744,10 @@ struct EventEditorView: View {
                 }
             }
             if type == .custom || (type == .activity && activityType == .custom) {
-                TextField("Title", text: $title)
+                LabeledContent("Title") {
+                    TextField("Required", text: $title)
+                        .multilineTextAlignment(.trailing)
+                }
             }
             DatePicker("Start", selection: $startDate)
                 .environment(\.timeZone, startTimeZone)
@@ -1203,9 +1206,15 @@ struct EventEditorView: View {
                 }
             } else {
                 Section("Symptom") {
-                    TextField("Symptom", text: $symptomName)
+                    LabeledContent("Symptom") {
+                        TextField("Required", text: $symptomName)
+                            .multilineTextAlignment(.trailing)
+                    }
                     Stepper("Severity: \(symptomSeverity)/10", value: $symptomSeverity, in: 0...10)
-                    TextField("Body location (optional)", text: $symptomBodyLocation)
+                    LabeledContent("Body location") {
+                        TextField("Optional", text: $symptomBodyLocation)
+                            .multilineTextAlignment(.trailing)
+                    }
                     Toggle("Resolved", isOn: $symptomResolved)
                     healthTrackingFooter
                 }
@@ -1269,13 +1278,16 @@ struct EventEditorView: View {
         case .glucose:
             if isDogProfile {
                 Section("Glucose") {
-                    HStack {
-                        TextField("Value", value: $dogGlucoseValue, format: .number)
-                            .keyboardType(.decimalPad)
-                        Picker("Unit", selection: $dogGlucoseUnit) {
-                            ForEach(DogGlucoseUnit.allCases) { Text($0.displayName).tag($0) }
+                    LabeledContent("Reading") {
+                        HStack {
+                            TextField("Value", value: $dogGlucoseValue, format: .number)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Picker("Unit", selection: $dogGlucoseUnit) {
+                                ForEach(DogGlucoseUnit.allCases) { Text($0.displayName).tag($0) }
+                            }
+                            .labelsHidden()
                         }
-                        .labelsHidden()
                     }
                     Picker("Relation to meal", selection: $dogGlucoseMealRelation) {
                         ForEach(DogMealRelation.allCases) { Text($0.displayName).tag($0) }
@@ -1286,13 +1298,16 @@ struct EventEditorView: View {
                 }
             } else {
                 Section("Blood Glucose") {
-                    HStack {
-                        TextField("Value", value: $bloodGlucoseValue, format: .number.precision(.fractionLength(0...1)))
-                            .keyboardType(.decimalPad)
-                        Picker("Unit", selection: $bloodGlucoseUnit) {
-                            ForEach(BloodGlucoseUnit.allCases) { Text($0.displayName).tag($0) }
+                    LabeledContent("Reading") {
+                        HStack {
+                            TextField("Value", value: $bloodGlucoseValue, format: .number.precision(.fractionLength(0...1)))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Picker("Unit", selection: $bloodGlucoseUnit) {
+                                ForEach(BloodGlucoseUnit.allCases) { Text($0.displayName).tag($0) }
+                            }
+                            .labelsHidden()
                         }
-                        .labelsHidden()
                     }
                     Picker("Context", selection: $bloodGlucoseContext) {
                         ForEach(BloodGlucoseContext.allCases) { Text($0.displayName).tag($0) }
@@ -1303,7 +1318,10 @@ struct EventEditorView: View {
         case .pain:
             Section("Pain") {
                 Stepper("Pain: \(painScore)/10", value: $painScore, in: 0...10)
-                TextField("Location (optional)", text: $painLocation)
+                LabeledContent("Location") {
+                    TextField("Optional", text: $painLocation)
+                        .multilineTextAlignment(.trailing)
+                }
                 healthTrackingFooter
             }
         case .custom:

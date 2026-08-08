@@ -1503,10 +1503,15 @@ private struct FirstRunOnboardingView: View {
                 }
                 .pickerStyle(.segmented)
 
-                TextField(profileNamePrompt, text: $profileName)
-                    .textContentType(.name)
-                    .submitLabel(.done)
-                    .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Name")
+                        .font(.subheadline)
+
+                    TextField(profileNamePrompt, text: $profileName)
+                        .textContentType(.name)
+                        .submitLabel(.done)
+                        .textFieldStyle(.roundedBorder)
+                }
 
                 if profileType == .adult {
                     Picker("Relationship", selection: $adultRelationship) {
