@@ -1,6 +1,6 @@
 # Little Windows
 
-Little Windows is a local-first SwiftUI care tracker for children and dogs. It targets iOS 17+, stores the main history with SwiftData, uses App Group snapshots for widgets and Live Activities, and can sync signed builds through Apple-native CloudKit.
+Little Windows is a local-first SwiftUI home organizer and optional care tracker for children and dogs. It targets iOS 17+, stores the main history with SwiftData, uses App Group snapshots for widgets and Live Activities, and can sync signed builds through Apple-native CloudKit.
 
 The app is built around dense daily care workflows: quick logging, active timers, customizable Today actions, sleep planning, routines, reports, guides, appointments, Food & Home lists, and private or shared iCloud-backed data modes.
 
@@ -10,11 +10,13 @@ The app is built around dense daily care workflows: quick logging, active timers
 2. Select the `LittleWindows` scheme.
 3. Run on an iOS 17+ simulator or signed device.
 
-First launch presents onboarding for a new empty store. Returning users can choose **Restore from iCloud** to wait for data previously synced through Private iCloud Sync on the same Apple Account, or open Settings to import a JSON backup. The iCloud option does not create or overwrite data when no synced profiles arrive, and it does not represent a separate server-side backup snapshot. If someone completes new setup before their original profile finishes downloading, the app can remove the newer empty matching setup shell in favor of the historical profile; it leaves profiles alone when both own history. The caregiver name for new entries uses iCloud key-value storage so it can follow the same Apple Account without becoming a shared Family Sync household value; older installs can recover one unambiguous non-default name from synced care history. The app does not create default child profiles, care history, shopping lists, or personal archives automatically. SwiftUI previews and debug-only seed helpers use neutral sample child and dog data.
+First launch presents onboarding for a new empty store. A user can begin with **Home, Food & Night Light** without creating a child or dog, or add a care profile during setup. Household-only mode presents Today, Home, and Night Light as the primary app areas; adding the first active child or dog expands navigation to Reports and Care and opens Today in its Care mode. Archiving the last active care profile saves any open timer, clears profile-scoped alerts, and returns to the household-only layout without deleting that profile or its history.
+
+Returning users can choose **Restore from iCloud** to wait for data previously synced through Private iCloud Sync on the same Apple Account, or open Settings to import a JSON backup. The iCloud option does not create or overwrite data when no synced household or profile arrives, and it does not represent a separate server-side backup snapshot. If someone completes new setup before their original profile finishes downloading, the app can remove the newer empty matching setup shell in favor of the historical profile; it leaves profiles alone when both own history. The caregiver name for new entries uses iCloud key-value storage so it can follow the same Apple Account without becoming a shared Family Sync household value; older installs can recover one unambiguous non-default name from synced care history. The app does not create default child profiles, care history, shopping lists, or personal archives automatically. SwiftUI previews and debug-only seed helpers use neutral sample child and dog data.
 
 ## App Areas
 
-- Today: profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep day-ahead planning, and system integration refresh.
+- Today: a household overview for Home and Food, plus profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep day-ahead planning, and system integration refresh when a care profile is active.
 - Profiles: child and dog profiles with switching, colors, archival support, dog-specific details, and optional profile photos.
 - History and Reports: day and list history, event editing, filtering, summaries, charts, and prediction accuracy review.
 - Milestones, Memories, and Solids: profile-scoped entries and age prompts, plus a child-only solids workspace for preparation, planning, allergens, recipes, and tracking.
@@ -125,6 +127,8 @@ The WidgetKit extension includes:
 - Food Quick Add widget
 
 Active timers synchronize to a Live Activity with Lock Screen and Dynamic Island presentations. App Intents, promoted App Shortcuts, deep links, and iOS 18 Control Center controls can start common timers, stop or resume timers, switch nursing sides, quick-log common events, open app destinations, and start night-light presets where that surface exposes them.
+
+Without an active care profile, care-specific widgets use an intentional **Add a care profile** state instead of showing fictional or stale care data. Care-only shortcuts and deep links open the app with the same profile prompt; Home, Food, Settings, and Night Light links continue to work normally.
 
 System surfaces pass commands back to the app and read lightweight App Group snapshots. They do not directly mutate the full SwiftData store. See [SYSTEM_INTEGRATIONS.md](SYSTEM_INTEGRATIONS.md) for signing, entitlements, routes, widgets, Live Activities, notification, and real-device testing details.
 

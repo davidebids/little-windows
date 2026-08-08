@@ -77,7 +77,9 @@ private struct NextSleepWidgetView: View {
 
     var body: some View {
         Link(destination: URL(string: "littlewindows://prediction")!) {
-            if let prediction = snapshot.prediction {
+            if snapshot.profileID == nil {
+                missingProfileContent
+            } else if let prediction = snapshot.prediction {
                 if family == .accessoryRectangular {
                     HStack(spacing: 9) {
                         Image(systemName: "moon.stars.fill")
@@ -172,6 +174,29 @@ private struct NextSleepWidgetView: View {
                     .foregroundStyle(.white)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var missingProfileContent: some View {
+        if family == .accessoryRectangular {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sleep insights")
+                        .font(.headline)
+                    Text("Add a child profile")
+                        .font(.caption)
+                }
+            } icon: {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .widgetAccentable()
+            }
+        } else {
+            CareProfileRequiredWidgetState(
+                title: "Sleep insights",
+                detail: "Add a child profile to learn sleep rhythms and windows.",
+                systemImage: "moon.stars.fill"
+            )
         }
     }
 

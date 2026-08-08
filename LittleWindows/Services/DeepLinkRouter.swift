@@ -23,6 +23,144 @@ enum TodayDisplayMode: String, Hashable, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum AppExperienceMode: Equatable {
+    case care
+    case householdOnly
+
+    init(hasActiveCareProfile: Bool) {
+        self = hasActiveCareProfile ? .care : .householdOnly
+    }
+
+    var availableTabs: [LittleWindowsTab] {
+        switch self {
+        case .care:
+            [.today, .food, .reports, .milestones, .nightLight]
+        case .householdOnly:
+            [.today, .food, .nightLight]
+        }
+    }
+
+    func normalizedTab(_ tab: LittleWindowsTab) -> LittleWindowsTab {
+        availableTabs.contains(tab) ? tab : .today
+    }
+
+    func normalizedTodayMode(_ mode: TodayDisplayMode) -> TodayDisplayMode {
+        self == .householdOnly ? .home : mode
+    }
+}
+
+enum CareProfileRequirement: String, Identifiable, Equatable {
+    case logging
+    case reports
+    case care
+    case appointments
+    case routines
+
+    var id: String { rawValue }
+
+    var contextTitle: String {
+        switch self {
+        case .logging: "Care logging"
+        case .reports: "Care reports"
+        case .care: "Care, guides, and memories"
+        case .appointments: "Appointments"
+        case .routines: "Care routines"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .logging:
+            "Add a child or dog profile before starting timers or recording care."
+        case .reports:
+            "Reports organize history for a specific child or dog, so they need a care profile."
+        case .care:
+            "Memories, guides, milestones, and solids are organized around a child or dog profile."
+        case .appointments:
+            "Appointments and visit notes stay attached to a specific child or dog profile."
+        case .routines:
+            "Care routines need a child or dog profile. Home tasks and reminders remain available in Home."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .logging: "plus.circle.fill"
+        case .reports: "chart.line.uptrend.xyaxis"
+        case .care: "heart.text.clipboard.fill"
+        case .appointments: "calendar.badge.clock"
+        case .routines: "checklist"
+        }
+    }
+}
+
+enum AppNavigationPolicy {
+    static func isHouseholdRoute(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = destinationComponents(for: url)
+        guard let destination = components.first else { return true }
+        return ["today", "food", "night-light", "settings"].contains(destination)
+            && careProfileRequirement(for: url) == nil
+    }
+
+    static func isSettingsRoute(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = destinationComponents(for: url)
+        return components.first == "settings"
+    }
+
+    static func careProfileRequirement(for url: URL) -> CareProfileRequirement? {
+        guard url.scheme == "littlewindows" else { return nil }
+        var components = [url.host].compactMap { $0 }
+            + url.pathComponents.filter { $0 != "/" }
+        let hadProfilePrefix = components.count >= 2
+            && components[0] == "profile"
+            && UUID(uuidString: components[1]) != nil
+        if hadProfilePrefix {
+            components.removeFirst(2)
+        }
+
+        guard let destination = components.first else {
+            return hadProfilePrefix ? .logging : nil
+        }
+        if destination == "food" {
+            return components.dropFirst().first == "solids" ? .care : nil
+        }
+        if destination == "night-light" || destination == "settings" {
+            return nil
+        }
+        if destination == "today" {
+            return hadProfilePrefix ? .logging : nil
+        }
+
+        switch destination {
+        case "quick-log", "active-timer", "event", "action":
+            return .logging
+        case "history", "reports", "calendar", "medical", "insights", "prediction":
+            return .reports
+        case "appointments", "visits", "appointment":
+            return .appointments
+        case "routines":
+            return .routines
+        case "care", "milestones", "memories", "age-guides", "age-guide", "puppy-guide":
+            return .care
+        default:
+            return nil
+        }
+    }
+
+    private static func destinationComponents(for url: URL) -> [String] {
+        var components = [url.host].compactMap { $0 }
+            + url.pathComponents.filter { $0 != "/" }
+        if components.count >= 2,
+           components[0] == "profile",
+           UUID(uuidString: components[1]) != nil {
+            components.removeFirst(2)
+        }
+        return components
+    }
+}
+
 struct SolidsNavigationOrigin: Equatable {
     var tab: LittleWindowsTab
     var insightsSection: InsightsSection?
@@ -131,6 +269,9 @@ final class DeepLinkRouter: ObservableObject {
     @Published var showingSettings = false
     @Published var showingFamilySyncSettings = false
     @Published var isDataReady = false
+    @Published var careProfileRequirement: CareProfileRequirement?
+    @Published private(set) var navigationRequestRevision = 0
+    private(set) var lastRequestedURL: URL?
 
     private init() {
         selectedTab = AppNavigationLaunchPolicy.initialTab
@@ -140,16 +281,21 @@ final class DeepLinkRouter: ObservableObject {
         action: DeepLinkAction,
         profileID: UUID? = nil
     ) {
+        lastRequestedURL = nil
         if let profileID { pendingProfileID = profileID }
         // Publish the action before selecting Today. RootView creates the Today
         // hierarchy lazily, so it must be waiting when that hierarchy appears.
         pendingAction = action
-        selectTodayCare()
+        todayDisplayMode = .care
+        selectedTab = .today
+        recordNavigationRequest(nil)
     }
 
     func selectTodayCare() {
+        lastRequestedURL = nil
         todayDisplayMode = .care
         selectedTab = .today
+        recordNavigationRequest(nil)
     }
 
     func openSolids(
@@ -159,6 +305,7 @@ final class DeepLinkRouter: ObservableObject {
         insightsSection: InsightsSection? = nil,
         feedingInsightsMode: FeedingInsightsMode? = nil
     ) {
+        lastRequestedURL = nil
         if let profileID { pendingProfileID = profileID }
         pendingSolidsOrigin = returnTab.map {
             SolidsNavigationOrigin(
@@ -169,11 +316,14 @@ final class DeepLinkRouter: ObservableObject {
         }
         pendingSolidsCommand = command
         selectedTab = .milestones
+        recordNavigationRequest(nil)
     }
 
     func openFood(_ command: FoodRouteCommand) {
+        lastRequestedURL = nil
         pendingFoodCommand = command
         selectedTab = .food
+        recordNavigationRequest(nil)
     }
 
     func consumeSolidsOrigin() -> SolidsNavigationOrigin? {
@@ -183,6 +333,11 @@ final class DeepLinkRouter: ObservableObject {
 
     func route(_ url: URL) {
         guard url.scheme == "littlewindows" else { return }
+        if AppNavigationPolicy.isHouseholdRoute(url) {
+            discardCareNavigationRequest()
+        }
+        lastRequestedURL = url
+        defer { recordNavigationRequest(url) }
         pendingSolidsOrigin = nil
         pendingFeedingInsightsMode = nil
         var components = [url.host].compactMap { $0 } + url.pathComponents.filter { $0 != "/" }
@@ -494,5 +649,33 @@ final class DeepLinkRouter: ObservableObject {
 
     func presentSettings() {
         showingSettings = true
+    }
+
+    func presentCareProfileRequirement(_ requirement: CareProfileRequirement) {
+        discardCareNavigationRequest()
+        careProfileRequirement = requirement
+    }
+
+    func discardCareNavigationRequest() {
+        if pendingAction != nil { pendingAction = nil }
+        if pendingAppointmentCommand != nil { pendingAppointmentCommand = nil }
+        if pendingAgeGuideCommand != nil { pendingAgeGuideCommand = nil }
+        if pendingPuppyGuideCommand != nil { pendingPuppyGuideCommand = nil }
+        if pendingRoutineCommand != nil { pendingRoutineCommand = nil }
+        if pendingSolidsCommand != nil { pendingSolidsCommand = nil }
+        if pendingSolidsOrigin != nil { pendingSolidsOrigin = nil }
+        if pendingInsightsSection != nil { pendingInsightsSection = nil }
+        if pendingFeedingInsightsMode != nil { pendingFeedingInsightsMode = nil }
+        if pendingProfileID != nil { pendingProfileID = nil }
+        lastRequestedURL = nil
+    }
+
+    func clearLastRequestedURL() {
+        lastRequestedURL = nil
+    }
+
+    private func recordNavigationRequest(_ url: URL?) {
+        lastRequestedURL = url
+        navigationRequestRevision &+= 1
     }
 }

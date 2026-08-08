@@ -1500,6 +1500,39 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testLastActiveProfileCanBeArchivedWithoutDeletingItsHistory() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let event = BabyEvent(
+            profileID: testChild.id,
+            type: .sleep,
+            startDate: Date().addingTimeInterval(-120)
+        )
+        context.insert(testChild)
+        context.insert(event)
+        try context.save()
+        ProfileService.shared.switchProfile(testChild)
+
+        ProfileService.shared.archiveProfile(
+            testChild,
+            profiles: [testChild],
+            context: context
+        )
+
+        XCTAssertTrue(testChild.isArchived)
+        XCTAssertNil(ProfileService.shared.selectedProfileID)
+        XCTAssertNil(ProfileService.shared.selectedProfile(in: [testChild]))
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<BabyEvent>()).map(\.id),
+            [event.id]
+        )
+        XCTAssertNotNil(event.endDate)
+        XCTAssertFalse(event.isTimerDraft)
+        XCTAssertGreaterThanOrEqual(event.duration ?? 0, 119)
+    }
+
+    @MainActor
     func testArchivingArchivedProfileIsNoOp() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
@@ -3136,6 +3169,17 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         XCTAssertEqual(activePlan.targetNapCount, 3)
         XCTAssertEqual(restoredPlan?.targetNapCount, 3)
+
+        ActiveSleepPlanService.clearIfProfileIsInactive(
+            activeProfileIDs: [UUID()],
+            defaults: defaults
+        )
+        XCTAssertNil(ActiveSleepPlanService.activePlan(
+            for: profile.id,
+            now: today,
+            calendar: calendar,
+            defaults: defaults
+        ))
     }
 
     func testBackwardsPlanShowsFullDayEvenAfterEarlierNapsPassed() throws {
@@ -3724,8 +3768,16 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     func testFirstRunOnboardingOnlyPresentsForNewEmptyStores() {
-        XCTAssertTrue(FirstRunOnboarding.shouldPresent(hasCompleted: false, profiles: []))
-        XCTAssertFalse(FirstRunOnboarding.shouldPresent(hasCompleted: true, profiles: []))
+        XCTAssertTrue(FirstRunOnboarding.shouldPresent(
+            hasCompleted: false,
+            profiles: [],
+            households: []
+        ))
+        XCTAssertFalse(FirstRunOnboarding.shouldPresent(
+            hasCompleted: true,
+            profiles: [],
+            households: []
+        ))
 
         let existingProfile = BabyProfile(
             name: "Sample Child",
@@ -3734,7 +3786,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         XCTAssertFalse(FirstRunOnboarding.shouldPresent(
             hasCompleted: false,
-            profiles: [existingProfile]
+            profiles: [existingProfile],
+            households: []
+        ))
+        XCTAssertFalse(FirstRunOnboarding.shouldPresent(
+            hasCompleted: false,
+            profiles: [],
+            households: [Household(name: "Home")]
         ))
     }
 
@@ -3779,13 +3837,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
         container.mainContext.insert(profile)
 
-        let outcome = await ICloudRestoreService.waitForImportedProfiles(
+        let outcome = await ICloudRestoreService.waitForImportedData(
             context: container.mainContext,
             waitDuration: .zero,
             pollInterval: .zero
         )
 
-        XCTAssertEqual(outcome, .restored(profileCount: 1))
+        XCTAssertEqual(outcome, .restored(profileCount: 1, householdCount: 0))
         XCTAssertEqual(
             try container.mainContext.fetch(FetchDescriptor<CareProfile>()).map(\.id),
             [profile.id]
@@ -3793,10 +3851,32 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testFirstRunICloudRestoreDetectsHouseholdDataWithoutCareProfiles() async throws {
+        let container = try makeInMemoryContainer()
+        let household = Household(name: "Home")
+        container.mainContext.insert(household)
+
+        let outcome = await ICloudRestoreService.waitForImportedData(
+            context: container.mainContext,
+            waitDuration: .zero,
+            pollInterval: .zero
+        )
+
+        XCTAssertEqual(outcome, .restored(profileCount: 0, householdCount: 1))
+        XCTAssertTrue(
+            try container.mainContext.fetch(FetchDescriptor<CareProfile>()).isEmpty
+        )
+        XCTAssertEqual(
+            try container.mainContext.fetch(FetchDescriptor<Household>()).map(\.id),
+            [household.id]
+        )
+    }
+
+    @MainActor
     func testFirstRunICloudRestoreLeavesEmptyStoreUnchangedWhenNothingArrives() async throws {
         let container = try makeInMemoryContainer()
 
-        let outcome = await ICloudRestoreService.waitForImportedProfiles(
+        let outcome = await ICloudRestoreService.waitForImportedData(
             context: container.mainContext,
             waitDuration: .zero,
             pollInterval: .zero
@@ -6474,6 +6554,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(importedReminder.timeZoneIdentifier, "America/Chicago")
         XCTAssertEqual(importedTodoReminder.type, .todos)
         XCTAssertEqual(importedTodoReminder.relatedTodoListID, todoList.id)
+        XCTAssertTrue(
+            try context.fetch(FetchDescriptor<CareProfile>()).isEmpty,
+            "Household backups must round-trip without inventing a care profile."
+        )
     }
 
     @MainActor
@@ -7410,6 +7494,100 @@ final class SleepPredictionEngineTests: XCTestCase {
         router.openToday(action: .logEvent(.feed))
         XCTAssertEqual(router.todayDisplayMode, .care)
         XCTAssertEqual(router.consumeAction(), .logEvent(.feed))
+    }
+
+    func testHouseholdOnlyExperienceKeepsHomeToolsAndNormalizesCareDestinations() {
+        let householdOnly = AppExperienceMode(hasActiveCareProfile: false)
+
+        XCTAssertEqual(householdOnly, .householdOnly)
+        XCTAssertEqual(householdOnly.availableTabs, [.today, .food, .nightLight])
+        XCTAssertEqual(householdOnly.normalizedTab(.reports), .today)
+        XCTAssertEqual(householdOnly.normalizedTab(.milestones), .today)
+        XCTAssertEqual(householdOnly.normalizedTab(.food), .food)
+        XCTAssertEqual(householdOnly.normalizedTodayMode(.care), .home)
+
+        let care = AppExperienceMode(hasActiveCareProfile: true)
+        XCTAssertEqual(care.availableTabs, [.today, .food, .reports, .milestones, .nightLight])
+        XCTAssertEqual(care.normalizedTab(.reports), .reports)
+        XCTAssertEqual(care.normalizedTodayMode(.care), .care)
+    }
+
+    func testHouseholdOnlyNavigationPolicyPromptsOnlyForCareScopedRoutes() throws {
+        let householdURLs = [
+            "littlewindows://today",
+            "littlewindows://food",
+            "littlewindows://food/todos",
+            "littlewindows://food/quick-add",
+            "littlewindows://food/shopping/00000000-0000-0000-0000-000000000501",
+            "littlewindows://food/trips/00000000-0000-0000-0000-000000000401",
+            "littlewindows://food/inventory",
+            "littlewindows://food/meal-prep",
+            "littlewindows://food/returns",
+            "littlewindows://night-light/diaper-change",
+            "littlewindows://night-light/stop",
+            "littlewindows://settings",
+            "littlewindows://settings/family-sync",
+            "littlewindows://profile/00000000-0000-0000-0000-000000000101/food",
+            "littlewindows://profile/00000000-0000-0000-0000-000000000101/night-light"
+        ]
+        for value in householdURLs {
+            let url = try XCTUnwrap(URL(string: value))
+            XCTAssertNil(AppNavigationPolicy.careProfileRequirement(for: url))
+            XCTAssertTrue(AppNavigationPolicy.isHouseholdRoute(url))
+        }
+
+        let careRoutes: [(String, CareProfileRequirement)] = [
+            ("littlewindows://quick-log/sleep", .logging),
+            ("littlewindows://quick-log/nursing-left", .logging),
+            ("littlewindows://quick-log/medicine", .logging),
+            ("littlewindows://action/stop-active", .logging),
+            ("littlewindows://active-timer", .logging),
+            ("littlewindows://event/00000000-0000-0000-0000-000000000201", .logging),
+            ("littlewindows://profile/00000000-0000-0000-0000-000000000101/today", .logging),
+            ("littlewindows://history", .reports),
+            ("littlewindows://reports/summary", .reports),
+            ("littlewindows://insights/feeding", .reports),
+            ("littlewindows://medical", .reports),
+            ("littlewindows://prediction", .reports),
+            ("littlewindows://care/solids", .care),
+            ("littlewindows://food/solids/allergens", .care),
+            ("littlewindows://milestones", .care),
+            ("littlewindows://memories", .care),
+            ("littlewindows://age-guide/6", .care),
+            ("littlewindows://puppy-guide", .care),
+            ("littlewindows://appointments", .appointments),
+            ("littlewindows://visits", .appointments),
+            ("littlewindows://appointment/00000000-0000-0000-0000-000000000301", .appointments),
+            ("littlewindows://routines", .routines)
+        ]
+        for (value, expectedRequirement) in careRoutes {
+            let url = try XCTUnwrap(URL(string: value))
+            XCTAssertEqual(
+                AppNavigationPolicy.careProfileRequirement(for: url),
+                expectedRequirement
+            )
+            XCTAssertFalse(AppNavigationPolicy.isHouseholdRoute(url))
+        }
+
+        XCTAssertTrue(AppNavigationPolicy.isSettingsRoute(
+            try XCTUnwrap(URL(string: "littlewindows://settings/family-sync"))
+        ))
+        XCTAssertFalse(AppNavigationPolicy.isSettingsRoute(
+            try XCTUnwrap(URL(string: "littlewindows://food"))
+        ))
+    }
+
+    @MainActor
+    func testHouseholdNavigationDiscardsAnOverriddenCareCommand() throws {
+        let router = DeepLinkRouter.shared
+        router.route(try XCTUnwrap(URL(string: "littlewindows://quick-log/sleep")))
+        XCTAssertNotNil(router.pendingAction)
+
+        router.route(try XCTUnwrap(URL(string: "littlewindows://food")))
+
+        XCTAssertNil(router.pendingAction)
+        XCTAssertNil(router.pendingProfileID)
+        XCTAssertEqual(router.selectedTab, .food)
     }
 
     @MainActor

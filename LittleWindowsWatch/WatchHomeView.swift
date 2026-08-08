@@ -230,9 +230,9 @@ struct WatchHomeView: View {
 
     private var unavailableView: some View {
         ContentUnavailableView {
-            Label("Connect Little Windows", systemImage: "iphone.and.arrow.forward")
+            Label("Add care when you’re ready", systemImage: "heart.text.clipboard")
         } description: {
-            Text("Open Little Windows on your iPhone once to send profiles and care actions to this watch.")
+            Text("Add or restore a child or dog in Little Windows on your iPhone, then refresh this watch.")
         } actions: {
             Button("Try Again") { connectivity.requestRefresh() }
         }

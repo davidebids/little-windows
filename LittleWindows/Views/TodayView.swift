@@ -793,26 +793,35 @@ struct TodayView: View {
                 .background(AppTheme.background)
         }
 
-        VStack(spacing: 0) {
-            TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
-            Divider()
+        let effectiveDisplayMode: TodayDisplayMode = profile == nil
+            ? .home
+            : deepLinkRouter.todayDisplayMode
 
-            if deepLinkRouter.todayDisplayMode == .care {
+        VStack(spacing: 0) {
+            if profile != nil {
+                TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
+                Divider()
+            }
+
+            if effectiveDisplayMode == .care {
                 listContent
             } else if let householdID = households.first?.id {
                 TodayHomeSummaryDataLoader(
                     householdID: householdID,
                     currentCaregiverName: activeCaregiverName
                 ) { summary in
-                    TodayHomeSummaryView(summary: summary) { command in
+                    TodayHomeSummaryView(
+                        summary: summary,
+                        caregiverName: activeCaregiverName
+                    ) { command in
                         deepLinkRouter.openFood(command)
                     }
                 }
             } else {
                 ContentUnavailableView(
-                    "Home isn’t ready yet",
+                    "Preparing your home",
                     systemImage: "house",
-                    description: Text("Little Windows is preparing the household workspace.")
+                    description: Text("Little Windows is setting up your household workspace.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(AppTheme.background)
@@ -830,14 +839,16 @@ struct TodayView: View {
                     if let profile {
                         ProfileAvatarView(profile: profile, size: 32)
                     } else {
-                        Image(systemName: "person.crop.circle")
-                            .font(.title2)
+                        Image(systemName: "gearshape.fill")
+                            .font(.headline)
                             .foregroundStyle(AppTheme.accent)
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(profile?.name ?? "Profile") settings")
-                .accessibilityHint("Opens settings where you can switch profiles")
+                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
+                .accessibilityHint(profile == nil
+                    ? "Opens household settings and care profile options"
+                    : "Opens settings where you can switch profiles")
             }
         }
         .sheet(item: $editorRoute) { route in
@@ -3524,16 +3535,28 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
 
 private struct TodayHomeSummaryView: View {
     let summary: TodayHomeSummary
+    let caregiverName: String
     let open: (FoodRouteCommand) -> Void
+
+    private var greetingTitle: String {
+        let name = caregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let placeholderNames = ["caregiver", "caregiver 1", "caregiver 2"]
+        guard !name.isEmpty,
+              let normalizedName = CaregiverIdentityService.normalizedName(name),
+              !placeholderNames.contains(normalizedName) else {
+            return "Welcome home"
+        }
+        return "Welcome, \(name)"
+    }
 
     var body: some View {
         List {
             if summary.isQuiet {
                 Section {
                     ContentUnavailableView(
-                        "Home is all clear",
+                        greetingTitle,
                         systemImage: "house.fill",
-                        description: Text("There are no open household items to surface right now.")
+                        description: Text("Your home is all clear—there are no open household items to surface right now.")
                     )
                     .listRowBackground(Color.clear)
                 }

@@ -36,13 +36,13 @@ struct NightLightView: View {
                     if let profile {
                         ProfileAvatarView(profile: profile, size: 32)
                     } else {
-                        Image(systemName: "person.crop.circle")
-                            .font(.title2)
+                        Image(systemName: "gearshape.fill")
+                            .font(.headline)
                             .foregroundStyle(AppTheme.accent)
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(profile?.name ?? "Profile") settings")
+                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
             }
         }
         .preferredColorScheme(.dark)

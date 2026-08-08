@@ -803,6 +803,29 @@ final class NotificationManager: NSObject, ObservableObject {
         )
     }
 
+    func cancelCareAlerts(profileID: UUID) async {
+        await cancelPendingLittleWindowAlerts(profileID: profileID)
+        await cancelPendingSleepPressureAlerts(profileID: profileID)
+        await cancelActiveSleepPlanWakeAlert(profileID: profileID)
+        await cancelMonthlyAgeGuideNotifications(profileID: profileID)
+    }
+
+    func cancelInactiveActiveSleepPlanWakeAlerts(activeProfileIDs: Set<UUID>) async {
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let identifiers = pending.map(\.identifier).filter { identifier in
+            guard identifier == Self.activeSleepPlanWakeNotificationBaseID
+                    || identifier.hasSuffix(".\(Self.activeSleepPlanWakeNotificationBaseID)") else {
+                return false
+            }
+            return !activeProfileIDs.contains { profileID in
+                identifier == Self.activeSleepPlanWakeNotificationID(profileID: profileID)
+            }
+        }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: identifiers
+        )
+    }
+
     func buildAppointmentNotificationContent(
         appointment: DoctorAppointment,
         babyName: String = "Baby",
@@ -1424,6 +1447,14 @@ final class NotificationManager: NSObject, ObservableObject {
             || authorizationStatus == .provisional
             || authorizationStatus == .ephemeral
         guard allowed else { return }
+
+        let activeProfileIDs = Set(profiles.lazy.filter { !$0.isArchived }.map(\.id))
+        for profile in profiles where profile.isArchived {
+            await cancelCareAlerts(profileID: profile.id)
+        }
+        await cancelInactiveActiveSleepPlanWakeAlerts(
+            activeProfileIDs: activeProfileIDs
+        )
 
         let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
         let appointmentIDs = Set(appointments.filter {
@@ -2330,6 +2361,10 @@ enum SystemIntegrationReconciler {
         let activeProfileIDs = profiles
             .filter { !$0.isArchived }
             .map(\.id)
+        let activeProfileIDSet = Set(activeProfileIDs)
+        ActiveSleepPlanService.clearIfProfileIsInactive(
+            activeProfileIDs: activeProfileIDSet
+        )
         let childProfileIDs = profiles
             .filter { !$0.isArchived && $0.profileType == .child }
             .map(\.id)
@@ -2348,21 +2383,23 @@ enum SystemIntegrationReconciler {
         await AppInteractionMonitor.waitUntilIdle()
         guard !Task.isCancelled else { return }
 
-        let appointments = (try? context.fetch(FetchDescriptor<DoctorAppointment>(
+        let appointments = ((try? context.fetch(FetchDescriptor<DoctorAppointment>(
             predicate: #Predicate { !$0.isCompleted && $0.remindersEnabled }
-        ))) ?? []
+        ))) ?? []).filter {
+            $0.profileID.map(activeProfileIDSet.contains) ?? false
+        }
         let now = Date()
         let foodReminders = (try? context.fetch(FetchDescriptor<FoodReminder>(
             predicate: #Predicate { $0.isEnabled && $0.dateTime > now }
         ))) ?? []
-        let plannedSolidMeals = (try? context.fetch(FetchDescriptor<PlannedSolidMeal>(
+        let plannedSolidMeals = ((try? context.fetch(FetchDescriptor<PlannedSolidMeal>(
             predicate: #Predicate { $0.reminderEnabled && $0.completedEventID == nil }
-        ))) ?? []
-        let solidAllergenProgress = (try? context.fetch(
+        ))) ?? []).filter { activeProfileIDSet.contains($0.profileID) }
+        let solidAllergenProgress = ((try? context.fetch(
             FetchDescriptor<SolidAllergenProgress>(
                 predicate: #Predicate { $0.reminderEnabled }
             )
-        )) ?? []
+        )) ?? []).filter { activeProfileIDSet.contains($0.profileID) }
         let selectedProfileID = profile?.id
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let solidsProfileStates = (try? context.fetch(FetchDescriptor<SolidsProfileState>(
@@ -2391,9 +2428,16 @@ enum SystemIntegrationReconciler {
             ((try? context.fetch(FetchDescriptor<TripItineraryChoiceGroup>(
                 predicate: #Predicate { itineraryChoiceGroupIDs.contains($0.id) }
             ))) ?? [])
-        let routines = (try? context.fetch(FetchDescriptor<CareRoutine>(
+        let routines = ((try? context.fetch(FetchDescriptor<CareRoutine>(
             predicate: #Predicate { $0.reminderEnabled }
-        ))) ?? []
+        ))) ?? []).filter { routine in
+            switch routine.scope {
+            case .profile:
+                return routine.profileID.map(activeProfileIDSet.contains) ?? false
+            case .household:
+                return !activeProfileIDs.isEmpty
+            }
+        }
         let ageGuideReadStates: [AgeGuideReadState]
         if UserDefaults.standard.bool(forKey: "monthlyAgeGuideNotificationsEnabled") {
             ageGuideReadStates = (try? context.fetch(

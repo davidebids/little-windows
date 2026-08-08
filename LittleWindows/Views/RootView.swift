@@ -361,6 +361,7 @@ struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
+    @Query(sort: \Household.createdAt) private var households: [Household]
     @AppStorage(FirstRunOnboarding.completedKey) private var hasCompletedInitialOnboarding = false
     @AppStorage(CaregiverIdentityService.currentCaregiverNameKey) private var currentCaregiverName = ""
     @AppStorage(CaregiverIdentityService.needsLogNamePromptKey) private var needsLogNamePrompt = false
@@ -373,6 +374,7 @@ struct RootView: View {
     @State private var localSaveErrorMessage: String?
     @State private var scrollInteractionState = RootScrollInteractionState()
     @State private var reconciliationRequestTask: Task<Void, Never>?
+    @State private var careProfilePresentationTask: Task<Void, Never>?
     @AppStorage(CloudKitSharingService.acceptanceStatusMessageKey)
     private var familySyncAcceptanceMessage = ""
     @AppStorage(PersistenceService.familySyncModeKey)
@@ -388,6 +390,14 @@ struct RootView: View {
 
     private var selectedProfile: CareProfile? {
         profileService.selectedProfile(in: profiles)
+    }
+
+    private var activeProfileIDs: [UUID] {
+        profileService.allActiveProfiles(in: profiles).map(\.id)
+    }
+
+    private var experienceMode: AppExperienceMode {
+        AppExperienceMode(hasActiveCareProfile: !activeProfileIDs.isEmpty)
     }
 
     private var primaryTabs: some View {
@@ -412,25 +422,27 @@ struct RootView: View {
                 .tabItem { Label("Home", systemImage: "house.fill") }
                 .tag(LittleWindowsTab.food)
 
-            Group {
-                if router.selectedTab == .reports {
-                    NavigationStack { ReportsView(profileID: selectedProfile?.id) }
-                } else {
-                    Color.clear
+            if experienceMode == .care {
+                Group {
+                    if router.selectedTab == .reports {
+                        NavigationStack { ReportsView(profileID: selectedProfile?.id) }
+                    } else {
+                        Color.clear
+                    }
                 }
-            }
-                .tabItem { Label("Reports", systemImage: "chart.line.uptrend.xyaxis") }
-                .tag(LittleWindowsTab.reports)
+                    .tabItem { Label("Reports", systemImage: "chart.line.uptrend.xyaxis") }
+                    .tag(LittleWindowsTab.reports)
 
-            Group {
-                if router.selectedTab == .milestones {
-                    CareView(profileID: selectedProfile?.id)
-                } else {
-                    Color.clear
+                Group {
+                    if router.selectedTab == .milestones {
+                        CareView(profileID: selectedProfile?.id)
+                    } else {
+                        Color.clear
+                    }
                 }
+                    .tabItem { Label("Care", systemImage: "heart.text.clipboard.fill") }
+                    .tag(LittleWindowsTab.milestones)
             }
-                .tabItem { Label("Care", systemImage: "heart.text.clipboard.fill") }
-                .tag(LittleWindowsTab.milestones)
 
             Group {
                 if router.selectedTab == .nightLight {
@@ -456,10 +468,11 @@ struct RootView: View {
         )
         .onChange(of: router.selectedTab) { _, _ in
             AppInteractionMonitor.noteInteraction()
+            handleNavigationRequestForCurrentExperience()
         }
     }
 
-    var body: some View {
+    private var presentedTabs: some View {
         primaryTabs
         .tint(AppTheme.accent)
         .environmentObject(router)
@@ -469,7 +482,8 @@ struct RootView: View {
                     guard hasCheckedInitialOnboardingState else { return false }
                     return FirstRunOnboarding.shouldPresent(
                         hasCompleted: hasCompletedInitialOnboarding,
-                        profiles: profiles
+                        profiles: profiles,
+                        households: households
                     )
                 },
                 set: { _ in }
@@ -478,7 +492,12 @@ struct RootView: View {
             FirstRunOnboardingView(
                 completeOnboarding: {
                     hasCompletedInitialOnboarding = true
-                    router.selectedTab = .today
+                    if selectedProfile == nil {
+                        router.todayDisplayMode = .home
+                        router.selectedTab = .today
+                    } else {
+                        router.selectTodayCare()
+                    }
                 },
                 importBackupInstead: {
                     shouldOpenSettingsAfterOnboarding = true
@@ -499,6 +518,17 @@ struct RootView: View {
                 }
             }
         }
+        .sheet(item: $router.careProfileRequirement) { requirement in
+            NavigationStack {
+                CareProfileRequiredView(requirement: requirement)
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var alertedTabs: some View {
+        presentedTabs
         .alert("Set your caregiver name", isPresented: Binding(
             get: {
                 needsLogNamePrompt &&
@@ -514,7 +544,7 @@ struct RootView: View {
                 needsLogNamePrompt = false
             }
         } message: {
-            Text("Enter the caregiver name this device should use for new care entries.")
+            Text("Enter the name this device should use for household activity and any future care entries.")
         }
         .alert("Family Sync", isPresented: $showingFamilySyncAcceptanceStatus) {
             Button("Open Settings") {
@@ -549,28 +579,12 @@ struct RootView: View {
         } message: {
             Text("Little Windows kept the previous saved version. \(localSaveErrorMessage ?? "Please try again.")")
         }
+    }
+
+    private var tabsWithApplicationEvents: some View {
+        alertedTabs
         .onOpenURL { url in
             handleIncomingURL(url)
-        }
-        .task {
-            recoverCaregiverIdentityIfNeeded()
-            markOnboardingCompleteForExistingData()
-            hasCheckedInitialOnboardingState = true
-            if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "insights" {
-                router.selectedReportsMode = .summary
-                router.selectedTab = .reports
-            }
-            if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "history" {
-                router.selectedReportsMode = .day
-                router.selectedTab = .reports
-            }
-            if let value = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_URL"],
-               let url = URL(string: value) {
-                route(url)
-            }
-            consumePendingSystemAction()
-            presentFamilySyncAcceptanceStatusIfNeeded()
-            presentFamilySyncAccessEndedStatusIfNeeded()
         }
         .onReceive(
             NotificationCenter.default.publisher(
@@ -594,6 +608,10 @@ struct RootView: View {
             localSaveErrorMessage = notification.userInfo?["message"] as? String
                 ?? "Please try again."
         }
+    }
+
+    private var tabsWithStateObservers: some View {
+        tabsWithApplicationEvents
         .onChange(of: familySyncInactiveEventID) { _, _ in
             presentFamilySyncAccessEndedStatusIfNeeded()
         }
@@ -606,6 +624,20 @@ struct RootView: View {
             markOnboardingCompleteForExistingData()
             hasCheckedInitialOnboardingState = true
         }
+        .onChange(of: households.count) { _, _ in
+            markOnboardingCompleteForExistingData()
+            hasCheckedInitialOnboardingState = true
+        }
+        .onChange(of: activeProfileIDs) { previousIDs, currentIDs in
+            handleActiveProfileTransition(from: previousIDs, to: currentIDs)
+        }
+        .onChange(of: router.navigationRequestRevision) { _, _ in
+            handleNavigationRequestForCurrentExperience()
+        }
+    }
+
+    private var tabsWithLifecycleWork: some View {
+        tabsWithStateObservers
         .task(id: "profile-duplicate-repair-\(profiles.count)") {
             guard profiles.count > 1 else { return }
             for retryDelaySeconds in [0, 3, 12, 30] {
@@ -621,7 +653,9 @@ struct RootView: View {
             }
         }
         .onChange(of: hasCompletedInitialOnboarding) { _, completed in
-            guard completed, shouldOpenSettingsAfterOnboarding else { return }
+            guard completed else { return }
+            ensureHouseholdWorkspaceIfNeeded()
+            guard shouldOpenSettingsAfterOnboarding else { return }
             shouldOpenSettingsAfterOnboarding = false
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
@@ -657,12 +691,137 @@ struct RootView: View {
         }
     }
 
+    var body: some View {
+        tabsWithLifecycleWork
+            .task {
+                performInitialSetup()
+            }
+    }
+
+    private func performInitialSetup() {
+        let launchURL = uiTestingLaunchURL
+        if let launchURL {
+            route(launchURL)
+            #if DEBUG
+            if DebugSimulatorSmokeSeedService.isResetEmpty(launchURL),
+               DebugSimulatorSmokeSeedService.isEnabled {
+                // The query arrays still describe the pre-reset store in this
+                // render pass. Let their updates drive onboarding instead of
+                // marking that stale data as an existing setup.
+                hasCheckedInitialOnboardingState = true
+                return
+            }
+            #endif
+        }
+        recoverCaregiverIdentityIfNeeded()
+        markOnboardingCompleteForExistingData()
+        hasCheckedInitialOnboardingState = true
+        ensureHouseholdWorkspaceIfNeeded()
+        handleNavigationRequestForCurrentExperience()
+        if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "insights" {
+            router.selectedReportsMode = .summary
+            router.selectedTab = .reports
+        }
+        if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "history" {
+            router.selectedReportsMode = .day
+            router.selectedTab = .reports
+        }
+        consumePendingSystemAction()
+        presentFamilySyncAcceptanceStatusIfNeeded()
+        presentFamilySyncAccessEndedStatusIfNeeded()
+    }
+
     private func markOnboardingCompleteForExistingData() {
-        guard !hasCompletedInitialOnboarding, !profiles.isEmpty else { return }
+        guard !hasCompletedInitialOnboarding,
+              !profiles.isEmpty || !households.isEmpty else { return }
         if !CaregiverIdentityService.hasExplicitCurrentCaregiverName() {
             needsLogNamePrompt = true
         }
         hasCompletedInitialOnboarding = true
+    }
+
+    private var uiTestingLaunchURL: URL? {
+        if let value = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_URL"],
+           let url = URL(string: value) {
+            return url
+        }
+        let arguments = CommandLine.arguments
+        guard let markerIndex = arguments.firstIndex(of: "--little-windows-start-url"),
+              arguments.indices.contains(markerIndex + 1) else {
+            return nil
+        }
+        return URL(string: arguments[markerIndex + 1])
+    }
+
+    private func ensureHouseholdWorkspaceIfNeeded() {
+        guard hasCompletedInitialOnboarding, households.isEmpty else { return }
+        FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
+    }
+
+    private func handleActiveProfileTransition(
+        from previousIDs: [UUID],
+        to currentIDs: [UUID]
+    ) {
+        if previousIDs.isEmpty, !currentIDs.isEmpty {
+            router.careProfileRequirement = nil
+            router.todayDisplayMode = .care
+            router.selectedTab = .today
+        } else if !previousIDs.isEmpty, currentIDs.isEmpty {
+            router.todayDisplayMode = .home
+            router.selectedTab = .today
+        } else {
+            normalizeNavigationForCurrentExperience()
+        }
+    }
+
+    private func normalizeNavigationForCurrentExperience() {
+        router.selectedTab = experienceMode.normalizedTab(router.selectedTab)
+        router.todayDisplayMode = experienceMode.normalizedTodayMode(router.todayDisplayMode)
+    }
+
+    private func handleNavigationRequestForCurrentExperience() {
+        guard hasCompletedInitialOnboarding, experienceMode == .householdOnly else {
+            normalizeNavigationForCurrentExperience()
+            return
+        }
+
+        if let url = router.lastRequestedURL,
+           let requirement = AppNavigationPolicy.careProfileRequirement(for: url) {
+            prepareForCareProfileRequirement(requirement)
+            return
+        }
+        if let requirement = pendingCareProfileRequirement {
+            prepareForCareProfileRequirement(requirement)
+            return
+        }
+        if let url = router.lastRequestedURL,
+           AppNavigationPolicy.isHouseholdRoute(url) {
+            prepareForHouseholdNavigation(to: url)
+            normalizeNavigationForCurrentExperience()
+            return
+        }
+        normalizeNavigationForCurrentExperience()
+    }
+
+    private var pendingCareProfileRequirement: CareProfileRequirement? {
+        switch router.selectedTab {
+        case .reports, .medical:
+            return .reports
+        case .milestones:
+            return .care
+        case .today where router.todayDisplayMode == .care:
+            if router.pendingAppointmentCommand != nil { return .appointments }
+            if router.pendingRoutineCommand != nil { return .routines }
+            if router.pendingAgeGuideCommand != nil
+                || router.pendingPuppyGuideCommand != nil
+                || router.pendingSolidsCommand != nil {
+                return .care
+            }
+            if router.pendingAction != nil { return .logging }
+            return nil
+        default:
+            return nil
+        }
     }
 
     private func recoverCaregiverIdentityIfNeeded() {
@@ -728,12 +887,24 @@ struct RootView: View {
             return
         }
         #endif
+        guard !presentCareProfileRequirementIfNeeded(for: url) else { return }
+        prepareForHouseholdNavigation(to: url)
         router.route(url)
+        if experienceMode == .householdOnly {
+            // Profile-prefixed Home or Night Light links can outlive an archived
+            // profile. Neither destination is profile-scoped, so do not let that
+            // stale identifier affect a later care navigation request.
+            router.pendingProfileID = nil
+        }
     }
 
     private func consumePendingSystemAction() {
         Task { @MainActor in
             while let url = IntegrationCommandStore.consumePendingURL() {
+                if presentCareProfileRequirementIfNeeded(for: url) {
+                    continue
+                }
+                prepareForHouseholdNavigation(to: url)
                 if await IntegrationCommandStore.deliverToRunningApp(url) {
                     presentProcessedSystemAction(url)
                     continue
@@ -746,6 +917,11 @@ struct RootView: View {
 
     private func handleIncomingURL(_ url: URL) {
         Task { @MainActor in
+            if presentCareProfileRequirementIfNeeded(for: url) {
+                IntegrationCommandStore.clearPendingURL(matching: url)
+                return
+            }
+            prepareForHouseholdNavigation(to: url)
             if await IntegrationCommandStore.deliverToRunningApp(url) {
                 IntegrationCommandStore.clearPendingURL(matching: url)
                 presentProcessedSystemAction(url)
@@ -753,6 +929,50 @@ struct RootView: View {
                 route(url)
             }
         }
+    }
+
+    private func presentCareProfileRequirementIfNeeded(for url: URL) -> Bool {
+        guard hasCompletedInitialOnboarding,
+              experienceMode == .householdOnly,
+              let requirement = AppNavigationPolicy.careProfileRequirement(for: url) else {
+            return false
+        }
+        // The URL is intentionally not routed while no profile exists. Clear any
+        // older request so its destination cannot cancel this delayed prompt.
+        router.clearLastRequestedURL()
+        prepareForCareProfileRequirement(requirement)
+        return true
+    }
+
+    private func prepareForCareProfileRequirement(_ requirement: CareProfileRequirement) {
+        // A system link can arrive while Settings is already presented. Dismiss
+        // it first so the contextual profile prompt has one unambiguous presenter.
+        router.showingSettings = false
+        router.showingFamilySyncSettings = false
+        normalizeNavigationForCurrentExperience()
+        scheduleCareProfileRequirement(requirement)
+    }
+
+    private func scheduleCareProfileRequirement(_ requirement: CareProfileRequirement) {
+        careProfilePresentationTask?.cancel()
+        careProfilePresentationTask = Task { @MainActor in
+            // Let the system finish handing off the URL before asking SwiftUI
+            // to present over the current navigation stack.
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled, experienceMode == .householdOnly else { return }
+            router.presentCareProfileRequirement(requirement)
+            careProfilePresentationTask = nil
+        }
+    }
+
+    private func prepareForHouseholdNavigation(to url: URL) {
+        careProfilePresentationTask?.cancel()
+        careProfilePresentationTask = nil
+        router.careProfileRequirement = nil
+        router.discardCareNavigationRequest()
+        guard !AppNavigationPolicy.isSettingsRoute(url) else { return }
+        router.showingSettings = false
+        router.showingFamilySyncSettings = false
     }
 
     private func presentProcessedSystemAction(_ url: URL) {
@@ -794,11 +1014,89 @@ struct RootView: View {
     }
 }
 
+private struct CareProfileRequiredView: View {
+    @Environment(\.dismiss) private var dismiss
+    let requirement: CareProfileRequirement
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.accent.opacity(0.10))
+                        .frame(width: 92, height: 92)
+                    Circle()
+                        .fill(AppTheme.accent.opacity(0.15))
+                        .frame(width: 64, height: 64)
+                    Image(systemName: requirement.systemImage)
+                        .font(.system(size: 29, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                .accessibilityHidden(true)
+
+                VStack(spacing: 7) {
+                    Text("Add a care profile")
+                        .font(.title2.bold())
+                        .multilineTextAlignment(.center)
+                    Text(requirement.detail)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Label(requirement.contextTitle, systemImage: requirement.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(AppTheme.accent.opacity(0.09), in: Capsule())
+
+                VStack(spacing: 9) {
+                    NavigationLink {
+                        ProfileEditorView()
+                    } label: {
+                        Label("Add Child or Dog", systemImage: "person.crop.circle.badge.plus")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("profile-required.add-profile")
+
+                    Button("Not Now") {
+                        dismiss()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 20)
+        }
+        .background(AppTheme.background)
+        .navigationTitle("Care Profile")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close", systemImage: "xmark") {
+                    dismiss()
+                }
+            }
+        }
+    }
+}
+
 enum FirstRunOnboarding {
     static let completedKey = "hasCompletedInitialOnboarding"
 
-    static func shouldPresent(hasCompleted: Bool, profiles: [CareProfile]) -> Bool {
-        !hasCompleted && profiles.isEmpty
+    static func shouldPresent(
+        hasCompleted: Bool,
+        profiles: [CareProfile],
+        households: [Household]
+    ) -> Bool {
+        !hasCompleted && profiles.isEmpty && households.isEmpty
     }
 }
 
@@ -910,12 +1208,12 @@ private struct FirstRunOnboardingView: View {
                 .background(AppTheme.accent.gradient, in: RoundedRectangle(cornerRadius: 16))
                 .accessibilityHidden(true)
 
-            Text(step == .caregiver ? "Set up your care home" : "Add the first profile")
+            Text(step == .caregiver ? "Set up your home" : "Add the first profile")
                 .font(.largeTitle.bold())
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(step == .caregiver
-                ? "Little Windows uses your name on logs so the history makes sense later."
+                ? "Use Little Windows for household planning, care tracking, or both. You can always add more later."
                 : "Choose whether you are tracking a child or dog, then add the details needed for daily care.")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -928,35 +1226,48 @@ private struct FirstRunOnboardingView: View {
             iCloudRestoreSection
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("Caregiver")
+                Text("Your name")
                     .font(.headline)
 
-                TextField("Your name", text: $primaryCaregiverName)
+                TextField(
+                    "Your name",
+                    text: $primaryCaregiverName,
+                    prompt: Text("Enter name here")
+                )
                     .textContentType(.name)
                     .submitLabel(.done)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("firstRun.caregiverName")
 
-                Text("This name is attached to care entries created on this device.")
+                Text("This name appears on household assignments and activity. If you add a care profile, it also appears on new care entries.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
             .padding(18)
             .appSurface()
 
-            Button {
-                guard isCaregiverStepValid else {
-                    validationMessage = "Enter your name to continue."
-                    return
-                }
-                step = .profile
-            } label: {
-                Label("Continue", systemImage: "arrow.right.circle.fill")
+            VStack(alignment: .leading, spacing: 12) {
+                Text("How would you like to start?")
                     .font(.headline)
-                    .frame(maxWidth: .infinity)
+
+                setupChoice(
+                    title: "Home, Food & Night Light",
+                    detail: "Plan tasks, shopping, meals, trips, returns, and use the night light—no care profile needed.",
+                    systemImage: "house.fill",
+                    tint: .indigo,
+                    accessibilityIdentifier: "firstRun.householdOnly",
+                    action: startHouseholdOnly
+                )
+
+                setupChoice(
+                    title: "Add a Child or Dog",
+                    detail: "Add a care profile now for daily tracking and a personalized Care workspace.",
+                    systemImage: "person.crop.circle.badge.plus",
+                    tint: .teal,
+                    accessibilityIdentifier: "firstRun.addCareProfile",
+                    action: startProfileSetup
+                )
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!isCaregiverStepValid || iCloudRestoreState.isWorking)
 
             Button {
                 iCloudRestoreTask?.cancel()
@@ -970,11 +1281,77 @@ private struct FirstRunOnboardingView: View {
             .controlSize(.large)
             .disabled(iCloudRestoreState.isWorking)
         }
-        .onAppear {
-            if primaryCaregiverName.isEmpty, caregiverOne != "Caregiver 1" {
-                primaryCaregiverName = caregiverOne
+    }
+
+    private func setupChoice(
+        title: String,
+        detail: String,
+        systemImage: String,
+        tint: Color,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(tint.gradient, in: RoundedRectangle(cornerRadius: 15))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 20))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(tint.opacity(0.18), lineWidth: 1)
             }
         }
+        .buttonStyle(.plain)
+        .disabled(!isCaregiverStepValid || iCloudRestoreState.isWorking)
+        .opacity(isCaregiverStepValid && !iCloudRestoreState.isWorking ? 1 : 0.55)
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    private func startHouseholdOnly() {
+        guard persistCaregiverIdentity() else { return }
+        iCloudRestoreTask?.cancel()
+        FoodHomeBootstrapService.seedIfNeeded(context: modelContext)
+        completeOnboarding()
+    }
+
+    private func startProfileSetup() {
+        guard persistCaregiverIdentity() else { return }
+        iCloudRestoreTask?.cancel()
+        step = .profile
+    }
+
+    private func persistCaregiverIdentity() -> Bool {
+        guard isCaregiverStepValid else {
+            validationMessage = "Enter your name to continue."
+            return false
+        }
+        caregiverOne = trimmedPrimaryCaregiverName
+        CaregiverIdentityService.storeIdentity(
+            currentName: trimmedPrimaryCaregiverName,
+            primaryName: trimmedPrimaryCaregiverName
+        )
+        return true
     }
 
     private var iCloudRestoreSection: some View {
@@ -1038,7 +1415,7 @@ private struct FirstRunOnboardingView: View {
             EmptyView()
         case .noDataArrived:
             restoreMessage(
-                title: "No synced profiles arrived yet",
+                title: "No synced data arrived yet",
                 detail: "Confirm this device uses the same Apple Account, check the connection, and try again. Little Windows did not create or overwrite any data.",
                 systemImage: "icloud.slash",
                 color: .orange
@@ -1181,8 +1558,7 @@ private struct FirstRunOnboardingView: View {
             return
         }
 
-        caregiverOne = trimmedPrimaryCaregiverName
-        CaregiverIdentityService.seedCurrentCaregiverNameIfNeeded(from: trimmedPrimaryCaregiverName)
+        guard persistCaregiverIdentity() else { return }
 
         if profileType == .dog {
             profileService.createDogProfile(
@@ -1214,6 +1590,7 @@ enum DebugSimulatorSmokeSeedService {
     static var isEnabled: Bool {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
+            || CommandLine.arguments.contains("--little-windows-ui-testing")
         #else
         false
         #endif

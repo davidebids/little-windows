@@ -66,7 +66,15 @@ private struct WatchActiveTimerWidgetView: View {
     let entry: WatchCompanionEntry
 
     var body: some View {
-        if let timer = entry.state.activeTimers.first(where: \.isRunning)
+        if entry.state.profiles.isEmpty {
+            WatchMissingProfileWidgetView(
+                family: family,
+                inlineTitle: "Add care profile",
+                rectangularTitle: "Care timers",
+                rectangularDetail: "Add on iPhone",
+                systemImage: "person.crop.circle.badge.plus"
+            )
+        } else if let timer = entry.state.activeTimers.first(where: \.isRunning)
             ?? entry.state.activeTimers.first {
             switch family {
             case .accessoryCircular:
@@ -128,7 +136,15 @@ private struct WatchSleepWindowWidgetView: View {
     let entry: WatchCompanionEntry
 
     var body: some View {
-        if let prediction = entry.state.prediction {
+        if entry.state.profiles.isEmpty {
+            WatchMissingProfileWidgetView(
+                family: family,
+                inlineTitle: "Add child profile",
+                rectangularTitle: "Sleep insights",
+                rectangularDetail: "Add a child on iPhone",
+                systemImage: "person.crop.circle.badge.plus"
+            )
+        } else if let prediction = entry.state.prediction {
             switch family {
             case .accessoryCircular:
                 VStack(spacing: 1) {
@@ -181,7 +197,15 @@ private struct WatchTodayWidgetView: View {
     private var metric: WatchMetricSnapshot? { entry.state.todayMetrics.first }
 
     var body: some View {
-        if let metric {
+        if entry.state.profiles.isEmpty {
+            WatchMissingProfileWidgetView(
+                family: family,
+                inlineTitle: "Add care profile",
+                rectangularTitle: "Care summary",
+                rectangularDetail: "Add on iPhone",
+                systemImage: "person.crop.circle.badge.plus"
+            )
+        } else if let metric {
             switch family {
             case .accessoryCircular:
                 VStack(spacing: 1) {
@@ -207,6 +231,39 @@ private struct WatchTodayWidgetView: View {
         } else {
             Label("Open Little Windows", systemImage: "sparkles")
                 .font(.caption)
+        }
+    }
+}
+
+private struct WatchMissingProfileWidgetView: View {
+    let family: WidgetFamily
+    let inlineTitle: String
+    let rectangularTitle: String
+    let rectangularDetail: String
+    let systemImage: String
+
+    var body: some View {
+        switch family {
+        case .accessoryCircular:
+            Image(systemName: systemImage)
+                .font(.title3)
+                .widgetAccentable()
+                .accessibilityLabel(inlineTitle)
+        case .accessoryInline:
+            Label(inlineTitle, systemImage: systemImage)
+        default:
+            Label {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(rectangularTitle)
+                        .font(.caption.weight(.semibold))
+                    Text(rectangularDetail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: systemImage)
+                    .widgetAccentable()
+            }
         }
     }
 }

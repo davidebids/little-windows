@@ -52,7 +52,7 @@ struct ICloudSyncSettingsView: View {
                 Text(viewModel.availability.detail)
                     .foregroundStyle(.secondary)
                 if viewModel.isICloudSyncEnabled {
-                    Text("Syncing happens automatically when iCloud is available. Logging still works offline; local changes sync later.")
+                    Text("Syncing happens automatically when iCloud is available. Little Windows still works offline, and local changes sync later.")
                         .foregroundStyle(.secondary)
                     Text(viewModel.syncMode == .sharedFamilySync ? "Family Sync shares data with accepted iCloud caregivers across Apple Accounts." : "Private iCloud Sync works across devices signed into your Apple Account.")
                         .foregroundStyle(.secondary)

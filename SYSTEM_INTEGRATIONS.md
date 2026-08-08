@@ -4,10 +4,10 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 
 ## Included surfaces
 
-- Active Timer widget: small, medium, Lock Screen rectangular, and Lock Screen inline.
-- Next Sleep Window widget: small, medium, and Lock Screen rectangular.
-- Today Summary widget: medium, including unified child care summary metrics for sleep, feeding, nursing, pumping, diapers, potty, medicine, temperature, growth, and activities when present.
-- Quick Log widget: medium, backed by profile-scoped ranked smart actions, hidden-category preferences, and user-pinned actions from Today.
+- Active Timer widget: small, medium, Lock Screen rectangular, and Lock Screen inline, with an add-profile state when no care profile is active.
+- Next Sleep Window widget: small, medium, and Lock Screen rectangular, with an add-child state when no care profile is active.
+- Today Summary widget: medium, including unified child care summary metrics for sleep, feeding, nursing, pumping, diapers, potty, medicine, temperature, growth, and activities when present, plus an add-profile state when care tracking has not been set up.
+- Quick Log widget: medium, backed by profile-scoped ranked smart actions, hidden-category preferences, and user-pinned actions from Today, plus an add-profile state when care tracking has not been set up.
 - Shopping List widget: small and medium, backed by the Food & Home shopping snapshot.
 - Food Quick Add widget: medium, opens grocery quick add, solids logging, and usual shopping lists in the app.
 - Live Activity with Lock Screen, Dynamic Island compact, Dynamic Island minimal, and Dynamic Island expanded presentations.
@@ -15,7 +15,7 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - App Shortcuts for repeat-last logging, solids and other high-frequency quick logging, timer control, and dog care.
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
 - A dependent watchOS 10+ companion app with profile switching, six profile-aware smart or customized favorites, a watch-safe All Actions list, timer controls, today metrics, and sleep-window predictions.
-- Apple Watch complications and Smart Stack widgets for the active timer, next sleep window, and today summary.
+- Apple Watch complications and Smart Stack widgets for the active timer, next sleep window, and today summary, with add-profile states when care tracking is not active.
 - Apple Watch App Intents for the most common child and dog actions.
 - Local notifications for sleep windows, routine reminders, appointment reminders, monthly guide reminders, itinerary items, trip packing and final-check reminders, and user-created Food & Home reminders.
 - WeatherKit forecasts and Apple Weather attribution for trip packing suggestions.
@@ -117,7 +117,9 @@ An owner can disconnect only the current device or stop the iCloud share for eve
 
 Settings resolves destructive Data actions from the store that is actually open, not only the pending preference. Private iCloud imports and full deletion explicitly warn that the change propagates to every device on that Apple Account. Family Sync owners receive the equivalent shared-caregiver warning; participants and devices whose ownership role cannot be confirmed cannot replace or erase the complete family dataset. Import and full deletion use a standard confirmation alert and create a local automatic recovery backup before changing the store.
 
-On a new empty install, onboarding offers **Restore from iCloud** when the app has opened its Private iCloud Sync store. The flow verifies iCloud account availability and waits for SwiftData's automatic CloudKit import to deliver at least one profile. It never queries or decodes SwiftData's private CloudKit records directly, creates replacement records, or treats sync as a point-in-time backup. If no profile arrives during the bounded wait, the user can retry, continue with a new setup, or import a JSON backup. Only data that completed a previous iCloud sync can return through this flow. Startup and later profile imports also repair repeated SwiftData profile rows carrying the same app-level profile ID. If someone continues through new setup before the original profile downloads, the app removes the newer onboarding shell only when it is empty, matches exactly one older profile identity, and that older profile already owns care data; it does not merge matching profiles when both own history.
+On a new empty install, onboarding offers **Restore from iCloud** when the app has opened its Private iCloud Sync store. The flow verifies iCloud account availability and waits for SwiftData's automatic CloudKit import to deliver either a household or a care profile. It never queries or decodes SwiftData's private CloudKit records directly, creates replacement records, or treats sync as a point-in-time backup. If no app data arrives during the bounded wait, the user can retry, continue with a new setup, or import a JSON backup. Only data that completed a previous iCloud sync can return through this flow. Startup and later profile imports also repair repeated SwiftData profile rows carrying the same app-level profile ID. If someone continues through new setup before the original profile downloads, the app removes the newer onboarding shell only when it is empty, matches exactly one older profile identity, and that older profile already owns care data; it does not merge matching profiles when both own history.
+
+New setup can create a household workspace without a child or dog. In that mode, the root tab bar contains Today, Home, and Night Light; Today opens directly to its household summary. Adding the first active care profile adds Reports and Care and switches Today to Care. Archiving the final active profile saves any open timer into history, removes profile-scoped alerts and care-only destinations, clears the active selection, preserves archived history, and returns Today to Home.
 
 If neither the configured CloudKit store nor its local fallback can open, the app shows Data Recovery instead of terminating. Retry leaves the store untouched. Restore and empty-start options first copy the SQLite store, WAL/SHM sidecars, and SwiftData support directory into a dated unreadable-store archive, then open a new local-only store. Automatic backups are validated before the unreadable store is moved. Recovery clears stale widget and Live Activity timer state. Trace collection is handled separately from this user-facing recovery flow.
 
@@ -147,6 +149,8 @@ This is intentional. The widget extension does not make unsafe concurrent edits 
 ## Deep links
 
 All routes use the `littlewindows://` scheme.
+
+Home, Food, Settings, Night Light, and the unscoped Today route work without an active child or dog. Care-only navigation, action, timer, event, report, appointment, routine, guide, milestone, memory, prediction, solids, and quick-log routes present **Add a care profile** with context for the requested feature. Creating the first profile from that prompt resumes the app in Today > Care; dismissing it leaves the household-only destination unchanged.
 
 Navigation routes:
 
@@ -299,6 +303,8 @@ Night-light and navigation intents:
 
 The `LittleWindowsShortcuts` provider exposes the iOS maximum of 10 promoted shortcuts to Shortcuts/Siri: start sleep, nurse left, nurse right, stop timer, repeat last, log solids, log medicine, log diaper, log dog food, and start dog walk. The generic Log Feed and Open Solids intents remain available in Shortcuts along with other unpromoted intents.
 
+When no care profile is active, intents that open a care-only route hand off to the app's **Add a care profile** prompt rather than creating a placeholder profile or care event. Night Light and household navigation remain fully available.
+
 ## Notifications
 
 Little Windows uses local notifications for:
@@ -354,6 +360,7 @@ Family Sync creates a CloudKit record-zone subscription for the shared family zo
 31. With a six-month-or-older child selected, open Solids and verify the 535-food database, stage-based first-100 path, seven-day guided schedule, swap/shift controls, 424-recipe library, recipe filters and named lists, food-to-recipe links, technique photography and auto-playing preparation walkthroughs, meal plan reminders, inventory-aware shopping handoff, tracker filters, and per-food chronological history. Log two foods in one meal with a serving amount and preference on each and a suspected reaction on only one; verify the meal detail and allergen screen keep amount, symptoms, severity, timing, response, and follow-up attached to the correct food. From an allergen page, plan the remaining introduction portions, verify the precise step and serving guidance reach the log editor, and confirm only explicitly checked portions advance the three-step introduction. Complete three separate tolerated exposures and verify unique-meal counts, safe recipe suggestions, rotation planning, and the Today follow-up prompt. Open **View feeding report** and verify Reports -> Summary -> Feeding shows period-correct solid meals, unique foods, new foods, allergen exposures, and reaction notes; verify its tracker/allergen links and that tapping a solid event in Day/List returns to solid meal detail. Create a custom food with age, preparation, safety, allergen, and photo metadata; mark it want-to-try/favorite, plan it, add it to shopping and inventory flows, log its allergen metadata, reuse it, delete the catalog entry, and confirm its historical timeline remains accessible. Verify JSON backup/import plus Family Sync preserve all solids data and named recipe lists.
 32. Select a dog and confirm Solids is absent from Food & Home. Confirm generic solids links and **Log Solids** from Shortcuts do nothing and do not change profiles. Select a one-month-old child and confirm Solids remains absent. At four to five months verify only the readiness preview appears; at six months verify the full section and Today prompt. With a child selected, run **Log Solids** from Shortcuts and confirm it opens the child solids editor.
 33. On a signed disposable device or simulator signed into the same Apple Account as an existing Private iCloud Sync install, reinstall Little Windows and choose **Restore from iCloud** during onboarding. Keep the app open and verify onboarding closes after synced profiles arrive, their history follows, and no duplicate starter profile is created. Repeat by continuing through new setup before the original profile arrives, using the same profile identity, and verify the newer empty setup profile disappears after the historical profile syncs. Confirm two matching profiles are preserved if both contain history. Repeat with no iCloud account and with an account that has no Little Windows data; verify the app explains the condition and leaves the empty store unchanged. Do not use destructive reset routes on a physical device containing personal data.
+34. On an empty disposable simulator, choose **Home, Food & Night Light** during onboarding. Verify Today opens the Home summary and the tab bar contains only Today, Home, and Night Light. Open Settings, Home, Food, and a Night Light preset and confirm each works without a profile. Open a care quick-log URL or shortcut and verify **Add a care profile** appears without creating care data. Add a child or dog from the prompt and verify Today opens in Care with Reports and Care restored. Archive that only active profile and verify the household-only tabs return while the archived profile and history remain available in Settings.
 
 Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit sync, and notification delivery are best validated on a physical iPhone. Simulator support varies by runtime and does not fully reproduce those surfaces.
 

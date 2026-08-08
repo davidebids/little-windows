@@ -50,28 +50,38 @@ private struct QuickLogWidgetView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    WidgetBrandLabel()
-                    Text("Quick log")
-                        .font(.headline)
-                }
-                Spacer()
-                Image(systemName: "bolt.fill")
-                    .foregroundStyle(LittleWindowsWidgetStyle.lavender)
+        if snapshot.profileID == nil {
+            Link(destination: URL(string: "littlewindows://care")!) {
+                CareProfileRequiredWidgetState(
+                    title: "Quick care logging",
+                    detail: "Add a child or dog to start timers and record care.",
+                    systemImage: "bolt.heart.fill"
+                )
             }
+        } else {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        WidgetBrandLabel()
+                        Text("Quick log")
+                            .font(.headline)
+                    }
+                    Spacer()
+                    Image(systemName: "bolt.fill")
+                        .foregroundStyle(LittleWindowsWidgetStyle.lavender)
+                }
 
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3),
-                spacing: 7
-            ) {
-                ForEach(actions) { action in
-                    quickAction(action)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3),
+                    spacing: 7
+                ) {
+                    ForEach(actions) { action in
+                        quickAction(action)
+                    }
                 }
             }
+            .foregroundStyle(.white)
         }
-        .foregroundStyle(.white)
     }
 
     private func quickAction(_ action: QuickLogActionSnapshot) -> some View {

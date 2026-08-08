@@ -3,6 +3,148 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testHouseholdOnlySetupAndCareDeepLinkPrompt() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+
+        let nameField = app.textFields["firstRun.caregiverName"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 4))
+        XCTAssertEqual(nameField.value as? String, "Enter name here")
+        nameField.tap()
+        nameField.typeText("Test Caregiver")
+
+        let householdChoice = app.buttons["firstRun.householdOnly"]
+        XCTAssertTrue(householdChoice.waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            app.staticTexts[
+                "Add a care profile now for daily tracking and a personalized Care workspace."
+            ].exists
+        )
+        householdChoice.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Welcome, Test Caregiver"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Today"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Night Light"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Care"].exists)
+        XCTAssertFalse(app.segmentedControls.buttons["Care"].exists)
+
+        let settingsButton = app.buttons["Settings"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 4))
+        settingsButton.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+
+        app.open(URL(string: "littlewindows://settings/family-sync")!)
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+        XCTAssertTrue(app.navigationBars["Family Sync"].waitForExistence(timeout: 5))
+        let householdSharingDescription = app.staticTexts.matching(
+            NSPredicate(
+                format: "label BEGINSWITH %@",
+                "Home, Food, trips, returns, reminders, and other household data"
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            householdSharingDescription.waitForExistence(timeout: 5)
+        )
+        app.navigationBars["Family Sync"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+
+        let profilesLink = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(profilesLink.waitForExistence(timeout: 4))
+        profilesLink.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No care profiles yet"].exists)
+        XCTAssertTrue(
+            app.staticTexts[
+                "Add a child or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is."
+            ].exists
+        )
+        XCTAssertTrue(app.buttons["profiles.empty.add"].exists)
+        let emptyProfilesAttachment = XCTAttachment(screenshot: app.screenshot())
+        emptyProfilesAttachment.name = "Household-only empty profiles"
+        emptyProfilesAttachment.lifetime = .keepAlways
+        add(emptyProfilesAttachment)
+
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.staticTexts["Add a care profile"].waitForExistence(timeout: 8))
+        let addProfile = app.buttons["profile-required.add-profile"]
+        XCTAssertTrue(addProfile.exists)
+        XCTAssertTrue(app.staticTexts["Care logging"].exists)
+
+        app.open(URL(string: "littlewindows://reports/summary")!)
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+        XCTAssertTrue(addProfile.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Care reports"].waitForExistence(timeout: 5))
+
+        // A newer household link must dismiss both an already-visible prompt
+        // and any delayed prompt that has not presented yet.
+        app.open(URL(string: "littlewindows://food")!)
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
+        XCTAssertTrue(addProfile.waitForNonExistence(timeout: 5))
+
+        app.open(URL(string: "littlewindows://quick-log/sleep")!)
+        app.open(URL(string: "littlewindows://night-light")!)
+        XCTAssertTrue(app.navigationBars["Night Light"].waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(1.2))
+        XCTAssertFalse(addProfile.exists)
+
+        // Care navigation arriving over Settings must dismiss Settings first so
+        // SwiftUI has a single sheet presenter for the profile requirement.
+        app.open(URL(string: "littlewindows://settings")!)
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.open(URL(string: "littlewindows://reports/summary")!)
+        XCTAssertTrue(addProfile.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Care reports"].exists)
+
+        addProfile.tap()
+        XCTAssertTrue(app.navigationBars["Add Profile"].waitForExistence(timeout: 5))
+        let childName = app.textFields["Child name"]
+        XCTAssertTrue(childName.waitForExistence(timeout: 3))
+        childName.tap()
+        childName.typeText("Test Child")
+        app.navigationBars["Add Profile"].buttons["Save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Reports"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Care"].exists)
+        XCTAssertTrue(app.segmentedControls.buttons["Care"].isSelected)
+
+        // The inverse transition should be just as complete: archiving the last
+        // profile preserves it in Settings and immediately restores Home mode.
+        app.open(URL(string: "littlewindows://settings")!)
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        let careProfiles = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(careProfiles.waitForExistence(timeout: 4))
+        careProfiles.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+        let profileRow = app.buttons.containing(
+            .staticText,
+            identifier: "Test Child"
+        ).firstMatch
+        XCTAssertTrue(profileRow.waitForExistence(timeout: 4))
+        profileRow.swipeLeft()
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 3))
+        app.buttons["Archive"].tap()
+        XCTAssertTrue(app.buttons["Archive Profile"].waitForExistence(timeout: 3))
+        app.buttons["Archive Profile"].tap()
+        XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 5))
+
+        app.open(URL(string: "littlewindows://today")!)
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Care"].exists)
+        XCTAssertFalse(app.segmentedControls.buttons["Care"].exists)
+    }
+
     func testFirstRunOffersRestoreFromICloud() {
         continueAfterFailure = false
 
@@ -2495,20 +2637,24 @@ final class UserVisibleFlowUITests: XCTestCase {
     ) {
         app.terminate()
         var launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": startURL
+            "LITTLE_WINDOWS_UI_TESTING": "1"
         ]
         launchEnvironment.merge(additionalEnvironment) { _, newValue in newValue }
         app.launchEnvironment = launchEnvironment
+        app.launchArguments = ["--little-windows-ui-testing"]
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        app.open(URL(string: startURL)!)
 
         // Foregrounding only proves that the process launched; it does not prove
         // that RootView has consumed the debug route and committed its store
         // mutation. Wait for the route's stable destination before terminating
         // the process for the next step in a reset -> seed -> deep-link flow.
         if startURL == "littlewindows://debug/reset-empty" {
-            XCTAssertTrue(app.navigationBars["Welcome"].waitForExistence(timeout: 12))
+            XCTAssertTrue(
+                app.navigationBars["Welcome"].waitForExistence(timeout: 12),
+                "Expected empty-store onboarding after reset.\n\(app.debugDescription)"
+            )
         } else if startURL == "littlewindows://debug/seed-smoke"
                     || startURL == "littlewindows://debug/seed-performance" {
             XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 25))
@@ -2518,15 +2664,16 @@ final class UserVisibleFlowUITests: XCTestCase {
     private func visit(name: String, startURL: String, expectedText: [String]) {
         app.terminate()
         app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": startURL
+            "LITTLE_WINDOWS_UI_TESTING": "1"
         ]
+        app.launchArguments = ["--little-windows-ui-testing"]
         app.launch()
 
         XCTAssertTrue(
             app.wait(for: .runningForeground, timeout: 8),
             "Expected app to foreground for \(name)"
         )
+        app.open(URL(string: startURL)!)
         let foundExpectedText = waitForAnyText(expectedText, timeout: 8)
 
         let attachment = XCTAttachment(screenshot: app.screenshot())

@@ -421,8 +421,9 @@ enum WidgetSnapshotService {
     /// data. Coalescing also prevents a run of check-offs or reorders from
     /// repeating the same bounded database reads for every tap.
     static func scheduleFoodRefresh(context: ModelContext) {
+        let container = context.container
         pendingFoodRefreshTask?.cancel()
-        pendingFoodRefreshTask = Task { @MainActor in
+        pendingFoodRefreshTask = Task { @MainActor [container] in
             do {
                 try await Task.sleep(for: .milliseconds(250))
             } catch {
@@ -430,7 +431,7 @@ enum WidgetSnapshotService {
             }
             await AppInteractionMonitor.waitUntilIdle()
             guard !Task.isCancelled else { return }
-            refreshFood(context: context)
+            refreshFood(context: ModelContext(container))
             pendingFoodRefreshTask = nil
         }
     }

@@ -86,3 +86,35 @@ struct WidgetIconBadge: View {
             }
     }
 }
+
+struct CareProfileRequiredWidgetState: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            WidgetBrandLabel()
+            Spacer(minLength: 0)
+            HStack(alignment: .center, spacing: 12) {
+                WidgetIconBadge(
+                    systemImage: systemImage,
+                    tint: LittleWindowsWidgetStyle.lavender
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.headline)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.64))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            Label("Add care profile", systemImage: "arrow.up.forward")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(LittleWindowsWidgetStyle.lavender)
+        }
+        .foregroundStyle(.white)
+    }
+}

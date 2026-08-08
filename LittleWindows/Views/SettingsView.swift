@@ -172,10 +172,6 @@ struct SettingsView: View {
         profileService.selectedProfile(in: profiles)
     }
 
-    private var isDogProfile: Bool {
-        selectedProfile?.profileType == .dog
-    }
-
     private var dataMutationScope: DataMutationScope {
         let familyRole = CloudKitSharingService.shared
             .currentFamilySyncStatus()
@@ -203,34 +199,42 @@ struct SettingsView: View {
                 } label: {
                     LabeledContent {
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(selectedProfile?.name ?? "None")
-                            Text("Switch or edit")
+                            Text(selectedProfile?.name ?? "Not tracking care")
+                            Text(selectedProfile == nil ? "Add a child or dog" : "Switch or edit")
                                 .font(.caption2)
                         }
                         .foregroundStyle(.secondary)
                     } label: {
-                        Label("Profiles", systemImage: "person.2.fill")
+                        Label("Care Profiles", systemImage: "person.2.fill")
                     }
                 }
             } header: {
-                Label("Profiles", systemImage: "person.crop.circle")
+                Label("Care Profiles", systemImage: "person.crop.circle")
+            } footer: {
+                if selectedProfile == nil {
+                    Text("Home, Food, and Night Light work without a care profile. Add one whenever you want to track a child or dog.")
+                }
             }
 
             Section("Your name") {
                 CaregiverNameFields(
-                    detail: "Your name appears on new care entries and follows this Apple Account when iCloud Sync is on. Family Sync share name labels the shared family space; most people can keep both names the same."
+                    detail: "Your name appears on household assignments and activity, and on new care entries when a profile is active. It follows this Apple Account when iCloud Sync is on."
                 )
             }
 
-            CareTimeZoneSettingsNavigationSection()
+            if let selectedProfile {
+                CareTimeZoneSettingsNavigationSection()
 
-            if !isDogProfile {
-                ChildSleepSettingsNavigationSection(profile: selectedProfile)
+                if selectedProfile.profileType == .child {
+                    ChildSleepSettingsNavigationSection(profile: selectedProfile)
+                }
             }
 
-            SyncSettingsSection()
+            SyncSettingsSection(hasActiveCareProfile: selectedProfile != nil)
 
-            WatchSettingsSection(profile: selectedProfile)
+            if selectedProfile != nil {
+                WatchSettingsSection(profile: selectedProfile)
+            }
 
             Section {
                 NavigationLink {
@@ -246,19 +250,23 @@ struct SettingsView: View {
                 Text("Food & Home records are household-level and sync through the same private iCloud store when iCloud Sync is available.")
             }
 
-            AppointmentSettingsNavigationSection(profile: selectedProfile)
+            if selectedProfile != nil {
+                AppointmentSettingsNavigationSection(profile: selectedProfile)
+            }
 
-            if !isDogProfile {
+            if let selectedProfile, selectedProfile.profileType == .child {
                 MonthlyAgeGuideSettingsNavigationSection()
             }
 
             Section {
-                NavigationLink {
-                    LazySettingsDestination {
-                        CareReportExportView()
+                if selectedProfile != nil {
+                    NavigationLink {
+                        LazySettingsDestination {
+                            CareReportExportView()
+                        }
+                    } label: {
+                        Label("Export care report", systemImage: "doc.text.magnifyingglass")
                     }
-                } label: {
-                    Label("Export care report", systemImage: "doc.text.magnifyingglass")
                 }
                 Button("Export JSON backup", systemImage: "square.and.arrow.up") {
                     export()
@@ -2046,6 +2054,8 @@ private struct WatchFavoritesSettingsView: View {
 }
 
 private struct SyncSettingsSection: View {
+    let hasActiveCareProfile: Bool
+
     @AppStorage(PersistenceService.iCloudSyncEnabledKey) private var isICloudSyncEnabled = true
     @AppStorage(PersistenceService.familySyncModeKey) private var syncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
     @AppStorage(CloudKitSharingService.inactiveReasonKey) private var inactiveReasonRawValue = ""
@@ -2088,7 +2098,11 @@ private struct SyncSettingsSection: View {
         } header: {
             Text("Sync")
         } footer: {
-            Text("Private iCloud Sync covers the same Apple Account. Family Sync shares Little Windows data with accepted iCloud caregivers across Apple Accounts.")
+            if hasActiveCareProfile {
+                Text("Private iCloud Sync covers the same Apple Account. Family Sync shares Little Windows data with accepted iCloud caregivers across Apple Accounts.")
+            } else {
+                Text("Private iCloud Sync keeps your household data available on devices using the same Apple Account. Family Sync shares it with accepted people across Apple Accounts.")
+            }
         }
     }
 }

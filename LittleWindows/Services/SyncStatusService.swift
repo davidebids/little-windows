@@ -119,7 +119,7 @@ enum ICloudRestoreEligibility: Equatable {
 }
 
 enum ICloudRestoreOutcome: Equatable {
-    case restored(profileCount: Int)
+    case restored(profileCount: Int, householdCount: Int)
     case noDataArrived
     case unavailable(String)
     case failed(String)
@@ -206,7 +206,7 @@ enum ICloudRestoreService {
             availability: statusService.availability
         ) {
         case .ready:
-            return await waitForImportedProfiles(
+            return await waitForImportedData(
                 context: context,
                 waitDuration: waitDuration,
                 pollInterval: pollInterval
@@ -216,7 +216,7 @@ enum ICloudRestoreService {
         }
     }
 
-    static func waitForImportedProfiles(
+    static func waitForImportedData(
         context: ModelContext,
         waitDuration: Duration,
         pollInterval: Duration
@@ -227,9 +227,13 @@ enum ICloudRestoreService {
         while !Task.isCancelled {
             do {
                 let profiles = try context.fetch(FetchDescriptor<CareProfile>())
-                if !profiles.isEmpty {
+                let households = try context.fetch(FetchDescriptor<Household>())
+                if !profiles.isEmpty || !households.isEmpty {
                     _ = ProfileService.shared.ensureSelection(in: profiles)
-                    return .restored(profileCount: profiles.count)
+                    return .restored(
+                        profileCount: profiles.count,
+                        householdCount: households.count
+                    )
                 }
             } catch {
                 return .failed("Little Windows could not read the restored data: \(error.localizedDescription)")
