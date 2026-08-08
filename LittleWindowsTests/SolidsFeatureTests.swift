@@ -135,6 +135,143 @@ final class SolidsFeatureTests: XCTestCase {
         }
     }
 
+    func testCatalogCopyStaysAccurateToEachFoodsPhysicalForm() throws {
+        func displayedCopy(for food: SolidsReferenceFood) -> String {
+            let details = [
+                food.details.introductionSummary,
+                food.details.backgroundSummary ?? "",
+                food.details.nutritionSummary,
+                food.details.allergenSummary,
+                food.details.choosingGuidance,
+                food.details.storageGuidance,
+                food.safetyNote,
+                food.chokingGuidance
+            ]
+            let questions = food.details.questions.flatMap { [$0.question, $0.answer] }
+            let stages = food.preparations.flatMap {
+                [$0.instructions, $0.servingAmount.firstServing, $0.servingAmount.routineServing]
+            }
+            let walkthroughs = food.preparations.indices.flatMap { index in
+                food.preparationWalkthrough(stageIndex: index).actions.flatMap {
+                    [$0.title, $0.detail, $0.completionLabel]
+                }
+            }
+            return (details + questions + stages + walkthroughs).joined(separator: "\n").lowercased()
+        }
+
+        let retiredCrossCategoryCopy = [
+            "skin, bones, shell",
+            "one-size-fits-all food shape",
+            "a bean should mash through the center, tofu should compress",
+            "remove every shell, tail, bone",
+            "remove all bone, cartilage, skin, and gristle",
+            "stems, sticks, pods, woody fibers"
+        ]
+        for food in SolidsReferenceCatalog.foods {
+            let copy = displayedCopy(for: food)
+            XCTAssertFalse(copy.contains("\\(name"), "\(food.name) contains an uninterpolated template placeholder")
+            for phrase in retiredCrossCategoryCopy {
+                XCTAssertFalse(copy.contains(phrase), "\(food.name) contains cross-category copy: \(phrase)")
+            }
+        }
+
+        let applesauce = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Applesauce"))
+        let applesauceCopy = displayedCopy(for: applesauce)
+        XCTAssertFalse(applesauceCopy.contains("wash applesauce"))
+        XCTAssertFalse(applesauceCopy.contains("raw applesauce"))
+        XCTAssertFalse(applesauceCopy.contains("pit"))
+        XCTAssertFalse(applesauceCopy.contains("core"))
+        XCTAssertTrue(applesauceCopy.contains("unsweetened"))
+        XCTAssertTrue(applesauceCopy.contains("scoopable"))
+
+        let pineapple = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Pineapple"))
+        XCTAssertFalse(pineapple.chokingGuidance.localizedCaseInsensitiveContains("hard raw pineapple chunks"))
+
+        let breadfruit = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Breadfruit"))
+        let breadfruitCopy = displayedCopy(for: breadfruit)
+        XCTAssertFalse(breadfruitCopy.contains("gummy ball"))
+        XCTAssertTrue(breadfruitCopy.contains("cook"))
+
+        let groundBeef = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Ground beef"))
+        let groundBeefCopy = displayedCopy(for: groundBeef)
+        XCTAssertFalse(groundBeefCopy.contains("bone"))
+        XCTAssertFalse(groundBeefCopy.contains("shell"))
+        XCTAssertFalse(groundBeefCopy.contains("tough skin"))
+        XCTAssertTrue(groundBeefCopy.contains("moist"))
+
+        let chickenThigh = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Chicken thigh"))
+        let chickenThighCopy = displayedCopy(for: chickenThigh)
+        XCTAssertTrue(chickenThighCopy.contains("boneless portion"))
+        XCTAssertTrue(chickenThighCopy.contains("cooked on the bone"))
+        XCTAssertTrue(chickenThighCopy.contains("inspect it again"))
+
+        let peanutButter = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Peanut butter"))
+        let peanutButterCopy = displayedCopy(for: peanutButter)
+        XCTAssertFalse(peanutButterCopy.contains("whole peanut butter"))
+        XCTAssertFalse(peanutButterCopy.contains("bone"))
+        XCTAssertFalse(peanutButterCopy.contains("skin"))
+        XCTAssertTrue(peanutButterCopy.contains("thin"))
+
+        let smoothie = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Fruit smoothie bowl"))
+        let smoothieCopy = displayedCopy(for: smoothie)
+        XCTAssertFalse(smoothieCopy.contains("bone"))
+        XCTAssertFalse(smoothieCopy.contains("shell"))
+        XCTAssertTrue(smoothieCopy.contains("spoon"))
+
+        let eggYolk = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Egg yolk"))
+        let eggYolkCopy = displayedCopy(for: eggYolk)
+        XCTAssertFalse(eggYolkCopy.contains("white and yolk"))
+        XCTAssertFalse(eggYolkCopy.contains("both white"))
+        XCTAssertTrue(eggYolkCopy.contains("moist"))
+        XCTAssertEqual(eggYolk.servingVisuals, [.spoon, .spoon, .spoon, .spoon])
+
+        let silkenTofu = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Silken tofu"))
+        let silkenTofuCopy = displayedCopy(for: silkenTofu)
+        XCTAssertFalse(silkenTofuCopy.contains("a bean should"))
+        XCTAssertFalse(silkenTofuCopy.contains("patty or cake"))
+        XCTAssertFalse(silkenTofuCopy.contains("rubbery skin"))
+        XCTAssertTrue(silkenTofuCopy.contains("scoopable"))
+
+        let tahini = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Tahini"))
+        let tahiniCopy = displayedCopy(for: tahini)
+        XCTAssertFalse(tahiniCopy.contains("whole tahini"))
+        XCTAssertFalse(tahiniCopy.contains("grind tahini"))
+        XCTAssertTrue(tahiniCopy.contains("smooth"))
+
+        let bayLeaf = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Bay leaf flavor"))
+        let bayLeafCopy = displayedCopy(for: bayLeaf)
+        XCTAssertTrue(bayLeafCopy.contains("remove"))
+        XCTAssertTrue(bayLeaf.preparations.allSatisfy {
+            $0.servingAmount.firstServing.localizedCaseInsensitiveContains("no leaf in the serving")
+        })
+
+        let sprouts = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Mung bean sprout"))
+        let sproutCopy = displayedCopy(for: sprouts)
+        XCTAssertTrue(sproutCopy.contains("steaming hot"))
+        XCTAssertTrue(sprouts.sourceURLs.contains(SolidsSourceLibrary.fdaProduceSafety))
+        XCTAssertFalse(sprouts.isIronRich)
+
+        for name in ["Cactus pear", "Prickly pear"] {
+            let pear = try XCTUnwrap(SolidsReferenceCatalog.food(named: name))
+            let pearCopy = displayedCopy(for: pear)
+            XCTAssertTrue(pearCopy.contains("glochid"), name)
+            XCTAssertTrue(pearCopy.contains("spine"), name)
+            XCTAssertTrue(pearCopy.contains("outer skin"), name)
+        }
+
+        let swordfish = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Swordfish"))
+        XCTAssertFalse(swordfish.isEligibleForGuidedPath)
+        XCTAssertTrue(swordfish.safetyNote.localizedCaseInsensitiveContains("choice to avoid"))
+
+        let mackerel = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Mackerel"))
+        XCTAssertFalse(mackerel.isEligibleForGuidedPath)
+        XCTAssertTrue(mackerel.safetyNote.localizedCaseInsensitiveContains("king mackerel"))
+
+        let tuna = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Tuna"))
+        XCTAssertFalse(tuna.isEligibleForGuidedPath)
+        XCTAssertTrue(tuna.safetyNote.localizedCaseInsensitiveContains("bigeye tuna"))
+    }
+
     func testIngredientFormsKeepTheirOwnPreparationProgressions() throws {
         let cassava = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Cassava"))
         XCTAssertTrue(cassava.safetyNote.localizedCaseInsensitiveContains("never serve cassava raw"))
@@ -228,12 +365,14 @@ final class SolidsFeatureTests: XCTestCase {
         let choking = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.cdcChoking)
         let fruitJuice = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.aapFruitJuice)
         let allergens = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.aapAllergenIntroduction)
+        let produceSafety = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.fdaProduceSafety)
 
         XCTAssertEqual(introduction, "CDC — Starting solid foods")
         XCTAssertEqual(choking, "CDC — Choking prevention")
         XCTAssertNotEqual(introduction, choking)
         XCTAssertEqual(fruitJuice, "AAP — Fruit juice guidance")
         XCTAssertEqual(allergens, "AAP — Allergen introduction guidance")
+        XCTAssertEqual(produceSafety, "FDA — Produce and sprout safety")
         XCTAssertNotEqual(fruitJuice, allergens)
     }
 
