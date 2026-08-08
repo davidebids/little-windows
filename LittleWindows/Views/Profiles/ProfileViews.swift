@@ -701,9 +701,12 @@ struct ManageProfilesView: View {
             Button {
                 showingAdd = true
             } label: {
-                Label("Add Child or Dog", systemImage: "plus.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add Child or Dog")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
