@@ -1603,6 +1603,19 @@ struct SolidsFoodDetailView: View {
                 Label(stage.title, systemImage: "figure.child")
                     .font(.headline)
                 Text(stage.instructions)
+                servingAmountRow(
+                    title: "First serving",
+                    value: stage.servingAmount.firstServing,
+                    systemImage: "1.circle.fill"
+                )
+                servingAmountRow(
+                    title: "After tolerated",
+                    value: stage.servingAmount.routineServing,
+                    systemImage: "fork.knife.circle.fill"
+                )
+                Text("These are suggested starting portions, not amounts the child must finish. Follow hunger and fullness cues and offer more when they show interest.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text(food.safetyNote)
                     .font(.subheadline)
                     .foregroundStyle(.orange)
@@ -1628,6 +1641,12 @@ struct SolidsFoodDetailView: View {
                             Text(visual.displayName).font(.caption).foregroundStyle(.orange)
                             Text(stage.instructions)
                                 .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Suggested amount")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(stage.servingAmount.routineServing)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -1846,6 +1865,26 @@ struct SolidsFoodDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func servingAmountRow(
+        title: String,
+        value: String,
+        systemImage: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.orange)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func addToShoppingList(_ list: ShoppingList) {
@@ -2581,6 +2620,22 @@ private struct SolidsPreparationWalkthroughView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("solids.preparation.stage")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("First serving")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(walkthrough.stage.servingAmount.firstServing)
+                    .font(.subheadline)
+                Text("After tolerated")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                Text(walkthrough.stage.servingAmount.routineServing)
+                    .font(.subheadline)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
             Text("The overview explains what to serve. This checklist walks through choosing, cleaning, cooking, shaping, testing, and serving it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

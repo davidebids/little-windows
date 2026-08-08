@@ -45,6 +45,9 @@ final class SolidsFeatureTests: XCTestCase {
             XCTAssertFalse(food.sourceURLs.isEmpty, food.name)
             XCTAssertTrue(food.preparations.allSatisfy { !$0.instructions.isEmpty }, food.name)
             XCTAssertTrue(food.preparations.allSatisfy {
+                !$0.servingAmount.firstServing.isEmpty && !$0.servingAmount.routineServing.isEmpty
+            }, "\(food.name) should include first and routine serving amounts")
+            XCTAssertTrue(food.preparations.allSatisfy {
                 $0.instructions.localizedCaseInsensitiveContains(food.name)
             }, "Preparation guidance should identify \(food.name), not just its category")
             XCTAssertTrue(food.preparations.map(\.minimumAgeMonths).allSatisfy {
@@ -68,6 +71,32 @@ final class SolidsFeatureTests: XCTestCase {
                 $0.host == "fdc.nal.usda.gov" && $0.absoluteString.localizedCaseInsensitiveContains("food-search")
             }, "\(food.name) should have an ingredient-specific USDA lookup")
         }
+    }
+
+    func testPeanutButterUsesSpecificCopyAndServingAmounts() throws {
+        let peanutButter = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Peanut butter"))
+        let firstStage = try XCTUnwrap(peanutButter.preparations.first)
+
+        XCTAssertTrue(firstStage.servingAmount.firstServing.contains("1 tsp"))
+        XCTAssertTrue(firstStage.servingAmount.routineServing.contains("2 tsp"))
+        XCTAssertTrue(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("smooth"))
+        XCTAssertTrue(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("thinned"))
+
+        let displayedCopy = [
+            peanutButter.details.introductionSummary,
+            peanutButter.details.backgroundSummary ?? "",
+            peanutButter.details.nutritionSummary,
+            peanutButter.details.allergenSummary,
+            peanutButter.details.choosingGuidance,
+            peanutButter.details.storageGuidance,
+            peanutButter.safetyNote,
+            peanutButter.chokingGuidance
+        ] + peanutButter.preparations.flatMap { stage in
+            [stage.instructions, stage.servingAmount.firstServing, stage.servingAmount.routineServing]
+        } + peanutButter.preparationWalkthrough(stageIndex: 0).actions.map(\.detail)
+
+        XCTAssertFalse(displayedCopy.contains { $0.localizedCaseInsensitiveContains("bones") })
+        XCTAssertFalse(displayedCopy.contains { $0.localizedCaseInsensitiveContains("skin") })
     }
 
     func testEveryIngredientUsesRichEditorialCopyInsteadOfCategoryBoilerplate() {

@@ -108,10 +108,16 @@ struct SolidsAllergenGuidance: Hashable {
     var sourceURLs: [URL]
 }
 
+struct SolidsServingAmountGuidance: Hashable {
+    var firstServing: String
+    var routineServing: String
+}
+
 struct SolidsPreparationStage: Identifiable, Hashable {
     var minimumAgeMonths: Int
     var title: String
     var instructions: String
+    var servingAmount = SolidsServingAmountGuidance(firstServing: "", routineServing: "")
     var id: Int { minimumAgeMonths }
 }
 
@@ -1060,6 +1066,7 @@ enum SolidsSourceLibrary {
     static let heartOfPalmAnaphylaxis = URL(string: "https://doi.org/10.1111/j.1398-9995.2006.01051.x")!
     static let whoComplementaryFeeding = URL(string: "https://www.who.int/publications/i/item/9789240081864")!
     static let espghanSugarPosition = URL(string: "https://doi.org/10.1097/MPG.0000000000001733")!
+    static let aapStartingSolids = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/Starting-Solid-Foods.aspx")!
     static let aapAllergenIntroduction = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/when-to-introduce-egg-peanut-butter-and-other-common-food-allergens-to-your-baby-food-allergy-prevention-tips.aspx")!
     static let niaidPeanutGuidance = URL(string: "https://www.niaid.nih.gov/sites/default/files/peanut-allergy-prevention-guidelines-parent-summary.pdf")!
 
@@ -1068,6 +1075,7 @@ enum SolidsSourceLibrary {
         if url == cdcIntroduction { return "CDC — Starting solid foods" }
         if url == cdcChoking { return "CDC — Choking prevention" }
         if url == aapFruitJuice { return "AAP — Fruit juice guidance" }
+        if url == aapStartingSolids { return "AAP — Starting solids and portions" }
         if url == aapAllergenIntroduction { return "AAP — Allergen introduction guidance" }
         if url.host?.contains("healthychildren") == true { return "American Academy of Pediatrics" }
         if url.host?.contains("nccih") == true { return "NIH NCCIH — Açaí safety" }
@@ -1480,7 +1488,20 @@ enum SolidsReferenceCatalog {
         let minimumAge = normalized(name) == "honey" ? 12 : 6
         let isIronRich = ironRichStatus(name: name, category: category)
         let highlights = nutritionHighlights(name: name, category: category)
+        let visuals = servingVisuals(name: name, category: category)
         let preparationStages = preparations(name: name, category: category, minimumAge: minimumAge)
+            .enumerated()
+            .map { index, stage in
+                var stage = stage
+                let visual = visuals.indices.contains(index) ? visuals[index] : (visuals.last ?? .spoon)
+                stage.servingAmount = servingAmountGuidance(
+                    name: name,
+                    category: category,
+                    ageMonths: stage.minimumAgeMonths,
+                    visual: visual
+                )
+                return stage
+            }
         return SolidsReferenceFood(
             id: id,
             name: name,
@@ -1504,7 +1525,7 @@ enum SolidsReferenceCatalog {
             chokingGuidance: chokingGuidance(name: name, category: category),
             nutritionHighlights: highlights,
             preparations: preparationStages,
-            servingVisuals: servingVisuals(name: name, category: category),
+            servingVisuals: visuals,
             sourceURLs: sourceURLs(
                 name: name,
                 category: category,
@@ -1608,6 +1629,15 @@ enum SolidsReferenceCatalog {
         }
         if key.contains("milk in food") || key == "buttermilk in food" {
             return "Pasteurized \(name.lowercased()) can be used as an ingredient once a child is ready for solids, generally around 6 months. Cow's milk should not replace breast milk or infant formula as the main drink before 12 months."
+        }
+        if category == .nutAndSeed {
+            if key.contains("butter") || key == "tahini" {
+                let riskGuidance = key == "peanut butter"
+                    ? " If the child has severe eczema or an egg allergy, ask their clinician how and where to introduce peanut."
+                    : ""
+                return "\(name) can generally be introduced once a child is developmentally ready for solids, usually around 6 months. Use a smooth version thinned into a familiar soft food or spread in a very thin layer; never offer a thick spoonful.\(riskGuidance)"
+            }
+            return "\(name) can generally be introduced once a child is developmentally ready for solids, usually around 6 months. Offer it finely ground into moist food or in a smooth, well-thinned butter; whole nuts and hard seed pieces are choking hazards."
         }
         if category == .herbAndFlavor {
             return "\(name) can season food from the start of solids in a finely prepared culinary amount. Mix it through moist food and keep whole pods, sticks, hard seeds, woody stems, and loose powder out of the serving."
@@ -3087,6 +3117,7 @@ enum SolidsReferenceCatalog {
             usda,
             SolidsSourceLibrary.cdcIntroduction,
             SolidsSourceLibrary.cdcChoking,
+            SolidsSourceLibrary.aapStartingSolids,
             SolidsSourceLibrary.nhsFoodSafety
         ]
         if normalized(name) == "acai" {
@@ -3403,6 +3434,79 @@ enum SolidsReferenceCatalog {
             if key.contains("falafel") || key.contains("bean dip") { values += [.sesame] }
         }
         return Array(Set(values.map(\.rawValue)).subtracting(allergenIDs(name: name, category: category))).sorted()
+    }
+
+    private static func servingAmountGuidance(
+        name: String,
+        category: SolidsFoodCategory,
+        ageMonths: Int,
+        visual: SolidsServingVisual
+    ) -> SolidsServingAmountGuidance {
+        let key = normalized(name)
+
+        if key == "peanut butter" {
+            return SolidsServingAmountGuidance(
+                firstServing: "1 tsp smooth peanut butter, thinned into a familiar food. Offer a small taste first, pause about 10 minutes, then continue the prepared amount if no reaction appears.",
+                routineServing: "About 2 tsp smooth peanut butter, thinned or spread very thinly. The child does not need to finish it."
+            )
+        }
+
+        if category == .nutAndSeed {
+            let safeForm = key.contains("butter") || key == "tahini"
+                ? "smooth \(name.lowercased()), well thinned"
+                : "\(name.lowercased()), finely ground into moist food"
+            return SolidsServingAmountGuidance(
+                firstServing: "1 tsp \(safeForm); begin with a small taste.",
+                routineServing: "Up to 2 tsp \(safeForm), after it is tolerated."
+            )
+        }
+
+        if category == .herbAndFlavor {
+            return SolidsServingAmountGuidance(
+                firstServing: "A small pinch mixed evenly through a familiar food.",
+                routineServing: "A pinch to ⅛ tsp mixed through the meal, adjusting for flavor."
+            )
+        }
+
+        if key == "honey" {
+            return SolidsServingAmountGuidance(
+                firstServing: "After 12 months only: a small drizzle mixed into food.",
+                routineServing: "Up to 1 tsp as an occasional added sweetener."
+            )
+        }
+
+        if category == .egg {
+            return SolidsServingAmountGuidance(
+                firstServing: "1–2 tsp fully cooked egg; begin with a small taste.",
+                routineServing: "About one-third of a fully cooked egg, after it is tolerated."
+            )
+        }
+
+        let routineVolume = ageMonths < 9 ? "1–2 tbsp" : "2–4 tbsp"
+        let firstServing: String
+        let routineServing: String
+        switch visual {
+        case .spear:
+            firstServing = "1 soft prepared piece."
+            routineServing = "1–2 soft prepared pieces, or about \(routineVolume) when mashed or chopped."
+        case .flattened:
+            firstServing = "1 soft flattened piece."
+            routineServing = "2–4 soft flattened pieces, or about \(routineVolume) prepared."
+        case .softPieces:
+            firstServing = "1–2 soft prepared pieces."
+            routineServing = "About \(routineVolume) of prepared pieces."
+        case .thinSpread:
+            firstServing = "1 tsp in a very thin layer; begin with a small taste."
+            routineServing = "Up to 2 tsp spread very thinly, after it is tolerated."
+        case .mashed, .shredded, .flakes, .spoon:
+            firstServing = "1–2 tsp prepared food."
+            routineServing = "About \(routineVolume) prepared."
+        }
+
+        return SolidsServingAmountGuidance(
+            firstServing: firstServing,
+            routineServing: routineServing
+        )
     }
 
     private static func ingredientQuantity(for name: String) -> String {
