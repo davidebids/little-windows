@@ -103,8 +103,11 @@ struct ProfileToolbarSettingsButton: View {
                     .foregroundStyle(AppTheme.accent)
             }
         }
-        .frame(width: 44, height: 44)
+        // Navigation bars add horizontal chrome around custom toolbar items.
+        // A narrower content frame keeps the resulting control circular.
+        .frame(width: 36, height: 44)
         .contentShape(Circle())
+        .buttonBorderShape(.circle)
         .onTapGesture(perform: action)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")

@@ -13,8 +13,12 @@ final class UserVisibleFlowUITests: XCTestCase {
         let profileSettings = app.buttons["Sample Child settings"]
         XCTAssertTrue(profileSettings.waitForExistence(timeout: 8))
         XCTAssertTrue(profileSettings.isHittable)
-        XCTAssertLessThanOrEqual(profileSettings.frame.width, 50)
-        XCTAssertLessThanOrEqual(profileSettings.frame.height, 50)
+        XCTAssertEqual(profileSettings.frame.width, 36, accuracy: 1)
+        XCTAssertEqual(
+            profileSettings.frame.width,
+            profileSettings.frame.height,
+            accuracy: 1
+        )
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Profile avatar on initial Today load"
