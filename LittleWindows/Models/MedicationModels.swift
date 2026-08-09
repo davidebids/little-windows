@@ -92,6 +92,65 @@ enum MedicationRoute: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum MedicationDoseUnit: String, Codable, CaseIterable, Identifiable {
+    case tablet
+    case capsule
+    case milliliters = "mL"
+    case milligrams = "mg"
+    case micrograms = "mcg"
+    case grams = "g"
+    case units = "unit"
+    case drops = "drop"
+    case puffs = "puff"
+    case sprays = "spray"
+    case applications = "application"
+    case patches = "patch"
+    case packets = "packet"
+    case scoops = "scoop"
+    case suppositories = "suppository"
+    case teaspoons = "tsp"
+    case tablespoons = "tbsp"
+    case doses = "dose"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .tablet: "Tablet"
+        case .capsule: "Capsule"
+        case .milliliters: "Milliliter (mL)"
+        case .milligrams: "Milligram (mg)"
+        case .micrograms: "Microgram (mcg)"
+        case .grams: "Gram (g)"
+        case .units: "Unit"
+        case .drops: "Drop"
+        case .puffs: "Puff"
+        case .sprays: "Spray"
+        case .applications: "Application"
+        case .patches: "Patch"
+        case .packets: "Packet"
+        case .scoops: "Scoop"
+        case .suppositories: "Suppository"
+        case .teaspoons: "Teaspoon (tsp)"
+        case .tablespoons: "Tablespoon (tbsp)"
+        case .doses: "Dose"
+        }
+    }
+
+    static func defaultUnit(for form: MedicationForm) -> MedicationDoseUnit {
+        switch form {
+        case .tablet: .tablet
+        case .capsule: .capsule
+        case .liquid, .injection: .milliliters
+        case .inhaler: .puffs
+        case .drops: .drops
+        case .cream: .applications
+        case .patch: .patches
+        case .other: .doses
+        }
+    }
+}
+
 enum MedicationScheduleKind: String, Codable, CaseIterable, Identifiable {
     case daily
     case specificWeekdays

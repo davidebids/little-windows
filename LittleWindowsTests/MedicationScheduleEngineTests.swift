@@ -4,6 +4,23 @@ import XCTest
 @testable import LittleWindows
 
 final class MedicationScheduleEngineTests: XCTestCase {
+    func testMedicationDoseUnitsCoverCommonMedicationForms() {
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .tablet), .tablet)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .capsule), .capsule)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .liquid), .milliliters)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .injection), .milliliters)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .inhaler), .puffs)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .drops), .drops)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .cream), .applications)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .patch), .patches)
+        XCTAssertEqual(MedicationDoseUnit.defaultUnit(for: .other), .doses)
+
+        XCTAssertTrue(MedicationDoseUnit.allCases.contains(.milligrams))
+        XCTAssertTrue(MedicationDoseUnit.allCases.contains(.micrograms))
+        XCTAssertTrue(MedicationDoseUnit.allCases.contains(.units))
+        XCTAssertTrue(MedicationDoseUnit.allCases.contains(.teaspoons))
+    }
+
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

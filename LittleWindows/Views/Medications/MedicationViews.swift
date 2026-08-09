@@ -745,7 +745,7 @@ private struct MedicationEditorView: View {
     @State private var startDate = Date()
     @State private var endDate = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
     @State private var doseAmount = 1.0
-    @State private var doseUnit = "tablet"
+    @State private var doseUnit: MedicationDoseUnit = .tablet
     @State private var doseTimes = [Calendar.current.date(from: DateComponents(hour: 8)) ?? Date()]
     @State private var weekdayMask = 127
     @State private var intervalDays = 2
@@ -802,7 +802,11 @@ private struct MedicationEditorView: View {
             )
         } ?? displayCalendar.date(byAdding: .day, value: 7, to: Date()) ?? Date())
         _doseAmount = State(initialValue: regimen?.doseAmount ?? 1)
-        _doseUnit = State(initialValue: regimen?.doseUnit ?? "tablet")
+        _doseUnit = State(
+            initialValue: regimen
+                .flatMap { MedicationDoseUnit(rawValue: $0.doseUnit) }
+                ?? MedicationDoseUnit.defaultUnit(for: medication?.form ?? .tablet)
+        )
         let existingTimes = regimen?.doseTimes.compactMap { value in
             displayCalendar.date(from: DateComponents(hour: value.hour, minute: value.minute))
         } ?? []
@@ -842,6 +846,7 @@ private struct MedicationEditorView: View {
                 Picker("Form", selection: $form) {
                     ForEach(MedicationForm.allCases) { Text($0.displayName).tag($0) }
                 }
+                .accessibilityIdentifier("medication.form")
                 LabeledContent("Strength") {
                     TextField("Optional", value: $strength, format: .number)
                         .keyboardType(.decimalPad)
@@ -872,10 +877,12 @@ private struct MedicationEditorView: View {
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Dose unit") {
-                    TextField("Required", text: $doseUnit)
-                        .multilineTextAlignment(.trailing)
+                Picker("Dose unit", selection: $doseUnit) {
+                    ForEach(MedicationDoseUnit.allCases) {
+                        Text($0.displayName).tag($0)
+                    }
                 }
+                .accessibilityIdentifier("medication.dose-unit")
                 scheduleFields
             }
 
@@ -966,6 +973,10 @@ private struct MedicationEditorView: View {
         } message: {
             Text(validationMessage ?? "")
         }
+        .onChange(of: form) { oldForm, newForm in
+            guard doseUnit == MedicationDoseUnit.defaultUnit(for: oldForm) else { return }
+            doseUnit = MedicationDoseUnit.defaultUnit(for: newForm)
+        }
     }
 
     private var scheduleCalendar: Calendar {
@@ -1038,9 +1049,8 @@ private struct MedicationEditorView: View {
             validationMessage = "Enter the medication name."
             return
         }
-        guard doseAmount > 0,
-              !doseUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            validationMessage = "Enter a dose greater than zero and its unit."
+        guard doseAmount > 0 else {
+            validationMessage = "Enter a dose greater than zero."
             return
         }
         if let strength, strength <= 0 {
@@ -1083,7 +1093,7 @@ private struct MedicationEditorView: View {
             return
         }
 
-        let normalizedDoseUnit = doseUnit.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDoseUnit = doseUnit.rawValue
         if let medication, let regimen {
             MedicationService.updateMedication(
                 medication: medication,

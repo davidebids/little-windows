@@ -117,6 +117,21 @@ final class UserVisibleFlowUITests: XCTestCase {
             )
         }
 
+        let formPicker = app.buttons["medication.form"]
+        let doseUnitPicker = app.buttons["medication.dose-unit"]
+        XCTAssertTrue(formPicker.exists)
+        XCTAssertTrue(doseUnitPicker.exists)
+
+        formPicker.tap()
+        XCTAssertTrue(app.buttons["Liquid"].waitForExistence(timeout: 3))
+        app.buttons["Liquid"].tap()
+        XCTAssertTrue(doseUnitPicker.label.contains("Milliliter (mL)"))
+
+        doseUnitPicker.tap()
+        XCTAssertTrue(app.buttons["Milligram (mg)"].waitForExistence(timeout: 3))
+        app.buttons["Milligram (mg)"].tap()
+        XCTAssertTrue(doseUnitPicker.label.contains("Milligram (mg)"))
+
         assertPersistentMultilineField(
             identifier: "medication.instructions",
             maxScrolls: 2
