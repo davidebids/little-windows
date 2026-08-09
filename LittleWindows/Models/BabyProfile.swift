@@ -251,6 +251,9 @@ final class CareProfile {
         case .child:
             return ageDescription
         case .adult:
+            if let birthDate {
+                return DateFormatting.age(from: birthDate)
+            }
             if adultRelationship == .myself {
                 return "My care"
             }

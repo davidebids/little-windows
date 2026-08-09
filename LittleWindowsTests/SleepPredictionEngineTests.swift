@@ -1880,6 +1880,34 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(testDog.profileSubtitle, "Mini Goldendoodle")
     }
 
+    func testAdultProfileSubtitlePrefersAgeWhenBirthDateIsSet() throws {
+        let birthDate = try XCTUnwrap(
+            Calendar.current.date(byAdding: .year, value: -40, to: Date())
+        )
+        let ownProfile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            birthDate: birthDate,
+            adultRelationship: .myself
+        )
+        let lovedOneProfile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            birthDate: birthDate,
+            adultRelationship: .parent
+        )
+        let profileWithoutBirthDate = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+
+        let expectedAge = DateFormatting.age(from: birthDate)
+        XCTAssertEqual(ownProfile.profileSubtitle, expectedAge)
+        XCTAssertEqual(lovedOneProfile.profileSubtitle, expectedAge)
+        XCTAssertEqual(profileWithoutBirthDate.profileSubtitle, "My care")
+    }
+
     func testDogEventDetailsDriveTimelineSummaries() {
         var pottyDetails = DogEventDetails()
         pottyDetails.pottyType = .poop
