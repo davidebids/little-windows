@@ -809,6 +809,22 @@ struct SolidsReferenceFood: Identifiable, Hashable {
     }
 }
 
+/// Search and list metadata kept separate from the much larger educational
+/// payload on `SolidsReferenceFood`. Screens that only need to find or filter
+/// foods should use this type so their first render does not build hundreds of
+/// preparation guides, questions, citations, and walkthroughs.
+struct SolidsReferenceFoodSummary: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var category: SolidsFoodCategory
+    var aliases: [String]
+    var minimumAgeMonths: Int
+    var isIronRich: Bool
+    var allergenIDs: [String]
+    var possibleAllergenIDs: [String]
+    var visualEmoji: String
+}
+
 enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
     case condiment
     case dairy
@@ -859,7 +875,19 @@ enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
     }
 
     func matches(_ food: SolidsReferenceFood) -> Bool {
-        let key = SolidFoodSelection.normalizedName(food.name)
+        matches(name: food.name, category: food.category, allergenIDs: food.allergenIDs)
+    }
+
+    func matches(_ food: SolidsReferenceFoodSummary) -> Bool {
+        matches(name: food.name, category: food.category, allergenIDs: food.allergenIDs)
+    }
+
+    private func matches(
+        name: String,
+        category: SolidsFoodCategory,
+        allergenIDs: [String]
+    ) -> Bool {
+        let key = SolidFoodSelection.normalizedName(name)
         let shellfishTerms = ["clam", "crab", "crayfish", "langoustine", "lobster", "mussel", "octopus", "oyster", "prawn", "scallop", "shrimp", "squid"]
         let seedTerms = ["chia", "flax", "hemp", "poppy", "pumpkin seed", "sesame", "sunflower seed"]
         let condimentTerms = ["bean dip", "hummus", "miso", "peanut sauce", "tahini"]
@@ -872,50 +900,50 @@ enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
         case .condiment:
             return condimentTerms.contains(where: key.contains)
         case .dairy:
-            return food.category == .dairy
+            return category == .dairy
         case .drink:
             return drinkTerms.contains(where: key.contains)
         case .egg:
-            return food.category == .egg
+            return category == .egg
         case .fish:
-            return food.category == .seafood && !shellfishTerms.contains(where: key.contains)
+            return category == .seafood && !shellfishTerms.contains(where: key.contains)
         case .flower:
             return flowerTerms.contains(where: key.contains)
         case .fruit:
-            return food.category == .fruit
+            return category == .fruit
         case .grain:
-            return food.category == .grain
+            return category == .grain
         case .herbSpice:
-            return food.category == .herbAndFlavor
+            return category == .herbAndFlavor
         case .legume:
-            return food.category == .beanAndPlantProtein || key == "peanut" || key == "peanut butter"
+            return category == .beanAndPlantProtein || key == "peanut" || key == "peanut butter"
         case .meat:
-            return food.category == .meat
+            return category == .meat
         case .prepared:
-            return food.category == .preparedFood
+            return category == .preparedFood
         case .pseudoGrain:
             return pseudoGrains.contains(key)
         case .seed:
             return seedTerms.contains(where: key.contains)
         case .shellfish:
-            return food.category == .seafood && shellfishTerms.contains(where: key.contains)
+            return category == .seafood && shellfishTerms.contains(where: key.contains)
         case .sweetener:
             return key == "honey"
         case .treeNut:
-            return food.allergenIDs.contains(SolidsAllergen.treeNuts.rawValue)
+            return allergenIDs.contains(SolidsAllergen.treeNuts.rawValue)
         case .vegan:
-            if [.fruit, .vegetable, .grain, .beanAndPlantProtein, .nutAndSeed, .herbAndFlavor].contains(food.category) {
+            if [.fruit, .vegetable, .grain, .beanAndPlantProtein, .nutAndSeed, .herbAndFlavor].contains(category) {
                 return true
             }
-            guard food.category == .preparedFood else { return false }
-            return food.allergenIDs.allSatisfy {
+            guard category == .preparedFood else { return false }
+            return allergenIDs.allSatisfy {
                 ![SolidsAllergen.milk.rawValue, SolidsAllergen.egg.rawValue, SolidsAllergen.fish.rawValue, SolidsAllergen.crustaceanShellfish.rawValue].contains($0)
             } && !animalPreparedFoodTerms.contains(where: key.contains)
         case .vegetable:
-            return food.category == .vegetable
+            return category == .vegetable
         case .vegetarian:
-            if food.category == .meat || food.category == .seafood { return false }
-            if food.category != .preparedFood { return true }
+            if category == .meat || category == .seafood { return false }
+            if category != .preparedFood { return true }
             return !animalPreparedFoodTerms.contains(where: key.contains)
         }
     }
@@ -983,15 +1011,47 @@ struct SolidsFoodDatabaseFilters: Equatable {
         _ food: SolidsReferenceFood,
         progress: SolidsFoodProgressFilterValue?
     ) -> Bool {
-        if let ageMonths, food.minimumAgeMonths > ageMonths { return false }
-        if !selectedTypes.isEmpty && !selectedTypes.contains(where: { $0.matches(food) }) { return false }
-        if !excludedAllergenIDs.isDisjoint(with: food.allergenIDs) { return false }
-        if !excludedAllergenIDs.isDisjoint(with: food.possibleAllergenIDs) { return false }
+        matches(
+            minimumAgeMonths: food.minimumAgeMonths,
+            isIronRich: food.isIronRich,
+            allergenIDs: food.allergenIDs,
+            possibleAllergenIDs: food.possibleAllergenIDs,
+            matchesSelectedType: selectedTypes.isEmpty || selectedTypes.contains { $0.matches(food) },
+            progress: progress
+        )
+    }
+
+    func matches(
+        _ food: SolidsReferenceFoodSummary,
+        progress: SolidsFoodProgressFilterValue?
+    ) -> Bool {
+        matches(
+            minimumAgeMonths: food.minimumAgeMonths,
+            isIronRich: food.isIronRich,
+            allergenIDs: food.allergenIDs,
+            possibleAllergenIDs: food.possibleAllergenIDs,
+            matchesSelectedType: selectedTypes.isEmpty || selectedTypes.contains { $0.matches(food) },
+            progress: progress
+        )
+    }
+
+    private func matches(
+        minimumAgeMonths: Int,
+        isIronRich: Bool,
+        allergenIDs: [String],
+        possibleAllergenIDs: [String],
+        matchesSelectedType: Bool,
+        progress: SolidsFoodProgressFilterValue?
+    ) -> Bool {
+        if let ageMonths, minimumAgeMonths > ageMonths { return false }
+        if !matchesSelectedType { return false }
+        if !excludedAllergenIDs.isDisjoint(with: allergenIDs) { return false }
+        if !excludedAllergenIDs.isDisjoint(with: possibleAllergenIDs) { return false }
 
         switch ironFilter {
         case .any: break
-        case .ironRich where !food.isIronRich: return false
-        case .notIronRich where food.isIronRich: return false
+        case .ironRich where !isIronRich: return false
+        case .notIronRich where isIronRich: return false
         default: break
         }
 
@@ -1427,20 +1487,21 @@ enum SolidsSourceLibrary {
 enum SolidsReferenceCatalog {
     static let version = 8
 
-    /// Builds the generated catalog indexes away from the UI thread. The home
-    /// screen calls this after its first frame so opening search-heavy screens
-    /// does not pay the one-time 400+ item setup cost during navigation.
+    /// Builds only the compact search index away from the UI thread. Rich food
+    /// guidance and recipe planning data stay lazy so warming the search field
+    /// cannot compete with first-interaction responsiveness.
     static func warmCaches() {
         _ = foodSearchEntries.count
-        _ = foodsByCategory.count
-        _ = recipeSearchEntries.count
-        _ = recipesByFoodID.count
-        _ = recipesByAllergenID.count
-        _ = guidedCandidateFoods.count
+    }
+
+    private struct FoodSeed {
+        var id: String
+        var name: String
+        var category: SolidsFoodCategory
     }
 
     private struct FoodSearchEntry {
-        var food: SolidsReferenceFood
+        var summary: SolidsReferenceFoodSummary
         var normalizedTerms: [String]
     }
 
@@ -1449,7 +1510,7 @@ enum SolidsReferenceCatalog {
         var normalizedText: String
     }
 
-    static let foods: [SolidsReferenceFood] = {
+    private static let foodSeeds: [FoodSeed] = {
         let groups: [(SolidsFoodCategory, String)] = [
             (.fruit, fruitNames),
             (.vegetable, vegetableNames),
@@ -1466,12 +1527,48 @@ enum SolidsReferenceCatalog {
 
         var seen = Set<String>()
         return groups.flatMap { category, value in
-            names(in: value).compactMap { name -> SolidsReferenceFood? in
+            names(in: value).compactMap { name -> FoodSeed? in
                 let id = slug(name)
                 guard seen.insert(id).inserted else { return nil }
-                return makeFood(id: id, name: name, category: category)
+                return FoodSeed(id: id, name: name, category: category)
             }
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }()
+
+    /// Compact immutable records used by search, filters, pickers, and plan
+    /// selection. Building these does not create any educational page content.
+    static let foodSummaries: [SolidsReferenceFoodSummary] = foodSeeds.map { seed in
+        let allergens = allergenIDs(name: seed.name, category: seed.category)
+        return SolidsReferenceFoodSummary(
+            id: seed.id,
+            name: seed.name,
+            category: seed.category,
+            aliases: aliases(for: seed.name),
+            minimumAgeMonths: normalized(seed.name) == "honey" ? 12 : 6,
+            isIronRich: ironRichStatus(name: seed.name, category: seed.category),
+            allergenIDs: allergens,
+            possibleAllergenIDs: possibleAllergenIDs(name: seed.name, category: seed.category),
+            visualEmoji: SolidsFoodVisual.emoji(for: seed.name, category: seed.category)
+        )
+    }
+
+    static let foods: [SolidsReferenceFood] = foodSummaries.map { summary in
+        makeFood(summary: summary)
+    }
+
+    private static let foodSummariesByID: [String: SolidsReferenceFoodSummary] =
+        Dictionary(uniqueKeysWithValues: foodSummaries.map { ($0.id, $0) })
+
+    private static let foodSummariesByLookupName: [String: SolidsReferenceFoodSummary] = {
+        var result: [String: SolidsReferenceFoodSummary] = [:]
+        for food in foodSummaries {
+            let nameKey = normalized(food.name)
+            if result[nameKey] == nil { result[nameKey] = food }
+            for alias in food.aliases where result[normalized(alias)] == nil {
+                result[normalized(alias)] = food
+            }
+        }
+        return result
     }()
 
     private static let foodsByID: [String: SolidsReferenceFood] =
@@ -1489,9 +1586,9 @@ enum SolidsReferenceCatalog {
         return result
     }()
 
-    private static let foodSearchEntries: [FoodSearchEntry] = foods.map { food in
+    private static let foodSearchEntries: [FoodSearchEntry] = foodSummaries.map { food in
         FoodSearchEntry(
-            food: food,
+            summary: food,
             normalizedTerms: ([food.name] + food.aliases).map(normalized)
         )
     }
@@ -1735,18 +1832,33 @@ enum SolidsReferenceCatalog {
         foodsByLookupName[normalized(name)]
     }
 
+    static func foodSummary(id: String) -> SolidsReferenceFoodSummary? {
+        foodSummariesByID[id]
+    }
+
+    static func foodSummary(named name: String) -> SolidsReferenceFoodSummary? {
+        foodSummariesByLookupName[normalized(name)]
+    }
+
     static func recipe(id: String) -> SolidsReferenceRecipe? {
         recipesByID[id]
     }
 
     static func search(_ query: String, category: SolidsFoodCategory? = nil) -> [SolidsReferenceFood] {
+        searchSummaries(query, category: category).compactMap { foodsByID[$0.id] }
+    }
+
+    static func searchSummaries(
+        _ query: String,
+        category: SolidsFoodCategory? = nil
+    ) -> [SolidsReferenceFoodSummary] {
         let key = normalized(query)
         return foodSearchEntries.compactMap { entry in
-            guard category == nil || entry.food.category == category,
+            guard category == nil || entry.summary.category == category,
                   key.isEmpty || entry.normalizedTerms.contains(where: { $0.contains(key) }) else {
                 return nil
             }
-            return entry.food
+            return entry.summary
         }
     }
 
@@ -1804,15 +1916,14 @@ enum SolidsReferenceCatalog {
         )
     }
 
-    private static func makeFood(
-        id: String,
-        name: String,
-        category: SolidsFoodCategory
-    ) -> SolidsReferenceFood {
-        let allergens = allergenIDs(name: name, category: category)
-        let possibleAllergens = possibleAllergenIDs(name: name, category: category)
-        let minimumAge = normalized(name) == "honey" ? 12 : 6
-        let isIronRich = ironRichStatus(name: name, category: category)
+    private static func makeFood(summary: SolidsReferenceFoodSummary) -> SolidsReferenceFood {
+        let id = summary.id
+        let name = summary.name
+        let category = summary.category
+        let allergens = summary.allergenIDs
+        let possibleAllergens = summary.possibleAllergenIDs
+        let minimumAge = summary.minimumAgeMonths
+        let isIronRich = summary.isIronRich
         let highlights = nutritionHighlights(name: name, category: category)
         let visuals = servingVisuals(name: name, category: category)
         let preparationStages = preparations(name: name, category: category, minimumAge: minimumAge)
@@ -1832,7 +1943,7 @@ enum SolidsReferenceCatalog {
             id: id,
             name: name,
             category: category,
-            aliases: aliases(for: name),
+            aliases: summary.aliases,
             minimumAgeMonths: minimumAge,
             isIronRich: isIronRich,
             allergenIDs: allergens,

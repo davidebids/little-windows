@@ -754,7 +754,30 @@ final class SolidsFeatureTests: XCTestCase {
 
     func testCatalogIndexesPreserveFoodRecipeAndSearchResults() throws {
         let foods = SolidsReferenceCatalog.foods
+        let summaries = SolidsReferenceCatalog.foodSummaries
         let recipes = SolidsReferenceCatalog.recipes
+
+        XCTAssertEqual(summaries.map(\.id), foods.map(\.id))
+        for (summary, food) in zip(summaries, foods) {
+            XCTAssertEqual(summary.name, food.name)
+            XCTAssertEqual(summary.category, food.category)
+            XCTAssertEqual(summary.aliases, food.aliases)
+            XCTAssertEqual(summary.minimumAgeMonths, food.minimumAgeMonths)
+            XCTAssertEqual(summary.isIronRich, food.isIronRich)
+            XCTAssertEqual(summary.allergenIDs, food.allergenIDs)
+            XCTAssertEqual(summary.possibleAllergenIDs, food.possibleAllergenIDs)
+            XCTAssertEqual(summary.visualEmoji, food.visualEmoji)
+            XCTAssertEqual(SolidsReferenceCatalog.foodSummary(id: summary.id), summary)
+            XCTAssertEqual(SolidsReferenceCatalog.foodSummary(named: summary.name), summary)
+        }
+
+        for type in SolidsFoodTypeFilter.allCases {
+            XCTAssertEqual(
+                summaries.filter(type.matches).map(\.id),
+                foods.filter(type.matches).map(\.id),
+                type.displayName
+            )
+        }
 
         for recipe in recipes {
             XCTAssertEqual(SolidsReferenceCatalog.recipe(id: recipe.id), recipe)
@@ -793,6 +816,11 @@ final class SolidsFeatureTests: XCTestCase {
                 }
             }.map(\.id)
             XCTAssertEqual(SolidsReferenceCatalog.search(query).map(\.id), expectedFoodIDs, query)
+            XCTAssertEqual(
+                SolidsReferenceCatalog.searchSummaries(query).map(\.id),
+                expectedFoodIDs,
+                query
+            )
 
             let expectedRecipeIDs = recipes.filter { recipe in
                 recipe.title.localizedCaseInsensitiveContains(query)

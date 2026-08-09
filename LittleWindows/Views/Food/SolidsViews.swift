@@ -1102,8 +1102,8 @@ struct SolidsFoodDatabaseView: View {
     @State private var showingFilters = false
     @State private var showingNewCustomFood = false
 
-    private var searchAndCategoryFoods: [SolidsReferenceFood] {
-        SolidsReferenceCatalog.search(effectiveSearchText, category: selectedCategory)
+    private var searchAndCategoryFoods: [SolidsReferenceFoodSummary] {
+        SolidsReferenceCatalog.searchSummaries(effectiveSearchText, category: selectedCategory)
     }
 
     private var filteredCustomFoods: [SolidFoodCatalogItem] {
@@ -1279,7 +1279,7 @@ struct SolidsFoodDatabaseView: View {
 private struct SolidsFoodDatabaseFilterView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let foods: [SolidsReferenceFood]
+    let foods: [SolidsReferenceFoodSummary]
     let progressByFoodID: [String: SolidsFoodProgressFilterValue]
     let onApply: (SolidsFoodDatabaseFilters) -> Void
 
@@ -1293,7 +1293,7 @@ private struct SolidsFoodDatabaseFilterView: View {
 
     init(
         filters: SolidsFoodDatabaseFilters,
-        foods: [SolidsReferenceFood],
+        foods: [SolidsReferenceFoodSummary],
         progressByFoodID: [String: SolidsFoodProgressFilterValue],
         onApply: @escaping (SolidsFoodDatabaseFilters) -> Void
     ) {
@@ -3047,7 +3047,7 @@ struct NewSolidMealPlanView: View {
     @State private var planWriter: SolidsPlanWriter?
     @State private var foodChoices: [SolidPlanFoodChoice]
 
-    private static let bundledFoodChoices = SolidsReferenceCatalog.foods.map {
+    private static let bundledFoodChoices = SolidsReferenceCatalog.foodSummaries.map {
         SolidPlanFoodChoice(
             id: $0.id,
             name: $0.name,
@@ -3161,7 +3161,7 @@ struct NewSolidMealPlanView: View {
         guard let allergenID = plan?.allergenID,
               let allergen = SolidsAllergen(rawValue: allergenID) else { return nil }
         let selectedContainsAllergen = selectedFoodIDs.contains { foodID in
-            if let reference = SolidsReferenceCatalog.food(id: foodID) {
+            if let reference = SolidsReferenceCatalog.foodSummary(id: foodID) {
                 return reference.allergenIDs.contains(allergenID)
             }
             return customFoods.first {

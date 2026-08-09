@@ -662,7 +662,15 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.swipeDown()
         let search = app.searchFields["Search foods"]
         XCTAssertTrue(search.waitForExistence(timeout: 3))
+
+        let focusStartedAt = ContinuousClock.now
         search.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        XCTAssertLessThan(
+            focusStartedAt.duration(to: .now),
+            .seconds(3),
+            "Focusing the food database search field should not initialize rich food guidance."
+        )
 
         let searchStartedAt = ContinuousClock.now
         search.typeText("pineapple")

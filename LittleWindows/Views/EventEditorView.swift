@@ -433,7 +433,7 @@ struct EventEditorView: View {
         )
         let presetConfirmedAllergens = Set(preset?.confirmedAllergenPortionIDs ?? [])
         return names.map { name in
-            let reference = SolidsReferenceCatalog.food(named: name)
+            let reference = SolidsReferenceCatalog.foodSummary(named: name)
             let foodID = presetIDs[SolidFoodSelection.normalizedName(name)]
                 ?? reference?.id
                 ?? "custom-\(SolidFoodSelection.normalizedName(name).replacingOccurrences(of: " ", with: "-"))"
@@ -458,7 +458,7 @@ struct EventEditorView: View {
         solidFoodDetails = names.map { name in
             let key = SolidFoodSelection.normalizedName(name)
             if var existing = existingByName[key] {
-                let catalogAllergens = SolidsReferenceCatalog.food(id: existing.foodID)?.allergenIDs
+                let catalogAllergens = SolidsReferenceCatalog.foodSummary(id: existing.foodID)?.allergenIDs
                     ?? customSolidFoods.first(where: {
                         "custom-\($0.id.uuidString.lowercased())" == existing.foodID
                             || $0.normalizedName == key
@@ -470,7 +470,7 @@ struct EventEditorView: View {
                 }
                 return existing
             }
-            if let reference = SolidsReferenceCatalog.food(named: name) {
+            if let reference = SolidsReferenceCatalog.foodSummary(named: name) {
                 return SolidFoodLogDetail(
                     foodID: reference.id,
                     foodName: reference.name,
@@ -3021,7 +3021,7 @@ private struct SolidFoodPickerView: View {
         let isKnownUserFood = recentFoodNames.contains {
             SolidFoodSelection.normalizedName($0) == normalizedName
         } || customFoods.contains { $0.normalizedName == normalizedName }
-        return isKnownUserFood || SolidsReferenceCatalog.food(named: name) != nil ? nil : name
+        return isKnownUserFood || SolidsReferenceCatalog.foodSummary(named: name) != nil ? nil : name
     }
 
     private var filteredRecentFoods: [String] {
@@ -3038,8 +3038,8 @@ private struct SolidFoodPickerView: View {
         }
     }
 
-    private var filteredReferenceFoods: [SolidsReferenceFood] {
-        SolidsReferenceCatalog.search(effectiveSearchText)
+    private var filteredReferenceFoods: [SolidsReferenceFoodSummary] {
+        SolidsReferenceCatalog.searchSummaries(effectiveSearchText)
     }
 
     @ViewBuilder
@@ -3058,13 +3058,13 @@ private struct SolidFoodPickerView: View {
         }
     }
 
-    private func foodDatabaseSection(_ foods: [SolidsReferenceFood]) -> some View {
+    private func foodDatabaseSection(_ foods: [SolidsReferenceFoodSummary]) -> some View {
         let foodsByCategory = Dictionary(grouping: foods, by: \.category)
         return VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Food database")
                     .font(.headline)
-                Text("\(SolidsReferenceCatalog.foods.count) bundled foods with stable names for tracking.")
+                Text("\(SolidsReferenceCatalog.foodSummaries.count) bundled foods with stable names for tracking.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -3151,7 +3151,7 @@ private struct SolidFoodPickerView: View {
     }
 
     private func visualEmoji(for name: String) -> String {
-        if let referenceFood = SolidsReferenceCatalog.food(named: name) {
+        if let referenceFood = SolidsReferenceCatalog.foodSummary(named: name) {
             return referenceFood.visualEmoji
         }
         return SolidsFoodVisual.emoji(for: name)
