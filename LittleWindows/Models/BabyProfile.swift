@@ -239,9 +239,6 @@ final class CareProfile {
         case .adult:
             return birthDate.map { DateFormatting.age(from: $0) } ?? "Age not set"
         case .dog:
-            if let adoptionDate {
-                return "home \(DateFormatting.age(from: adoptionDate))"
-            }
             return birthDate.map { DateFormatting.age(from: $0) } ?? "Age not set"
         }
     }
