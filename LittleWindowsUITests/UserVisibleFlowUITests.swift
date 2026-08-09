@@ -25,6 +25,22 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
     }
 
+    func testPuppyStageGuideOpenedFromTodayHasCloseControl() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://puppy-guide")
+
+        XCTAssertTrue(app.navigationBars["6 Months"].waitForExistence(timeout: 8))
+        let closeButton = app.buttons["puppy-stage-guide.close"]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 4))
+        closeButton.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        XCTAssertFalse(app.staticTexts["Puppy Stage Guide"].exists)
+    }
+
     func testMedicationEditorKeepsLabelsVisibleForPopulatedValues() {
         continueAfterFailure = false
 

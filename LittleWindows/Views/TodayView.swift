@@ -940,7 +940,11 @@ struct TodayView: View {
         }
         .sheet(item: $puppyGuideToOpen) { guide in
             NavigationStack {
-                PuppyStageGuideDetailView(guide: guide, profile: puppyGuideProfileToOpen ?? profile)
+                PuppyStageGuideDetailView(
+                    guide: guide,
+                    profile: puppyGuideProfileToOpen ?? profile,
+                    showsCloseButton: true
+                )
             }
         }
         .sheet(isPresented: $showingProfileEditor) {

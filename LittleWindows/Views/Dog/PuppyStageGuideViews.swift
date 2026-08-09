@@ -67,16 +67,19 @@ struct PuppyStageGuideCard: View {
 }
 
 struct PuppyStageGuideDetailView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var readStates: [PuppyStageGuideReadState]
     let guide: PuppyStageGuide
     let profile: CareProfile?
+    let showsCloseButton: Bool
     @State private var editorRoute: EventEditorRoute?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
 
-    init(guide: PuppyStageGuide, profile: CareProfile?) {
+    init(guide: PuppyStageGuide, profile: CareProfile?, showsCloseButton: Bool = false) {
         self.guide = guide
         self.profile = profile
+        self.showsCloseButton = showsCloseButton
         let selectedProfileID = profile?.id
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         _readStates = Query(FetchDescriptor<PuppyStageGuideReadState>(
@@ -172,6 +175,16 @@ struct PuppyStageGuideDetailView: View {
         }
         .navigationTitle(guide.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if showsCloseButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") {
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("puppy-stage-guide.close")
+                }
+            }
+        }
         .sheet(item: $editorRoute) { route in
             NavigationStack {
                 EventEditorView(type: route.type, event: route.event) { event in
