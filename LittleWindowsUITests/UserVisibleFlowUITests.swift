@@ -7,7 +7,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         continueAfterFailure = false
 
         launch(startURL: "littlewindows://debug/reset-empty")
-        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(
+            startURL: "littlewindows://debug/seed-smoke",
+            additionalEnvironment: ["LITTLE_WINDOWS_UI_TEST_PROFILE_PHOTO": "1"]
+        )
         launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
 
         let profileSettings = app.buttons["Sample Child settings"]

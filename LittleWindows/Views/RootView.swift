@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 @MainActor
 enum AppInteractionMonitor {
@@ -1654,6 +1655,7 @@ enum DebugSimulatorSmokeSeedService {
     static let inventoryItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000601")!
     static let mealPrepItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000701")!
     static let storeID = UUID(uuidString: "00000000-0000-0000-0000-000000000801")!
+    private static let profilePhotoID = UUID(uuidString: "00000000-0000-0000-0000-000000000901")!
 
     private static let produceSectionID = UUID(uuidString: "00000000-0000-0000-0000-000000000802")!
     private static let coldSectionID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
@@ -1863,6 +1865,9 @@ enum DebugSimulatorSmokeSeedService {
             displayColor: "indigo",
             context: context
         )
+        if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TEST_PROFILE_PHOTO"] == "1" {
+            seedProfilePhoto(for: child, context: context)
+        }
         _ = fetchOrCreateProfile(
             id: dogProfileID,
             profileType: .dog,
@@ -1882,6 +1887,38 @@ enum DebugSimulatorSmokeSeedService {
         seedFoodHome(today: today, context: context)
 
         _ = PersistenceService.save(context: context)
+    }
+
+    @MainActor
+    private static func seedProfilePhoto(for profile: CareProfile, context: ModelContext) {
+        let size = CGSize(width: 240, height: 100)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 80, height: size.height))
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 80, y: 0, width: 80, height: size.height))
+            UIColor.systemIndigo.setFill()
+            context.fill(CGRect(x: 160, y: 0, width: 80, height: size.height))
+        }
+        guard let data = image.pngData() else { return }
+
+        if let attachment = fetch(PhotoAttachment.self, id: profilePhotoID, context: context) {
+            attachment.imageData = data
+            attachment.thumbnailData = data
+            attachment.updatedAt = Date()
+        } else {
+            context.insert(PhotoAttachment(
+                id: profilePhotoID,
+                profileID: profile.id,
+                ownerKind: .profilePhoto,
+                contentType: "image/png",
+                filename: "simulator-profile-photo.png",
+                imageData: data,
+                thumbnailData: data
+            ))
+        }
+        profile.profilePhotoAttachmentID = profilePhotoID
+        profile.updatedAt = Date()
     }
 
     @MainActor

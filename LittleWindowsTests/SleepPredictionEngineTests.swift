@@ -6289,7 +6289,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testProfileAvatarThumbnailIsSquareBeforeSwiftUILayout() throws {
+    func testProfileAvatarPhotoIsCircularBeforeSwiftUILayout() throws {
         let source = UIGraphicsImageRenderer(
             size: CGSize(width: 240, height: 100)
         ).image { context in
@@ -6297,7 +6297,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             context.fill(CGRect(x: 0, y: 0, width: 240, height: 100))
         }
         let data = try XCTUnwrap(source.jpegData(compressionQuality: 0.9))
-        let result = try XCTUnwrap(ThumbnailImageCache.squareImage(
+        let result = try XCTUnwrap(ThumbnailImageCache.circularImage(
             attachmentID: UUID(),
             data: data,
             size: 40
@@ -6305,6 +6305,31 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         XCTAssertEqual(result.size.width, 40, accuracy: 0.001)
         XCTAssertEqual(result.size.height, 40, accuracy: 0.001)
+
+        let cgImage = try XCTUnwrap(result.cgImage)
+        let width = cgImage.width
+        let height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = try XCTUnwrap(CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        func alpha(x: Int, y: Int) -> UInt8 {
+            pixels[(y * width + x) * 4 + 3]
+        }
+
+        XCTAssertLessThan(alpha(x: 0, y: 0), 10)
+        XCTAssertLessThan(alpha(x: width - 1, y: height - 1), 10)
+        XCTAssertGreaterThan(alpha(x: width / 2, y: 1), 50)
+        XCTAssertGreaterThan(alpha(x: width / 2, y: height - 2), 50)
     }
 
     @MainActor

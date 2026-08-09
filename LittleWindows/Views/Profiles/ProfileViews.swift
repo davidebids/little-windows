@@ -39,14 +39,14 @@ struct ProfileAvatarView: View {
 
                 if let attachmentID = profile.profilePhotoAttachmentID,
                    let profilePhotoData,
-                   let image = ThumbnailImageCache.squareImage(
+                   let image = ThumbnailImageCache.circularImage(
                     attachmentID: attachmentID,
                     data: profilePhotoData,
                     size: size
                    ) {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFill()
+                        .interpolation(.high)
                         .frame(width: size, height: size)
                 } else {
                     Text(profile.initials)
@@ -55,7 +55,6 @@ struct ProfileAvatarView: View {
                 }
             }
             .frame(width: size, height: size)
-            .clipShape(Circle())
 
             Image(systemName: profile.profileType.systemImage)
                 .font(.system(size: size * 0.19, weight: .bold))
