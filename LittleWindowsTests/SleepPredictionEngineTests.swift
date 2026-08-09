@@ -1880,6 +1880,20 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(testDog.profileSubtitle, "Mini Goldendoodle")
     }
 
+    func testDogTodayActionsIncludeEveryEnabledCategory() {
+        let allDogTypes = EventType.cases(for: .dog)
+        XCTAssertEqual(
+            TodayDogQuickActionCatalog.enabledTypes(in: Set(allDogTypes)),
+            allDogTypes
+        )
+
+        let visibleTypes = Set(allDogTypes).subtracting([.treat, .vaccine])
+        let enabledTypes = TodayDogQuickActionCatalog.enabledTypes(in: visibleTypes)
+        XCTAssertFalse(enabledTypes.contains(.treat))
+        XCTAssertFalse(enabledTypes.contains(.vaccine))
+        XCTAssertEqual(enabledTypes.count, allDogTypes.count - 2)
+    }
+
     func testAdultProfileSubtitlePrefersAgeWhenBirthDateIsSet() throws {
         let birthDate = try XCTUnwrap(
             Calendar.current.date(byAdding: .year, value: -40, to: Date())

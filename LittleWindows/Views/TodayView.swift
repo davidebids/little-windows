@@ -41,6 +41,12 @@ enum TodayFeedQuickActionDetail {
     }
 }
 
+enum TodayDogQuickActionCatalog {
+    static func enabledTypes(in visibleTypes: Set<EventType>) -> [EventType] {
+        EventType.cases(for: .dog).filter(visibleTypes.contains)
+    }
+}
+
 private struct TodayRenderState {
     var profile: CareProfile?
     var profileID: UUID?
@@ -1775,104 +1781,8 @@ struct TodayView: View {
                     columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                     spacing: 14
                 ) {
-                    if state.shows(.food) {
-                        QuickActionButton(
-                            title: "Food",
-                            subtitle: lastEventSubtitle(.food, state: state),
-                            icon: "fork.knife",
-                            color: .orange
-                        ) {
-                            editorRoute = EventEditorRoute(type: .food)
-                        }
-                    }
-                    if state.shows(.water) {
-                        QuickActionButton(
-                            title: "Water",
-                            subtitle: lastEventSubtitle(.water, state: state),
-                            icon: "drop.fill",
-                            color: .cyan
-                        ) {
-                            editorRoute = EventEditorRoute(type: .water)
-                        }
-                    }
-                    if state.shows(.walk) {
-                        QuickActionButton(
-                            title: "Start Walk",
-                            subtitle: state.hasActiveTimer(of: .walk)
-                                ? "Timer active"
-                                : lastEventSubtitle(.walk, state: state),
-                            icon: "figure.walk",
-                            color: .green,
-                            isEnabled: !state.hasActiveTimer(of: .walk)
-                        ) {
-                            startTimer(.walk)
-                        }
-                    }
-                    if state.shows(.potty) {
-                        QuickActionButton(
-                            title: "Pee",
-                            subtitle: dogPottySubtitle(.pee, state: state),
-                            icon: "pawprint.fill",
-                            color: .teal
-                        ) {
-                            logDogPotty(.pee, accident: false)
-                        }
-                    }
-                    if state.shows(.potty) {
-                        QuickActionButton(
-                            title: "Poop",
-                            subtitle: dogPottySubtitle(.poop, state: state),
-                            icon: "pawprint.circle.fill",
-                            color: .teal
-                        ) {
-                            logDogPotty(.poop, accident: false)
-                        }
-                    }
-                    if state.shows(.potty) {
-                        QuickActionButton(
-                            title: "Accident",
-                            subtitle: dogPottySubtitle(.pee, state: state, accident: true),
-                            icon: "exclamationmark.triangle.fill",
-                            color: .orange
-                        ) {
-                            logDogPotty(.pee, accident: true)
-                        }
-                    }
-                    if state.shows(.rest) {
-                        QuickActionButton(
-                            title: "Rest",
-                            subtitle: state.hasActiveTimer(of: .rest)
-                                ? "Timer active"
-                                : lastEventSubtitle(.rest, state: state),
-                            icon: "bed.double.fill",
-                            color: .indigo,
-                            isEnabled: !state.hasActiveTimer(of: .rest)
-                        ) {
-                            startTimer(.rest)
-                        }
-                    }
-                    if state.shows(.training) {
-                        QuickActionButton(
-                            title: "Training",
-                            subtitle: state.hasActiveTimer(of: .training)
-                                ? "Timer active"
-                                : lastEventSubtitle(.training, state: state),
-                            icon: "graduationcap.fill",
-                            color: .purple,
-                            isEnabled: !state.hasActiveTimer(of: .training)
-                        ) {
-                            startTimer(.training)
-                        }
-                    }
-                    if state.shows(.medicine) {
-                        QuickActionButton(
-                            title: "Medicine",
-                            subtitle: lastEventSubtitle(.medicine, state: state),
-                            icon: "cross.case.fill",
-                            color: .red
-                        ) {
-                            editorRoute = EventEditorRoute(type: .medicine)
-                        }
+                    ForEach(TodayDogQuickActionCatalog.enabledTypes(in: state.visibleCareTypes)) { type in
+                        dogQuickAction(type, state: state)
                     }
                 }
                 Button {
@@ -1892,8 +1802,69 @@ struct TodayView: View {
         } header: {
             AppSectionHeader(title: "Log something")
         } footer: {
-            Text("Walk, training, and rest timers use the same Live Activity and widget controls. No GPS route tracking or location permission is used.")
+            Text("Walk, training, rest, and grooming timers use the same Live Activity and widget controls. No GPS route tracking or location permission is used.")
                 .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func dogQuickAction(_ type: EventType, state: TodayRenderState) -> some View {
+        switch type {
+        case .potty:
+            QuickActionButton(
+                title: "Pee",
+                subtitle: dogPottySubtitle(.pee, state: state),
+                icon: "pawprint.fill",
+                color: .teal
+            ) {
+                logDogPotty(.pee, accident: false)
+            }
+            .accessibilityIdentifier("dog-quick-action-potty-pee")
+            QuickActionButton(
+                title: "Poop",
+                subtitle: dogPottySubtitle(.poop, state: state),
+                icon: "pawprint.circle.fill",
+                color: .teal
+            ) {
+                logDogPotty(.poop, accident: false)
+            }
+            .accessibilityIdentifier("dog-quick-action-potty-poop")
+            QuickActionButton(
+                title: "Accident",
+                subtitle: dogPottySubtitle(.pee, state: state, accident: true),
+                icon: "exclamationmark.triangle.fill",
+                color: .orange
+            ) {
+                logDogPotty(.pee, accident: true)
+            }
+            .accessibilityIdentifier("dog-quick-action-potty-accident")
+        case .walk, .rest, .training, .grooming:
+            QuickActionButton(
+                title: type == .walk ? "Start Walk" : type.displayName,
+                subtitle: state.hasActiveTimer(of: type)
+                    ? "Timer active"
+                    : lastEventSubtitle(type, state: state),
+                icon: type.systemImage(for: .dog),
+                color: type.tint,
+                isEnabled: !state.hasActiveTimer(of: type)
+            ) {
+                startTimer(type)
+            }
+            .accessibilityIdentifier("dog-quick-action-\(type.rawValue)")
+        case .food, .water, .treat, .medicine, .symptom, .growth,
+             .temperature, .vaccine, .glucose, .custom:
+            QuickActionButton(
+                title: type.displayName,
+                subtitle: lastEventSubtitle(type, state: state),
+                icon: type.systemImage(for: .dog),
+                color: type.tint
+            ) {
+                editorRoute = EventEditorRoute(type: type)
+            }
+            .accessibilityIdentifier("dog-quick-action-\(type.rawValue)")
+        case .sleep, .feed, .nursing, .pumping, .diaper, .activity,
+             .bloodPressure, .heartRate, .oxygenSaturation, .respiratoryRate, .pain:
+            EmptyView()
         }
     }
 

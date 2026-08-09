@@ -3,6 +3,28 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testDogTodayShowsAllEnabledCareCategories() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000102/today")
+
+        for identifier in [
+            "dog-quick-action-treat",
+            "dog-quick-action-grooming",
+            "dog-quick-action-vaccine",
+            "dog-quick-action-custom"
+        ] {
+            let button = app.buttons[identifier]
+            for _ in 0..<12 where !button.isHittable {
+                app.swipeUp(velocity: .slow)
+            }
+            XCTAssertTrue(button.exists, "Expected enabled dog action \(identifier) to appear on Today.")
+            XCTAssertTrue(button.isHittable, "Expected enabled dog action \(identifier) to be reachable.")
+        }
+    }
+
     func testMedicationEditorKeepsLabelsVisibleForPopulatedValues() {
         continueAfterFailure = false
 
