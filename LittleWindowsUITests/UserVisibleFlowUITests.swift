@@ -679,6 +679,31 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Avocado"].exists)
     }
 
+    func testAppointmentMultilineFieldsUsePersistentLeadingLabels() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://appointment/00000000-0000-0000-0000-000000000301")
+
+        XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 5))
+        app.buttons["Edit"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Appointment"].waitForExistence(timeout: 5))
+
+        assertPersistentAppointmentField(
+            identifier: "appointment.address",
+            maxScrolls: 6
+        )
+        assertPersistentAppointmentField(
+            identifier: "appointment.notes",
+            maxScrolls: 4
+        )
+        assertPersistentAppointmentField(
+            identifier: "appointment.question.new",
+            maxScrolls: 4
+        )
+    }
+
     func testSolidsSummaryCardsOpenMatchingLists() {
         continueAfterFailure = false
 
@@ -2840,5 +2865,29 @@ final class UserVisibleFlowUITests: XCTestCase {
             }
         }
         return app.buttons[labels[0]]
+    }
+
+    private func assertPersistentAppointmentField(
+        identifier: String,
+        maxScrolls: Int
+    ) {
+        let label = app.staticTexts["\(identifier).label"]
+        let field = app.textFields[identifier]
+        for _ in 0..<maxScrolls where !label.exists || !field.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(label.waitForExistence(timeout: 3), "Missing label for \(identifier)")
+        XCTAssertTrue(field.waitForExistence(timeout: 3), "Missing input for \(identifier)")
+        XCTAssertEqual(
+            label.frame.minX,
+            field.frame.minX,
+            accuracy: 3,
+            "The label and input should share a leading edge for \(identifier)."
+        )
+        XCTAssertGreaterThan(
+            field.frame.minY,
+            label.frame.minY,
+            "The persistent label should remain above the input for \(identifier)."
+        )
     }
 }

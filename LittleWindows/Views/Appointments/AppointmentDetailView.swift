@@ -107,26 +107,34 @@ struct AppointmentDetailView: View {
                             }
                         }
                     }
-                LabeledContent("Summary") {
-                    TextField("Optional", text: $visitSummaryDraft, axis: .vertical)
-                        .lineLimit(3...8)
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Follow-up") {
-                    TextField("Optional", text: $followUpInstructionsDraft, axis: .vertical)
-                        .lineLimit(3...8)
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Vaccines given") {
-                    TextField("Optional", text: $vaccinesGivenDraft, axis: .vertical)
-                        .lineLimit(2...5)
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Medications discussed") {
-                    TextField("Optional", text: $medicationsDiscussedDraft, axis: .vertical)
-                        .lineLimit(2...5)
-                        .multilineTextAlignment(.trailing)
-                }
+                AppointmentMultilineFormField(
+                    title: "Summary",
+                    prompt: "Optional",
+                    text: $visitSummaryDraft,
+                    lineLimit: 3...8,
+                    accessibilityIdentifier: "appointment.result.summary"
+                )
+                AppointmentMultilineFormField(
+                    title: "Follow-up",
+                    prompt: "Optional",
+                    text: $followUpInstructionsDraft,
+                    lineLimit: 3...8,
+                    accessibilityIdentifier: "appointment.result.follow-up"
+                )
+                AppointmentMultilineFormField(
+                    title: "Vaccines given",
+                    prompt: "Optional",
+                    text: $vaccinesGivenDraft,
+                    lineLimit: 2...5,
+                    accessibilityIdentifier: "appointment.result.vaccines"
+                )
+                AppointmentMultilineFormField(
+                    title: "Medications discussed",
+                    prompt: "Optional",
+                    text: $medicationsDiscussedDraft,
+                    lineLimit: 2...5,
+                    accessibilityIdentifier: "appointment.result.medications"
+                )
             }
 
             currentMedicationsSection

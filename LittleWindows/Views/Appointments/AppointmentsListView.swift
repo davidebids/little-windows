@@ -379,11 +379,13 @@ struct AppointmentEditorView: View {
                     TextField("Optional", text: $locationName)
                         .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Address") {
-                    TextField("Optional", text: $address, axis: .vertical)
-                        .lineLimit(2...3)
-                        .multilineTextAlignment(.trailing)
-                }
+                AppointmentMultilineFormField(
+                    title: "Address",
+                    prompt: "Optional",
+                    text: $address,
+                    lineLimit: 2...3,
+                    accessibilityIdentifier: "appointment.address"
+                )
                 LabeledContent("Phone") {
                     TextField("Optional", text: $phoneNumber)
                         .keyboardType(.phonePad)
@@ -392,11 +394,13 @@ struct AppointmentEditorView: View {
             }
 
             Section("Visit prep") {
-                LabeledContent("Notes") {
-                    TextField("Optional", text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
-                        .multilineTextAlignment(.trailing)
-                }
+                AppointmentMultilineFormField(
+                    title: "Notes",
+                    prompt: "Optional",
+                    text: $notes,
+                    lineLimit: 3...6,
+                    accessibilityIdentifier: "appointment.notes"
+                )
             }
 
             AppointmentQuestionsEditor(questionDrafts: $questionDrafts)
@@ -523,6 +527,29 @@ private struct AppointmentQuestionDraft: Identifiable, Equatable {
     }
 }
 
+struct AppointmentMultilineFormField: View {
+    let title: String
+    let prompt: String
+    @Binding var text: String
+    let lineLimit: ClosedRange<Int>
+    let accessibilityIdentifier: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("\(accessibilityIdentifier).label")
+            TextField(prompt, text: $text, axis: .vertical)
+                .lineLimit(lineLimit)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier(accessibilityIdentifier)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 private struct AppointmentQuestionsEditor: View {
     @Binding var questionDrafts: [AppointmentQuestionDraft]
     @State private var newQuestionText = ""
@@ -540,7 +567,7 @@ private struct AppointmentQuestionsEditor: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach($questionDrafts) { draft in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
                         TextField("Question", text: draft.text, axis: .vertical)
                             .lineLimit(1...3)
 
@@ -559,27 +586,37 @@ private struct AppointmentQuestionsEditor: View {
                 }
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                TextField("Add a question", text: $newQuestionText, axis: .vertical)
-                    .id(newQuestionInputID)
-                    .lineLimit(1...3)
-                    .focused($isAddingQuestionFocused)
-                    .submitLabel(.done)
-                    .onSubmit {
-                        addQuestion()
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Add a question")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("appointment.question.new.label")
+                HStack(alignment: .top, spacing: 12) {
+                    TextField("Type a question", text: $newQuestionText, axis: .vertical)
+                        .id(newQuestionInputID)
+                        .lineLimit(1...3)
+                        .focused($isAddingQuestionFocused)
+                        .submitLabel(.done)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("appointment.question.new")
+                        .onSubmit {
+                            addQuestion()
+                        }
 
-                Button {
-                    addQuestion()
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .imageScale(.large)
+                    Button {
+                        addQuestion()
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .imageScale(.large)
+                            .frame(width: 28, height: 28, alignment: .top)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!hasQuestionText)
+                    .foregroundStyle(hasQuestionText ? Color.accentColor : Color.secondary)
+                    .accessibilityLabel("Add question")
                 }
-                .buttonStyle(.borderless)
-                .disabled(!hasQuestionText)
-                .foregroundStyle(hasQuestionText ? Color.accentColor : Color.secondary)
-                .accessibilityLabel("Add question")
             }
+            .padding(.vertical, 2)
         } header: {
             Text("Questions to ask")
         } footer: {
