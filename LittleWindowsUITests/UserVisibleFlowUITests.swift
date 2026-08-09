@@ -147,6 +147,36 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(attachment)
     }
 
+    func testMedicationInstructionsFocusAndTypingIsResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://medications")
+
+        XCTAssertTrue(app.navigationBars["Medications"].waitForExistence(timeout: 8))
+        app.buttons["Add Medication"].tap()
+        XCTAssertTrue(app.navigationBars["Add Medication"].waitForExistence(timeout: 4))
+
+        let instructions = app.descendants(matching: .any)
+            .matching(identifier: "medication.instructions")
+            .firstMatch
+        XCTAssertTrue(instructions.waitForExistence(timeout: 4))
+
+        let focusStartedAt = Date()
+        instructions.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        let focusDuration = Date().timeIntervalSince(focusStartedAt)
+
+        let typingStartedAt = Date()
+        instructions.typeText("Take with food")
+        let typingDuration = Date().timeIntervalSince(typingStartedAt)
+
+        XCTAssertEqual(instructions.value as? String, "Take with food")
+        XCTAssertLessThan(focusDuration, 2.5, "Instructions focus took \(focusDuration)s")
+        XCTAssertLessThan(typingDuration, 2.5, "Instructions typing took \(typingDuration)s")
+    }
+
     func testHouseholdOnlySetupAndCareDeepLinkPrompt() {
         continueAfterFailure = false
 
@@ -3038,7 +3068,9 @@ final class UserVisibleFlowUITests: XCTestCase {
         maxScrolls: Int
     ) {
         let label = app.staticTexts["\(identifier).label"]
-        let field = app.textFields[identifier]
+        let field = app.descendants(matching: .any)
+            .matching(identifier: identifier)
+            .firstMatch
         for _ in 0..<maxScrolls where !label.exists || !field.exists {
             app.swipeUp()
         }

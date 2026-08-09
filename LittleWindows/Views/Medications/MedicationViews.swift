@@ -691,6 +691,36 @@ private struct MedicationDetailView: View {
     }
 }
 
+private struct MedicationInstructionsFormField: View {
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Instructions")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("medication.instructions.label")
+
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("Optional")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+
+                TextEditor(text: $text)
+                    .scrollContentBackground(.hidden)
+                    .frame(height: 88)
+                    .accessibilityIdentifier("medication.instructions")
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 private struct MedicationEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -828,13 +858,7 @@ private struct MedicationEditorView: View {
                     TextField("Optional", text: $reasonForTaking)
                         .multilineTextAlignment(.trailing)
                 }
-                PersistentMultilineFormField(
-                    title: "Instructions",
-                    prompt: "Optional",
-                    text: $instructions,
-                    lineLimit: 2...4,
-                    accessibilityIdentifier: "medication.instructions"
-                )
+                MedicationInstructionsFormField(text: $instructions)
             }
 
             Section("Schedule") {
