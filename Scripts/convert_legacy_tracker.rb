@@ -49,6 +49,71 @@ def combined_notes(*parts)
   values.empty? ? nil : values.join("\n")
 end
 
+def cleaned_text(value)
+  value.to_s
+    .gsub(/\\n/i, " ")
+    .gsub(/\s+/, " ")
+    .strip
+end
+
+def slug(value)
+  value.downcase
+    .encode("ASCII", invalid: :replace, undef: :replace, replace: "")
+    .gsub(/[^a-z0-9]+/, "-")
+    .gsub(/\A-+|-+\z/, "")
+end
+
+def solid_food_reference(source_name)
+  normalized = cleaned_text(source_name).downcase
+  known_foods = {
+    "avocado" => ["avocado", "Avocado", []],
+    "banana" => ["banana", "Banana", []],
+    "carrot" => ["carrot", "Carrot", []],
+    "egg" => ["egg", "Egg", ["egg"]],
+    "oatmeal" => ["oatmeal", "Oatmeal", []],
+    "peach" => ["peach", "Peach", []],
+    "peanut butter" => ["peanut-butter", "Peanut butter", ["peanuts"]],
+    "pea" => ["pea", "Pea", []],
+    "peas" => ["pea", "Pea", []],
+    "watermelon" => ["watermelon", "Watermelon", []],
+    # The source does not identify the style of yogurt, so preserve it as a
+    # custom food instead of guessing one of the app's specific yogurt entries.
+    "yogurt" => ["custom-yogurt", "Yogurt", ["milk"]]
+  }
+  return known_foods.fetch(normalized) if known_foods.key?(normalized)
+
+  display_name = cleaned_text(source_name)
+  ["custom-#{slug(display_name)}", display_name, []]
+end
+
+def solid_food_details(value, reaction)
+  cleaned_text(value).split(/\s*,\s*/).map do |part|
+    next if part.empty?
+
+    match = part.match(/\A(.+?)\s+of\s+(.+)\z/i)
+    serving_amount = match && cleaned_text(match[1])
+    source_name = cleaned_text(match ? match[2] : part)
+    food_id, food_name, allergen_ids = solid_food_reference(source_name)
+    suspected_reaction = reaction == "sensitivity"
+    {
+      "foodID" => food_id,
+      "foodName" => food_name,
+      "allergenIDs" => allergen_ids,
+      "confirmedAllergenPortionIDs" => nil,
+      "preference" => reaction,
+      "servingAmount" => serving_amount,
+      "notes" => nil,
+      "suspectedReaction" => suspected_reaction,
+      "symptoms" => [],
+      "severity" => "unknown",
+      "onsetMinutes" => nil,
+      "durationMinutes" => nil,
+      "responseNotes" => suspected_reaction ? "Source export marked this meal as ALLERGIC; no symptoms or severity were included." : "",
+      "followUp" => "none"
+    }
+  end.compact
+end
+
 def base_event(index:, suffix:, type:, start_time:, end_time: nil, title: nil, notes: nil)
   {
     "id" => deterministic_uuid("legacy-tracker-event-#{index}-#{suffix}"),
@@ -64,6 +129,12 @@ def base_event(index:, suffix:, type:, start_time:, end_time: nil, title: nil, n
     "feedKindRawValue" => nil,
     "amountOz" => nil,
     "foodDescription" => nil,
+    "solidReactionRawValue" => nil,
+    "solidTextureRawValue" => nil,
+    "solidFeedingStyleRawValue" => nil,
+    "solidAllergenExposure" => nil,
+    "solidSensitivityObserved" => nil,
+    "solidFoodDetailsJSON" => nil,
     "nursingSideRawValue" => nil,
     "activeNursingSideRawValue" => nil,
     "leftDurationSeconds" => nil,
@@ -234,6 +305,28 @@ rows.each_with_index do |row, offset|
       event["foodDescription"] = row["Start Condition"]
       events << event
     end
+  when "Solids"
+    reaction = case cleaned_text(row["End Condition"]).upcase
+               when "LOVED" then "loved"
+               when "ALLERGIC" then "sensitivity"
+               else "unknown"
+               end
+    details = solid_food_details(row["Start Condition"], reaction)
+    event = base_event(
+      index: row_number,
+      suffix: "solids",
+      type: "feed",
+      start_time: start_time,
+      end_time: source_end || start_time,
+      notes: source_notes
+    )
+    event["feedKindRawValue"] = "solid"
+    event["foodDescription"] = details.map { |detail| detail["foodName"] }.join(", ")
+    event["solidReactionRawValue"] = reaction
+    event["solidAllergenExposure"] = details.any? { |detail| !detail["allergenIDs"].empty? }
+    event["solidSensitivityObserved"] = reaction == "sensitivity"
+    event["solidFoodDetailsJSON"] = JSON.generate(details)
+    events << event
   when "Diaper"
     details = row["End Condition"].to_s
     lowered = details.downcase
@@ -416,7 +509,8 @@ if options[:summary]
     "",
     "Breast feeds with two recorded sides are represented as two sequential nursing events. No nursing event uses a Both side.",
     "Night sleep is classified as an overnight sequence, including early-morning sleep that resumes within 90 minutes of the preceding night segment.",
-    "Growth records are converted to native growth events. Temperature and pumping records are preserved as custom events."
+    "Growth records are converted to native growth events. Temperature and pumping records are preserved as custom events.",
+    "Solid-food records are converted to native solid-feed events with source serving amounts and preferences. A source ALLERGIC label is preserved as a suspected sensitivity without inventing symptoms, severity, or a diagnosis."
   ]
   File.write(options[:summary], lines.join("\n") + "\n")
 end
