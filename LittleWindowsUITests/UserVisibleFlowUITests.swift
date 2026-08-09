@@ -281,6 +281,18 @@ final class UserVisibleFlowUITests: XCTestCase {
         careProfiles.tap()
         XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
 
+        let deletableRow = app.buttons.containing(
+            .staticText,
+            identifier: "Sample Dog"
+        ).firstMatch
+        XCTAssertTrue(deletableRow.waitForExistence(timeout: 4))
+        deletableRow.swipeLeft()
+        XCTAssertTrue(app.buttons["Delete"].waitForExistence(timeout: 3))
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.buttons["Delete Profile"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Remove this profile and its history."].exists)
+        app.buttons["Cancel"].tap()
+
         func archiveProfile(named name: String) {
             let row = app.buttons.containing(.staticText, identifier: name).firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 4))

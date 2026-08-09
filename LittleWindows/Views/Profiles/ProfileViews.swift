@@ -950,11 +950,12 @@ struct ManageProfilesView: View {
             .listRowBackground(profile.isArchived ? Color.primary.opacity(0.045) : Color.clear)
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if canDelete {
-                    Button(role: .destructive) {
+                    Button {
                         profileToDelete = profile
                     } label: {
                         Label("Delete", systemImage: "trash.fill")
                     }
+                    .tint(.red)
                 }
                 if profile.isArchived {
                     Button {
