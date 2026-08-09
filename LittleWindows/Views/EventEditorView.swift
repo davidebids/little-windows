@@ -2904,7 +2904,11 @@ private struct SolidFoodPickerView: View {
             }
             .navigationTitle("Choose Foods")
             .navigationBarTitleDisplayMode(.inline)
-            .debouncedSearch(text: $effectiveSearchText, prompt: "Search or enter a food")
+            .debouncedSearch(
+                text: $effectiveSearchText,
+                prompt: "Search or enter a food",
+                delay: .milliseconds(250)
+            )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

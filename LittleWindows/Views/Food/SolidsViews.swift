@@ -1191,7 +1191,12 @@ struct SolidsFoodDatabaseView: View {
                 ForEach(visibleFoods) { food in
                     Button { openFood(food.id) } label: {
                         SolidsFoodRow(
-                            food: food,
+                            id: food.id,
+                            name: food.name,
+                            visualEmoji: food.visualEmoji,
+                            category: food.category,
+                            isIronRich: food.isIronRich,
+                            containsAllergen: !food.allergenIDs.isEmpty,
                             status: progressByFoodID[food.id]?.status
                         )
                         .equatable()
@@ -1201,7 +1206,11 @@ struct SolidsFoodDatabaseView: View {
             }
         }
         .navigationTitle("Food Database")
-        .debouncedSearch(text: $effectiveSearchText, prompt: "Search foods")
+        .debouncedSearch(
+            text: $effectiveSearchText,
+            prompt: "Search foods",
+            delay: .milliseconds(250)
+        )
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { showingFilters = true } label: {
@@ -1507,23 +1516,38 @@ private struct SolidsFoodDatabaseFilterView: View {
 }
 
 private struct SolidsFoodRow: View, Equatable {
-    let food: SolidsReferenceFood
+    let id: String
+    let name: String
+    let visualEmoji: String
+    let category: SolidsFoodCategory
+    let isIronRich: Bool
+    let containsAllergen: Bool
     let status: SolidsFoodStatus?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.visualEmoji == rhs.visualEmoji
+            && lhs.category == rhs.category
+            && lhs.isIronRich == rhs.isIronRich
+            && lhs.containsAllergen == rhs.containsAllergen
+            && lhs.status == rhs.status
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(food.visualEmoji)
+            Text(visualEmoji)
                 .font(.system(size: 22))
                 .frame(width: 30, height: 30)
                 .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
             VStack(alignment: .leading, spacing: 2) {
-                Text(food.name)
+                Text(name)
                     .font(.body.weight(.medium))
                     .foregroundStyle(.primary)
                 HStack(spacing: 6) {
-                    Text(food.category.displayName)
-                    if food.isIronRich { Text("• Iron-rich") }
-                    if !food.allergenIDs.isEmpty { Text("• Allergen") }
+                    Text(category.displayName)
+                    if isIronRich { Text("• Iron-rich") }
+                    if containsAllergen { Text("• Allergen") }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

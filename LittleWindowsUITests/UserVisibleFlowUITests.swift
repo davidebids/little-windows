@@ -643,6 +643,38 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["1 active filter"].exists)
     }
 
+    func testFoodDatabaseSearchRemainsResponsiveWithRichCatalogContent() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 5) {
+            activate.tap()
+        }
+        let database = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Food database'")).firstMatch
+        XCTAssertTrue(database.waitForExistence(timeout: 5))
+        database.tap()
+        XCTAssertTrue(app.navigationBars["Food Database"].waitForExistence(timeout: 5))
+
+        app.swipeDown()
+        let search = app.searchFields["Search foods"]
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        search.tap()
+
+        let searchStartedAt = ContinuousClock.now
+        search.typeText("pineapple")
+        XCTAssertTrue(app.staticTexts["Pineapple"].waitForExistence(timeout: 3))
+        XCTAssertLessThan(
+            searchStartedAt.duration(to: .now),
+            .seconds(4),
+            "Typing and filtering the rich food catalog should remain responsive."
+        )
+        XCTAssertFalse(app.staticTexts["Avocado"].exists)
+    }
+
     func testSolidsSummaryCardsOpenMatchingLists() {
         continueAfterFailure = false
 
