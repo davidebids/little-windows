@@ -30,19 +30,9 @@ struct NightLightView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                ProfileToolbarSettingsButton(profile: profile) {
                     router.presentSettings()
-                } label: {
-                    if let profile {
-                        ProfileAvatarView(profile: profile, size: 40)
-                    } else {
-                        Image(systemName: "gearshape.fill")
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.accent)
-                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
             }
         }
         .preferredColorScheme(.dark)

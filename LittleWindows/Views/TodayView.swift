@@ -839,22 +839,9 @@ struct TodayView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                ProfileToolbarSettingsButton(profile: profile) {
                     deepLinkRouter.presentSettings()
-                } label: {
-                    if let profile {
-                        ProfileAvatarView(profile: profile, size: 40)
-                    } else {
-                        Image(systemName: "gearshape.fill")
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.accent)
-                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
-                .accessibilityHint(profile == nil
-                    ? "Opens household settings and care profile options"
-                    : "Opens settings where you can switch profiles")
             }
         }
         .sheet(item: $editorRoute) { route in

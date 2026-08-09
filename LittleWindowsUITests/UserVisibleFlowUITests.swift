@@ -3,6 +3,28 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testProfileAvatarFitsToolbarOnInitialLoad() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+
+        let profileSettings = app.buttons["Sample Child settings"]
+        XCTAssertTrue(profileSettings.waitForExistence(timeout: 8))
+        XCTAssertTrue(profileSettings.isHittable)
+        XCTAssertLessThanOrEqual(profileSettings.frame.width, 50)
+        XCTAssertLessThanOrEqual(profileSettings.frame.height, 50)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Profile avatar on initial Today load"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        profileSettings.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+    }
+
     func testDogTodayShowsAllEnabledCareCategories() {
         continueAfterFailure = false
 

@@ -32,35 +32,43 @@ struct ProfileAvatarView: View {
     }
 
     var body: some View {
-        ZStack {
-            if let attachmentID = profile.profilePhotoAttachmentID,
-               let profilePhotoData,
-               let image = ThumbnailImageCache.squareImage(
-                attachmentID: attachmentID,
-                data: profilePhotoData,
-                size: size
-               ) {
-                Image(uiImage: image)
-                    .resizable()
-                    .frame(width: size, height: size)
-            } else {
-                Text(profile.initials)
-                    .font(.system(size: size * 0.34, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(profileTint.gradient)
+        ZStack(alignment: .bottomTrailing) {
+            ZStack {
+                Circle()
+                    .fill(profileTint.gradient)
+
+                if let attachmentID = profile.profilePhotoAttachmentID,
+                   let profilePhotoData,
+                   let image = ThumbnailImageCache.squareImage(
+                    attachmentID: attachmentID,
+                    data: profilePhotoData,
+                    size: size
+                   ) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                } else {
+                    Text(profile.initials)
+                        .font(.system(size: size * 0.34, weight: .bold))
+                        .foregroundStyle(.white)
+                }
             }
-        }
             .frame(width: size, height: size)
             .clipShape(Circle())
-            .overlay(alignment: .bottomTrailing) {
-                Image(systemName: profile.profileType.systemImage)
-                    .font(.system(size: size * 0.22, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: size * 0.38, height: size * 0.38)
-                    .background(.black.opacity(0.24), in: Circle())
-                    .offset(x: size * 0.05, y: size * 0.05)
-            }
+
+            Image(systemName: profile.profileType.systemImage)
+                .font(.system(size: size * 0.19, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: size * 0.38, height: size * 0.38)
+                .background(.black.opacity(0.32), in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.72), lineWidth: max(0.75, size * 0.018))
+                }
+                .padding(max(1, size * 0.025))
+        }
+        .frame(width: size, height: size)
     }
 
     private var profilePhotoData: Data? {
@@ -77,6 +85,35 @@ struct ProfileAvatarView: View {
         case "purple": .purple
         case "brown": .brown
         default: AppTheme.accent
+        }
+    }
+}
+
+struct ProfileToolbarSettingsButton: View {
+    let profile: CareProfile?
+    let action: () -> Void
+
+    var body: some View {
+        Group {
+            if let profile {
+                ProfileAvatarView(profile: profile, size: 34)
+            } else {
+                Image(systemName: "gearshape.fill")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .contentShape(Circle())
+        .onTapGesture(perform: action)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
+        .accessibilityHint(profile == nil
+            ? "Opens household settings and care profile options"
+            : "Opens settings where you can switch profiles")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            action()
         }
     }
 }
