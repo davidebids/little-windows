@@ -38,6 +38,12 @@ enum EventMutationService {
 
     static func canQuickRepeat(_ event: CareEvent) -> Bool {
         guard !event.isTimerDraft else { return false }
+        if let profileType = event.profileTypeSnapshot {
+            guard EventType.cases(for: profileType).contains(event.type) else { return false }
+            if event.type == .activity, let activityType = event.activityType {
+                guard activityType.isAvailable(for: profileType) else { return false }
+            }
+        }
         switch event.type {
         case .feed, .pumping, .diaper, .temperature, .activity,
              .food, .water, .treat, .potty, .grooming:
@@ -58,6 +64,13 @@ enum EventMutationService {
         at date: Date = Date()
     ) -> CareEvent? {
         guard canQuickRepeat(source) else { return nil }
+        let effectiveProfileType = source.profileTypeSnapshot ?? profileType
+        if let effectiveProfileType {
+            guard EventType.cases(for: effectiveProfileType).contains(source.type) else { return nil }
+            if source.type == .activity, let activityType = source.activityType {
+                guard activityType.isAvailable(for: effectiveProfileType) else { return nil }
+            }
+        }
         let duration = source.duration ?? 0
         let endDate = duration > 0 ? date.addingTimeInterval(duration) : date
         let timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()

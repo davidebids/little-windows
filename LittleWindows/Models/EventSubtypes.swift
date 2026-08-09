@@ -192,6 +192,9 @@ enum ActivityType: String, Codable, CaseIterable, Identifiable {
     case outdoorPlay
     case screenTime
     case bath
+    case exercise
+    case physicalTherapy
+    case socialActivity
     case custom
 
     var id: String { rawValue }
@@ -205,6 +208,9 @@ enum ActivityType: String, Codable, CaseIterable, Identifiable {
         case .outdoorPlay: "Outdoor Play"
         case .screenTime: "Screen Time"
         case .bath: "Bath"
+        case .exercise: "Exercise"
+        case .physicalTherapy: "Physical Therapy"
+        case .socialActivity: "Social Activity"
         case .custom: "Custom Activity"
         }
     }
@@ -218,6 +224,9 @@ enum ActivityType: String, Codable, CaseIterable, Identifiable {
         case .outdoorPlay: "sun.max.fill"
         case .screenTime: "tv.fill"
         case .bath: "bathtub.fill"
+        case .exercise: "figure.run"
+        case .physicalTherapy: "figure.strengthtraining.traditional"
+        case .socialActivity: "person.2.fill"
         case .custom: "sparkles"
         }
     }

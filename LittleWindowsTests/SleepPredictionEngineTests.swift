@@ -4639,6 +4639,23 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testAdultWidgetQuickActionsExcludeChildCare() {
+        let snapshot = WidgetSnapshotService.makeSnapshot(
+            profileType: .adult,
+            babyName: "Test Adult",
+            events: [],
+            prediction: nil
+        )
+
+        let actionIDs = Set(snapshot.resolvedQuickActions.map(\.id))
+        XCTAssertTrue(actionIDs.contains("medicine"))
+        XCTAssertTrue(actionIDs.contains("symptom"))
+        XCTAssertFalse(actionIDs.contains("tummy-time"))
+        XCTAssertFalse(actionIDs.contains("diaper"))
+        XCTAssertFalse(actionIDs.contains("feed"))
+    }
+
+    @MainActor
     func testWidgetRefreshPublishesStoppedAndSavedTimerStateBeforeReturning() throws {
         let container = try makeInMemoryContainer()
         let now = Date()
@@ -5038,6 +5055,49 @@ final class SleepPredictionEngineTests: XCTestCase {
             accuracy: 0.001
         )
         XCTAssertEqual(snapshot.todaySummary.careSessionCount, 0)
+    }
+
+    @MainActor
+    func testActivityTypesAreScopedToTheSelectedProfileType() {
+        let childActivities = ActivityType.cases(for: .child)
+        let adultActivities = ActivityType.cases(for: .adult)
+
+        XCTAssertTrue(childActivities.contains(.tummyTime))
+        XCTAssertFalse(childActivities.contains(.physicalTherapy))
+        XCTAssertTrue(adultActivities.contains(.exercise))
+        XCTAssertTrue(adultActivities.contains(.bath))
+        XCTAssertFalse(adultActivities.contains(.tummyTime))
+        XCTAssertFalse(adultActivities.contains(.storyTime))
+        XCTAssertTrue(ActivityType.cases(for: .dog).isEmpty)
+    }
+
+    @MainActor
+    func testAdultActivityTimerRejectsChildSubtype() throws {
+        let container = try makeInMemoryContainer()
+        let profileID = UUID()
+
+        let rejected = EventTimerService.start(
+            type: .activity,
+            activityType: .tummyTime,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            profileID: profileID,
+            profileType: .adult
+        )
+        let accepted = EventTimerService.start(
+            type: .activity,
+            activityType: .physicalTherapy,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            profileID: profileID,
+            profileType: .adult
+        )
+
+        XCTAssertNil(rejected)
+        XCTAssertEqual(accepted?.activityType, .physicalTherapy)
+        XCTAssertEqual(accepted?.profileTypeSnapshot, .adult)
     }
 
     @MainActor
@@ -8548,6 +8608,38 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(steps[1].eventType, .sleep)
         XCTAssertEqual(steps[1].sleepKind, .nightSleep)
         XCTAssertNil(steps[2].eventType)
+    }
+
+    @MainActor
+    func testAdultRoutineNormalizesChildOnlyActivitySubtype() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = CareProfile(profileType: .adult, name: "Test Adult")
+        context.insert(profile)
+
+        let routine = try XCTUnwrap(CareRoutineService.createRoutine(
+            title: "Movement",
+            scope: .profile,
+            steps: [
+                CareRoutineStepInput(
+                    title: "Start movement",
+                    action: .startTimer,
+                    eventType: .activity,
+                    activityType: .tummyTime
+                )
+            ],
+            profileID: profile.id,
+            profileType: .adult,
+            householdID: nil,
+            existingRoutines: [],
+            context: context
+        ))
+
+        let step = try XCTUnwrap(
+            context.fetch(FetchDescriptor<CareRoutineStep>())
+                .first { $0.routineID == routine.id }
+        )
+        XCTAssertEqual(step.activityType, .exercise)
     }
 
     @MainActor

@@ -182,7 +182,11 @@ enum CareRoutineService {
                 notes: step.notes,
                 action: step.action,
                 eventType: step.eventType,
-                activityType: step.activityType,
+                activityType: normalizedActivityType(
+                    step.activityType,
+                    eventType: step.eventType,
+                    profileType: template.profileType ?? profileType
+                ),
                 nursingSide: step.nursingSide,
                 sleepKind: step.sleepKind,
                 sortOrder: index
@@ -236,7 +240,11 @@ enum CareRoutineService {
                 notes: step.notes.nilIfEmpty,
                 action: step.action,
                 eventType: eventType,
-                activityType: eventType == .activity ? step.activityType : nil,
+                activityType: normalizedActivityType(
+                    step.activityType,
+                    eventType: eventType,
+                    profileType: profileType
+                ),
                 nursingSide: eventType == .nursing ? step.nursingSide : nil,
                 sleepKind: eventType == .sleep ? step.sleepKind : nil,
                 sortOrder: index
@@ -299,7 +307,11 @@ enum CareRoutineService {
             step.notes = inputStep.notes.nilIfEmpty
             step.action = inputStep.action
             step.eventType = eventType
-            step.activityType = eventType == .activity ? inputStep.activityType : nil
+            step.activityType = normalizedActivityType(
+                inputStep.activityType,
+                eventType: eventType,
+                profileType: profileType
+            )
             step.nursingSide = eventType == .nursing ? inputStep.nursingSide : nil
             step.sleepKind = eventType == .sleep ? inputStep.sleepKind : nil
             step.sortOrder = index
@@ -337,7 +349,11 @@ enum CareRoutineService {
                 notes: step.notes,
                 action: step.action,
                 eventType: step.eventType,
-                activityType: step.activityType,
+                activityType: normalizedActivityType(
+                    step.activityType,
+                    eventType: step.eventType,
+                    profileType: routine.profileType
+                ),
                 nursingSide: step.nursingSide,
                 sleepKind: step.sleepKind,
                 sortOrder: index
@@ -577,6 +593,18 @@ enum CareRoutineService {
                 return copy
             }
             .filter { !$0.title.isEmpty }
+    }
+
+    private static func normalizedActivityType(
+        _ activityType: ActivityType?,
+        eventType: EventType?,
+        profileType: CareProfileType?
+    ) -> ActivityType? {
+        guard eventType == .activity, let activityType else { return nil }
+        guard let profileType else { return activityType }
+        return activityType.isAvailable(for: profileType)
+            ? activityType
+            : ActivityType.defaultValue(for: profileType)
     }
 
     private static func uniqueCopyTitle(

@@ -135,6 +135,50 @@ final class WatchCompanionTests: XCTestCase {
     }
 
     @MainActor
+    func testAdultWatchActivityChoicesExcludeChildActivities() async throws {
+        let actions = WatchActionCatalog.actions(profileTypeRawValue: "adult")
+        let activity = try XCTUnwrap(actions.first { $0.id == "activity" })
+        let optionIDs = Set(activity.options.map(\.id))
+
+        XCTAssertTrue(activity.startsTimer)
+        XCTAssertTrue(optionIDs.contains(ActivityType.exercise.rawValue))
+        XCTAssertTrue(optionIDs.contains(ActivityType.physicalTherapy.rawValue))
+        XCTAssertFalse(optionIDs.contains(ActivityType.tummyTime.rawValue))
+        XCTAssertFalse(actions.contains { $0.id == "tummy-time" })
+
+        let container = try makeInMemoryContainer()
+        let profile = CareProfile(profileType: .adult, name: "Test Adult")
+        container.mainContext.insert(profile)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+        let eventID = UUID()
+
+        let accepted = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .performAction,
+                profileID: profile.id,
+                eventID: eventID,
+                actionID: "activity",
+                optionID: ActivityType.exercise.rawValue
+            ),
+            container: container
+        )
+        let rejected = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .performAction,
+                profileID: profile.id,
+                eventID: UUID(),
+                actionID: "tummy-time"
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(accepted.status, .applied)
+        XCTAssertEqual(fetchEvent(eventID, context: container.mainContext)?.activityType, .exercise)
+        XCTAssertEqual(rejected.status, .rejected)
+    }
+
+    @MainActor
     func testAdultWatchStateShowsNearestUnloggedMedicationOnlyForAdultProfile() throws {
         let container = try makeInMemoryContainer()
         let now = Date()

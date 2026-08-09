@@ -320,7 +320,7 @@ struct EventEditorView: View {
         _dose = State(initialValue: event?.dose ?? 0)
         _medicineUnit = State(initialValue: event?.medicineUnit ?? .milliliters)
         _reason = State(initialValue: event?.reason ?? "")
-        _activityType = State(initialValue: event?.activityType ?? .tummyTime)
+        _activityType = State(initialValue: event?.activityType ?? .custom)
         let lengthParts = event?.canonicalLengthCentimeters.map(
             GrowthUnitConversion.centimetersToFeetAndInches
         )
@@ -440,6 +440,9 @@ struct EventEditorView: View {
     }
     private var temperatureMethods: [TemperatureMethod] {
         isDogProfile ? [.rectal, .ear, .unknown] : TemperatureMethod.allCases
+    }
+    private var availableActivityTypes: [ActivityType] {
+        ActivityType.cases(for: activeProfileType)
     }
     private var activeCaregiverName: String {
         CaregiverIdentityService.currentCaregiverName(
@@ -681,6 +684,7 @@ struct EventEditorView: View {
             }
             .onAppear(perform: refreshRecentMedicineNamesIfNeeded)
             .onAppear(perform: normalizeDogTemperatureMethod)
+            .onAppear(perform: normalizeActivityType)
             .onAppear {
                 if type == .feed, feedKind == .solid {
                     syncSolidFoodDetails(names: selectedSolidFoodNames)
@@ -690,7 +694,13 @@ struct EventEditorView: View {
                 if newType == .temperature {
                     normalizeDogTemperatureMethod()
                 }
+                if newType == .activity {
+                    normalizeActivityType()
+                }
                 refreshRecentMedicineNamesIfNeeded()
+            }
+            .onChange(of: activeProfileType) {
+                normalizeActivityType()
             }
             .onChange(of: activeProfileID) {
                 refreshRecentMedicineNamesIfNeeded()
@@ -1081,7 +1091,7 @@ struct EventEditorView: View {
         case .activity:
             Section("Activity") {
                 Picker("Activity", selection: $activityType) {
-                    ForEach(ActivityType.allCases) {
+                    ForEach(availableActivityTypes) {
                         Label($0.displayName, systemImage: $0.systemImage).tag($0)
                     }
                 }
@@ -1474,6 +1484,15 @@ struct EventEditorView: View {
     }
 
     private func save() {
+        guard EventType.cases(for: activeProfileType).contains(type) else {
+            validationMessage = "This event type isn't available for an \(activeProfileType.displayName.lowercased()) profile."
+            return
+        }
+        if type == .activity,
+           !activityType.isAvailable(for: activeProfileType) {
+            validationMessage = "Choose an activity available for an \(activeProfileType.displayName.lowercased()) profile."
+            return
+        }
         if type.supportsTimer, hasEndDate, endDate < startDate {
             validationMessage = "End time must be after the start time."
             return
@@ -1664,6 +1683,12 @@ struct EventEditorView: View {
     private func normalizeDogTemperatureMethod() {
         guard isDogProfile, type == .temperature, !temperatureMethods.contains(temperatureMethod) else { return }
         temperatureMethod = .rectal
+    }
+
+    private func normalizeActivityType() {
+        guard type == .activity,
+              !activityType.isAvailable(for: activeProfileType) else { return }
+        activityType = ActivityType.defaultValue(for: activeProfileType)
     }
 
     private func dogDetailsForSave() -> DogEventDetails {

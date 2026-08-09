@@ -478,7 +478,17 @@ enum WatchActionCatalog {
                 option("nightSleep", "Night sleep", "moon.fill")
             ]
         ),
-        action("activity", "Activity", "Timer", "figure.walk", "green", "activity")
+        action(
+            "activity", "Activity", "Timer", "figure.walk", "green", "activity",
+            options: [
+                option("exercise", "Exercise", "figure.run"),
+                option("physicalTherapy", "Physical therapy", "figure.strengthtraining.traditional"),
+                option("socialActivity", "Social activity", "person.2.fill"),
+                option("brushTeeth", "Brush teeth", "mouth.fill"),
+                option("screenTime", "Screen time", "tv.fill"),
+                option("bath", "Bath", "bathtub.fill")
+            ]
+        )
     ]
 
     private static func action(

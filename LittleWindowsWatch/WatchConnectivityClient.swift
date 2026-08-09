@@ -566,7 +566,7 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
     }
 
     private let timerActionIDs: Set<String> = [
-        "sleep", "nursing", "pumping", "tummy-time", "story-time",
+        "sleep", "nursing", "pumping", "activity", "tummy-time", "story-time",
         "brush-teeth", "indoor-play", "outdoor-play", "screen-time", "bath",
         "walk", "rest", "training", "grooming"
     ]

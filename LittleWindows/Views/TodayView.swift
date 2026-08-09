@@ -2800,13 +2800,16 @@ struct TodayView: View {
                 startTimer(type, nursingSide: side)
             }
         case .startActivity(let activity):
+            guard let profile,
+                  activity.isAvailable(for: profile.profileType) else { return }
             startTimer(.activity, activityType: activity)
         case .logDiaper:
             editorRoute = EventEditorRoute(type: .diaper)
         case .logEvent(let type):
-            editorRoute = EventEditorRoute(
-                type: profile?.profileType == .dog && type == .feed ? .food : type
-            )
+            guard let profile else { return }
+            let resolvedType = profile.profileType == .dog && type == .feed ? .food : type
+            guard EventType.cases(for: profile.profileType).contains(resolvedType) else { return }
+            editorRoute = EventEditorRoute(type: resolvedType)
         case .logSolidFeed(let preset):
             guard let profile, profile.profileType == .child else { return }
             let state = solidsProfileStates.first { $0.profileID == profile.id }
@@ -3056,7 +3059,8 @@ struct TodayView: View {
     }
 
     private func activityOptions(state: TodayRenderState) -> [AppActionSheetOption] {
-        ActivityType.allCases.map { activity in
+        let profileType = profile?.profileType ?? .child
+        return ActivityType.cases(for: profileType).map { activity in
             let timerAlreadyActive = activity != .custom && state.hasActiveTimer(of: .activity)
             return AppActionSheetOption(
                 title: activity.displayName,

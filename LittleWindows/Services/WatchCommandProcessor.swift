@@ -266,7 +266,13 @@ enum WatchCommandProcessor {
         case "pumping":
             return startTimer(command, profile: profile, type: .pumping, context: context)
         case "activity":
-            return startTimer(command, profile: profile, type: .activity, context: context)
+            return startTimer(
+                command,
+                profile: profile,
+                type: .activity,
+                activityType: command.optionID.flatMap(ActivityType.init(rawValue:)),
+                context: context
+            )
         case "tummy-time":
             return startTimer(
                 command,

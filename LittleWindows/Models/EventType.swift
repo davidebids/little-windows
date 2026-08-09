@@ -129,3 +129,26 @@ enum EventType: String, Codable, CaseIterable, Identifiable {
         }
     }
 }
+
+extension ActivityType {
+    static func cases(for profileType: CareProfileType) -> [ActivityType] {
+        switch profileType {
+        case .child:
+            return [.tummyTime, .storyTime, .brushTeeth, .indoorPlay,
+                    .outdoorPlay, .screenTime, .bath, .custom]
+        case .adult:
+            return [.exercise, .physicalTherapy, .socialActivity, .brushTeeth,
+                    .screenTime, .bath, .custom]
+        case .dog:
+            return []
+        }
+    }
+
+    static func defaultValue(for profileType: CareProfileType) -> ActivityType {
+        cases(for: profileType).first ?? .custom
+    }
+
+    func isAvailable(for profileType: CareProfileType) -> Bool {
+        Self.cases(for: profileType).contains(self)
+    }
+}

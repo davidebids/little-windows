@@ -28,6 +28,12 @@ enum EventTimerService {
         at date: Date = Date()
     ) -> CareEvent? {
         guard type.supportsTimer else { return nil }
+        if let profileType {
+            guard EventType.cases(for: profileType).contains(type) else { return nil }
+            if type == .activity, let activityType {
+                guard activityType.isAvailable(for: profileType) else { return nil }
+            }
+        }
         guard !events.contains(where: { $0.type == type && $0.isTimerDraft }) else { return nil }
 
         let event = CareEvent(
