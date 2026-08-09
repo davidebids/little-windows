@@ -79,9 +79,6 @@ struct SolidsHomeView: View {
         }
         .background(AppTheme.background)
         .task {
-            Task.detached(priority: .utility) {
-                SolidsReferenceCatalog.warmCaches()
-            }
             if stateWriter == nil {
                 stateWriter = await SolidsWriterPool.shared.profileStateWriter(
                     for: modelContext.container
@@ -1101,9 +1098,14 @@ struct SolidsFoodDatabaseView: View {
     @State private var filters = SolidsFoodDatabaseFilters.empty
     @State private var showingFilters = false
     @State private var showingNewCustomFood = false
+    @State private var bundledFoods: [SolidsReferenceFoodSummary]?
 
     private var searchAndCategoryFoods: [SolidsReferenceFoodSummary] {
-        SolidsReferenceCatalog.searchSummaries(effectiveSearchText, category: selectedCategory)
+        SolidsReferenceCatalog.searchSummaries(
+            effectiveSearchText,
+            category: selectedCategory,
+            in: bundledFoods ?? []
+        )
     }
 
     private var filteredCustomFoods: [SolidFoodCatalogItem] {
@@ -1129,8 +1131,8 @@ struct SolidsFoodDatabaseView: View {
             filters.matches($0, progress: progressFilterByFoodID[$0.id])
         }
         let visibleCustomFoods = filteredCustomFoods
-        let photoDataByID = photoAttachments.reduce(into: [UUID: Data]()) { result, attachment in
-            if let data = attachment.previewData { result[attachment.id] = data }
+        let photosByID = photoAttachments.reduce(into: [UUID: PhotoAttachment]()) { result, attachment in
+            result[attachment.id] = attachment
         }
         List {
             if !visibleCustomFoods.isEmpty {
@@ -1139,7 +1141,7 @@ struct SolidsFoodDatabaseView: View {
                         Button { openCustomFood(food.id) } label: {
                             HStack(spacing: 12) {
                                 if let photoID = food.photoAttachmentID,
-                                   let data = photoDataByID[photoID],
+                                   let data = photosByID[photoID]?.previewData,
                                    let image = ThumbnailImageCache.image(
                                     attachmentID: photoID,
                                     data: data
@@ -1222,6 +1224,7 @@ struct SolidsFoodDatabaseView: View {
                     )
                 }
                 .accessibilityIdentifier("solids.foods.filters")
+                .disabled(bundledFoods == nil)
                 Button { showingNewCustomFood = true } label: {
                     Label("New custom food", systemImage: "plus")
                 }
@@ -1248,8 +1251,17 @@ struct SolidsFoodDatabaseView: View {
                 )
             }
         }
+        .task {
+            guard bundledFoods == nil else { return }
+            bundledFoods = await SolidsReferenceCatalog.loadFoodSummaries()
+        }
         .overlay {
-            if visibleFoods.isEmpty && visibleCustomFoods.isEmpty {
+            if bundledFoods == nil {
+                ProgressView("Loading food database")
+                    .padding()
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .allowsHitTesting(false)
+            } else if visibleFoods.isEmpty && visibleCustomFoods.isEmpty {
                 if filters.isEmpty {
                     ContentUnavailableView.search(text: effectiveSearchText)
                 } else {

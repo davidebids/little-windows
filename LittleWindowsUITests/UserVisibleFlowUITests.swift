@@ -647,18 +647,14 @@ final class UserVisibleFlowUITests: XCTestCase {
         continueAfterFailure = false
 
         launch(startURL: "littlewindows://debug/reset-empty")
-        launch(startURL: "littlewindows://debug/seed-smoke")
-        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
-
-        let activate = app.buttons["Start solids workspace"]
-        if activate.waitForExistence(timeout: 5) {
-            activate.tap()
-        }
-        let database = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Food database'")).firstMatch
-        XCTAssertTrue(database.waitForExistence(timeout: 5))
-        database.tap()
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(
+            startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/database"
+        )
         XCTAssertTrue(app.navigationBars["Food Database"].waitForExistence(timeout: 5))
 
+        // This is intentionally the first interaction in a newly launched app
+        // process. A warm second visit would hide catalog and SwiftData faults.
         app.swipeDown()
         let search = app.searchFields["Search foods"]
         XCTAssertTrue(search.waitForExistence(timeout: 3))

@@ -1,6 +1,6 @@
 import Foundation
 
-enum SolidsFoodCategory: String, CaseIterable, Codable, Identifiable {
+enum SolidsFoodCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     case fruit
     case vegetable
     case grain
@@ -813,7 +813,7 @@ struct SolidsReferenceFood: Identifiable, Hashable {
 /// payload on `SolidsReferenceFood`. Screens that only need to find or filter
 /// foods should use this type so their first render does not build hundreds of
 /// preparation guides, questions, citations, and walkthroughs.
-struct SolidsReferenceFoodSummary: Identifiable, Hashable {
+struct SolidsReferenceFoodSummary: Identifiable, Hashable, Sendable {
     var id: String
     var name: String
     var category: SolidsFoodCategory
@@ -823,6 +823,7 @@ struct SolidsReferenceFoodSummary: Identifiable, Hashable {
     var allergenIDs: [String]
     var possibleAllergenIDs: [String]
     var visualEmoji: String
+    var normalizedSearchTerms: [String]
 }
 
 enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
@@ -1487,22 +1488,10 @@ enum SolidsSourceLibrary {
 enum SolidsReferenceCatalog {
     static let version = 8
 
-    /// Builds only the compact search index away from the UI thread. Rich food
-    /// guidance and recipe planning data stay lazy so warming the search field
-    /// cannot compete with first-interaction responsiveness.
-    static func warmCaches() {
-        _ = foodSearchEntries.count
-    }
-
     private struct FoodSeed {
         var id: String
         var name: String
         var category: SolidsFoodCategory
-    }
-
-    private struct FoodSearchEntry {
-        var summary: SolidsReferenceFoodSummary
-        var normalizedTerms: [String]
     }
 
     private struct RecipeSearchEntry {
@@ -1538,18 +1527,28 @@ enum SolidsReferenceCatalog {
     /// Compact immutable records used by search, filters, pickers, and plan
     /// selection. Building these does not create any educational page content.
     static let foodSummaries: [SolidsReferenceFoodSummary] = foodSeeds.map { seed in
+        let foodAliases = aliases(for: seed.name)
         let allergens = allergenIDs(name: seed.name, category: seed.category)
         return SolidsReferenceFoodSummary(
             id: seed.id,
             name: seed.name,
             category: seed.category,
-            aliases: aliases(for: seed.name),
+            aliases: foodAliases,
             minimumAgeMonths: normalized(seed.name) == "honey" ? 12 : 6,
             isIronRich: ironRichStatus(name: seed.name, category: seed.category),
             allergenIDs: allergens,
             possibleAllergenIDs: possibleAllergenIDs(name: seed.name, category: seed.category),
-            visualEmoji: SolidsFoodVisual.emoji(for: seed.name, category: seed.category)
+            visualEmoji: SolidsFoodVisual.emoji(for: seed.name, category: seed.category),
+            normalizedSearchTerms: ([seed.name] + foodAliases).map(normalized)
         )
+    }
+
+    /// The compact catalog is initialized off the main actor so a cold first
+    /// visit cannot block keyboard presentation or text input.
+    static func loadFoodSummaries() async -> [SolidsReferenceFoodSummary] {
+        await Task.detached(priority: .userInitiated) {
+            foodSummaries
+        }.value
     }
 
     static let foods: [SolidsReferenceFood] = foodSummaries.map { summary in
@@ -1585,13 +1584,6 @@ enum SolidsReferenceCatalog {
         }
         return result
     }()
-
-    private static let foodSearchEntries: [FoodSearchEntry] = foodSummaries.map { food in
-        FoodSearchEntry(
-            summary: food,
-            normalizedTerms: ([food.name] + food.aliases).map(normalized)
-        )
-    }
 
     private static let foodsByCategory = Dictionary(grouping: foods, by: \SolidsReferenceFood.category)
 
@@ -1850,15 +1842,16 @@ enum SolidsReferenceCatalog {
 
     static func searchSummaries(
         _ query: String,
-        category: SolidsFoodCategory? = nil
+        category: SolidsFoodCategory? = nil,
+        in foods: [SolidsReferenceFoodSummary]? = nil
     ) -> [SolidsReferenceFoodSummary] {
         let key = normalized(query)
-        return foodSearchEntries.compactMap { entry in
-            guard category == nil || entry.summary.category == category,
-                  key.isEmpty || entry.normalizedTerms.contains(where: { $0.contains(key) }) else {
-                return nil
+        return (foods ?? foodSummaries).filter { food in
+            guard category == nil || food.category == category,
+                  key.isEmpty || food.normalizedSearchTerms.contains(where: { $0.contains(key) }) else {
+                return false
             }
-            return entry.summary
+            return true
         }
     }
 
