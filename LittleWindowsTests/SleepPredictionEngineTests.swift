@@ -1880,7 +1880,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(testDog.profileSubtitle, "Mini Goldendoodle")
     }
 
-    func testDogAgeUsesBirthDateInsteadOfTimeSinceAdoption() throws {
+    func testDogAgeUsesBirthDateThenFallsBackToAdoptionDate() throws {
         let calendar = Calendar.current
         let birthDate = try XCTUnwrap(calendar.date(byAdding: .year, value: -4, to: Date()))
         let adoptionDate = try XCTUnwrap(calendar.date(byAdding: .year, value: -1, to: Date()))
@@ -1897,9 +1897,15 @@ final class SleepPredictionEngineTests: XCTestCase {
             adoptionDate: adoptionDate,
             species: "dog"
         )
+        let dogWithoutDates = CareProfile(
+            profileType: .dog,
+            name: "Test Dog",
+            species: "dog"
+        )
 
         XCTAssertEqual(dog.ageDescription, DateFormatting.age(from: birthDate))
-        XCTAssertEqual(dogWithoutBirthDate.ageDescription, "Age not set")
+        XCTAssertEqual(dogWithoutBirthDate.ageDescription, "Adopted 1 year ago")
+        XCTAssertEqual(dogWithoutDates.ageDescription, "Age not set")
     }
 
     func testDogTodayActionsIncludeEveryEnabledCategory() {
