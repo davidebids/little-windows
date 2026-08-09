@@ -107,28 +107,28 @@ struct AppointmentDetailView: View {
                             }
                         }
                     }
-                AppointmentMultilineFormField(
+                PersistentMultilineFormField(
                     title: "Summary",
                     prompt: "Optional",
                     text: $visitSummaryDraft,
                     lineLimit: 3...8,
                     accessibilityIdentifier: "appointment.result.summary"
                 )
-                AppointmentMultilineFormField(
+                PersistentMultilineFormField(
                     title: "Follow-up",
                     prompt: "Optional",
                     text: $followUpInstructionsDraft,
                     lineLimit: 3...8,
                     accessibilityIdentifier: "appointment.result.follow-up"
                 )
-                AppointmentMultilineFormField(
+                PersistentMultilineFormField(
                     title: "Vaccines given",
                     prompt: "Optional",
                     text: $vaccinesGivenDraft,
                     lineLimit: 2...5,
                     accessibilityIdentifier: "appointment.result.vaccines"
                 )
-                AppointmentMultilineFormField(
+                PersistentMultilineFormField(
                     title: "Medications discussed",
                     prompt: "Optional",
                     text: $medicationsDiscussedDraft,

@@ -38,12 +38,17 @@ final class UserVisibleFlowUITests: XCTestCase {
         addMedication.tap()
 
         XCTAssertTrue(app.navigationBars["Add Medication"].waitForExistence(timeout: 4))
-        for label in ["Name", "Strength", "Strength unit", "Dose", "Dose unit"] {
+        for label in ["Name", "Strength", "Strength unit", "Instructions", "Dose", "Dose unit"] {
             XCTAssertTrue(
                 app.staticTexts[label].exists,
                 "The \(label) label should remain visible independently of its input value."
             )
         }
+
+        assertPersistentMultilineField(
+            identifier: "medication.instructions",
+            maxScrolls: 2
+        )
 
         let supplyToggle = app.switches["Track quantity on hand"]
         for _ in 0..<5 where !supplyToggle.isHittable {
@@ -712,15 +717,15 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Edit Appointment"].waitForExistence(timeout: 5))
 
-        assertPersistentAppointmentField(
+        assertPersistentMultilineField(
             identifier: "appointment.address",
             maxScrolls: 6
         )
-        assertPersistentAppointmentField(
+        assertPersistentMultilineField(
             identifier: "appointment.notes",
             maxScrolls: 4
         )
-        assertPersistentAppointmentField(
+        assertPersistentMultilineField(
             identifier: "appointment.question.new",
             maxScrolls: 4
         )
@@ -2889,7 +2894,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         return app.buttons[labels[0]]
     }
 
-    private func assertPersistentAppointmentField(
+    private func assertPersistentMultilineField(
         identifier: String,
         maxScrolls: Int
     ) {

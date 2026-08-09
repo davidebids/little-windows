@@ -641,11 +641,13 @@ private struct MedicationDetailView: View {
                             Text(reason.displayName).tag(reason)
                         }
                     }
-                    LabeledContent("Notes") {
-                        TextField("Optional", text: $supplyNotes, axis: .vertical)
-                            .lineLimit(2...4)
-                            .multilineTextAlignment(.trailing)
-                    }
+                    PersistentMultilineFormField(
+                        title: "Notes",
+                        prompt: "Optional",
+                        text: $supplyNotes,
+                        lineLimit: 2...4,
+                        accessibilityIdentifier: "medication.supply.notes"
+                    )
                 } header: {
                     Text("Supply on hand")
                 } footer: {
@@ -826,11 +828,13 @@ private struct MedicationEditorView: View {
                     TextField("Optional", text: $reasonForTaking)
                         .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Instructions") {
-                    TextField("Optional", text: $instructions, axis: .vertical)
-                        .lineLimit(2...4)
-                        .multilineTextAlignment(.trailing)
-                }
+                PersistentMultilineFormField(
+                    title: "Instructions",
+                    prompt: "Optional",
+                    text: $instructions,
+                    lineLimit: 2...4,
+                    accessibilityIdentifier: "medication.instructions"
+                )
             }
 
             Section("Schedule") {

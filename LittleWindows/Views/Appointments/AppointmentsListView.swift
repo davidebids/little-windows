@@ -379,7 +379,7 @@ struct AppointmentEditorView: View {
                     TextField("Optional", text: $locationName)
                         .multilineTextAlignment(.trailing)
                 }
-                AppointmentMultilineFormField(
+                PersistentMultilineFormField(
                     title: "Address",
                     prompt: "Optional",
                     text: $address,
@@ -394,7 +394,7 @@ struct AppointmentEditorView: View {
             }
 
             Section("Visit prep") {
-                AppointmentMultilineFormField(
+                PersistentMultilineFormField(
                     title: "Notes",
                     prompt: "Optional",
                     text: $notes,
@@ -527,7 +527,7 @@ private struct AppointmentQuestionDraft: Identifiable, Equatable {
     }
 }
 
-struct AppointmentMultilineFormField: View {
+struct PersistentMultilineFormField: View {
     let title: String
     let prompt: String
     @Binding var text: String
