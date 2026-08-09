@@ -68,6 +68,44 @@ enum ThumbnailImageCache {
         cache.setObject(image, forKey: key, cost: max(data.count, decodedCost))
         return image
     }
+
+    /// Produces a square, orientation-normalized bitmap before SwiftUI lays it
+    /// out. This avoids an initial toolbar pass briefly treating a wide profile
+    /// photo as fitted content until another interaction invalidates the layout.
+    static func squareImage(
+        attachmentID: UUID,
+        data: Data,
+        size: CGFloat
+    ) -> UIImage? {
+        let pixelSize = max(1, Int(size.rounded(.up)))
+        let key = "\(attachmentID.uuidString)-square-\(pixelSize)-\(data.count)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        guard let source = UIImage(data: data),
+              source.size.width > 0,
+              source.size.height > 0 else { return nil }
+
+        let targetSize = CGSize(width: size, height: size)
+        let fillScale = max(
+            targetSize.width / source.size.width,
+            targetSize.height / source.size.height
+        )
+        let drawnSize = CGSize(
+            width: source.size.width * fillScale,
+            height: source.size.height * fillScale
+        )
+        let drawRect = CGRect(
+            x: (targetSize.width - drawnSize.width) / 2,
+            y: (targetSize.height - drawnSize.height) / 2,
+            width: drawnSize.width,
+            height: drawnSize.height
+        )
+        let rendered = UIGraphicsImageRenderer(size: targetSize).image { _ in
+            source.draw(in: drawRect)
+        }
+        let decodedCost = rendered.cgImage.map { $0.width * $0.height * 4 } ?? data.count
+        cache.setObject(rendered, forKey: key, cost: max(data.count, decodedCost))
+        return rendered
+    }
 }
 
 struct EventEditorView: View {

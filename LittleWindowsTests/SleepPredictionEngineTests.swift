@@ -3,6 +3,7 @@ import CoreData
 import XCTest
 import SwiftData
 import SwiftUI
+import UIKit
 @testable import LittleWindows
 
 final class SleepPredictionEngineTests: XCTestCase {
@@ -6155,6 +6156,25 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(summary.topActivities.map(\.activityType), [.tummyTime, .bath])
         XCTAssertEqual(summary.topActivities.first?.count, 2)
         XCTAssertEqual(summary.topActivities.first?.durationSeconds ?? 0, 20 * 60)
+    }
+
+    @MainActor
+    func testProfileAvatarThumbnailIsSquareBeforeSwiftUILayout() throws {
+        let source = UIGraphicsImageRenderer(
+            size: CGSize(width: 240, height: 100)
+        ).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 240, height: 100))
+        }
+        let data = try XCTUnwrap(source.jpegData(compressionQuality: 0.9))
+        let result = try XCTUnwrap(ThumbnailImageCache.squareImage(
+            attachmentID: UUID(),
+            data: data,
+            size: 40
+        ))
+
+        XCTAssertEqual(result.size.width, 40, accuracy: 0.001)
+        XCTAssertEqual(result.size.height, 40, accuracy: 0.001)
     }
 
     @MainActor

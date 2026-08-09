@@ -34,7 +34,7 @@ struct NightLightView: View {
                     router.presentSettings()
                 } label: {
                     if let profile {
-                        ProfileAvatarView(profile: profile, size: 32)
+                        ProfileAvatarView(profile: profile, size: 40)
                     } else {
                         Image(systemName: "gearshape.fill")
                             .font(.headline)

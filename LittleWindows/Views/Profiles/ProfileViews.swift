@@ -35,15 +35,14 @@ struct ProfileAvatarView: View {
         ZStack {
             if let attachmentID = profile.profilePhotoAttachmentID,
                let profilePhotoData,
-               let image = ThumbnailImageCache.image(
+               let image = ThumbnailImageCache.squareImage(
                 attachmentID: attachmentID,
-                data: profilePhotoData
+                data: profilePhotoData,
+                size: size
                ) {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
                     .frame(width: size, height: size)
-                    .clipped()
             } else {
                 Text(profile.initials)
                     .font(.system(size: size * 0.34, weight: .bold))
@@ -613,15 +612,14 @@ private struct ProfilePhotoPreview: View {
         ZStack {
             if let photoID,
                let photoData,
-               let image = ThumbnailImageCache.image(
+               let image = ThumbnailImageCache.squareImage(
                 attachmentID: photoID,
-                data: photoData
+                data: photoData,
+                size: 72
                ) {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
                     .frame(width: 72, height: 72)
-                    .clipped()
             } else {
                 Text(profile?.initials ?? initials)
                     .font(.title3.bold())
