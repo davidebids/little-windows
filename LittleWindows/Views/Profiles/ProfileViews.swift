@@ -806,6 +806,9 @@ struct ManageProfilesView: View {
 
     private var profileActionTitle: String {
         if let profileToArchive {
+            if archivesLastActiveProfile {
+                return "Archive \(profileToArchive.name) and switch to Home?"
+            }
             return "Archive \(profileToArchive.name)?"
         }
         if let profileToDelete {
@@ -815,10 +818,8 @@ struct ManageProfilesView: View {
     }
 
     private var profileActionMessage: String {
-        if let profileToArchive,
-           !profileToArchive.isArchived,
-           activeProfiles.count == 1 {
-            return "This saves any open timer, pauses care tracking, and returns Little Windows to Home, Food, and Night Light. The profile and all of its history stay safely archived."
+        if archivesLastActiveProfile {
+            return "This is the last active care profile. Little Windows will hide Care and Reports and continue with Today, Home, Food, and Night Light. The profile and all care history stay safely archived, and you can restore it anytime."
         }
         if profileToArchive != nil {
             return "This saves any open timer and hides the profile from daily tracking, but keeps all history available."
@@ -836,12 +837,13 @@ struct ManageProfilesView: View {
 
     private var profileActionOptions: [AppActionSheetOption] {
         if let profile = profileToArchive {
-            let archivesLastActiveProfile = !profile.isArchived && activeProfiles.count == 1
             return [
                 AppActionSheetOption(
-                    title: "Archive Profile",
+                    title: archivesLastActiveProfile
+                        ? "Archive and Switch to Home"
+                        : "Archive Profile",
                     subtitle: archivesLastActiveProfile
-                        ? "Pause care tracking and continue with household tools."
+                        ? "Keep all history and turn off Care."
                         : "Hide this profile from daily tracking.",
                     systemImage: "archivebox.fill",
                     tint: .orange
@@ -862,6 +864,11 @@ struct ManageProfilesView: View {
                 delete(profile)
             }
         ]
+    }
+
+    private var archivesLastActiveProfile: Bool {
+        guard let profileToArchive else { return false }
+        return !profileToArchive.isArchived && activeProfiles.count == 1
     }
 
     private func manageRows(_ values: [CareProfile]) -> some View {
@@ -941,13 +948,14 @@ struct ManageProfilesView: View {
             }
             .buttonStyle(.plain)
             .listRowBackground(profile.isArchived ? Color.primary.opacity(0.045) : Color.clear)
-            .swipeActions {
-                Button(role: .destructive) {
-                    profileToDelete = profile
-                } label: {
-                    Label("Delete", systemImage: "trash.fill")
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if canDelete {
+                    Button(role: .destructive) {
+                        profileToDelete = profile
+                    } label: {
+                        Label("Delete", systemImage: "trash.fill")
+                    }
                 }
-                .disabled(!canDelete)
                 if profile.isArchived {
                     Button {
                         restore(profile)

@@ -255,8 +255,8 @@ final class UserVisibleFlowUITests: XCTestCase {
         profileRow.swipeLeft()
         XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 3))
         app.buttons["Archive"].tap()
-        XCTAssertTrue(app.buttons["Archive Profile"].waitForExistence(timeout: 3))
-        app.buttons["Archive Profile"].tap()
+        XCTAssertTrue(app.buttons["Archive and Switch to Home"].waitForExistence(timeout: 3))
+        app.buttons["Archive and Switch to Home"].tap()
         XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 5))
 
         app.open(URL(string: "littlewindows://today")!)
@@ -265,6 +265,61 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
         XCTAssertFalse(app.tabBars.buttons["Care"].exists)
         XCTAssertFalse(app.segmentedControls.buttons["Care"].exists)
+    }
+
+    func testArchivingRemainingProfileAfterOtherArchivesExplainsHomeMode() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://settings")
+
+        let careProfiles = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(careProfiles.waitForExistence(timeout: 5))
+        careProfiles.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+
+        func archiveProfile(named name: String) {
+            let row = app.buttons.containing(.staticText, identifier: name).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 4))
+            row.swipeLeft()
+            let archiveButton = app.buttons["Archive"]
+            XCTAssertTrue(archiveButton.waitForExistence(timeout: 3))
+            archiveButton.tap()
+            XCTAssertTrue(app.buttons["Archive Profile"].waitForExistence(timeout: 3))
+            app.buttons["Archive Profile"].tap()
+        }
+
+        archiveProfile(named: "Sample Child")
+
+        let finalRow = app.buttons.containing(
+            .staticText,
+            identifier: "Sample Dog"
+        ).firstMatch
+        XCTAssertTrue(finalRow.waitForExistence(timeout: 4))
+        finalRow.swipeLeft()
+        XCTAssertFalse(app.buttons["Delete"].exists)
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 3))
+        app.buttons["Archive"].tap()
+
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label BEGINSWITH %@",
+                    "This is the last active care profile."
+                )
+            ).firstMatch.waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["Archive and Switch to Home"].exists)
+        app.buttons["Archive and Switch to Home"].tap()
+
+        app.open(URL(string: "littlewindows://today")!)
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Care"].exists)
     }
 
     func testFirstRunOffersRestoreFromICloud() {
