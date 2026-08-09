@@ -6,6 +6,7 @@ require "digest"
 require "fileutils"
 require "json"
 require "optparse"
+require "set"
 require "time"
 
 ENV["TZ"] = "America/Los_Angeles"
@@ -21,11 +22,16 @@ OptionParser.new do |parser|
   parser.on("--summary PATH", "Markdown import report path") { |value| options[:summary] = value }
   parser.on("--birth-date DATE", "Baby birth date (YYYY-MM-DD)") { |value| options[:birth_date] = value }
   parser.on("--baby-name NAME", "Baby profile name") { |value| options[:baby_name] = value }
+  parser.on("--merge-backup PATH", "Existing Little Windows backup to preserve") { |value| options[:merge_backup] = value }
+  parser.on("--target-profile-id UUID", "Existing child profile that receives converted events") { |value| options[:target_profile_id] = value }
 end.parse!
 
 input = ARGV.shift
 abort("Missing input CSV") unless input
 abort("Missing --output") unless options[:output]
+if options[:merge_backup].nil? != options[:target_profile_id].nil?
+  abort("--merge-backup and --target-profile-id must be provided together")
+end
 
 def deterministic_uuid(value)
   hex = Digest::SHA256.hexdigest(value)[0, 32]
@@ -49,6 +55,71 @@ def combined_notes(*parts)
   values.empty? ? nil : values.join("\n")
 end
 
+def cleaned_text(value)
+  value.to_s
+    .gsub(/\\n/i, " ")
+    .gsub(/\s+/, " ")
+    .strip
+end
+
+def slug(value)
+  value.downcase
+    .encode("ASCII", invalid: :replace, undef: :replace, replace: "")
+    .gsub(/[^a-z0-9]+/, "-")
+    .gsub(/\A-+|-+\z/, "")
+end
+
+def solid_food_reference(source_name)
+  normalized = cleaned_text(source_name).downcase
+  known_foods = {
+    "avocado" => ["avocado", "Avocado", []],
+    "banana" => ["banana", "Banana", []],
+    "carrot" => ["carrot", "Carrot", []],
+    "egg" => ["egg", "Egg", ["egg"]],
+    "oatmeal" => ["oatmeal", "Oatmeal", []],
+    "peach" => ["peach", "Peach", []],
+    "peanut butter" => ["peanut-butter", "Peanut butter", ["peanuts"]],
+    "pea" => ["pea", "Pea", []],
+    "peas" => ["pea", "Pea", []],
+    "watermelon" => ["watermelon", "Watermelon", []],
+    # The source does not identify the style of yogurt, so preserve it as a
+    # custom food instead of guessing one of the app's specific yogurt entries.
+    "yogurt" => ["custom-yogurt", "Yogurt", ["milk"]]
+  }
+  return known_foods.fetch(normalized) if known_foods.key?(normalized)
+
+  display_name = cleaned_text(source_name)
+  ["custom-#{slug(display_name)}", display_name, []]
+end
+
+def solid_food_details(value, reaction)
+  cleaned_text(value).split(/\s*,\s*/).map do |part|
+    next if part.empty?
+
+    match = part.match(/\A(.+?)\s+of\s+(.+)\z/i)
+    serving_amount = match && cleaned_text(match[1])
+    source_name = cleaned_text(match ? match[2] : part)
+    food_id, food_name, allergen_ids = solid_food_reference(source_name)
+    suspected_reaction = reaction == "sensitivity"
+    {
+      "foodID" => food_id,
+      "foodName" => food_name,
+      "allergenIDs" => allergen_ids,
+      "confirmedAllergenPortionIDs" => nil,
+      "preference" => reaction,
+      "servingAmount" => serving_amount,
+      "notes" => nil,
+      "suspectedReaction" => suspected_reaction,
+      "symptoms" => [],
+      "severity" => "unknown",
+      "onsetMinutes" => nil,
+      "durationMinutes" => nil,
+      "responseNotes" => suspected_reaction ? "Source export marked this meal as ALLERGIC; no symptoms or severity were included." : "",
+      "followUp" => "none"
+    }
+  end.compact
+end
+
 def base_event(index:, suffix:, type:, start_time:, end_time: nil, title: nil, notes: nil)
   {
     "id" => deterministic_uuid("legacy-tracker-event-#{index}-#{suffix}"),
@@ -64,6 +135,12 @@ def base_event(index:, suffix:, type:, start_time:, end_time: nil, title: nil, n
     "feedKindRawValue" => nil,
     "amountOz" => nil,
     "foodDescription" => nil,
+    "solidReactionRawValue" => nil,
+    "solidTextureRawValue" => nil,
+    "solidFeedingStyleRawValue" => nil,
+    "solidAllergenExposure" => nil,
+    "solidSensitivityObserved" => nil,
+    "solidFoodDetailsJSON" => nil,
     "nursingSideRawValue" => nil,
     "activeNursingSideRawValue" => nil,
     "leftDurationSeconds" => nil,
@@ -234,6 +311,28 @@ rows.each_with_index do |row, offset|
       event["foodDescription"] = row["Start Condition"]
       events << event
     end
+  when "Solids"
+    reaction = case cleaned_text(row["End Condition"]).upcase
+               when "LOVED" then "loved"
+               when "ALLERGIC" then "sensitivity"
+               else "unknown"
+               end
+    details = solid_food_details(row["Start Condition"], reaction)
+    event = base_event(
+      index: row_number,
+      suffix: "solids",
+      type: "feed",
+      start_time: start_time,
+      end_time: source_end || start_time,
+      notes: source_notes
+    )
+    event["feedKindRawValue"] = "solid"
+    event["foodDescription"] = details.map { |detail| detail["foodName"] }.join(", ")
+    event["solidReactionRawValue"] = reaction
+    event["solidAllergenExposure"] = details.any? { |detail| !detail["allergenIDs"].empty? }
+    event["solidSensitivityObserved"] = reaction == "sensitivity"
+    event["solidFoodDetailsJSON"] = JSON.generate(details)
+    events << event
   when "Diaper"
     details = row["End Condition"].to_s
     lowered = details.downcase
@@ -382,6 +481,35 @@ backup = {
   "predictionRecords" => []
 }
 
+if options[:merge_backup]
+  existing_backup = JSON.parse(File.read(options[:merge_backup]))
+  target_profile_id = options[:target_profile_id].upcase
+  target_profile = existing_backup.fetch("profiles", []).find do |value|
+    value["id"].to_s.upcase == target_profile_id
+  end
+  abort("Target profile was not found in the existing backup") unless target_profile
+  unless target_profile["profileTypeRawValue"].to_s.empty? || target_profile["profileTypeRawValue"] == "child"
+    abort("Target profile must be a child profile")
+  end
+
+  imported_event_ids = events.map { |event| event.fetch("id") }.to_set
+  conflicting_event = existing_backup.fetch("events", []).find do |event|
+    imported_event_ids.include?(event["id"]) && event["profileID"].to_s.upcase != target_profile_id
+  end
+  abort("An imported event ID belongs to another profile in the existing backup") if conflicting_event
+
+  events.each do |event|
+    event["profileID"] = target_profile["id"]
+    event["profileTypeSnapshotRawValue"] = "child"
+  end
+  preserved_events = existing_backup.fetch("events", []).reject do |event|
+    imported_event_ids.include?(event["id"])
+  end
+  existing_backup["events"] = (preserved_events + events).sort_by { |event| event.fetch("startDate") }
+  existing_backup["exportedAt"] = Time.now.utc.iso8601
+  backup = existing_backup
+end
+
 FileUtils.mkdir_p(File.dirname(options[:output])) unless File.dirname(options[:output]) == "."
 File.write(options[:output], JSON.pretty_generate(backup) + "\n")
 
@@ -405,10 +533,12 @@ if options[:summary]
     "- Date range: #{source_start_date} to #{source_end_date} (#{tracked_days} days)",
     "- Sleep logs: #{sleep_events.length} (#{nap_events.length} naps, #{night_events.length} night segments)",
     "- Inferred birth date: #{options[:birth_date]}",
+    options[:merge_backup] ? "- Output mode: merged into an existing child profile while preserving the current backup" : nil,
     "",
     "## Converted Event Counts",
     ""
   ]
+  lines.compact!
   event_counts.each { |type, count| lines << "- #{type}: #{count}" }
   lines += ["", "## Conversion Decisions", ""]
   conversion_notes.sort.each { |label, count| lines << "- #{label}: #{count}" }
@@ -416,7 +546,8 @@ if options[:summary]
     "",
     "Breast feeds with two recorded sides are represented as two sequential nursing events. No nursing event uses a Both side.",
     "Night sleep is classified as an overnight sequence, including early-morning sleep that resumes within 90 minutes of the preceding night segment.",
-    "Growth records are converted to native growth events. Temperature and pumping records are preserved as custom events."
+    "Growth records are converted to native growth events. Temperature and pumping records are preserved as custom events.",
+    "Solid-food records are converted to native solid-feed events with source serving amounts and preferences. A source ALLERGIC label is preserved as a suspected sensitivity without inventing symptoms, severity, or a diagnosis."
   ]
   File.write(options[:summary], lines.join("\n") + "\n")
 end
@@ -429,6 +560,8 @@ puts JSON.pretty_generate(
   naps: nap_events.length,
   night_segments: night_events.length,
   conversion_notes: conversion_notes.sort.to_h,
+  merge_backup: options[:merge_backup],
+  target_profile_id: options[:target_profile_id],
   output: options[:output],
   summary: options[:summary]
 )
