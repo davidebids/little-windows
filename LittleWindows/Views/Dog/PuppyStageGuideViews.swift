@@ -34,19 +34,38 @@ struct PuppyStageGuideCard: View {
                 .buttonStyle(.plain)
             }
 
-            HStack {
-                Button("Read guide", systemImage: "book.pages.fill", action: onRead)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.teal)
-                Button("Add milestone", systemImage: "heart.fill", action: onAddMilestone)
-                    .buttonStyle(.bordered)
-                Button(
-                    isTrainingTimerActive ? "Training active" : "Log training",
-                    systemImage: isTrainingTimerActive ? "timer" : "graduationcap.fill",
-                    action: onLogTraining
-                )
-                    .buttonStyle(.bordered)
-                    .disabled(isTrainingTimerActive)
+            HStack(spacing: 8) {
+                Button(action: onRead) {
+                    PuppyStageGuideActionLabel(
+                        title: "Read guide",
+                        systemImage: "book.pages.fill"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+                .accessibilityIdentifier("puppy-stage-guide.read")
+
+                Button(action: onAddMilestone) {
+                    PuppyStageGuideActionLabel(
+                        title: "Add milestone",
+                        systemImage: "heart.fill"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("puppy-stage-guide.add-milestone")
+
+                Button(action: onLogTraining) {
+                    PuppyStageGuideActionLabel(
+                        title: isTrainingTimerActive ? "Training active" : "Log training",
+                        systemImage: isTrainingTimerActive ? "timer" : "graduationcap.fill"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.bordered)
+                .disabled(isTrainingTimerActive)
+                .accessibilityIdentifier("puppy-stage-guide.log-training")
             }
             .font(.caption.weight(.semibold))
         }
@@ -63,6 +82,25 @@ struct PuppyStageGuideCard: View {
             RoundedRectangle(cornerRadius: 22)
                 .stroke(Color.teal.opacity(0.16), lineWidth: 0.5)
         }
+    }
+}
+
+private struct PuppyStageGuideActionLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 7) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .frame(width: 20)
+            Text(title)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+        .contentShape(Rectangle())
     }
 }
 

@@ -41,6 +41,36 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Puppy Stage Guide"].exists)
     }
 
+    func testPuppyStageGuideCardActionsAreAligned() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000102/today")
+
+        let readButton = app.buttons["puppy-stage-guide.read"]
+        for _ in 0..<12 where !readButton.isHittable {
+            app.swipeUp(velocity: .slow)
+        }
+
+        let addMilestoneButton = app.buttons["puppy-stage-guide.add-milestone"]
+        let logTrainingButton = app.buttons["puppy-stage-guide.log-training"]
+        XCTAssertTrue(readButton.isHittable)
+        XCTAssertTrue(addMilestoneButton.isHittable)
+        XCTAssertTrue(logTrainingButton.isHittable)
+
+        for button in [addMilestoneButton, logTrainingButton] {
+            XCTAssertEqual(button.frame.minY, readButton.frame.minY, accuracy: 2)
+            XCTAssertEqual(button.frame.height, readButton.frame.height, accuracy: 2)
+            XCTAssertEqual(button.frame.width, readButton.frame.width, accuracy: 2)
+        }
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Aligned puppy stage guide actions"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testMedicationEditorKeepsLabelsVisibleForPopulatedValues() {
         continueAfterFailure = false
 
