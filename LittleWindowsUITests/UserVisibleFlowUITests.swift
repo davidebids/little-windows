@@ -32,6 +32,48 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
 
+    func testUnassignedLocalProfileCanOptIntoFamilySync() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-smoke",
+            additionalEnvironment: ["LITTLE_WINDOWS_UI_TEST_UNOWNED_PROFILE": "1"]
+        )
+        launch(startURL: "littlewindows://settings")
+
+        let careProfiles = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(careProfiles.waitForExistence(timeout: 5))
+        careProfiles.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+
+        let editProfile = app.buttons["Edit Sample Child"]
+        XCTAssertTrue(editProfile.waitForExistence(timeout: 4))
+        editProfile.tap()
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+
+        let sharingToggle = app.switches["Share this profile with Family Sync"]
+        XCTAssertTrue(sharingToggle.waitForExistence(timeout: 4))
+        XCTAssertTrue(sharingToggle.isEnabled)
+        sharingToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let sharingEnabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"),
+            object: sharingToggle
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [sharingEnabled], timeout: 3), .completed)
+        app.navigationBars["Edit Profile"].buttons["Save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+        XCTAssertTrue(editProfile.waitForExistence(timeout: 4))
+        editProfile.tap()
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+        XCTAssertTrue(sharingToggle.waitForExistence(timeout: 4))
+        XCTAssertTrue(sharingToggle.isEnabled)
+        XCTAssertEqual(sharingToggle.value as? String, "1")
+    }
+
     func testDogTodayShowsAllEnabledCareCategories() {
         continueAfterFailure = false
 

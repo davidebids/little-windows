@@ -1865,6 +1865,9 @@ enum DebugSimulatorSmokeSeedService {
             displayColor: "indigo",
             context: context
         )
+        if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TEST_UNOWNED_PROFILE"] == "1" {
+            child.ownerIdentifier = ""
+        }
         if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TEST_PROFILE_PHOTO"] == "1" {
             seedProfilePhoto(for: child, context: context)
         }

@@ -169,6 +169,35 @@ final class ProfileService: ObservableObject {
         }
     }
 
+    func canChangeSharingScope(
+        for profile: CareProfile,
+        caregiverIdentifier: String = CaregiverIdentityService.stableCaregiverIdentifier()
+    ) -> Bool {
+        let ownerIdentifier = profile.ownerIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return ownerIdentifier.isEmpty || ownerIdentifier == caregiverIdentifier
+    }
+
+    @discardableResult
+    func setSharingScope(
+        _ sharingScope: CareProfileSharingScope,
+        for profile: CareProfile,
+        caregiverIdentifier: String = CaregiverIdentityService.stableCaregiverIdentifier()
+    ) -> Bool {
+        guard canChangeSharingScope(
+            for: profile,
+            caregiverIdentifier: caregiverIdentifier
+        ) else {
+            return false
+        }
+
+        if profile.ownerIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            profile.ownerIdentifier = caregiverIdentifier
+        }
+        profile.sharingScope = sharingScope
+        return true
+    }
+
 
     @available(*, deprecated, renamed: "updateProfile")
     func updateChildProfile(_ profile: CareProfile) {

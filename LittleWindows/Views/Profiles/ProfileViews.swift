@@ -499,9 +499,10 @@ struct ProfileEditorView: View {
             profile.birthDate = profileType == .adult && !hasBirthDate ? nil : birthDate
             profile.sex = sex
             profile.adultRelationship = profileType == .adult ? adultRelationship : nil
-            if canChangeSharingScope {
-                profile.sharingScope = sharesWithFamily ? .family : .privateOnly
-            }
+            _ = profileService.setSharingScope(
+                sharesWithFamily ? .family : .privateOnly,
+                for: profile
+            )
             profile.notes = notes
             profile.displayColor = profile.displayColor ?? defaultDisplayColor
             profile.profileType = profileType
@@ -566,7 +567,7 @@ struct ProfileEditorView: View {
 
     private var canChangeSharingScope: Bool {
         guard let profile else { return true }
-        return profile.isOwned(by: CaregiverIdentityService.stableCaregiverIdentifier())
+        return profileService.canChangeSharingScope(for: profile)
     }
 
     private var namePrompt: String {

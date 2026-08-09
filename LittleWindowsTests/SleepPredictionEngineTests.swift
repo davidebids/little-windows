@@ -1478,6 +1478,45 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testUnassignedProfileCanBeClaimedWhenChangingFamilySharing() {
+        let currentCaregiverID = UUID().uuidString
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: Date(),
+            ownerIdentifier: ""
+        )
+
+        XCTAssertTrue(ProfileService.shared.canChangeSharingScope(
+            for: profile,
+            caregiverIdentifier: currentCaregiverID
+        ))
+        XCTAssertTrue(ProfileService.shared.setSharingScope(
+            .family,
+            for: profile,
+            caregiverIdentifier: currentCaregiverID
+        ))
+        XCTAssertEqual(profile.ownerIdentifier, currentCaregiverID)
+        XCTAssertEqual(profile.sharingScope, .family)
+    }
+
+    @MainActor
+    func testProfileOwnedByAnotherCaregiverKeepsFamilySharingLocked() {
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: Date(),
+            sharingScope: .privateOnly,
+            ownerIdentifier: UUID().uuidString
+        )
+
+        XCTAssertFalse(ProfileService.shared.setSharingScope(
+            .family,
+            for: profile,
+            caregiverIdentifier: UUID().uuidString
+        ))
+        XCTAssertEqual(profile.sharingScope, .privateOnly)
+    }
+
+    @MainActor
     func testArchivedProfileCanBeRestoredAndSelected() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
