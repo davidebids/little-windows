@@ -495,17 +495,32 @@ struct PersistentMultilineFormField: View {
     let lineLimit: ClosedRange<Int>
     let accessibilityIdentifier: String
 
+    private var editorHeight: CGFloat {
+        max(64, CGFloat(lineLimit.lowerBound) * 22 + 20)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("\(accessibilityIdentifier).label")
-            TextField(prompt, text: $text, axis: .vertical)
-                .lineLimit(lineLimit)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier(accessibilityIdentifier)
+
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(prompt)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+
+                TextEditor(text: $text)
+                    .scrollContentBackground(.hidden)
+                    .frame(height: editorHeight)
+                    .accessibilityIdentifier(accessibilityIdentifier)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -529,8 +544,7 @@ private struct AppointmentQuestionsEditor: View {
             } else {
                 ForEach($questionDrafts) { draft in
                     HStack(alignment: .top, spacing: 12) {
-                        TextField("Question", text: draft.text, axis: .vertical)
-                            .lineLimit(1...3)
+                        TextField("Question", text: draft.text)
 
                         Button(role: .destructive) {
                             removeQuestion(withID: draft.wrappedValue.id)
@@ -553,9 +567,8 @@ private struct AppointmentQuestionsEditor: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("appointment.question.new.label")
                 HStack(alignment: .top, spacing: 12) {
-                    TextField("Type a question", text: $newQuestionText, axis: .vertical)
+                    TextField("Type a question", text: $newQuestionText)
                         .id(newQuestionInputID)
-                        .lineLimit(1...3)
                         .focused($isAddingQuestionFocused)
                         .submitLabel(.done)
                         .frame(maxWidth: .infinity, alignment: .leading)

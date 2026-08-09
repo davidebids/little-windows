@@ -919,6 +919,56 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
     }
 
+    func testAppointmentAddressAndNotesAreResponsiveOnColdEditorLoad() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+
+        func openColdEditor(fieldIdentifier: String) -> XCUIElement {
+            launch(startURL: "littlewindows://appointments")
+            XCTAssertTrue(app.navigationBars["Appointments"].waitForExistence(timeout: 8))
+            let add = app.buttons["Add"]
+            XCTAssertTrue(add.waitForExistence(timeout: 4))
+            add.tap()
+            XCTAssertTrue(app.navigationBars["Add Appointment"].waitForExistence(timeout: 4))
+
+            let field = app.descendants(matching: .any)
+                .matching(identifier: fieldIdentifier)
+                .firstMatch
+            for _ in 0..<8 where !field.isHittable {
+                app.swipeUp()
+            }
+            XCTAssertTrue(field.waitForExistence(timeout: 4))
+            XCTAssertTrue(field.isHittable)
+            return field
+        }
+
+        func assertResponsive(_ field: XCUIElement, text: String) {
+            let focusStartedAt = Date()
+            field.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+            let focusDuration = Date().timeIntervalSince(focusStartedAt)
+
+            let typingStartedAt = Date()
+            field.typeText(text)
+            let typingDuration = Date().timeIntervalSince(typingStartedAt)
+
+            XCTAssertEqual(field.value as? String, text)
+            XCTAssertLessThan(focusDuration, 2.5, "Field focus took \(focusDuration)s")
+            XCTAssertLessThan(typingDuration, 2.5, "Field typing took \(typingDuration)s")
+        }
+
+        assertResponsive(
+            openColdEditor(fieldIdentifier: "appointment.address"),
+            text: "123 Main Street"
+        )
+        assertResponsive(
+            openColdEditor(fieldIdentifier: "appointment.notes"),
+            text: "Bring recent records"
+        )
+    }
+
     func testSolidsSummaryCardsOpenMatchingLists() {
         continueAfterFailure = false
 
