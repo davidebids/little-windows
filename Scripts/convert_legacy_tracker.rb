@@ -480,6 +480,7 @@ backup = {
   "events" => events,
   "predictionRecords" => []
 }
+recovered_solid_event_count = 0
 
 if options[:merge_backup]
   existing_backup = JSON.parse(File.read(options[:merge_backup]))
@@ -505,7 +506,61 @@ if options[:merge_backup]
   preserved_events = existing_backup.fetch("events", []).reject do |event|
     imported_event_ids.include?(event["id"])
   end
-  existing_backup["events"] = (preserved_events + events).sort_by { |event| event.fetch("startDate") }
+  merged_events = preserved_events + events
+  merged_event_ids = merged_events.map { |event| event.fetch("id") }.to_set
+  orphan_solid_items = existing_backup.fetch("solidFoodEventItems", []).group_by do |item|
+    item.fetch("eventID")
+  end.reject { |event_id, _| merged_event_ids.include?(event_id) }
+  orphan_solid_items.each do |event_id, items|
+    profile_id = items.first.fetch("profileID")
+    profile_type = existing_backup.fetch("profiles", []).find do |value|
+      value.fetch("id") == profile_id
+    end&.fetch("profileTypeRawValue", "child")
+    details = items.map do |item|
+      {
+        "foodID" => item.fetch("foodID"),
+        "foodName" => item.fetch("foodNameSnapshot"),
+        "allergenIDs" => JSON.parse(item.fetch("allergenIDsJSON", "[]")),
+        "confirmedAllergenPortionIDs" => JSON.parse(
+          item.fetch("confirmedAllergenPortionIDsJSON", "[]")
+        ),
+        "preference" => item.fetch("reactionRawValue", "unknown"),
+        "servingAmount" => item["servingAmount"].to_s.empty? ? nil : item["servingAmount"],
+        "notes" => item["notes"].to_s.empty? ? nil : item["notes"],
+        "suspectedReaction" => item.fetch("suspectedReaction", false),
+        "symptoms" => JSON.parse(item.fetch("symptomIDsJSON", "[]")),
+        "severity" => item.fetch("severityRawValue", "unknown"),
+        "onsetMinutes" => item["onsetMinutes"],
+        "durationMinutes" => item["durationMinutes"],
+        "responseNotes" => item.fetch("responseNotes", ""),
+        "followUp" => item.fetch("followUpRawValue", "none")
+      }
+    end
+    start_date = items.map { |item| item.fetch("createdAt") }.min
+    updated_at = items.map { |item| item.fetch("updatedAt") }.max
+    sensitivity_observed = details.any? { |detail| detail["suspectedReaction"] }
+    merged_events << {
+      "id" => event_id,
+      "profileID" => profile_id,
+      "profileTypeSnapshotRawValue" => profile_type,
+      "typeRawValue" => "feed",
+      "title" => nil,
+      "startDate" => start_date,
+      "endDate" => start_date,
+      "createdAt" => start_date,
+      "updatedAt" => updated_at,
+      "caregiverName" => nil,
+      "notes" => nil,
+      "feedKindRawValue" => "solid",
+      "foodDescription" => details.map { |detail| detail["foodName"] }.join(", "),
+      "solidReactionRawValue" => sensitivity_observed ? "sensitivity" : details.first.fetch("preference"),
+      "solidAllergenExposure" => details.any? { |detail| !detail["allergenIDs"].empty? },
+      "solidSensitivityObserved" => sensitivity_observed,
+      "solidFoodDetailsJSON" => JSON.generate(details)
+    }
+    recovered_solid_event_count += 1
+  end
+  existing_backup["events"] = merged_events.sort_by { |event| event.fetch("startDate") }
   existing_backup["exportedAt"] = Time.now.utc.iso8601
   backup = existing_backup
 end
@@ -560,6 +615,7 @@ puts JSON.pretty_generate(
   naps: nap_events.length,
   night_segments: night_events.length,
   conversion_notes: conversion_notes.sort.to_h,
+  recovered_solid_events: recovered_solid_event_count,
   merge_backup: options[:merge_backup],
   target_profile_id: options[:target_profile_id],
   output: options[:output],
