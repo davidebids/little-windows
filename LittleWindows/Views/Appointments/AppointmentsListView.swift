@@ -336,36 +336,6 @@ struct AppointmentEditorView: View {
                 }
             }
 
-            Section("Fast presets") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        if profileType == .dog {
-                            presetButton("Vet wellness", .vetWellness)
-                            presetButton("Vaccine visit", .vaccine)
-                            presetButton("Sick visit", .sickVisit)
-                            presetButton("Emergency vet", .emergencyVet)
-                            presetButton("Grooming", .grooming)
-                            presetButton("Training", .training)
-                            presetButton("Boarding", .boarding)
-                        } else if profileType == .adult {
-                            presetButton("Primary care", .primaryCare)
-                            presetButton("Specialist visit", .specialist)
-                            presetButton("Lab work", .lab)
-                            presetButton("Therapy", .therapy)
-                            presetButton("Dental visit", .dental)
-                            presetButton("Imaging", .imaging)
-                        } else {
-                            presetButton("Pediatrician visit", .pediatrician)
-                            presetButton("Wellness check", .wellnessCheck)
-                            presetButton("Vaccine appointment", .vaccine)
-                            presetButton("Sick visit", .sickVisit)
-                            presetButton("Specialist visit", .specialist)
-                            presetButton("Dental visit", .dental)
-                        }
-                    }
-                }
-            }
-
             Section(profileType == .dog ? "Vet and place" : "People and place") {
                 LabeledContent(profileType == .dog ? "Veterinarian" : "Doctor") {
                     TextField("Optional", text: $doctorName)
@@ -448,15 +418,6 @@ struct AppointmentEditorView: View {
                     .vaccine, .urgentCare, .other]
         }
         return [.pediatrician, .wellnessCheck, .vaccine, .sickVisit, .specialist, .lab, .dental, .lactation, .urgentCare, .other]
-    }
-
-    private func presetButton(_ presetTitle: String, _ type: AppointmentType) -> some View {
-        Button(presetTitle) {
-            title = presetTitle
-            appointmentType = type
-        }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
     }
 
     private func save() {

@@ -893,7 +893,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Avocado"].exists)
     }
 
-    func testAppointmentMultilineFieldsUsePersistentLeadingLabels() {
+    func testAppointmentEditorUsesPersistentFieldsWithoutDecorativePresets() {
         continueAfterFailure = false
 
         launch(startURL: "littlewindows://debug/reset-empty")
@@ -903,6 +903,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 5))
         app.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Edit Appointment"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Fast presets"].exists)
 
         assertPersistentMultilineField(
             identifier: "appointment.address",
