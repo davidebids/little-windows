@@ -75,6 +75,10 @@ struct WatchHomeView: View {
                     WatchPredictionCard(prediction: prediction)
                 }
 
+                if let medication = connectivity.state.upcomingMedication {
+                    WatchMedicationCard(medication: medication)
+                }
+
                 VStack(alignment: .leading, spacing: 9) {
                     HStack(spacing: 5) {
                         Image(systemName: "sparkles")
@@ -157,9 +161,7 @@ struct WatchHomeView: View {
             WatchProfilePickerView()
         } label: {
             HStack(spacing: 7) {
-                Image(systemName: selectedProfileIsDog
-                    ? "pawprint.fill"
-                    : "figure.and.child.holdinghands")
+                Image(systemName: selectedProfileSystemImage)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(width: 27, height: 27)
@@ -169,7 +171,7 @@ struct WatchHomeView: View {
                     Text(connectivity.state.selectedProfile?.name ?? "Choose profile")
                         .font(.system(size: 11, weight: .bold))
                         .lineLimit(1)
-                    Text(selectedProfileIsDog ? "Dog profile" : "Child profile")
+                    Text(selectedProfileTypeLabel)
                         .font(.system(size: 8.5, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -199,6 +201,22 @@ struct WatchHomeView: View {
 
     private var selectedProfileIsDog: Bool {
         connectivity.state.selectedProfile?.profileTypeRawValue == "dog"
+    }
+
+    private var selectedProfileTypeLabel: String {
+        switch connectivity.state.selectedProfile?.profileTypeRawValue {
+        case "adult": "Adult profile"
+        case "dog": "Dog profile"
+        default: "Child profile"
+        }
+    }
+
+    private var selectedProfileSystemImage: String {
+        switch connectivity.state.selectedProfile?.profileTypeRawValue {
+        case "adult": "person.crop.circle.fill"
+        case "dog": "pawprint.fill"
+        default: "figure.and.child.holdinghands"
+        }
     }
 
     private var profileTint: Color {
@@ -232,10 +250,129 @@ struct WatchHomeView: View {
         ContentUnavailableView {
             Label("Add care when you’re ready", systemImage: "heart.text.clipboard")
         } description: {
-            Text("Add or restore a child or dog in Little Windows on your iPhone, then refresh this watch.")
+            Text("Add or restore a care profile in Little Windows on your iPhone, then refresh this watch.")
         } actions: {
             Button("Try Again") { connectivity.requestRefresh() }
         }
+    }
+}
+
+private struct WatchMedicationCard: View {
+    @EnvironmentObject private var connectivity: WatchConnectivityClient
+    let medication: WatchMedicationSnapshot
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "pills.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 25, height: 25)
+                        .background(Color.red.gradient, in: Circle())
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("UPCOMING MEDICATION")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .tracking(0.55)
+                            .foregroundStyle(.secondary)
+                        Text(medication.medicationName)
+                            .font(.system(size: 11, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    Spacer(minLength: 3)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(doseText)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 3)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(medication.scheduledAt, style: .time)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                        Text(relativeLabel(at: context.date))
+                            .font(.system(size: 7.5, weight: .semibold))
+                            .foregroundStyle(timingTint(at: context.date))
+                    }
+                }
+
+                HStack(spacing: 5) {
+                    Button {
+                        if connectivity.logMedicationTaken(medication) {
+                            WKInterfaceDevice.current().play(.click)
+                        }
+                    } label: {
+                        actionLabel("Taken", systemImage: "checkmark")
+                    }
+                    .buttonStyle(WatchTimerControlStyle(tint: .green, isFilled: true))
+
+                    Button {
+                        if connectivity.logMedicationSkipped(medication) {
+                            WKInterfaceDevice.current().play(.click)
+                        }
+                    } label: {
+                        actionLabel("Skip", systemImage: "minus")
+                    }
+                    .buttonStyle(WatchTimerControlStyle(tint: .secondary))
+
+                    if medication.snoozeAvailable {
+                        Button {
+                            if connectivity.snoozeMedication(medication) {
+                                WKInterfaceDevice.current().play(.click)
+                            }
+                        } label: {
+                            actionLabel("10m", systemImage: "clock.arrow.circlepath")
+                        }
+                        .buttonStyle(WatchTimerControlStyle(tint: .orange))
+                        .accessibilityLabel("Snooze medication for 10 minutes")
+                    }
+                }
+            }
+            .padding(8)
+            .background(
+                LinearGradient(
+                    colors: [Color.red.opacity(0.18), WatchTheme.surface],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.red.opacity(0.24), lineWidth: 0.8)
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private var doseText: String {
+        "\(medication.doseAmount.formatted(.number.precision(.fractionLength(0...2)))) \(medication.doseUnit)"
+    }
+
+    private func relativeLabel(at date: Date) -> String {
+        let interval = medication.scheduledAt.timeIntervalSince(date)
+        if abs(interval) < 60 { return "Due now" }
+        let minutes = max(1, Int(abs(interval) / 60))
+        if interval > 0 {
+            return minutes < 60 ? "Due in \(minutes)m" : "Due later"
+        }
+        return minutes < 60 ? "\(minutes)m overdue" : "Overdue"
+    }
+
+    private func timingTint(at date: Date) -> Color {
+        medication.scheduledAt < date.addingTimeInterval(-60) ? .orange : .secondary
+    }
+
+    private func actionLabel(_ title: String, systemImage: String) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .bold))
+            Text(title)
+                .font(.system(size: 7.5, weight: .bold))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -250,9 +387,13 @@ private struct WatchProfilePickerView: View {
                 dismiss()
             } label: {
                 HStack(spacing: 9) {
-                    Image(systemName: profile.profileTypeRawValue == "dog"
-                        ? "pawprint.fill"
-                        : "figure.and.child.holdinghands")
+                    Image(systemName: {
+                        switch profile.profileTypeRawValue {
+                        case "adult": "person.crop.circle.fill"
+                        case "dog": "pawprint.fill"
+                        default: "figure.and.child.holdinghands"
+                        }
+                    }())
                         .foregroundStyle(.white)
                         .frame(width: 28, height: 28)
                         .background(

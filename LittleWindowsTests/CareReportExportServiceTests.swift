@@ -6,12 +6,12 @@ import XCTest
 final class CareReportExportServiceTests: XCTestCase {
     @MainActor
     func testCSVQuotesCellsAndDefusesSpreadsheetFormulas() {
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child",
             birthDate: Date(timeIntervalSince1970: 0)
         )
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .feed,
             startDate: Date(timeIntervalSince1970: 1_800),
@@ -46,11 +46,11 @@ final class CareReportExportServiceTests: XCTestCase {
 
     @MainActor
     func testDiaperRashAppearsOnlyWhenRecorded() {
-        let withRash = BabyEvent(type: .diaper)
+        let withRash = CareEvent(type: .diaper)
         withRash.diaperKind = .wet
         withRash.diaperRash = true
 
-        let withoutRash = BabyEvent(type: .diaper)
+        let withoutRash = CareEvent(type: .diaper)
         withoutRash.diaperKind = .wet
 
         XCTAssertTrue(CareReportExportService.detailsText(for: withRash).contains("Diaper rash"))
@@ -60,7 +60,7 @@ final class CareReportExportServiceTests: XCTestCase {
     @MainActor
     func testCSVIncludesAppointmentsAndMilestonesWhenEnabled() {
         let start = Date(timeIntervalSince1970: 1_800)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child",
             birthDate: Date(timeIntervalSince1970: 0)
@@ -111,7 +111,7 @@ final class CareReportExportServiceTests: XCTestCase {
 
     @MainActor
     func testCSVRowsAreChronologicalAcrossRecordTypes() throws {
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child",
             birthDate: Date(timeIntervalSince1970: 0)
@@ -119,7 +119,7 @@ final class CareReportExportServiceTests: XCTestCase {
         let appointmentDate = Date(timeIntervalSince1970: 1_000)
         let milestoneDate = Date(timeIntervalSince1970: 2_000)
         let eventDate = Date(timeIntervalSince1970: 3_000)
-        let event = BabyEvent(profileID: profile.id, type: .feed, startDate: eventDate)
+        let event = CareEvent(profileID: profile.id, type: .feed, startDate: eventDate)
         event.feedKind = .bottle
         let appointment = DoctorAppointment(
             profileID: profile.id,
@@ -159,12 +159,12 @@ final class CareReportExportServiceTests: XCTestCase {
 
     @MainActor
     func testCSVRespectsNotesAndCaregiverPrivacyToggles() {
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child",
             birthDate: Date(timeIntervalSince1970: 0)
         )
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .medicine,
             startDate: Date(timeIntervalSince1970: 1_800),
@@ -192,6 +192,62 @@ final class CareReportExportServiceTests: XCTestCase {
         XCTAssertFalse(csv.contains("Caregiver A"))
         XCTAssertFalse(csv.contains("Private note"))
         XCTAssertTrue(csv.contains("Medicine: Vitamin"))
+        let lines = csv.split(separator: "\n")
+        XCTAssertEqual(csvColumnCount(lines[0]), csvColumnCount(lines[1]))
+    }
+
+    @MainActor
+    func testReportIncludesCurrentMedicationPlan() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(
+            profileID: profile.id,
+            name: "Test Medication",
+            form: .tablet,
+            strength: 10,
+            strengthUnit: "mg",
+            route: .oral,
+            instructions: "Take with water"
+        )
+        let regimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: Date(),
+            doseAmount: 1,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 8, minute: 0)]
+        )
+        context.insert(profile)
+        context.insert(medication)
+        context.insert(regimen)
+        try context.save()
+
+        let report = try CareReportExportService.makeReport(
+            profile: profile,
+            options: CareReportExportOptions(
+                startDate: Date(),
+                endDate: Date(),
+                includeNotes: false,
+                includeCaregiverNames: false,
+                includeAppointments: false,
+                includeMilestones: false
+            ),
+            context: context
+        )
+        let csv = CareReportExportService.csvString(for: report)
+
+        XCTAssertEqual(report.medications.map(\.name), ["Test Medication"])
+        XCTAssertEqual(report.medicationRegimens.map(\.id), [regimen.id])
+        XCTAssertTrue(csv.contains("Medication Plan"))
+        XCTAssertTrue(csv.contains("Strength: 10 mg"))
+        XCTAssertTrue(csv.contains("Schedule: Every day"))
+        XCTAssertTrue(csv.contains("Instructions: Take with water"))
     }
 
     @MainActor
@@ -201,15 +257,15 @@ final class CareReportExportServiceTests: XCTestCase {
         let calendar = Calendar(identifier: .gregorian)
         let start = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 1)))
         let end = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 2)))
-        let profile = BabyProfile(profileType: .child, name: "Sample Child", birthDate: start)
-        let sibling = BabyProfile(profileType: .child, name: "Sibling", birthDate: start)
+        let profile = CareProfile(profileType: .child, name: "Sample Child", birthDate: start)
+        let sibling = CareProfile(profileType: .child, name: "Sibling", birthDate: start)
         context.insert(profile)
         context.insert(sibling)
 
-        let included = BabyEvent(profileID: profile.id, type: .sleep, startDate: start.addingTimeInterval(3_600))
-        let includedOnEndDay = BabyEvent(profileID: profile.id, type: .diaper, startDate: end.addingTimeInterval(3_600))
-        let excludedProfile = BabyEvent(profileID: sibling.id, type: .feed, startDate: start.addingTimeInterval(3_600))
-        let excludedDate = BabyEvent(profileID: profile.id, type: .feed, startDate: end.addingTimeInterval(90_000))
+        let included = CareEvent(profileID: profile.id, type: .sleep, startDate: start.addingTimeInterval(3_600))
+        let includedOnEndDay = CareEvent(profileID: profile.id, type: .diaper, startDate: end.addingTimeInterval(3_600))
+        let excludedProfile = CareEvent(profileID: sibling.id, type: .feed, startDate: start.addingTimeInterval(3_600))
+        let excludedDate = CareEvent(profileID: profile.id, type: .feed, startDate: end.addingTimeInterval(90_000))
         for event in [included, includedOnEndDay, excludedProfile, excludedDate] {
             context.insert(event)
         }
@@ -248,12 +304,12 @@ final class CareReportExportServiceTests: XCTestCase {
         let start = try XCTUnwrap(
             ISO8601DateFormatter().date(from: "2026-01-15T06:00:00Z")
         )
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child",
             birthDate: selectedDay
         )
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .diaper,
             startDate: start,
@@ -288,12 +344,12 @@ final class CareReportExportServiceTests: XCTestCase {
 
     @MainActor
     func testPDFGenerationProducesNonEmptyPDFData() throws {
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child",
             birthDate: Date(timeIntervalSince1970: 0)
         )
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .temperature,
             startDate: Date(timeIntervalSince1970: 1_800),
@@ -333,13 +389,13 @@ final class CareReportExportServiceTests: XCTestCase {
 
     @MainActor
     func testPDFPaginatesWithContinuationFooterAndNoDuplicateAppendix() throws {
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child With A Very Long Name That Should Not Break The Header",
             birthDate: Date(timeIntervalSince1970: 0)
         )
         let events = (0..<70).map { index in
-            let event = BabyEvent(
+            let event = CareEvent(
                 profileID: profile.id,
                 type: .temperature,
                 startDate: Date(timeIntervalSince1970: TimeInterval(index * 1_800)),
@@ -380,7 +436,7 @@ final class CareReportExportServiceTests: XCTestCase {
 
     @MainActor
     func testDefaultFilenameNormalizesReversedCustomDates() throws {
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .child,
             name: "Sample Child!",
             birthDate: Date(timeIntervalSince1970: 0)
@@ -397,6 +453,27 @@ final class CareReportExportServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(filename, "Little-Windows-Sample-Child-2026-06-06-to-2026-07-05.pdf")
+    }
+
+    private func csvColumnCount(_ row: Substring) -> Int {
+        var count = 1
+        var isInsideQuotedCell = false
+        var index = row.startIndex
+        while index < row.endIndex {
+            let character = row[index]
+            if character == "\"" {
+                let next = row.index(after: index)
+                if isInsideQuotedCell, next < row.endIndex, row[next] == "\"" {
+                    index = row.index(after: next)
+                    continue
+                }
+                isInsideQuotedCell.toggle()
+            } else if character == ",", !isInsideQuotedCell {
+                count += 1
+            }
+            index = row.index(after: index)
+        }
+        return count
     }
 
     @MainActor

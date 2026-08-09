@@ -119,8 +119,8 @@ struct PredictionExplanationView: View {
 struct BackwardsSleepPlanView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let profile: BabyProfile
-    let events: [BabyEvent]
+    let profile: CareProfile
+    let events: [CareEvent]
     let settings: PredictionSettings
     let activePlan: ActiveSleepPlan?
     let activatePlan: (BackwardsSleepPlan) -> Void
@@ -134,8 +134,8 @@ struct BackwardsSleepPlanView: View {
     private static let napCountChoices = Array(1...4)
 
     init(
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        events: [CareEvent],
         settings: PredictionSettings,
         activePlan: ActiveSleepPlan? = nil,
         activatePlan: @escaping (BackwardsSleepPlan) -> Void = { _ in },

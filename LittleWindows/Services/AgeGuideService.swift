@@ -35,34 +35,41 @@ struct AgeGuideService {
         guides.first { $0.ageMonth == month }
     }
 
-    func currentAgeGuide(for profile: BabyProfile, now: Date = Date()) -> AgeGuide? {
-        ageGuide(for: ageMonth(for: profile, now: now))
+    func currentAgeGuide(for profile: CareProfile, now: Date = Date()) -> AgeGuide? {
+        guard profile.profileType.capabilities.supportsAgeGuide else { return nil }
+        return ageGuide(for: ageMonth(for: profile, now: now))
     }
 
     func milestonePrompts(for month: Int) -> [MilestonePrompt] {
         ageGuide(for: month)?.milestonePrompts ?? []
     }
 
-    func ageMonth(for profile: BabyProfile, now: Date = Date()) -> Int {
-        max(0, calendar.dateComponents([.month], from: profile.birthDate, to: now).month ?? 0)
+    func ageMonth(for profile: CareProfile, now: Date = Date()) -> Int {
+        guard let birthDate = profile.birthDate else { return 0 }
+        return max(0, calendar.dateComponents([.month], from: birthDate, to: now).month ?? 0)
     }
 
     func monthlyBirthdayDate(
-        for profile: BabyProfile,
+        for profile: CareProfile,
         ageMonth: Int
     ) -> Date? {
-        calendar.date(byAdding: .month, value: ageMonth, to: profile.birthDate)
+        guard profile.profileType.capabilities.supportsAgeGuide,
+              let birthDate = profile.birthDate else {
+            return nil
+        }
+        return calendar.date(byAdding: .month, value: ageMonth, to: birthDate)
     }
 
     func shouldShowMonthlyCard(
-        profile: BabyProfile,
+        profile: CareProfile,
         readState: AgeGuideReadState?,
         now: Date = Date()
     ) -> Bool {
-        guard let guide = currentAgeGuide(for: profile, now: now),
+        guard let birthDate = profile.birthDate,
+              let guide = currentAgeGuide(for: profile, now: now),
               let reachedDate = monthlyBirthdayDate(for: profile, ageMonth: guide.ageMonth),
               reachedDate <= now,
-              !calendar.isDate(reachedDate, inSameDayAs: profile.birthDate) || guide.ageMonth == 0 else {
+              !calendar.isDate(reachedDate, inSameDayAs: birthDate) || guide.ageMonth == 0 else {
             return false
         }
         guard readState?.isDismissedFromToday != true else { return false }

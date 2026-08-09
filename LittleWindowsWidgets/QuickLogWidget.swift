@@ -33,7 +33,7 @@ struct QuickLogWidget: Widget {
                 }
         }
         .configurationDisplayName("Quick Log")
-        .description("Start common timers with one tap.")
+        .description("Open common care actions with one tap.")
         .supportedFamilies([.systemMedium])
     }
 }
@@ -42,11 +42,7 @@ private struct QuickLogWidgetView: View {
     let snapshot: WidgetSnapshot
 
     private var actions: [QuickLogActionSnapshot] {
-        let snapshotActions = snapshot.resolvedQuickActions
-        if !snapshotActions.isEmpty {
-            return Array(snapshotActions.prefix(6))
-        }
-        return Self.fallbackActions
+        Array(snapshot.resolvedQuickActions.prefix(6))
     }
 
     var body: some View {
@@ -54,7 +50,7 @@ private struct QuickLogWidgetView: View {
             Link(destination: URL(string: "littlewindows://care")!) {
                 CareProfileRequiredWidgetState(
                     title: "Quick care logging",
-                    detail: "Add a child or dog to start timers and record care.",
+                    detail: "Add a care profile to start timers and record care.",
                     systemImage: "bolt.heart.fill"
                 )
             }
@@ -71,12 +67,21 @@ private struct QuickLogWidgetView: View {
                         .foregroundStyle(LittleWindowsWidgetStyle.lavender)
                 }
 
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3),
-                    spacing: 7
-                ) {
-                    ForEach(actions) { action in
-                        quickAction(action)
+                if actions.isEmpty {
+                    Link(destination: URL(string: "littlewindows://care")!) {
+                        Label("Open Care", systemImage: "heart.text.square.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 78)
+                            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 13))
+                    }
+                } else {
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3),
+                        spacing: 7
+                    ) {
+                        ForEach(actions) { action in
+                            quickAction(action)
+                        }
                     }
                 }
             }
@@ -123,55 +128,4 @@ private struct QuickLogWidgetView: View {
         default: LittleWindowsWidgetStyle.lavender
         }
     }
-
-    private static let fallbackActions = [
-        QuickLogActionSnapshot(
-            id: "tummy-time",
-            title: "Tummy",
-            subtitle: "Timer",
-            systemImage: "figure.play",
-            tintName: "green",
-            destinationPath: "quick-log/tummy-time"
-        ),
-        QuickLogActionSnapshot(
-            id: "diaper",
-            title: "Diaper",
-            subtitle: nil,
-            systemImage: "drop.fill",
-            tintName: "teal",
-            destinationPath: "quick-log/diaper"
-        ),
-        QuickLogActionSnapshot(
-            id: "temperature",
-            title: "Temp",
-            subtitle: nil,
-            systemImage: "thermometer.medium",
-            tintName: "red",
-            destinationPath: "quick-log/temperature"
-        ),
-        QuickLogActionSnapshot(
-            id: "bath",
-            title: "Bath",
-            subtitle: "Timer",
-            systemImage: "bathtub.fill",
-            tintName: "cyan",
-            destinationPath: "quick-log/bath"
-        ),
-        QuickLogActionSnapshot(
-            id: "sleep",
-            title: "Sleep",
-            subtitle: "Timer",
-            systemImage: "moon.fill",
-            tintName: "indigo",
-            destinationPath: "quick-log/sleep"
-        ),
-        QuickLogActionSnapshot(
-            id: "medicine",
-            title: "Meds",
-            subtitle: nil,
-            systemImage: "cross.case.fill",
-            tintName: "red",
-            destinationPath: "quick-log/medicine"
-        )
-    ]
 }

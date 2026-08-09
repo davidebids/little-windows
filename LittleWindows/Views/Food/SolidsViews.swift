@@ -33,9 +33,9 @@ private struct SolidsDrawerSelectionButton: View {
 struct SolidsHomeView: View {
     @Environment(\.modelContext) private var modelContext
 
-    let profile: BabyProfile
+    let profile: CareProfile
     let accessLevel: SolidsAccessLevel
-    let events: [BabyEvent]
+    let events: [CareEvent]
     let eventItems: [SolidFoodEventItem]
     let progress: [SolidFoodProgress]
     let plans: [PlannedSolidMeal]
@@ -51,7 +51,7 @@ struct SolidsHomeView: View {
         SolidsTrackingService.ageMonths(for: profile)
     }
 
-    private var scopedEvents: [BabyEvent] {
+    private var scopedEvents: [CareEvent] {
         events.filter { $0.profileID == profile.id && $0.type == .feed && $0.feedKind == .solid }
     }
 
@@ -79,9 +79,6 @@ struct SolidsHomeView: View {
         }
         .background(AppTheme.background)
         .task {
-            Task.detached(priority: .utility) {
-                SolidsReferenceCatalog.warmCaches()
-            }
             if stateWriter == nil {
                 stateWriter = await SolidsWriterPool.shared.profileStateWriter(
                     for: modelContext.container
@@ -178,9 +175,24 @@ struct SolidsHomeView: View {
         let visiblePlans = upcomingPlans
         return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
-                metric(value: "\(visibleProgress.lazy.filter { $0.status == .tried }.count)", label: "Foods tried")
-                metric(value: "\(visibleProgress.lazy.filter { $0.status == .wantToTry }.count)", label: "Want to try")
-                metric(value: "\(visiblePlans.count)", label: "Planned")
+                metric(
+                    value: "\(visibleProgress.lazy.filter { $0.status == .tried }.count)",
+                    label: "Foods tried",
+                    route: .solidsTracker(.tried),
+                    accessibilityIdentifier: "solids.metric.tried"
+                )
+                metric(
+                    value: "\(visibleProgress.lazy.filter { $0.status == .wantToTry }.count)",
+                    label: "Want to try",
+                    route: .solidsTracker(.wantToTry),
+                    accessibilityIdentifier: "solids.metric.want-to-try"
+                )
+                metric(
+                    value: "\(visiblePlans.count)",
+                    label: "Planned",
+                    route: .solidsPlan,
+                    accessibilityIdentifier: "solids.metric.planned"
+                )
             }
 
             Button {
@@ -199,7 +211,7 @@ struct SolidsHomeView: View {
                 destinationCard("Guided solids", "A practical next step", "point.forward.to.point.capsulepath", .solidsGuided)
                 destinationCard("Food database", "400+ foods", "books.vertical.fill", .solidsDatabase)
                 destinationCard("Plan meals", visiblePlans.isEmpty ? "Build the next plate" : "\(visiblePlans.count) upcoming", "calendar.badge.plus", .solidsPlan)
-                destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker)
+                destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker(.all))
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
                 destinationCard("Recipes", "400+ simple ideas", "fork.knife", .solidsRecipes)
             }
@@ -245,17 +257,30 @@ struct SolidsHomeView: View {
         }
     }
 
-    private func metric(value: String, label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value).font(.title3.bold())
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+    private func metric(
+        value: String,
+        label: String,
+        route: FoodRoute,
+        accessibilityIdentifier: String
+    ) -> some View {
+        Button {
+            open(route)
+        } label: {
+            VStack(spacing: 3) {
+                Text(value).font(.title3.bold())
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+            .appSurface(cornerRadius: 15)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .appSurface(cornerRadius: 15)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityHint("Opens the corresponding list")
     }
 
     private func destinationCard(
@@ -331,7 +356,7 @@ struct SolidsHomeView: View {
 
 struct SolidsGuidedPathView: View {
     @Environment(\.modelContext) private var modelContext
-    let profile: BabyProfile
+    let profile: CareProfile
     let progress: [SolidFoodProgress]
     let eventItems: [SolidFoodEventItem]
     let allergenProgress: [SolidAllergenProgress]
@@ -377,7 +402,8 @@ struct SolidsGuidedPathView: View {
     private var earliestGuidedStartDate: Date {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let sixMonthDate = calendar.date(byAdding: .month, value: 6, to: profile.birthDate) ?? today
+        guard let birthDate = profile.birthDate else { return today }
+        let sixMonthDate = calendar.date(byAdding: .month, value: 6, to: birthDate) ?? today
         return max(today, calendar.startOfDay(for: sixMonthDate))
     }
 
@@ -1045,7 +1071,7 @@ private struct SolidsFeedingSkillRow: View {
 
 private struct SolidsSuggestionPreparationText: View {
     let suggestion: SolidsGuidedMealSuggestion
-    let profile: BabyProfile
+    let profile: CareProfile
     let profileState: SolidsProfileState?
 
     var body: some View {
@@ -1060,7 +1086,7 @@ private struct SolidsSuggestionPreparationText: View {
 }
 
 struct SolidsFoodDatabaseView: View {
-    let profile: BabyProfile
+    let profile: CareProfile
     let progress: [SolidFoodProgress]
     let customFoods: [SolidFoodCatalogItem]
     let photoAttachments: [PhotoAttachment]
@@ -1072,9 +1098,14 @@ struct SolidsFoodDatabaseView: View {
     @State private var filters = SolidsFoodDatabaseFilters.empty
     @State private var showingFilters = false
     @State private var showingNewCustomFood = false
+    @State private var bundledFoods: [SolidsReferenceFoodSummary]?
 
-    private var searchAndCategoryFoods: [SolidsReferenceFood] {
-        SolidsReferenceCatalog.search(effectiveSearchText, category: selectedCategory)
+    private var searchAndCategoryFoods: [SolidsReferenceFoodSummary] {
+        SolidsReferenceCatalog.searchSummaries(
+            effectiveSearchText,
+            category: selectedCategory,
+            in: bundledFoods ?? []
+        )
     }
 
     private var filteredCustomFoods: [SolidFoodCatalogItem] {
@@ -1100,8 +1131,8 @@ struct SolidsFoodDatabaseView: View {
             filters.matches($0, progress: progressFilterByFoodID[$0.id])
         }
         let visibleCustomFoods = filteredCustomFoods
-        let photoDataByID = photoAttachments.reduce(into: [UUID: Data]()) { result, attachment in
-            if let data = attachment.previewData { result[attachment.id] = data }
+        let photosByID = photoAttachments.reduce(into: [UUID: PhotoAttachment]()) { result, attachment in
+            result[attachment.id] = attachment
         }
         List {
             if !visibleCustomFoods.isEmpty {
@@ -1110,7 +1141,7 @@ struct SolidsFoodDatabaseView: View {
                         Button { openCustomFood(food.id) } label: {
                             HStack(spacing: 12) {
                                 if let photoID = food.photoAttachmentID,
-                                   let data = photoDataByID[photoID],
+                                   let data = photosByID[photoID]?.previewData,
                                    let image = ThumbnailImageCache.image(
                                     attachmentID: photoID,
                                     data: data
@@ -1162,7 +1193,12 @@ struct SolidsFoodDatabaseView: View {
                 ForEach(visibleFoods) { food in
                     Button { openFood(food.id) } label: {
                         SolidsFoodRow(
-                            food: food,
+                            id: food.id,
+                            name: food.name,
+                            visualEmoji: food.visualEmoji,
+                            category: food.category,
+                            isIronRich: food.isIronRich,
+                            containsAllergen: !food.allergenIDs.isEmpty,
                             status: progressByFoodID[food.id]?.status
                         )
                         .equatable()
@@ -1172,7 +1208,11 @@ struct SolidsFoodDatabaseView: View {
             }
         }
         .navigationTitle("Food Database")
-        .debouncedSearch(text: $effectiveSearchText, prompt: "Search foods")
+        .debouncedSearch(
+            text: $effectiveSearchText,
+            prompt: "Search foods",
+            delay: .milliseconds(250)
+        )
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { showingFilters = true } label: {
@@ -1184,6 +1224,7 @@ struct SolidsFoodDatabaseView: View {
                     )
                 }
                 .accessibilityIdentifier("solids.foods.filters")
+                .disabled(bundledFoods == nil)
                 Button { showingNewCustomFood = true } label: {
                     Label("New custom food", systemImage: "plus")
                 }
@@ -1210,8 +1251,17 @@ struct SolidsFoodDatabaseView: View {
                 )
             }
         }
+        .task {
+            guard bundledFoods == nil else { return }
+            bundledFoods = await SolidsReferenceCatalog.loadFoodSummaries()
+        }
         .overlay {
-            if visibleFoods.isEmpty && visibleCustomFoods.isEmpty {
+            if bundledFoods == nil {
+                ProgressView("Loading food database")
+                    .padding()
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .allowsHitTesting(false)
+            } else if visibleFoods.isEmpty && visibleCustomFoods.isEmpty {
                 if filters.isEmpty {
                     ContentUnavailableView.search(text: effectiveSearchText)
                 } else {
@@ -1241,7 +1291,7 @@ struct SolidsFoodDatabaseView: View {
 private struct SolidsFoodDatabaseFilterView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let foods: [SolidsReferenceFood]
+    let foods: [SolidsReferenceFoodSummary]
     let progressByFoodID: [String: SolidsFoodProgressFilterValue]
     let onApply: (SolidsFoodDatabaseFilters) -> Void
 
@@ -1255,7 +1305,7 @@ private struct SolidsFoodDatabaseFilterView: View {
 
     init(
         filters: SolidsFoodDatabaseFilters,
-        foods: [SolidsReferenceFood],
+        foods: [SolidsReferenceFoodSummary],
         progressByFoodID: [String: SolidsFoodProgressFilterValue],
         onApply: @escaping (SolidsFoodDatabaseFilters) -> Void
     ) {
@@ -1478,23 +1528,38 @@ private struct SolidsFoodDatabaseFilterView: View {
 }
 
 private struct SolidsFoodRow: View, Equatable {
-    let food: SolidsReferenceFood
+    let id: String
+    let name: String
+    let visualEmoji: String
+    let category: SolidsFoodCategory
+    let isIronRich: Bool
+    let containsAllergen: Bool
     let status: SolidsFoodStatus?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.visualEmoji == rhs.visualEmoji
+            && lhs.category == rhs.category
+            && lhs.isIronRich == rhs.isIronRich
+            && lhs.containsAllergen == rhs.containsAllergen
+            && lhs.status == rhs.status
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(food.visualEmoji)
+            Text(visualEmoji)
                 .font(.system(size: 22))
                 .frame(width: 30, height: 30)
                 .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
             VStack(alignment: .leading, spacing: 2) {
-                Text(food.name)
+                Text(name)
                     .font(.body.weight(.medium))
                     .foregroundStyle(.primary)
                 HStack(spacing: 6) {
-                    Text(food.category.displayName)
-                    if food.isIronRich { Text("• Iron-rich") }
-                    if !food.allergenIDs.isEmpty { Text("• Allergen") }
+                    Text(category.displayName)
+                    if isIronRich { Text("• Iron-rich") }
+                    if containsAllergen { Text("• Allergen") }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1516,7 +1581,7 @@ struct SolidsFoodDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     let food: SolidsReferenceFood
-    let profile: BabyProfile
+    let profile: CareProfile
     let progress: [SolidFoodProgress]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
@@ -1574,6 +1639,19 @@ struct SolidsFoodDetailView: View {
                 Label(stage.title, systemImage: "figure.child")
                     .font(.headline)
                 Text(stage.instructions)
+                servingAmountRow(
+                    title: "First serving",
+                    value: stage.servingAmount.firstServing,
+                    systemImage: "1.circle.fill"
+                )
+                servingAmountRow(
+                    title: "After tolerated",
+                    value: stage.servingAmount.routineServing,
+                    systemImage: "fork.knife.circle.fill"
+                )
+                Text("These are suggested starting portions, not amounts the child must finish. Follow hunger and fullness cues and offer more when they show interest.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text(food.safetyNote)
                     .font(.subheadline)
                     .foregroundStyle(.orange)
@@ -1599,6 +1677,12 @@ struct SolidsFoodDetailView: View {
                             Text(visual.displayName).font(.caption).foregroundStyle(.orange)
                             Text(stage.instructions)
                                 .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Suggested amount")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(stage.servingAmount.routineServing)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -1819,6 +1903,26 @@ struct SolidsFoodDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func servingAmountRow(
+        title: String,
+        value: String,
+        systemImage: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.orange)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private func addToShoppingList(_ list: ShoppingList) {
         let write = SolidsShoppingFoodWrite(
             foodID: food.id,
@@ -1886,7 +1990,7 @@ struct CustomSolidFoodDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     let food: SolidFoodCatalogItem
-    let profile: BabyProfile
+    let profile: CareProfile
     let photo: PhotoAttachment?
     let allFoods: [SolidFoodCatalogItem]
     let progress: [SolidFoodProgress]
@@ -2552,6 +2656,22 @@ private struct SolidsPreparationWalkthroughView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("solids.preparation.stage")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("First serving")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(walkthrough.stage.servingAmount.firstServing)
+                    .font(.subheadline)
+                Text("After tolerated")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                Text(walkthrough.stage.servingAmount.routineServing)
+                    .font(.subheadline)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
             Text("The overview explains what to serve. This checklist walks through choosing, cleaning, cooking, shaping, testing, and serving it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -2671,7 +2791,7 @@ private struct SolidsPreparationWalkthroughView: View {
 
 struct SolidsPlannerView: View {
     @Environment(\.modelContext) private var modelContext
-    let profile: BabyProfile
+    let profile: CareProfile
     let plans: [PlannedSolidMeal]
     let openPlan: (UUID) -> Void
 
@@ -2918,7 +3038,7 @@ struct NewSolidMealPlanView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \SolidFoodCatalogItem.name) private var customFoods: [SolidFoodCatalogItem]
-    let profile: BabyProfile
+    let profile: CareProfile
     let plan: PlannedSolidMeal?
 
     @State private var scheduledAt: Date
@@ -2939,7 +3059,7 @@ struct NewSolidMealPlanView: View {
     @State private var planWriter: SolidsPlanWriter?
     @State private var foodChoices: [SolidPlanFoodChoice]
 
-    private static let bundledFoodChoices = SolidsReferenceCatalog.foods.map {
+    private static let bundledFoodChoices = SolidsReferenceCatalog.foodSummaries.map {
         SolidPlanFoodChoice(
             id: $0.id,
             name: $0.name,
@@ -2948,15 +3068,13 @@ struct NewSolidMealPlanView: View {
         )
     }
 
-    init(profile: BabyProfile, plan: PlannedSolidMeal? = nil) {
+    init(profile: CareProfile, plan: PlannedSolidMeal? = nil) {
         self.profile = profile
         self.plan = plan
         let now = Date()
-        let sixMonthDate = Calendar.current.date(
-            byAdding: .month,
-            value: 6,
-            to: profile.birthDate
-        ) ?? now
+        let sixMonthDate = profile.birthDate.flatMap {
+            Calendar.current.date(byAdding: .month, value: 6, to: $0)
+        } ?? now
         _scheduledAt = State(initialValue: plan?.scheduledAt ?? max(now, sixMonthDate))
         _selectedFoodIDs = State(initialValue: Set(plan?.foodIDs ?? []))
         _notesDraft = State(initialValue: SolidPlanNotesDraft(plan?.notes ?? ""))
@@ -3055,7 +3173,7 @@ struct NewSolidMealPlanView: View {
         guard let allergenID = plan?.allergenID,
               let allergen = SolidsAllergen(rawValue: allergenID) else { return nil }
         let selectedContainsAllergen = selectedFoodIDs.contains { foodID in
-            if let reference = SolidsReferenceCatalog.food(id: foodID) {
+            if let reference = SolidsReferenceCatalog.foodSummary(id: foodID) {
                 return reference.allergenIDs.contains(allergenID)
             }
             return customFoods.first {
@@ -3319,10 +3437,11 @@ struct NewSolidMealPlanView: View {
     }
 
     private func eligibilityDate(for food: SolidPlanFoodChoice) -> Date {
-        Calendar.current.date(
+        guard let birthDate = profile.birthDate else { return scheduledAt }
+        return Calendar.current.date(
             byAdding: .month,
             value: food.minimumAgeMonths,
-            to: profile.birthDate
+            to: birthDate
         ) ?? scheduledAt
     }
 
@@ -3422,7 +3541,7 @@ private enum PlannedSolidMealAlert: Identifiable {
 
 struct PlannedSolidMealDetailView: View {
     let plan: PlannedSolidMeal
-    let profile: BabyProfile
+    let profile: CareProfile
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
     let inventoryItems: [InventoryItem]
@@ -3678,25 +3797,6 @@ struct PlannedSolidMealDetailView: View {
     }
 }
 
-private enum SolidsTrackerFilter: String, CaseIterable, Identifiable {
-    case all
-    case tried
-    case favorites
-    case wantToTry
-    case reactions
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .all: "All"
-        case .tried: "Tried"
-        case .favorites: "Favorites"
-        case .wantToTry: "Want to try"
-        case .reactions: "Reactions"
-        }
-    }
-}
-
 private enum SolidsTrackerSort: String, CaseIterable, Identifiable {
     case recentlyTried
     case firstTried
@@ -3715,17 +3815,35 @@ private enum SolidsTrackerSort: String, CaseIterable, Identifiable {
 }
 
 struct SolidsTrackerView: View {
-    let profile: BabyProfile
-    let events: [BabyEvent]
+    let profile: CareProfile
+    let events: [CareEvent]
     let progress: [SolidFoodProgress]
     let eventItems: [SolidFoodEventItem]
     let openFoodHistory: (String, String) -> Void
     let openMeal: (UUID) -> Void
 
-    @State private var filter: SolidsTrackerFilter = .all
+    @State private var filter: SolidsTrackerFilter
     @State private var sort: SolidsTrackerSort = .recentlyTried
     @State private var effectiveSearchText = ""
     @State private var showingSortOptions = false
+
+    init(
+        profile: CareProfile,
+        initialFilter: SolidsTrackerFilter = .all,
+        events: [CareEvent],
+        progress: [SolidFoodProgress],
+        eventItems: [SolidFoodEventItem],
+        openFoodHistory: @escaping (String, String) -> Void,
+        openMeal: @escaping (UUID) -> Void
+    ) {
+        self.profile = profile
+        self.events = events
+        self.progress = progress
+        self.eventItems = eventItems
+        self.openFoodHistory = openFoodHistory
+        self.openMeal = openMeal
+        _filter = State(initialValue: initialFilter)
+    }
 
     private var scopedProgress: [SolidFoodProgress] {
         let query = effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3765,7 +3883,7 @@ struct SolidsTrackerView: View {
         }
     }
 
-    private var scopedMeals: [BabyEvent] {
+    private var scopedMeals: [CareEvent] {
         events.filter { $0.profileID == profile.id && $0.type == .feed && $0.feedKind == .solid }
             .sorted { $0.startDate > $1.startDate }
     }
@@ -3788,6 +3906,8 @@ struct SolidsTrackerView: View {
                                 .font(.caption.weight(.semibold))
                                 .buttonStyle(.bordered)
                                 .tint(filter == value ? .orange : .secondary)
+                                .accessibilityIdentifier("solids.tracker.filter.\(value.rawValue)")
+                                .accessibilityValue(filter == value ? "Selected" : "Not selected")
                         }
                     }
                 }
@@ -3801,7 +3921,7 @@ struct SolidsTrackerView: View {
             }
             Section("Foods") {
                 if visibleProgress.isEmpty {
-                    Text("Foods logged from a solid feed event will appear here.")
+                    Text(emptyFoodsMessage)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(visibleProgress) { item in
@@ -3865,6 +3985,21 @@ struct SolidsTrackerView: View {
         )
     }
 
+    private var emptyFoodsMessage: String {
+        switch filter {
+        case .all:
+            "Foods logged from a solid feed event or saved for later will appear here."
+        case .tried:
+            "No foods have been marked tried yet."
+        case .favorites:
+            "No foods have been marked as favorites yet."
+        case .wantToTry:
+            "No foods are saved to Want to try yet."
+        case .reactions:
+            "No foods with suspected reactions have been logged."
+        }
+    }
+
     private func sortSystemImage(_ value: SolidsTrackerSort) -> String {
         switch value {
         case .recentlyTried: "clock.arrow.circlepath"
@@ -3876,10 +4011,10 @@ struct SolidsTrackerView: View {
 }
 
 struct SolidFoodHistoryView: View {
-    let profile: BabyProfile
+    let profile: CareProfile
     let foodID: String
     let foodName: String
-    let events: [BabyEvent]
+    let events: [CareEvent]
     let eventItems: [SolidFoodEventItem]
     let openMeal: (UUID) -> Void
 
@@ -3888,7 +4023,7 @@ struct SolidFoodHistoryView: View {
             .sorted { $0.createdAt > $1.createdAt }
     }
 
-    private var eventByID: [UUID: BabyEvent] {
+    private var eventByID: [UUID: CareEvent] {
         Dictionary(uniqueKeysWithValues: events.filter { $0.profileID == profile.id }.map { ($0.id, $0) })
     }
 
@@ -3948,7 +4083,7 @@ struct SolidFoodHistoryView: View {
 }
 
 struct SolidMealDetailView: View {
-    let event: BabyEvent
+    let event: CareEvent
     let items: [SolidFoodEventItem]
     let editEvent: () -> Void
 
@@ -3999,7 +4134,7 @@ struct SolidMealDetailView: View {
 }
 
 struct SolidsAllergensView: View {
-    let profile: BabyProfile
+    let profile: CareProfile
     let eventItems: [SolidFoodEventItem]
     let progress: [SolidAllergenProgress]
     let openAllergen: (String) -> Void
@@ -4071,7 +4206,7 @@ struct SolidsAllergensView: View {
 struct SolidsAllergenDetailView: View {
     @Environment(\.modelContext) private var modelContext
     let allergen: SolidsAllergen
-    let profile: BabyProfile
+    let profile: CareProfile
     let eventItems: [SolidFoodEventItem]
     let progress: SolidAllergenProgress?
     let allProgress: [SolidAllergenProgress]
@@ -4092,7 +4227,7 @@ struct SolidsAllergenDetailView: View {
 
     init(
         allergen: SolidsAllergen,
-        profile: BabyProfile,
+        profile: CareProfile,
         eventItems: [SolidFoodEventItem],
         progress: SolidAllergenProgress?,
         allProgress: [SolidAllergenProgress],
@@ -4552,7 +4687,7 @@ private struct SolidsAllergenNotesEditor: View {
 
 struct SolidsRecipesView: View {
     @Environment(\.modelContext) private var modelContext
-    let profile: BabyProfile
+    let profile: CareProfile
     let profileState: SolidsProfileState?
     let openRecipe: (String) -> Void
 
@@ -4987,7 +5122,7 @@ struct SolidsRecipesView: View {
 struct SolidsRecipeDetailView: View {
     @Environment(\.modelContext) private var modelContext
     let recipe: SolidsReferenceRecipe
-    let profile: BabyProfile
+    let profile: CareProfile
     let profileState: SolidsProfileState?
     let plannedMeals: [PlannedSolidMeal]
     let household: Household?
@@ -5013,7 +5148,7 @@ struct SolidsRecipeDetailView: View {
     @State private var mealPrepWriter: SolidsMealPrepWriter?
     init(
         recipe: SolidsReferenceRecipe,
-        profile: BabyProfile,
+        profile: CareProfile,
         profileState: SolidsProfileState?,
         plannedMeals: [PlannedSolidMeal],
         household: Household?,

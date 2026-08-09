@@ -31,24 +31,26 @@ enum IntegrationCommandProcessor {
         guard PersistenceService.save(context: context) else { return true }
 
         let timer = WidgetSnapshotService.refreshActiveTimer(event, at: requestedAt)
-        Task { @MainActor in
+        let environment = ProcessInfo.processInfo.environment
+        if environment["XCTestConfigurationFilePath"] == nil,
+           environment["XCTestBundlePath"] == nil {
             await LiveActivityManager.shared.updateTimer(timer)
+            WatchConnectivityService.shared.publishCurrentState()
         }
-        WatchConnectivityService.shared.publishCurrentState()
         return true
     }
 
     private static func fetchEvent(
         for command: TimerCommand,
         context: ModelContext
-    ) -> BabyEvent? {
+    ) -> CareEvent? {
         switch command.action {
         case .stopActive:
-            var descriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { event in
+            var descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate<CareEvent> { event in
                     event.endDate == nil
                 },
-                sortBy: [SortDescriptor(\BabyEvent.startDate, order: .forward)]
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .forward)]
             )
             descriptor.fetchLimit = 30
             let profileID = command.profileID ?? ProfileService.shared.selectedProfileID
@@ -59,8 +61,8 @@ enum IntegrationCommandProcessor {
                     ? EventTimerService.primaryActiveEvent(in: events)
                     : nil)
         case .stop(let id), .resume(let id), .switchSide(let id):
-            var descriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { event in
+            var descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate<CareEvent> { event in
                     event.id == id
                 }
             )
@@ -71,7 +73,7 @@ enum IntegrationCommandProcessor {
 
     private static func shouldApply(
         _ action: TimerAction,
-        to event: BabyEvent,
+        to event: CareEvent,
         requestedAt: Date
     ) -> Bool {
         switch action {
@@ -102,8 +104,8 @@ enum IntegrationCommandProcessor {
         context: ModelContext
     ) {
         guard let profileID else { return }
-        var descriptor = FetchDescriptor<BabyProfile>(
-            predicate: #Predicate<BabyProfile> { profile in
+        var descriptor = FetchDescriptor<CareProfile>(
+            predicate: #Predicate<CareProfile> { profile in
                 profile.id == profileID
             }
         )

@@ -34,19 +34,38 @@ struct PuppyStageGuideCard: View {
                 .buttonStyle(.plain)
             }
 
-            HStack {
-                Button("Read guide", systemImage: "book.pages.fill", action: onRead)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.teal)
-                Button("Add milestone", systemImage: "heart.fill", action: onAddMilestone)
-                    .buttonStyle(.bordered)
-                Button(
-                    isTrainingTimerActive ? "Training active" : "Log training",
-                    systemImage: isTrainingTimerActive ? "timer" : "graduationcap.fill",
-                    action: onLogTraining
-                )
-                    .buttonStyle(.bordered)
-                    .disabled(isTrainingTimerActive)
+            HStack(spacing: 8) {
+                Button(action: onRead) {
+                    PuppyStageGuideActionLabel(
+                        title: "Read guide",
+                        systemImage: "book.pages.fill"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+                .accessibilityIdentifier("puppy-stage-guide.read")
+
+                Button(action: onAddMilestone) {
+                    PuppyStageGuideActionLabel(
+                        title: "Add milestone",
+                        systemImage: "heart.fill"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("puppy-stage-guide.add-milestone")
+
+                Button(action: onLogTraining) {
+                    PuppyStageGuideActionLabel(
+                        title: isTrainingTimerActive ? "Training active" : "Log training",
+                        systemImage: isTrainingTimerActive ? "timer" : "graduationcap.fill"
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.bordered)
+                .disabled(isTrainingTimerActive)
+                .accessibilityIdentifier("puppy-stage-guide.log-training")
             }
             .font(.caption.weight(.semibold))
         }
@@ -66,17 +85,39 @@ struct PuppyStageGuideCard: View {
     }
 }
 
+private struct PuppyStageGuideActionLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 7) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .frame(width: 20)
+            Text(title)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+        .contentShape(Rectangle())
+    }
+}
+
 struct PuppyStageGuideDetailView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var readStates: [PuppyStageGuideReadState]
     let guide: PuppyStageGuide
     let profile: CareProfile?
+    let showsCloseButton: Bool
     @State private var editorRoute: EventEditorRoute?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
 
-    init(guide: PuppyStageGuide, profile: CareProfile?) {
+    init(guide: PuppyStageGuide, profile: CareProfile?, showsCloseButton: Bool = false) {
         self.guide = guide
         self.profile = profile
+        self.showsCloseButton = showsCloseButton
         let selectedProfileID = profile?.id
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         _readStates = Query(FetchDescriptor<PuppyStageGuideReadState>(
@@ -172,6 +213,16 @@ struct PuppyStageGuideDetailView: View {
         }
         .navigationTitle(guide.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if showsCloseButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") {
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("puppy-stage-guide.close")
+                }
+            }
+        }
         .sheet(item: $editorRoute) { route in
             NavigationStack {
                 EventEditorView(type: route.type, event: route.event) { event in
@@ -183,7 +234,7 @@ struct PuppyStageGuideDetailView: View {
         }
         .sheet(item: $selectedMilestoneTemplate) { template in
             NavigationStack {
-                MilestoneEditorView(template: template)
+                MilestoneEditorView(template: template, profileID: profile?.id)
             }
         }
         .task {

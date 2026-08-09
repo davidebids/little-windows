@@ -3,6 +3,240 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testProfileAvatarFitsToolbarOnInitialLoad() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-smoke",
+            additionalEnvironment: ["LITTLE_WINDOWS_UI_TEST_PROFILE_PHOTO": "1"]
+        )
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+
+        let profileSettings = app.buttons["Sample Child settings"]
+        XCTAssertTrue(profileSettings.waitForExistence(timeout: 8))
+        XCTAssertTrue(profileSettings.isHittable)
+        XCTAssertEqual(profileSettings.frame.width, 36, accuracy: 1)
+        XCTAssertEqual(
+            profileSettings.frame.width,
+            profileSettings.frame.height,
+            accuracy: 1
+        )
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Profile avatar on initial Today load"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        profileSettings.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+    }
+
+    func testUnassignedLocalProfileCanOptIntoFamilySync() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-smoke",
+            additionalEnvironment: ["LITTLE_WINDOWS_UI_TEST_UNOWNED_PROFILE": "1"]
+        )
+        launch(startURL: "littlewindows://settings")
+
+        let careProfiles = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(careProfiles.waitForExistence(timeout: 5))
+        careProfiles.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+
+        let editProfile = app.buttons["Edit Sample Child"]
+        XCTAssertTrue(editProfile.waitForExistence(timeout: 4))
+        editProfile.tap()
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+
+        let sharingToggle = app.switches["Share this profile with Family Sync"]
+        XCTAssertTrue(sharingToggle.waitForExistence(timeout: 4))
+        XCTAssertTrue(sharingToggle.isEnabled)
+        sharingToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let sharingEnabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"),
+            object: sharingToggle
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [sharingEnabled], timeout: 3), .completed)
+        app.navigationBars["Edit Profile"].buttons["Save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+        XCTAssertTrue(editProfile.waitForExistence(timeout: 4))
+        editProfile.tap()
+        XCTAssertTrue(app.navigationBars["Edit Profile"].waitForExistence(timeout: 5))
+        XCTAssertTrue(sharingToggle.waitForExistence(timeout: 4))
+        XCTAssertTrue(sharingToggle.isEnabled)
+        XCTAssertEqual(sharingToggle.value as? String, "1")
+    }
+
+    func testDogTodayShowsAllEnabledCareCategories() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000102/today")
+
+        for identifier in [
+            "dog-quick-action-treat",
+            "dog-quick-action-grooming",
+            "dog-quick-action-vaccine",
+            "dog-quick-action-custom"
+        ] {
+            let button = app.buttons[identifier]
+            for _ in 0..<12 where !button.isHittable {
+                app.swipeUp(velocity: .slow)
+            }
+            XCTAssertTrue(button.exists, "Expected enabled dog action \(identifier) to appear on Today.")
+            XCTAssertTrue(button.isHittable, "Expected enabled dog action \(identifier) to be reachable.")
+        }
+    }
+
+    func testPuppyStageGuideOpenedFromTodayHasCloseControl() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://puppy-guide")
+
+        XCTAssertTrue(app.navigationBars["6 Months"].waitForExistence(timeout: 8))
+        let closeButton = app.buttons["puppy-stage-guide.close"]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 4))
+        closeButton.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        XCTAssertFalse(app.staticTexts["Puppy Stage Guide"].exists)
+    }
+
+    func testPuppyStageGuideCardActionsAreAligned() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000102/today")
+
+        let readButton = app.buttons["puppy-stage-guide.read"]
+        for _ in 0..<12 where !readButton.isHittable {
+            app.swipeUp(velocity: .slow)
+        }
+
+        let addMilestoneButton = app.buttons["puppy-stage-guide.add-milestone"]
+        let logTrainingButton = app.buttons["puppy-stage-guide.log-training"]
+        XCTAssertTrue(readButton.isHittable)
+        XCTAssertTrue(addMilestoneButton.isHittable)
+        XCTAssertTrue(logTrainingButton.isHittable)
+
+        for button in [addMilestoneButton, logTrainingButton] {
+            XCTAssertEqual(button.frame.minY, readButton.frame.minY, accuracy: 2)
+            XCTAssertEqual(button.frame.height, readButton.frame.height, accuracy: 2)
+            XCTAssertEqual(button.frame.width, readButton.frame.width, accuracy: 2)
+        }
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Aligned puppy stage guide actions"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testMedicationEditorKeepsLabelsVisibleForPopulatedValues() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://medications")
+
+        XCTAssertTrue(app.navigationBars["Medications"].waitForExistence(timeout: 8))
+        let addMedication = app.buttons["Add Medication"]
+        XCTAssertTrue(addMedication.waitForExistence(timeout: 4))
+        addMedication.tap()
+
+        XCTAssertTrue(app.navigationBars["Add Medication"].waitForExistence(timeout: 4))
+        for label in ["Name", "Strength", "Strength unit", "Instructions", "Dose", "Dose unit"] {
+            XCTAssertTrue(
+                app.staticTexts[label].exists,
+                "The \(label) label should remain visible independently of its input value."
+            )
+        }
+
+        let formPicker = app.buttons["medication.form"]
+        let doseUnitPicker = app.buttons["medication.dose-unit"]
+        XCTAssertTrue(formPicker.exists)
+        XCTAssertTrue(doseUnitPicker.exists)
+
+        formPicker.tap()
+        XCTAssertTrue(app.buttons["Liquid"].waitForExistence(timeout: 3))
+        app.buttons["Liquid"].tap()
+        XCTAssertTrue(doseUnitPicker.label.contains("Milliliter (mL)"))
+
+        doseUnitPicker.tap()
+        XCTAssertTrue(app.buttons["Milligram (mg)"].waitForExistence(timeout: 3))
+        app.buttons["Milligram (mg)"].tap()
+        XCTAssertTrue(doseUnitPicker.label.contains("Milligram (mg)"))
+
+        assertPersistentMultilineField(
+            identifier: "medication.instructions",
+            maxScrolls: 2
+        )
+
+        let supplyToggle = app.switches["Track quantity on hand"]
+        for _ in 0..<5 where !supplyToggle.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(supplyToggle.waitForExistence(timeout: 3))
+        supplyToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let supplyEnabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"),
+            object: supplyToggle
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [supplyEnabled], timeout: 3), .completed)
+
+        let quantityLabel = app.staticTexts["Quantity on hand"]
+        for _ in 0..<3 where !quantityLabel.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(quantityLabel.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Refill alert at"].exists)
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Medication editor persistent labels"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testMedicationInstructionsFocusAndTypingIsResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://medications")
+
+        XCTAssertTrue(app.navigationBars["Medications"].waitForExistence(timeout: 8))
+        app.buttons["Add Medication"].tap()
+        XCTAssertTrue(app.navigationBars["Add Medication"].waitForExistence(timeout: 4))
+
+        let instructions = app.descendants(matching: .any)
+            .matching(identifier: "medication.instructions")
+            .firstMatch
+        XCTAssertTrue(instructions.waitForExistence(timeout: 4))
+
+        let focusStartedAt = Date()
+        instructions.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        let focusDuration = Date().timeIntervalSince(focusStartedAt)
+
+        let typingStartedAt = Date()
+        instructions.typeText("Take with food")
+        let typingDuration = Date().timeIntervalSince(typingStartedAt)
+
+        XCTAssertEqual(instructions.value as? String, "Take with food")
+        XCTAssertLessThan(focusDuration, 2.5, "Instructions focus took \(focusDuration)s")
+        XCTAssertLessThan(typingDuration, 2.5, "Instructions typing took \(typingDuration)s")
+    }
+
     func testHouseholdOnlySetupAndCareDeepLinkPrompt() {
         continueAfterFailure = false
 
@@ -59,10 +293,14 @@ final class UserVisibleFlowUITests: XCTestCase {
         profilesLink.tap()
         XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No care profiles yet"].exists)
+        let emptyProfilesDescription = app.staticTexts.matching(
+            NSPredicate(
+                format: "label == %@",
+                "Add a child, adult, or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is."
+            )
+        ).firstMatch
         XCTAssertTrue(
-            app.staticTexts[
-                "Add a child or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is."
-            ].exists
+            emptyProfilesDescription.waitForExistence(timeout: 3)
         )
         XCTAssertTrue(app.buttons["profiles.empty.add"].exists)
         let emptyProfilesAttachment = XCTAttachment(screenshot: app.screenshot())
@@ -133,8 +371,8 @@ final class UserVisibleFlowUITests: XCTestCase {
         profileRow.swipeLeft()
         XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 3))
         app.buttons["Archive"].tap()
-        XCTAssertTrue(app.buttons["Archive Profile"].waitForExistence(timeout: 3))
-        app.buttons["Archive Profile"].tap()
+        XCTAssertTrue(app.buttons["Archive and Switch to Home"].waitForExistence(timeout: 3))
+        app.buttons["Archive and Switch to Home"].tap()
         XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 5))
 
         app.open(URL(string: "littlewindows://today")!)
@@ -143,6 +381,73 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
         XCTAssertFalse(app.tabBars.buttons["Care"].exists)
         XCTAssertFalse(app.segmentedControls.buttons["Care"].exists)
+    }
+
+    func testArchivingRemainingProfileAfterOtherArchivesExplainsHomeMode() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://settings")
+
+        let careProfiles = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Care Profiles")
+        ).firstMatch
+        XCTAssertTrue(careProfiles.waitForExistence(timeout: 5))
+        careProfiles.tap()
+        XCTAssertTrue(app.navigationBars["Profiles"].waitForExistence(timeout: 5))
+
+        let deletableRow = app.buttons.containing(
+            .staticText,
+            identifier: "Sample Dog"
+        ).firstMatch
+        XCTAssertTrue(deletableRow.waitForExistence(timeout: 4))
+        deletableRow.swipeLeft()
+        XCTAssertTrue(app.buttons["Delete"].waitForExistence(timeout: 3))
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.buttons["Delete Profile"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Remove this profile and its history."].exists)
+        app.buttons["Cancel"].tap()
+
+        func archiveProfile(named name: String) {
+            let row = app.buttons.containing(.staticText, identifier: name).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 4))
+            row.swipeLeft()
+            let archiveButton = app.buttons["Archive"]
+            XCTAssertTrue(archiveButton.waitForExistence(timeout: 3))
+            archiveButton.tap()
+            XCTAssertTrue(app.buttons["Archive Profile"].waitForExistence(timeout: 3))
+            app.buttons["Archive Profile"].tap()
+        }
+
+        archiveProfile(named: "Sample Child")
+
+        let finalRow = app.buttons.containing(
+            .staticText,
+            identifier: "Sample Dog"
+        ).firstMatch
+        XCTAssertTrue(finalRow.waitForExistence(timeout: 4))
+        finalRow.swipeLeft()
+        XCTAssertFalse(app.buttons["Delete"].exists)
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 3))
+        app.buttons["Archive"].tap()
+
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label BEGINSWITH %@",
+                    "This is the last active care profile."
+                )
+            ).firstMatch.waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["Archive and Switch to Home"].exists)
+        app.buttons["Archive and Switch to Home"].tap()
+
+        app.open(URL(string: "littlewindows://today")!)
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.buttons["Home"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Reports"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Care"].exists)
     }
 
     func testFirstRunOffersRestoreFromICloud() {
@@ -318,8 +623,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         addItem.tap()
 
         let title = app.textFields["home.todo.title"]
-        XCTAssertTrue(title.waitForExistence(timeout: 4))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        // The keyboard is the focus success condition. Waiting for the field and
+        // keyboard separately double-counts XCUI's polling delay in this budget.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 4))
+        XCTAssertTrue(title.exists)
         XCTAssertLessThan(
             focusStartedAt.duration(to: .now),
             .seconds(4),
@@ -458,20 +765,24 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
         XCTAssertTrue(reviewStep.waitForExistence(timeout: 3))
 
-        let recipeLink = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "solids.guided.recipe.")
+        let previewLink = app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
+                "solids.guided.food.",
+                "solids.guided.recipe."
+            )
         ).firstMatch
-        for _ in 0..<8 where !recipeLink.exists {
+        for _ in 0..<8 where !previewLink.exists {
             app.swipeUp()
         }
-        XCTAssertTrue(recipeLink.waitForExistence(timeout: 4))
-        let recipeTitle = recipeLink.label
-        recipeLink.tap()
+        XCTAssertTrue(previewLink.waitForExistence(timeout: 4))
+        let previewTitle = previewLink.label
+        previewLink.tap()
         XCTAssertTrue(
-            app.navigationBars[recipeTitle].waitForExistence(timeout: 4),
-            "A guided recipe title should open the recipe, not its first ingredient."
+            app.navigationBars[previewTitle].waitForExistence(timeout: 4),
+            "A guided meal title should open its preparation guidance."
         )
-        app.navigationBars[recipeTitle].buttons.element(boundBy: 0).tap()
+        app.navigationBars[previewTitle].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.navigationBars["Guided Solids"].waitForExistence(timeout: 4))
 
         let buildJourney = app.buttons["solids.guided.build-journey"]
@@ -499,7 +810,11 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/foods/avocado")
         XCTAssertTrue(app.navigationBars["Avocado"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.images["solids.serving-photo.mashed"].waitForExistence(timeout: 4))
+        let servingPhoto = app.images["solids.serving-photo.mashed"]
+        for _ in 0..<8 where !servingPhoto.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(servingPhoto.waitForExistence(timeout: 4))
 
         launch(startURL: "littlewindows://care/solids/guided")
         XCTAssertTrue(app.navigationBars["Guided Solids"].waitForExistence(timeout: 8))
@@ -582,6 +897,153 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.buttons["Reset"].tap()
         app.buttons["solids.foods.filter.apply"].tap()
         XCTAssertFalse(app.staticTexts["1 active filter"].exists)
+    }
+
+    func testFoodDatabaseSearchRemainsResponsiveWithRichCatalogContent() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(
+            startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/database"
+        )
+        XCTAssertTrue(app.navigationBars["Food Database"].waitForExistence(timeout: 5))
+
+        // This is intentionally the first interaction in a newly launched app
+        // process. A warm second visit would hide catalog and SwiftData faults.
+        app.swipeDown()
+        let search = app.searchFields["Search foods"]
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+
+        let focusStartedAt = ContinuousClock.now
+        search.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        XCTAssertLessThan(
+            focusStartedAt.duration(to: .now),
+            .seconds(3),
+            "Focusing the food database search field should not initialize rich food guidance."
+        )
+
+        let searchStartedAt = ContinuousClock.now
+        search.typeText("pineapple")
+        XCTAssertTrue(app.staticTexts["Pineapple"].waitForExistence(timeout: 3))
+        XCTAssertLessThan(
+            searchStartedAt.duration(to: .now),
+            .seconds(4),
+            "Typing and filtering the rich food catalog should remain responsive."
+        )
+        XCTAssertFalse(app.staticTexts["Avocado"].exists)
+    }
+
+    func testAppointmentEditorUsesPersistentFieldsWithoutDecorativePresets() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://appointment/00000000-0000-0000-0000-000000000301")
+
+        XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 5))
+        app.buttons["Edit"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Appointment"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Fast presets"].exists)
+
+        assertPersistentMultilineField(
+            identifier: "appointment.address",
+            maxScrolls: 6
+        )
+        assertPersistentMultilineField(
+            identifier: "appointment.notes",
+            maxScrolls: 4
+        )
+        assertPersistentMultilineField(
+            identifier: "appointment.question.new",
+            maxScrolls: 4
+        )
+    }
+
+    func testAppointmentAddressAndNotesAreResponsiveOnColdEditorLoad() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+
+        func openColdEditor(fieldIdentifier: String) -> XCUIElement {
+            launch(startURL: "littlewindows://appointments")
+            XCTAssertTrue(app.navigationBars["Appointments"].waitForExistence(timeout: 8))
+            let add = app.buttons["Add"]
+            XCTAssertTrue(add.waitForExistence(timeout: 4))
+            add.tap()
+            XCTAssertTrue(app.navigationBars["Add Appointment"].waitForExistence(timeout: 4))
+
+            let field = app.descendants(matching: .any)
+                .matching(identifier: fieldIdentifier)
+                .firstMatch
+            for _ in 0..<8 where !field.isHittable {
+                app.swipeUp()
+            }
+            XCTAssertTrue(field.waitForExistence(timeout: 4))
+            XCTAssertTrue(field.isHittable)
+            return field
+        }
+
+        func assertResponsive(_ field: XCUIElement, text: String) {
+            let focusStartedAt = Date()
+            field.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+            let focusDuration = Date().timeIntervalSince(focusStartedAt)
+
+            let typingStartedAt = Date()
+            field.typeText(text)
+            let typingDuration = Date().timeIntervalSince(typingStartedAt)
+
+            XCTAssertEqual(field.value as? String, text)
+            XCTAssertLessThan(focusDuration, 2.5, "Field focus took \(focusDuration)s")
+            XCTAssertLessThan(typingDuration, 2.5, "Field typing took \(typingDuration)s")
+        }
+
+        assertResponsive(
+            openColdEditor(fieldIdentifier: "appointment.address"),
+            text: "123 Main Street"
+        )
+        assertResponsive(
+            openColdEditor(fieldIdentifier: "appointment.notes"),
+            text: "Bring recent records"
+        )
+    }
+
+    func testSolidsSummaryCardsOpenMatchingLists() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 5) {
+            activate.tap()
+            XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 5))
+        }
+
+        let tried = app.buttons["solids.metric.tried"]
+        XCTAssertTrue(tried.waitForExistence(timeout: 4))
+        tried.tap()
+        XCTAssertTrue(app.navigationBars["Food Tracker"].waitForExistence(timeout: 4))
+        XCTAssertEqual(app.buttons["solids.tracker.filter.tried"].value as? String, "Selected")
+        XCTAssertTrue(app.staticTexts["No foods have been marked tried yet."].exists)
+
+        app.navigationBars["Food Tracker"].buttons.element(boundBy: 0).tap()
+        let wantToTry = app.buttons["solids.metric.want-to-try"]
+        XCTAssertTrue(wantToTry.waitForExistence(timeout: 4))
+        wantToTry.tap()
+        XCTAssertTrue(app.navigationBars["Food Tracker"].waitForExistence(timeout: 4))
+        XCTAssertEqual(app.buttons["solids.tracker.filter.wantToTry"].value as? String, "Selected")
+        XCTAssertTrue(app.staticTexts["No foods are saved to Want to try yet."].exists)
+
+        app.navigationBars["Food Tracker"].buttons.element(boundBy: 0).tap()
+        let planned = app.buttons["solids.metric.planned"]
+        XCTAssertTrue(planned.waitForExistence(timeout: 4))
+        planned.tap()
+        XCTAssertTrue(app.navigationBars["Plan Meals"].waitForExistence(timeout: 4))
     }
 
     func testPreparationWalkthroughUsesAnInteractiveChecklist() {
@@ -2710,5 +3172,31 @@ final class UserVisibleFlowUITests: XCTestCase {
             }
         }
         return app.buttons[labels[0]]
+    }
+
+    private func assertPersistentMultilineField(
+        identifier: String,
+        maxScrolls: Int
+    ) {
+        let label = app.staticTexts["\(identifier).label"]
+        let field = app.descendants(matching: .any)
+            .matching(identifier: identifier)
+            .firstMatch
+        for _ in 0..<maxScrolls where !label.exists || !field.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(label.waitForExistence(timeout: 3), "Missing label for \(identifier)")
+        XCTAssertTrue(field.waitForExistence(timeout: 3), "Missing input for \(identifier)")
+        XCTAssertEqual(
+            label.frame.minX,
+            field.frame.minX,
+            accuracy: 3,
+            "The label and input should share a leading edge for \(identifier)."
+        )
+        XCTAssertGreaterThan(
+            field.frame.minY,
+            label.frame.minY,
+            "The persistent label should remain above the input for \(identifier)."
+        )
     }
 }

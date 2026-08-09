@@ -35,7 +35,7 @@ enum PersistenceService {
     }
 
     static let modelTypes: [any PersistentModel.Type] = [
-            BabyProfile.self,
+            CareProfile.self,
             PhotoAttachment.self,
             SolidFoodCatalogItem.self,
             SolidsProfileState.self,
@@ -43,7 +43,12 @@ enum PersistenceService {
             SolidFoodEventItem.self,
             SolidAllergenProgress.self,
             PlannedSolidMeal.self,
-            BabyEvent.self,
+            CareEvent.self,
+            Medication.self,
+            MedicationRegimen.self,
+            MedicationSchedulePhase.self,
+            MedicationDoseRecord.self,
+            MedicationSupplyLog.self,
             DoctorAppointment.self,
             MilestoneEntry.self,
             AgeGuideReadState.self,

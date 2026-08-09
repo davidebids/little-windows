@@ -4,7 +4,7 @@ import SwiftUI
 struct AppointmentsListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @State private var showingEditor = false
     @State private var appointmentPendingDelete: DoctorAppointment?
     @State private var showingDeleteConfirmation = false
@@ -19,7 +19,7 @@ struct AppointmentsListView: View {
         ))
     }
 
-    private var profile: BabyProfile? { profileService.selectedProfile(in: profiles) }
+    private var profile: CareProfile? { profileService.selectedProfile(in: profiles) }
     private var scopedAppointments: [DoctorAppointment] {
         appointments.filter { $0.matchesProfile(profile?.id) }
     }
@@ -42,7 +42,7 @@ struct AppointmentsListView: View {
                 ContentUnavailableView(
                     "No appointments yet",
                     systemImage: "stethoscope",
-                    description: Text("Add pediatrician visits, vaccines, checkups, and follow-ups here.")
+                    description: Text(emptyDescription)
                 )
                 .listRowBackground(Color.clear)
             } else {
@@ -71,7 +71,7 @@ struct AppointmentsListView: View {
         .sheet(isPresented: $showingEditor) {
             NavigationStack {
                 AppointmentEditorView(
-                    babyName: profile?.name ?? "Baby",
+                    babyName: profile?.name ?? "Profile",
                     profileID: profile?.id,
                     profileType: profile?.profileType ?? .child
                 )
@@ -93,6 +93,14 @@ struct AppointmentsListView: View {
             }
         } message: {
             Text("This permanently removes the appointment and cancels its reminders.")
+        }
+    }
+
+    private var emptyDescription: String {
+        switch profile?.profileType {
+        case .adult: "Add primary care, specialist, lab, therapy, dental, and follow-up visits here."
+        case .dog: "Add vet wellness, vaccine, grooming, and follow-up visits here."
+        default: "Add pediatrician visits, vaccines, checkups, and follow-ups here."
         }
     }
 
@@ -259,8 +267,21 @@ struct AppointmentEditorView: View {
         self.babyName = babyName
         self.profileID = profileID
         self.profileType = profileType
-        _title = State(initialValue: appointment?.title ?? (profileType == .dog ? "Vet visit" : "Pediatrician visit"))
-        _appointmentType = State(initialValue: appointment?.appointmentType ?? (profileType == .dog ? .vetWellness : .pediatrician))
+        let defaultTitle: String
+        let defaultType: AppointmentType
+        switch profileType {
+        case .child:
+            defaultTitle = "Pediatrician visit"
+            defaultType = .pediatrician
+        case .adult:
+            defaultTitle = "Primary care visit"
+            defaultType = .primaryCare
+        case .dog:
+            defaultTitle = "Vet visit"
+            defaultType = .vetWellness
+        }
+        _title = State(initialValue: appointment?.title ?? defaultTitle)
+        _appointmentType = State(initialValue: appointment?.appointmentType ?? defaultType)
         _startDate = State(initialValue: appointment?.startDate ?? Date().addingTimeInterval(24 * 60 * 60))
         _endDate = State(initialValue: appointment?.endDate ?? Date().addingTimeInterval(25 * 60 * 60))
         _hasEndDate = State(initialValue: appointment?.endDate != nil)
@@ -286,7 +307,10 @@ struct AppointmentEditorView: View {
     var body: some View {
         Form {
             Section("Appointment") {
-                TextField("Title", text: $title)
+                LabeledContent("Title") {
+                    TextField("Required", text: $title)
+                        .multilineTextAlignment(.trailing)
+                }
                 Picker("Type", selection: $appointmentType) {
                     ForEach(appointmentTypes) {
                         Label($0.displayName, systemImage: $0.systemImage).tag($0)
@@ -312,42 +336,41 @@ struct AppointmentEditorView: View {
                 }
             }
 
-            Section("Fast presets") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        if profileType == .dog {
-                            presetButton("Vet wellness", .vetWellness)
-                            presetButton("Vaccine visit", .vaccine)
-                            presetButton("Sick visit", .sickVisit)
-                            presetButton("Emergency vet", .emergencyVet)
-                            presetButton("Grooming", .grooming)
-                            presetButton("Training", .training)
-                            presetButton("Boarding", .boarding)
-                        } else {
-                            presetButton("Pediatrician visit", .pediatrician)
-                            presetButton("Wellness check", .wellnessCheck)
-                            presetButton("Vaccine appointment", .vaccine)
-                            presetButton("Sick visit", .sickVisit)
-                            presetButton("Specialist visit", .specialist)
-                            presetButton("Dental visit", .dental)
-                        }
-                    }
+            Section(profileType == .dog ? "Vet and place" : "People and place") {
+                LabeledContent(profileType == .dog ? "Veterinarian" : "Doctor") {
+                    TextField("Optional", text: $doctorName)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Clinic") {
+                    TextField("Optional", text: $clinicName)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Location") {
+                    TextField("Optional", text: $locationName)
+                        .multilineTextAlignment(.trailing)
+                }
+                PersistentMultilineFormField(
+                    title: "Address",
+                    prompt: "Optional",
+                    text: $address,
+                    lineLimit: 2...3,
+                    accessibilityIdentifier: "appointment.address"
+                )
+                LabeledContent("Phone") {
+                    TextField("Optional", text: $phoneNumber)
+                        .keyboardType(.phonePad)
+                        .multilineTextAlignment(.trailing)
                 }
             }
 
-            Section(profileType == .dog ? "Vet and place" : "People and place") {
-                TextField(profileType == .dog ? "Veterinarian name" : "Doctor name", text: $doctorName)
-                TextField("Clinic name", text: $clinicName)
-                TextField("Location name", text: $locationName)
-                TextField("Address", text: $address, axis: .vertical)
-                    .lineLimit(2...3)
-                TextField("Phone number", text: $phoneNumber)
-                    .keyboardType(.phonePad)
-            }
-
             Section("Visit prep") {
-                TextField("Notes", text: $notes, axis: .vertical)
-                    .lineLimit(3...6)
+                PersistentMultilineFormField(
+                    title: "Notes",
+                    prompt: "Optional",
+                    text: $notes,
+                    lineLimit: 3...6,
+                    accessibilityIdentifier: "appointment.notes"
+                )
             }
 
             AppointmentQuestionsEditor(questionDrafts: $questionDrafts)
@@ -389,16 +412,12 @@ struct AppointmentEditorView: View {
         if profileType == .dog {
             return [.vetWellness, .vaccine, .sickVisit, .emergencyVet, .dental, .grooming, .training, .boarding, .daycare, .other]
         }
-        return [.pediatrician, .wellnessCheck, .vaccine, .sickVisit, .specialist, .lab, .dental, .lactation, .urgentCare, .other]
-    }
-
-    private func presetButton(_ presetTitle: String, _ type: AppointmentType) -> some View {
-        Button(presetTitle) {
-            title = presetTitle
-            appointmentType = type
+        if profileType == .adult {
+            return [.primaryCare, .wellnessCheck, .sickVisit, .specialist, .lab,
+                    .imaging, .procedure, .therapy, .dental, .optometry,
+                    .vaccine, .urgentCare, .other]
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
+        return [.pediatrician, .wellnessCheck, .vaccine, .sickVisit, .specialist, .lab, .dental, .lactation, .urgentCare, .other]
     }
 
     private func save() {
@@ -469,6 +488,44 @@ private struct AppointmentQuestionDraft: Identifiable, Equatable {
     }
 }
 
+struct PersistentMultilineFormField: View {
+    let title: String
+    let prompt: String
+    @Binding var text: String
+    let lineLimit: ClosedRange<Int>
+    let accessibilityIdentifier: String
+
+    private var editorHeight: CGFloat {
+        max(64, CGFloat(lineLimit.lowerBound) * 22 + 20)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("\(accessibilityIdentifier).label")
+
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(prompt)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+
+                TextEditor(text: $text)
+                    .scrollContentBackground(.hidden)
+                    .frame(height: editorHeight)
+                    .accessibilityIdentifier(accessibilityIdentifier)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 private struct AppointmentQuestionsEditor: View {
     @Binding var questionDrafts: [AppointmentQuestionDraft]
     @State private var newQuestionText = ""
@@ -486,9 +543,8 @@ private struct AppointmentQuestionsEditor: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach($questionDrafts) { draft in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        TextField("Question", text: draft.text, axis: .vertical)
-                            .lineLimit(1...3)
+                    HStack(alignment: .top, spacing: 12) {
+                        TextField("Question", text: draft.text)
 
                         Button(role: .destructive) {
                             removeQuestion(withID: draft.wrappedValue.id)
@@ -505,27 +561,36 @@ private struct AppointmentQuestionsEditor: View {
                 }
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                TextField("Add a question", text: $newQuestionText, axis: .vertical)
-                    .id(newQuestionInputID)
-                    .lineLimit(1...3)
-                    .focused($isAddingQuestionFocused)
-                    .submitLabel(.done)
-                    .onSubmit {
-                        addQuestion()
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Add a question")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("appointment.question.new.label")
+                HStack(alignment: .top, spacing: 12) {
+                    TextField("Type a question", text: $newQuestionText)
+                        .id(newQuestionInputID)
+                        .focused($isAddingQuestionFocused)
+                        .submitLabel(.done)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("appointment.question.new")
+                        .onSubmit {
+                            addQuestion()
+                        }
 
-                Button {
-                    addQuestion()
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .imageScale(.large)
+                    Button {
+                        addQuestion()
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .imageScale(.large)
+                            .frame(width: 28, height: 28, alignment: .top)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!hasQuestionText)
+                    .foregroundStyle(hasQuestionText ? Color.accentColor : Color.secondary)
+                    .accessibilityLabel("Add question")
                 }
-                .buttonStyle(.borderless)
-                .disabled(!hasQuestionText)
-                .foregroundStyle(hasQuestionText ? Color.accentColor : Color.secondary)
-                .accessibilityLabel("Add question")
             }
+            .padding(.vertical, 2)
         } header: {
             Text("Questions to ask")
         } footer: {

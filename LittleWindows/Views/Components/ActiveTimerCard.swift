@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ActiveTimerCard: View {
-    let event: BabyEvent
+    let event: CareEvent
     var planWakeAlert: ActiveSleepPlanWakeAlert?
     var edit: () -> Void
     var toggleRunning: () -> Void
@@ -107,7 +107,7 @@ struct ActiveTimerCard: View {
 }
 
 struct ActiveTimerEditorView: View {
-    let event: BabyEvent
+    let event: CareEvent
     let adjustStart: (Date) -> Void
     let stop: () -> Void
     let resume: () -> Void
@@ -128,7 +128,7 @@ struct ActiveTimerEditorView: View {
     @State private var showingDiscardConfirmation = false
 
     init(
-        event: BabyEvent,
+        event: CareEvent,
         adjustStart: @escaping (Date) -> Void,
         stop: @escaping () -> Void,
         resume: @escaping () -> Void,
@@ -515,13 +515,13 @@ struct ActiveTimerEditorView: View {
         adjustStart(clamped)
     }
 
-    private static func defaultEndDate(for event: BabyEvent) -> Date {
+    private static func defaultEndDate(for event: CareEvent) -> Date {
         min(Date(), event.startDate.addingTimeInterval(event.timerElapsed()))
     }
 }
 
 private struct NursingSideSelector: View {
-    let event: BabyEvent
+    let event: CareEvent
     let date: Date
     var isCompact = false
     var setNursingSide: ((NursingSide) -> Void)?

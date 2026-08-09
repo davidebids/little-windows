@@ -628,18 +628,18 @@ final class CloudKitSharingService {
     }
 
     private func refreshTimerSurfaces(context: ModelContext) async {
-        let profiles = (try? context.fetch(FetchDescriptor<BabyProfile>())) ?? []
+        let profiles = (try? context.fetch(FetchDescriptor<CareProfile>())) ?? []
         let profile = ProfileService.shared.ensureSelection(in: profiles)
         let recentCutoff = Calendar.current.date(
             byAdding: .day,
             value: -45,
             to: Calendar.current.startOfDay(for: Date())
         ) ?? Date()
-        var eventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
+        var eventDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
                 event.startDate >= recentCutoff || event.endDate == nil
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         eventDescriptor.fetchLimit = 900
         let events = ((try? context.fetch(eventDescriptor)) ?? [])
@@ -1192,7 +1192,8 @@ final class CloudKitSharingService {
         return try FamilySyncDatasetPayload(
             data: DataExportImportService.exportData(
                 context: context,
-                includeCaregiverIdentity: false
+                includeCaregiverIdentity: false,
+                profileScope: .familyShared
             )
         )
     }
@@ -1229,7 +1230,8 @@ final class CloudKitSharingService {
             data,
             context: context,
             recordLocalSave: false,
-            createRecoveryBackup: false
+            createRecoveryBackup: false,
+            preservePrivateProfiles: true
         )
         if let checksum = root[Constant.datasetChecksumKey] as? String {
             defaults.set(checksum, forKey: DefaultsKey.lastDatasetChecksum)
@@ -1768,7 +1770,8 @@ private actor FamilySyncDatasetExporter {
         try FamilySyncDatasetPayload(
             data: DataExportImportService.exportData(
                 context: modelContext,
-                includeCaregiverIdentity: false
+                includeCaregiverIdentity: false,
+                profileScope: .familyShared
             )
         )
     }
@@ -2655,7 +2658,7 @@ enum CloudKitFamilySyncConflictResolver {
         in context: ModelContext,
         now: Date = Date()
     ) {
-        let events = (try? context.fetch(FetchDescriptor<BabyEvent>())) ?? []
+        let events = (try? context.fetch(FetchDescriptor<CareEvent>())) ?? []
         let activeTimers = events.filter(\.isTimerDraft)
         let grouped = Dictionary(grouping: activeTimers) { event in
             "\(event.profileID?.uuidString ?? "none"):\(event.typeRawValue)"

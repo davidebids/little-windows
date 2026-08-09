@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 @MainActor
 enum AppInteractionMonitor {
@@ -68,8 +69,13 @@ extension EventType {
         case .training: .purple
         case .grooming: .pink
         case .symptom: .red
+        case .bloodPressure: .red
+        case .heartRate: .pink
+        case .oxygenSaturation: .cyan
+        case .respiratoryRate: .blue
         case .vaccine: .mint
         case .glucose: .red
+        case .pain: .orange
         case .custom: .purple
         }
     }
@@ -1056,7 +1062,7 @@ private struct CareProfileRequiredView: View {
                     NavigationLink {
                         ProfileEditorView()
                     } label: {
-                        Label("Add Child or Dog", systemImage: "person.crop.circle.badge.plus")
+                        Label("Add Care Profile", systemImage: "person.crop.circle.badge.plus")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
@@ -1130,7 +1136,10 @@ private struct FirstRunOnboardingView: View {
     @State private var profileType = CareProfileType.child
     @State private var profileName = ""
     @State private var birthDate = Date()
-    @State private var sex = BabySex.unknown
+    @State private var hasBirthDate = false
+    @State private var sex = ProfileSex.unknown
+    @State private var adultRelationship = AdultCareRelationship.myself
+    @State private var sharesWithFamily = false
     @State private var hasAdoptionDate = false
     @State private var adoptionDate = Date()
     @State private var breed = ""
@@ -1155,7 +1164,11 @@ private struct FirstRunOnboardingView: View {
     }
 
     private var profileNamePrompt: String {
-        profileType == .dog ? "Dog name" : "Child name"
+        switch profileType {
+        case .child: "Child name"
+        case .adult: adultRelationship == .myself ? "Your name" : "Adult name"
+        case .dog: "Dog name"
+        }
     }
 
     var body: some View {
@@ -1214,7 +1227,7 @@ private struct FirstRunOnboardingView: View {
 
             Text(step == .caregiver
                 ? "Use Little Windows for household planning, care tracking, or both. You can always add more later."
-                : "Choose whether you are tracking a child or dog, then add the details needed for daily care.")
+                : "Choose whether you are tracking a child, adult, or dog, then add the details needed for daily care.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1260,7 +1273,7 @@ private struct FirstRunOnboardingView: View {
                 )
 
                 setupChoice(
-                    title: "Add a Child or Dog",
+                    title: "Add a Care Profile",
                     detail: "Add a care profile now for daily tracking and a personalized Care workspace.",
                     systemImage: "person.crop.circle.badge.plus",
                     tint: .teal,
@@ -1491,23 +1504,39 @@ private struct FirstRunOnboardingView: View {
                 }
                 .pickerStyle(.segmented)
 
-                TextField(profileNamePrompt, text: $profileName)
-                    .textContentType(.name)
-                    .submitLabel(.done)
-                    .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Name")
+                        .font(.subheadline)
 
-                DatePicker(
-                    profileType == .dog ? "Birthday or best estimate" : "Birthdate",
-                    selection: $birthDate,
-                    in: ...Date(),
-                    displayedComponents: .date
-                )
+                    TextField(profileNamePrompt, text: $profileName)
+                        .textContentType(.name)
+                        .submitLabel(.done)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                if profileType == .adult {
+                    Picker("Relationship", selection: $adultRelationship) {
+                        ForEach(AdultCareRelationship.allCases) { relationship in
+                            Text(relationship.displayName).tag(relationship)
+                        }
+                    }
+                    Toggle("Add date of birth", isOn: $hasBirthDate)
+                }
+
+                if profileType != .adult || hasBirthDate {
+                    DatePicker(
+                        profileType == .dog ? "Birthday or best estimate" : "Date of birth",
+                        selection: $birthDate,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+                }
 
                 HStack {
                     Text("Sex")
                     Spacer()
                     Picker("Sex", selection: $sex) {
-                        ForEach(BabySex.allCases) { value in
+                        ForEach(ProfileSex.allCases) { value in
                             Text(value.displayName).tag(value)
                         }
                     }
@@ -1530,6 +1559,14 @@ private struct FirstRunOnboardingView: View {
                         )
                     }
                 }
+
+                Toggle("Share this profile with Family Sync", isOn: $sharesWithFamily)
+
+                Text(sharesWithFamily
+                    ? "This profile and its care records can be included if you connect Family Sync."
+                    : "This profile stays private. You can opt in to Family Sync later.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .padding(18)
             .appSurface()
@@ -1554,7 +1591,7 @@ private struct FirstRunOnboardingView: View {
             return
         }
         guard isProfileStepValid else {
-            validationMessage = "Enter a \(profileType == .dog ? "dog" : "child") name."
+            validationMessage = "Enter a name for this care profile."
             return
         }
 
@@ -1565,9 +1602,20 @@ private struct FirstRunOnboardingView: View {
                 name: trimmedProfileName,
                 birthDate: birthDate,
                 sex: sex,
+                sharingScope: sharesWithFamily ? .family : .privateOnly,
                 adoptionDate: hasAdoptionDate ? adoptionDate : nil,
                 breed: breed.nilIfBlank,
                 displayColor: "teal",
+                context: modelContext
+            )
+        } else if profileType == .adult {
+            profileService.createAdultProfile(
+                name: trimmedProfileName,
+                birthDate: hasBirthDate ? birthDate : nil,
+                sex: sex,
+                relationship: adultRelationship,
+                sharingScope: sharesWithFamily ? .family : .privateOnly,
+                displayColor: "purple",
                 context: modelContext
             )
         } else {
@@ -1575,6 +1623,7 @@ private struct FirstRunOnboardingView: View {
                 name: trimmedProfileName,
                 birthDate: birthDate,
                 sex: sex,
+                sharingScope: sharesWithFamily ? .family : .privateOnly,
                 displayColor: "indigo",
                 context: modelContext
             )
@@ -1606,6 +1655,7 @@ enum DebugSimulatorSmokeSeedService {
     static let inventoryItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000601")!
     static let mealPrepItemID = UUID(uuidString: "00000000-0000-0000-0000-000000000701")!
     static let storeID = UUID(uuidString: "00000000-0000-0000-0000-000000000801")!
+    private static let profilePhotoID = UUID(uuidString: "00000000-0000-0000-0000-000000000901")!
 
     private static let produceSectionID = UUID(uuidString: "00000000-0000-0000-0000-000000000802")!
     private static let coldSectionID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
@@ -1674,7 +1724,7 @@ enum DebugSimulatorSmokeSeedService {
             case 2: .diaper
             default: .activity
             }
-            let event = BabyEvent(
+            let event = CareEvent(
                 profileID: profile.id,
                 type: type,
                 startDate: date,
@@ -1815,6 +1865,12 @@ enum DebugSimulatorSmokeSeedService {
             displayColor: "indigo",
             context: context
         )
+        if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TEST_UNOWNED_PROFILE"] == "1" {
+            child.ownerIdentifier = ""
+        }
+        if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TEST_PROFILE_PHOTO"] == "1" {
+            seedProfilePhoto(for: child, context: context)
+        }
         _ = fetchOrCreateProfile(
             id: dogProfileID,
             profileType: .dog,
@@ -1837,12 +1893,44 @@ enum DebugSimulatorSmokeSeedService {
     }
 
     @MainActor
+    private static func seedProfilePhoto(for profile: CareProfile, context: ModelContext) {
+        let size = CGSize(width: 240, height: 100)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 80, height: size.height))
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 80, y: 0, width: 80, height: size.height))
+            UIColor.systemIndigo.setFill()
+            context.fill(CGRect(x: 160, y: 0, width: 80, height: size.height))
+        }
+        guard let data = image.pngData() else { return }
+
+        if let attachment = fetch(PhotoAttachment.self, id: profilePhotoID, context: context) {
+            attachment.imageData = data
+            attachment.thumbnailData = data
+            attachment.updatedAt = Date()
+        } else {
+            context.insert(PhotoAttachment(
+                id: profilePhotoID,
+                profileID: profile.id,
+                ownerKind: .profilePhoto,
+                contentType: "image/png",
+                filename: "simulator-profile-photo.png",
+                imageData: data,
+                thumbnailData: data
+            ))
+        }
+        profile.profilePhotoAttachmentID = profilePhotoID
+        profile.updatedAt = Date()
+    }
+
+    @MainActor
     private static func fetchOrCreateProfile(
         id: UUID,
         profileType: CareProfileType,
         name: String,
         birthDate: Date,
-        sex: BabySex,
+        sex: ProfileSex,
         displayColor: String,
         adoptionDate: Date? = nil,
         breed: String? = nil,
@@ -1959,11 +2047,11 @@ enum DebugSimulatorSmokeSeedService {
         title: String?,
         notes: String?,
         context: ModelContext,
-        configure: (BabyEvent) -> Void
+        configure: (CareEvent) -> Void
     ) {
         let resolvedEndDate = type.supportsTimer ? endDate : nil
         let timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
-        let event = fetch(BabyEvent.self, id: id, context: context) ?? BabyEvent(
+        let event = fetch(CareEvent.self, id: id, context: context) ?? CareEvent(
             id: id,
             profileID: profile.id,
             type: type,

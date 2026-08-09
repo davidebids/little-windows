@@ -901,6 +901,10 @@ private struct RoutineStepBuilderRow: View {
         eventTypes.filter(\.supportsTimer)
     }
 
+    private var activityTypes: [ActivityType] {
+        profileType.map(ActivityType.cases(for:)) ?? ActivityType.allCases
+    }
+
     private var selectedEventTypes: [EventType] {
         switch step.action {
         case .startTimer:
@@ -970,7 +974,7 @@ private struct RoutineStepBuilderRow: View {
 
                 if step.eventType == .activity {
                     Picker("Activity", selection: $step.activityType) {
-                        ForEach(ActivityType.allCases) { activity in
+                        ForEach(activityTypes) { activity in
                             Text(activity.displayName).tag(activity)
                         }
                     }
@@ -991,6 +995,10 @@ private struct RoutineStepBuilderRow: View {
         guard !selectedEventTypes.isEmpty else { return }
         if !selectedEventTypes.contains(step.eventType) {
             step.eventType = selectedEventTypes.first ?? .custom
+        }
+        if step.eventType == .activity,
+           !activityTypes.contains(step.activityType) {
+            step.activityType = profileType.map(ActivityType.defaultValue(for:)) ?? .custom
         }
     }
 }

@@ -56,9 +56,9 @@ enum WatchFavoritePreferenceStore {
 @MainActor
 enum WatchStateFactory {
     static func make(context: ModelContext, now: Date = Date()) -> WatchCompanionState {
-        let fetchedProfiles = ((try? context.fetch(FetchDescriptor<BabyProfile>(
+        let fetchedProfiles = ((try? context.fetch(FetchDescriptor<CareProfile>(
             predicate: #Predicate { !$0.isArchived },
-            sortBy: [SortDescriptor(\BabyProfile.createdAt)]
+            sortBy: [SortDescriptor(\CareProfile.createdAt)]
         ))) ?? [])
         var seenProfileIDs = Set<UUID>()
         let profiles = fetchedProfiles.filter {
@@ -87,16 +87,16 @@ enum WatchStateFactory {
             value: -14,
             to: Calendar.current.startOfDay(for: now)
         ) ?? now
-        var descriptor = FetchDescriptor<BabyEvent>(
+        var descriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate { event in
                 event.profileID == profileID
                     && (event.startDate >= recentCutoff || event.endDate == nil)
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         descriptor.fetchLimit = 600
         let events = (try? context.fetch(descriptor)) ?? []
-        var activeTimerDescriptor = FetchDescriptor<BabyEvent>(
+        var activeTimerDescriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate { $0.endDate == nil }
         )
         activeTimerDescriptor.fetchLimit = 300
@@ -205,6 +205,13 @@ enum WatchStateFactory {
                 tintName: $0.tintName
             )
         }
+        let upcomingMedication = selectedProfile.profileType == .adult
+            ? upcomingMedication(
+                profileID: profileID,
+                context: context,
+                now: now
+            )
+            : nil
 
         return WatchCompanionState(
             schemaVersion: WatchCompanionProtocol.schemaVersion,
@@ -229,8 +236,103 @@ enum WatchStateFactory {
             prediction: currentPrediction,
             todayMetrics: Array(metrics),
             favoriteActions: favoriteActions,
-            allActions: allActions
+            allActions: allActions,
+            upcomingMedication: upcomingMedication
         )
+    }
+
+    static func upcomingMedication(
+        profileID: UUID,
+        context: ModelContext,
+        now: Date = Date(),
+        snoozeDefaults: UserDefaults = .standard
+    ) -> WatchMedicationSnapshot? {
+        let medications = ((try? context.fetch(FetchDescriptor<Medication>(
+            predicate: #Predicate { medication in
+                medication.profileID == profileID && !medication.isArchived
+            }
+        ))) ?? [])
+        let medicationsByID = Dictionary(
+            medications.map { ($0.id, $0) },
+            uniquingKeysWith: { current, _ in current }
+        )
+        let regimens = ((try? context.fetch(FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { regimen in
+                regimen.profileID == profileID && regimen.isActive
+            }
+        ))) ?? []).filter {
+            $0.scheduleKind.isScheduled && medicationsByID[$0.medicationID] != nil
+        }
+        guard !regimens.isEmpty else { return nil }
+
+        let phases = ((try? context.fetch(FetchDescriptor<MedicationSchedulePhase>(
+            predicate: #Predicate { $0.profileID == profileID }
+        ))) ?? [])
+        let records = ((try? context.fetch(FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.profileID == profileID }
+        ))) ?? [])
+        let calendar = MedicationScheduleDate.currentCalendar()
+        let searchStart = calendar.date(byAdding: .hour, value: -12, to: now)
+            ?? now.addingTimeInterval(-12 * 60 * 60)
+        let searchEnd = calendar.date(byAdding: .day, value: 7, to: now)
+            ?? now.addingTimeInterval(7 * 24 * 60 * 60)
+        var candidates: [WatchMedicationSnapshot] = []
+
+        for regimen in regimens {
+            guard let medication = medicationsByID[regimen.medicationID],
+                  medication.profileID == profileID else { continue }
+            let regimenPhases = phases.filter {
+                $0.regimenID == regimen.id && $0.profileID == profileID
+            }
+            let regimenRecords = records.filter {
+                $0.regimenID == regimen.id
+                    && $0.medicationID == medication.id
+                    && $0.profileID == profileID
+            }
+            let occurrences = MedicationScheduleEngine.unloggedOccurrences(
+                MedicationScheduleEngine.occurrences(
+                    regimen: regimen,
+                    phases: regimenPhases,
+                    from: searchStart,
+                    through: searchEnd,
+                    calendar: calendar
+                ),
+                records: regimenRecords
+            )
+            candidates.append(contentsOf: occurrences.map { occurrence in
+                WatchMedicationSnapshot(
+                    profileID: profileID,
+                    medicationID: medication.id,
+                    regimenID: regimen.id,
+                    phaseID: occurrence.phaseID,
+                    occurrenceKey: occurrence.occurrenceKey,
+                    medicationName: medication.name,
+                    scheduledAt: occurrence.scheduledAt,
+                    doseAmount: occurrence.doseAmount,
+                    doseUnit: occurrence.doseUnit,
+                    snoozeAvailable: regimen.remindersEnabled
+                        && abs(occurrence.scheduledAt.timeIntervalSince(now)) <= 30 * 60
+                        && !MedicationSnoozeStateStore.isSnoozed(
+                            occurrenceKey: occurrence.occurrenceKey,
+                            now: now,
+                            defaults: snoozeDefaults
+                        )
+                )
+            })
+        }
+
+        let overdue = candidates.filter { $0.scheduledAt <= now }.max {
+            if $0.scheduledAt != $1.scheduledAt {
+                return $0.scheduledAt < $1.scheduledAt
+            }
+            return $0.id > $1.id
+        }
+        return overdue ?? candidates.min {
+            if $0.scheduledAt != $1.scheduledAt {
+                return $0.scheduledAt < $1.scheduledAt
+            }
+            return $0.id < $1.id
+        }
     }
 
     static func smartFavorites(

@@ -35,8 +35,8 @@ struct SleepMiniPlanTimelineItem: Hashable, Identifiable {
 
 enum SleepMiniPlanService {
     static func plan(
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         prediction: SleepPrediction?,
         now: Date,
@@ -45,7 +45,7 @@ enum SleepMiniPlanService {
         guard profile.profileType == .child else { return nil }
         let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
         var hasCompletedSleep = false
-        var recentSleeps: [BabyEvent] = []
+        var recentSleeps: [CareEvent] = []
         for event in events where event.isSleepBlock && !event.isTimerDraft && event.endDate != nil && event.startDate <= now {
             hasCompletedSleep = true
             if event.startDate >= recentCutoff {
@@ -203,7 +203,7 @@ enum SleepMiniPlanService {
     }
 
     private static func dayAheadItems(
-        recentSleeps: [BabyEvent],
+        recentSleeps: [CareEvent],
         prediction: SleepPrediction?,
         now: Date,
         calendar: Calendar
@@ -212,7 +212,7 @@ enum SleepMiniPlanService {
 
         if let lastSleep = recentSleeps
             .filter(\.isSleepBlock)
-            .compactMap({ event -> BabyEvent? in
+            .compactMap({ event -> CareEvent? in
                 guard let endDate = event.endDate, endDate <= now else { return nil }
                 return event
             })
@@ -648,9 +648,9 @@ enum ActiveSleepPlanService {
 
     static func wakeAlert(
         for activePlan: ActiveSleepPlan?,
-        profile: BabyProfile?,
-        events: [BabyEvent],
-        activeSleep: BabyEvent?,
+        profile: CareProfile?,
+        events: [CareEvent],
+        activeSleep: CareEvent?,
         now: Date = Date(),
         calendar: Calendar = .current,
         settings: PredictionSettings = .default
@@ -736,8 +736,8 @@ enum SleepPredictionEngine {
     }
 
     static func latestWakeDateForBedtime(
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        events: [CareEvent],
         targetBedtime: Date,
         now: Date = Date(),
         calendar: Calendar = .current,
@@ -778,8 +778,8 @@ enum SleepPredictionEngine {
     }
 
     static func backwardsPlan(
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        events: [CareEvent],
         targetBedtime: Date,
         now: Date = Date(),
         calendar: Calendar = .current,
@@ -1011,13 +1011,15 @@ enum SleepPredictionEngine {
     }
 
     static func predict(
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        events: [CareEvent],
         records: [SleepPredictionRecord] = [],
         now: Date = Date(),
         calendar: Calendar = .current,
         settings: PredictionSettings = .default
     ) -> SleepPrediction? {
+        guard profile.profileType.capabilities.supportsSleepPrediction,
+              let birthDate = profile.birthDate else { return nil }
         if events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) {
             return nil
         }
@@ -1045,7 +1047,7 @@ enum SleepPredictionEngine {
         let clipped = clipOutliers(samples)
         let stats = statistics(for: clipped)
         let baseline = ageBaselineMinutes(
-            birthDate: profile.birthDate,
+            birthDate: birthDate,
             date: now,
             customMinimum: settings.customBaselineMinimum,
             customMaximum: settings.customBaselineMaximum,
@@ -1247,19 +1249,21 @@ enum SleepPredictionEngine {
     }
 
     static func sleepPressure(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord] = [],
         now: Date = Date(),
         calendar: Calendar = .current,
         settings: PredictionSettings = .default
     ) -> SleepPressure? {
-        guard let profile, profile.profileType == .child else { return nil }
+        guard let profile,
+              profile.profileType.capabilities.supportsSleepPrediction,
+              let birthDate = profile.birthDate else { return nil }
         guard !events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) else {
             return nil
         }
 
-        let ageDays = max(0, calendar.dateComponents([.day], from: profile.birthDate, to: now).day ?? 0)
+        let ageDays = max(0, calendar.dateComponents([.day], from: birthDate, to: now).day ?? 0)
         let ageMonths = Double(ageDays) / 30.4375
         if ageMonths < 4 {
             return SleepPressure(
@@ -1323,7 +1327,7 @@ enum SleepPredictionEngine {
         )
         let stats = statistics(for: clipOutliers(samples))
         let baseline = ageBaselineMinutes(
-            birthDate: profile.birthDate,
+            birthDate: birthDate,
             date: now,
             customMinimum: settings.customBaselineMinimum,
             customMaximum: settings.customBaselineMaximum,
@@ -1503,7 +1507,7 @@ enum SleepPredictionEngine {
     }
 
     static func wakeWindowSamples(
-        from sleeps: [BabyEvent],
+        from sleeps: [CareEvent],
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [WakeWindowSample] {
@@ -1542,7 +1546,7 @@ enum SleepPredictionEngine {
         }
     }
 
-    static func napIndex(for sleep: BabyEvent, among sleeps: [BabyEvent], calendar: Calendar = .current) -> Int {
+    static func napIndex(for sleep: CareEvent, among sleeps: [CareEvent], calendar: Calendar = .current) -> Int {
         guard sleep.sleepKind != .nightSleep else { return 5 }
         let earlierNaps = sleeps.filter {
             $0.id != sleep.id &&
@@ -1553,7 +1557,7 @@ enum SleepPredictionEngine {
         return min(4, earlierNaps + 1)
     }
 
-    static func nextNapIndex(events: [BabyEvent], date: Date, calendar: Calendar = .current) -> Int {
+    static func nextNapIndex(events: [CareEvent], date: Date, calendar: Calendar = .current) -> Int {
         min(4, events.filter {
             $0.isSleepBlock &&
             $0.sleepKind == .nap &&
@@ -1709,7 +1713,7 @@ enum SleepPredictionEngine {
     }
 
     private static func typicalDailyNapCount(
-        events: [BabyEvent],
+        events: [CareEvent],
         now: Date,
         calendar: Calendar
     ) -> Double {
@@ -1721,7 +1725,7 @@ enum SleepPredictionEngine {
     }
 
     private static func circularTypicalTime(
-        for events: [BabyEvent],
+        for events: [CareEvent],
         on targetDate: Date,
         calendar: Calendar
     ) -> Date? {
@@ -1739,8 +1743,8 @@ enum SleepPredictionEngine {
     }
 
     private static func typicalDailyNapCountForPlanning(
-        events: [BabyEvent],
-        profile: BabyProfile,
+        events: [CareEvent],
+        profile: CareProfile,
         date: Date,
         calendar: Calendar,
         settings: PredictionSettings
@@ -1751,8 +1755,9 @@ enum SleepPredictionEngine {
             let average = Double(grouped.values.reduce(0) { $0 + $1.count }) / Double(grouped.count)
             return min(4, max(1, Int(average.rounded())))
         }
+        guard let birthDate = profile.birthDate else { return 2 }
         let baseline = ageBaselineMinutes(
-            birthDate: profile.birthDate,
+            birthDate: birthDate,
             date: date,
             customMinimum: settings.customBaselineMinimum,
             customMaximum: settings.customBaselineMaximum,
@@ -1772,7 +1777,7 @@ enum SleepPredictionEngine {
     }
 
     private static func napDurationAveragesByIndex(
-        from sleeps: [BabyEvent],
+        from sleeps: [CareEvent],
         calendar: Calendar
     ) -> [Int: Double] {
         var values = [Int: [Double]]()
@@ -1788,7 +1793,7 @@ enum SleepPredictionEngine {
     }
 
     private static func wakeWindowAveragesByNextSleepIndex(
-        from sleeps: [BabyEvent],
+        from sleeps: [CareEvent],
         now: Date,
         calendar: Calendar
     ) -> [Int: Double] {
@@ -1800,7 +1805,7 @@ enum SleepPredictionEngine {
     }
 
     private static func typicalMorningWakeDate(
-        from sleeps: [BabyEvent],
+        from sleeps: [CareEvent],
         on date: Date,
         calendar: Calendar
     ) -> Date? {
@@ -1824,13 +1829,14 @@ enum SleepPredictionEngine {
     }
 
     private static func fallbackWakeWindowMinutes(
-        profile: BabyProfile,
+        profile: CareProfile,
         date: Date,
         settings: PredictionSettings,
         calendar: Calendar
     ) -> Double {
+        guard let birthDate = profile.birthDate else { return 120 }
         let baseline = ageBaselineMinutes(
-            birthDate: profile.birthDate,
+            birthDate: birthDate,
             date: date,
             customMinimum: settings.customBaselineMinimum,
             customMaximum: settings.customBaselineMaximum,
@@ -1877,7 +1883,7 @@ enum SleepPredictionEngine {
     }
 
     private static func totalSleepMinutes(
-        events: [BabyEvent],
+        events: [CareEvent],
         start: Date,
         end: Date
     ) -> Double {
@@ -1890,7 +1896,7 @@ enum SleepPredictionEngine {
         }
     }
 
-    private static func sourceDayCount(from sleeps: [BabyEvent], calendar: Calendar) -> Int {
+    private static func sourceDayCount(from sleeps: [CareEvent], calendar: Calendar) -> Int {
         Set(sleeps.map { calendar.startOfDay(for: $0.startDate) }).count
     }
 

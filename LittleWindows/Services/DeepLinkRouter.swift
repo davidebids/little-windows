@@ -71,15 +71,15 @@ enum CareProfileRequirement: String, Identifiable, Equatable {
     var detail: String {
         switch self {
         case .logging:
-            "Add a child or dog profile before starting timers or recording care."
+            "Add a child, adult, or dog profile before recording care."
         case .reports:
-            "Reports organize history for a specific child or dog, so they need a care profile."
+            "Reports organize history for a specific care profile."
         case .care:
-            "Memories, guides, milestones, and solids are organized around a child or dog profile."
+            "Medications, health logs, memories, guides, and milestones are organized around a care profile."
         case .appointments:
-            "Appointments and visit notes stay attached to a specific child or dog profile."
+            "Appointments and visit notes stay attached to a specific care profile."
         case .routines:
-            "Care routines need a child or dog profile. Home tasks and reminders remain available in Home."
+            "Care routines need a care profile. Home tasks and reminders remain available in Home."
         }
     }
 
@@ -138,6 +138,8 @@ enum AppNavigationPolicy {
             return .logging
         case "history", "reports", "calendar", "medical", "insights", "prediction":
             return .reports
+        case "medications":
+            return .care
         case "appointments", "visits", "appointment":
             return .appointments
         case "routines":
@@ -224,6 +226,20 @@ enum RoutineRouteCommand: Equatable {
     case list
 }
 
+struct MedicationDoseRouteCommand: Equatable, Hashable, Identifiable {
+    var profileID: UUID
+    var medicationID: UUID
+    var regimenID: UUID
+    var phaseID: UUID?
+    var occurrenceKey: String
+    var scheduledAt: Date
+    var doseAmount: Double
+    var doseUnit: String
+    var status: MedicationDoseStatus
+
+    var id: String { "\(occurrenceKey)|\(status.rawValue)" }
+}
+
 enum NightLightCommand: Equatable {
     case open
     case start(NightLightPresetKind?)
@@ -257,6 +273,8 @@ final class DeepLinkRouter: ObservableObject {
     @Published var pendingAgeGuideCommand: AgeGuideRouteCommand?
     @Published var pendingPuppyGuideCommand: PuppyGuideRouteCommand?
     @Published var pendingRoutineCommand: RoutineRouteCommand?
+    @Published var pendingMedications = false
+    @Published var pendingMedicationDoseCommand: MedicationDoseRouteCommand?
     @Published var pendingSolidsCommand: FoodRouteCommand?
     @Published var pendingSolidsOrigin: SolidsNavigationOrigin?
     @Published var pendingFoodCommand: FoodRouteCommand?
@@ -295,6 +313,15 @@ final class DeepLinkRouter: ObservableObject {
         lastRequestedURL = nil
         todayDisplayMode = .care
         selectedTab = .today
+        recordNavigationRequest(nil)
+    }
+
+    func openMedicationDose(_ command: MedicationDoseRouteCommand) {
+        lastRequestedURL = nil
+        pendingProfileID = command.profileID
+        pendingMedicationDoseCommand = command
+        pendingMedications = true
+        selectedTab = .milestones
         recordNavigationRequest(nil)
     }
 
@@ -395,7 +422,7 @@ final class DeepLinkRouter: ObservableObject {
                 openSolids(.plannedSolidMeal(uuid), returningTo: nil)
             }
         } else if components == ["food", "solids", "tracker"] {
-            openSolids(.solidsTracker, returningTo: nil)
+            openSolids(.solidsTracker(.all), returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",
@@ -524,6 +551,9 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["medical"] {
             selectedReportsMode = .summary
             selectedTab = .reports
+        } else if components == ["medications"] {
+            pendingMedications = true
+            selectedTab = .milestones
         } else if components == ["insights"] {
             selectedReportsMode = .summary
             selectedTab = .reports
@@ -597,7 +627,20 @@ final class DeepLinkRouter: ObservableObject {
         } else if components == ["quick-log", "training"] {
             openToday(action: .startTimer(.training, nil))
         } else if components == ["quick-log", "medicine"] {
-            openToday(action: .logEvent(.medicine))
+            pendingMedications = true
+            selectedTab = .milestones
+        } else if components == ["quick-log", "symptom"] {
+            openToday(action: .logEvent(.symptom))
+        } else if components == ["quick-log", "blood-pressure"] {
+            openToday(action: .logEvent(.bloodPressure))
+        } else if components == ["quick-log", "heart-rate"] {
+            openToday(action: .logEvent(.heartRate))
+        } else if components == ["quick-log", "oxygen-saturation"] {
+            openToday(action: .logEvent(.oxygenSaturation))
+        } else if components == ["quick-log", "glucose"] {
+            openToday(action: .logEvent(.glucose))
+        } else if components == ["quick-log", "pain"] {
+            openToday(action: .logEvent(.pain))
         } else if components == ["quick-log", "nursing-left"] {
             openToday(action: .startTimer(.nursing, .left))
         } else if components == ["quick-log", "nursing-right"] {
@@ -662,6 +705,8 @@ final class DeepLinkRouter: ObservableObject {
         if pendingAgeGuideCommand != nil { pendingAgeGuideCommand = nil }
         if pendingPuppyGuideCommand != nil { pendingPuppyGuideCommand = nil }
         if pendingRoutineCommand != nil { pendingRoutineCommand = nil }
+        if pendingMedications { pendingMedications = false }
+        if pendingMedicationDoseCommand != nil { pendingMedicationDoseCommand = nil }
         if pendingSolidsCommand != nil { pendingSolidsCommand = nil }
         if pendingSolidsOrigin != nil { pendingSolidsOrigin = nil }
         if pendingInsightsSection != nil { pendingInsightsSection = nil }

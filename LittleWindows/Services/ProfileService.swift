@@ -32,6 +32,10 @@ final class ProfileService: ObservableObject {
         allActiveProfiles(in: profiles).filter { $0.profileType == .child }
     }
 
+    func allAdultProfiles(in profiles: [CareProfile]) -> [CareProfile] {
+        allActiveProfiles(in: profiles).filter { $0.profileType == .adult }
+    }
+
     func allDogProfiles(in profiles: [CareProfile]) -> [CareProfile] {
         allActiveProfiles(in: profiles).filter { $0.profileType == .dog }
     }
@@ -64,7 +68,8 @@ final class ProfileService: ObservableObject {
     func createChildProfile(
         name: String,
         birthDate: Date,
-        sex: BabySex,
+        sex: ProfileSex,
+        sharingScope: CareProfileSharingScope = .privateOnly,
         notes: String = "",
         displayColor: String? = nil,
         context: ModelContext
@@ -74,6 +79,35 @@ final class ProfileService: ObservableObject {
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             birthDate: birthDate,
             sex: sex,
+            sharingScope: sharingScope,
+            notes: notes,
+            displayColor: displayColor
+        )
+        context.insert(profile)
+        switchProfile(profile)
+        _ = PersistenceService.save(context: context)
+        SystemIntegrationReconciler.requestReconciliation()
+        return profile
+    }
+
+    @discardableResult
+    func createAdultProfile(
+        name: String,
+        birthDate: Date? = nil,
+        sex: ProfileSex = .unknown,
+        relationship: AdultCareRelationship,
+        sharingScope: CareProfileSharingScope = .privateOnly,
+        notes: String = "",
+        displayColor: String? = "purple",
+        context: ModelContext
+    ) -> CareProfile {
+        let profile = CareProfile(
+            profileType: .adult,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            birthDate: birthDate,
+            sex: sex,
+            adultRelationship: relationship,
+            sharingScope: sharingScope,
             notes: notes,
             displayColor: displayColor
         )
@@ -88,7 +122,8 @@ final class ProfileService: ObservableObject {
     func createDogProfile(
         name: String,
         birthDate: Date,
-        sex: BabySex = .unknown,
+        sex: ProfileSex = .unknown,
+        sharingScope: CareProfileSharingScope = .privateOnly,
         adoptionDate: Date? = nil,
         breed: String? = nil,
         coatColor: String? = nil,
@@ -106,6 +141,7 @@ final class ProfileService: ObservableObject {
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             birthDate: birthDate,
             sex: sex,
+            sharingScope: sharingScope,
             notes: notes,
             displayColor: displayColor,
             adoptionDate: adoptionDate,
@@ -125,12 +161,47 @@ final class ProfileService: ObservableObject {
         return profile
     }
 
-    func updateChildProfile(_ profile: CareProfile) {
+    func updateProfile(_ profile: CareProfile) {
         profile.updatedAt = Date()
         switchProfile(profile)
         if let context = profile.modelContext {
             _ = PersistenceService.save(context: context)
         }
+    }
+
+    func canChangeSharingScope(
+        for profile: CareProfile,
+        caregiverIdentifier: String = CaregiverIdentityService.stableCaregiverIdentifier()
+    ) -> Bool {
+        let ownerIdentifier = profile.ownerIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return ownerIdentifier.isEmpty || ownerIdentifier == caregiverIdentifier
+    }
+
+    @discardableResult
+    func setSharingScope(
+        _ sharingScope: CareProfileSharingScope,
+        for profile: CareProfile,
+        caregiverIdentifier: String = CaregiverIdentityService.stableCaregiverIdentifier()
+    ) -> Bool {
+        guard canChangeSharingScope(
+            for: profile,
+            caregiverIdentifier: caregiverIdentifier
+        ) else {
+            return false
+        }
+
+        if profile.ownerIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            profile.ownerIdentifier = caregiverIdentifier
+        }
+        profile.sharingScope = sharingScope
+        return true
+    }
+
+
+    @available(*, deprecated, renamed: "updateProfile")
+    func updateChildProfile(_ profile: CareProfile) {
+        updateProfile(profile)
     }
 
     func archiveProfile(
@@ -144,7 +215,7 @@ final class ProfileService: ObservableObject {
         let archivesFinalActiveProfile = active.count == 1
         let archivedAt = Date()
         let profileID = profile.id
-        let openTimers = (try? context.fetch(FetchDescriptor<BabyEvent>(
+        let openTimers = (try? context.fetch(FetchDescriptor<CareEvent>(
             predicate: #Predicate {
                 $0.profileID == profileID && $0.endDate == nil
             }
@@ -244,7 +315,32 @@ final class ProfileService: ObservableObject {
     }
 
     private func deleteProfileScopedRecords(profileID: UUID, context: ModelContext) {
-        deleteProfileScopedRecords(of: BabyEvent.self, profileID: profileID, context: context)
+        let routineIDs = Set(
+            ((try? context.fetch(FetchDescriptor<CareRoutine>())) ?? [])
+                .filter { $0.profileID == profileID }
+                .map(\.id)
+        )
+        ((try? context.fetch(FetchDescriptor<CareRoutineRun>())) ?? [])
+            .filter { $0.profileID == profileID || routineIDs.contains($0.routineID) }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<CareRoutineStep>())) ?? [])
+            .filter { routineIDs.contains($0.routineID) }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<CareRoutine>())) ?? [])
+            .filter { routineIDs.contains($0.id) }
+            .forEach { context.delete($0) }
+        ((try? context.fetch(FetchDescriptor<TripTraveler>())) ?? [])
+            .filter { $0.profileID == profileID }
+            .forEach {
+                $0.profileID = nil
+                $0.updatedAt = Date()
+            }
+        deleteProfileScopedRecords(of: CareEvent.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: Medication.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: MedicationRegimen.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: MedicationSchedulePhase.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: MedicationDoseRecord.self, profileID: profileID, context: context)
+        deleteProfileScopedRecords(of: MedicationSupplyLog.self, profileID: profileID, context: context)
         deleteProfileScopedRecords(of: SleepPredictionRecord.self, profileID: profileID, context: context)
         deleteProfileScopedRecords(of: MilestoneEntry.self, profileID: profileID, context: context)
         deleteProfileScopedRecords(of: DoctorAppointment.self, profileID: profileID, context: context)
@@ -402,13 +498,30 @@ enum ProfileDuplicateRepairService {
         guard lhs.profileType == rhs.profileType,
               normalized(lhs.name) == normalized(rhs.name),
               lhs.sex == rhs.sex,
-              Calendar.current.isDate(lhs.birthDate, inSameDayAs: rhs.birthDate),
+              optionalDatesMatch(lhs.birthDate, rhs.birthDate),
+              lhs.sharingScope == rhs.sharingScope,
+              lhs.ownerIdentifier == rhs.ownerIdentifier,
               lhs.isArchived == rhs.isArchived else {
             return false
         }
-        guard lhs.profileType == .dog else { return true }
-        return optionalDatesAreCompatible(lhs.adoptionDate, rhs.adoptionDate)
-            && optionalTextIsCompatible(lhs.breed, rhs.breed)
+        switch lhs.profileType {
+        case .child:
+            return true
+        case .adult:
+            return lhs.adultRelationship == rhs.adultRelationship
+        case .dog:
+            return optionalDatesAreCompatible(lhs.adoptionDate, rhs.adoptionDate)
+                && optionalTextIsCompatible(lhs.breed, rhs.breed)
+        }
+    }
+
+    private static func optionalDatesMatch(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none): true
+        case (.some(let lhs), .some(let rhs)):
+            Calendar.current.isDate(lhs, inSameDayAs: rhs)
+        default: false
+        }
     }
 
     private static func optionalDatesAreCompatible(_ lhs: Date?, _ rhs: Date?) -> Bool {
@@ -442,11 +555,36 @@ enum ProfileDuplicateRepairService {
     }
 
     private static func hasLinkedData(profileID: UUID, context: ModelContext) -> Bool? {
-        guard let hasBabyEvents = hasRecord(
-            FetchDescriptor<BabyEvent>(predicate: #Predicate { $0.profileID == profileID }),
+        guard let hasCareEvents = hasRecord(
+            FetchDescriptor<CareEvent>(predicate: #Predicate { $0.profileID == profileID }),
             context: context
         ) else { return nil }
-        if hasBabyEvents { return true }
+        if hasCareEvents { return true }
+        guard let hasMedications = hasRecord(
+            FetchDescriptor<Medication>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasMedications { return true }
+        guard let hasMedicationRegimens = hasRecord(
+            FetchDescriptor<MedicationRegimen>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasMedicationRegimens { return true }
+        guard let hasMedicationPhases = hasRecord(
+            FetchDescriptor<MedicationSchedulePhase>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasMedicationPhases { return true }
+        guard let hasMedicationDoses = hasRecord(
+            FetchDescriptor<MedicationDoseRecord>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasMedicationDoses { return true }
+        guard let hasMedicationSupplyLogs = hasRecord(
+            FetchDescriptor<MedicationSupplyLog>(predicate: #Predicate { $0.profileID == profileID }),
+            context: context
+        ) else { return nil }
+        if hasMedicationSupplyLogs { return true }
         guard let hasPredictions = hasRecord(
             FetchDescriptor<SleepPredictionRecord>(predicate: #Predicate { $0.profileID == profileID }),
             context: context
@@ -577,7 +715,7 @@ enum ProfileMigrationService {
         context: ModelContext,
         validProfileIDs: Set<UUID>
     ) -> Bool {
-        hasOrphanedBabyEvents(context: context, validProfileIDs: validProfileIDs)
+        hasOrphanedCareEvents(context: context, validProfileIDs: validProfileIDs)
             || hasOrphanedPredictionRecords(context: context, validProfileIDs: validProfileIDs)
             || hasOrphanedMilestones(context: context, validProfileIDs: validProfileIDs)
             || hasOrphanedAppointments(context: context, validProfileIDs: validProfileIDs)
@@ -590,16 +728,16 @@ enum ProfileMigrationService {
             || hasOrphanedPlannedSolidMeals(context: context, validProfileIDs: validProfileIDs)
     }
 
-    private static func hasOrphanedBabyEvents(
+    private static func hasOrphanedCareEvents(
         context: ModelContext,
         validProfileIDs: Set<UUID>
     ) -> Bool {
-        let total = (try? context.fetchCount(FetchDescriptor<BabyEvent>())) ?? 0
+        let total = (try? context.fetchCount(FetchDescriptor<CareEvent>())) ?? 0
         guard total > 0 else { return false }
         guard !validProfileIDs.isEmpty else { return true }
         let validCount = validProfileIDs.reduce(0) { partial, profileID in
-            let descriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { $0.profileID == profileID }
+            let descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate<CareEvent> { $0.profileID == profileID }
             )
             return partial + ((try? context.fetchCount(descriptor)) ?? 0)
         }
@@ -776,7 +914,7 @@ enum ProfileMigrationService {
         validProfileIDs: Set<UUID>,
         context: ModelContext
     ) {
-        ((try? context.fetch(FetchDescriptor<BabyEvent>())) ?? [])
+        ((try? context.fetch(FetchDescriptor<CareEvent>())) ?? [])
             .filter { $0.hasOrphanedProfileID(validProfileIDs) }
             .forEach {
                 $0.profileID = profileID
@@ -845,6 +983,7 @@ enum ProfileMigrationService {
             .filter { !validProfileIDs.contains($0[keyPath: profileIDKeyPath]) }
             .forEach { $0[keyPath: profileIDKeyPath] = profileID }
     }
+
 }
 
 private extension ProfileScopedRecord {

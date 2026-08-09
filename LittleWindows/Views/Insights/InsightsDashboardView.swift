@@ -4,12 +4,12 @@ import SwiftUI
 
 struct InsightsDashboardView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     let navigationTitle: String
     @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var viewModel = InsightsViewModel()
     @StateObject private var profileService = ProfileService.shared
-    @State private var events: [BabyEvent] = []
+    @State private var events: [CareEvent] = []
     @State private var appointments: [DoctorAppointment] = []
     @State private var records: [SleepPredictionRecord] = []
 
@@ -17,13 +17,13 @@ struct InsightsDashboardView: View {
         self.navigationTitle = navigationTitle
     }
 
-    private var profile: BabyProfile? {
+    private var profile: CareProfile? {
         profileService.selectedProfile(in: profiles)
     }
     private var isDogProfile: Bool {
         profile?.profileType == .dog
     }
-    private var scopedEvents: [BabyEvent] {
+    private var scopedEvents: [CareEvent] {
         events.filter { $0.matchesProfile(profile?.id) }
     }
     private var scopedAppointments: [DoctorAppointment] {
@@ -43,7 +43,16 @@ struct InsightsDashboardView: View {
         ].joined(separator: "-")
     }
 
+    @ViewBuilder
     var body: some View {
+        if let profile, profile.profileType == .adult {
+            AdultHealthOverviewView(profile: profile)
+        } else {
+            standardDashboard
+        }
+    }
+
+    private var standardDashboard: some View {
         ScrollView {
             LazyVStack(spacing: 18) {
                 controls
@@ -303,37 +312,37 @@ struct InsightsDashboardView: View {
 
         do {
             if let selectedProfileID, viewModel.selectedSection == .growth {
-                let descriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                let descriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == selectedProfileID && event.typeRawValue == "growth"
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate)]
                 )
                 events = try modelContext.fetch(descriptor)
             } else if viewModel.selectedSection == .growth {
-                let descriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                let descriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.typeRawValue == "growth"
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate)]
                 )
                 events = try modelContext.fetch(descriptor)
             } else if let selectedProfileID {
-                let descriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                let descriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == selectedProfileID &&
                             event.startDate >= eventFetchStart &&
                             event.startDate < eventFetchEnd
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate)]
                 )
                 events = try modelContext.fetch(descriptor)
             } else {
-                let descriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                let descriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.startDate >= eventFetchStart && event.startDate < eventFetchEnd
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate)]
                 )
                 events = try modelContext.fetch(descriptor)
             }
@@ -525,8 +534,8 @@ private struct FeedingInsightsDataView: View {
     @Query private var progress: [SolidFoodProgress]
     @Query private var profileStates: [SolidsProfileState]
 
-    let profile: BabyProfile
-    let events: [BabyEvent]
+    let profile: CareProfile
+    let events: [CareEvent]
     let snapshot: InsightsSnapshot
     let period: ClosedRange<Date>
     let insightsSection: InsightsSection
@@ -534,8 +543,8 @@ private struct FeedingInsightsDataView: View {
     @ObservedObject private var router = DeepLinkRouter.shared
 
     init(
-        profile: BabyProfile,
-        events: [BabyEvent],
+        profile: CareProfile,
+        events: [CareEvent],
         snapshot: InsightsSnapshot,
         period: ClosedRange<Date>,
         insightsSection: InsightsSection
@@ -583,7 +592,7 @@ private struct FeedingInsightsDataView: View {
         FeedingInsightsView(
             snapshot: snapshot,
             solids: solidsReport,
-            openSolidsTracker: { openSolids(.solidsTracker) },
+            openSolidsTracker: { openSolids(.solidsTracker(.all)) },
             openAllergens: { openSolids(.solidsAllergens) }
         )
         .task(id: profile.id) {

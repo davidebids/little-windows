@@ -1,6 +1,6 @@
 import Foundation
 
-enum SolidsFoodCategory: String, CaseIterable, Codable, Identifiable {
+enum SolidsFoodCategory: String, CaseIterable, Codable, Identifiable, Sendable {
     case fruit
     case vegetable
     case grain
@@ -108,10 +108,16 @@ struct SolidsAllergenGuidance: Hashable {
     var sourceURLs: [URL]
 }
 
+struct SolidsServingAmountGuidance: Hashable {
+    var firstServing: String
+    var routineServing: String
+}
+
 struct SolidsPreparationStage: Identifiable, Hashable {
     var minimumAgeMonths: Int
     var title: String
     var instructions: String
+    var servingAmount = SolidsServingAmountGuidance(firstServing: "", routineServing: "")
     var id: Int { minimumAgeMonths }
 }
 
@@ -226,7 +232,7 @@ struct SolidsReferenceFood: Identifiable, Hashable {
     var isEligibleForGuidedPath: Bool {
         // Keep foods with useful educational pages but an explicit young-child
         // avoidance recommendation out of generated meal suggestions.
-        id != "swordfish"
+        !["mackerel", "swordfish", "tuna"].contains(id)
     }
 
     var visualEmoji: String {
@@ -302,48 +308,188 @@ struct SolidsReferenceFood: Identifiable, Hashable {
                 "Prepared form and ingredients checked"
             )
         }
+        if ["cactus pear", "prickly pear"].contains(normalizedName) {
+            return (
+                "Choose a fully de-spined fruit",
+                "Use commercially de-spined \(name.lowercased()) or wear protective gloves while removing every spine and hair-like glochid. Wash the fruit, cut off the ends, peel away the entire outer skin, and keep the discarded peel away from the serving area.",
+                "Spines and peel completely removed"
+            )
+        }
         switch category {
         case .fruit:
+            let form = SolidsReferenceCatalog.fruitPreparationForm(name: name)
+            if form == .sauce {
+                return (
+                    "Check the package and portion",
+                    "Confirm that \(name.lowercased()) is unsweetened, contains no honey for a child under 12 months, and has an intact container. Spoon a small amount into a clean bowl rather than feeding from and saving the same container.",
+                    "Package and serving portion checked"
+                )
+            }
+            let inspection: String
+            switch form {
+            case .sauce:
+                inspection = ""
+            case .smallRoundBerry:
+                inspection = "Remove any stem or firm dried flower end and discard damaged berries."
+            case .aggregateBerry:
+                inspection = "Remove the stem and discard any firm core or damaged section."
+            case .roundOrSlipperyFruit:
+                inspection = "Open or cut it, then remove its pit, large seed, husk, or inedible peel as applicable."
+            case .citrus:
+                inspection = "Remove peel, seeds, tough membrane, and excess pith."
+            case .firmFruit:
+                inspection = "Remove the core and seeds; peel only when the skin is tough or damaged."
+            case .stoneFruit:
+                inspection = "Remove the entire pit and peel only if the skin is tough or damaged."
+            case .melon:
+                inspection = "Wash the rind before cutting, then remove all rind and hard seeds from the edible flesh."
+            case .softFruit:
+                inspection = "Remove the specific stem, hard seed, core, or inedible peel this fruit contains, following its food-specific safety note."
+            case .seededPulp:
+                inspection = "Wash the outside before opening, keep the rind out of the serving, and remove any large or unexpectedly hard seed."
+            case .arils:
+                inspection = "Open the fruit and separate the arils completely from the rind and membrane."
+            case .driedStickyFruit:
+                inspection = "Confirm the package is intact and the pit has been removed; inspect the fruit again before softening it."
+            case .gratedFlesh:
+                inspection = "Choose packaged finely grated or ground flesh without hard shell fragments, or safely open fresh coconut and keep every shell piece out of the edible portion."
+            case .cookBeforeServing:
+                inspection = "Wash before cutting, then peel, core, seed, or otherwise trim only as this food's specific guidance requires before thorough cooking."
+            }
+            let washing = form == .driedStickyFruit || form == .gratedFlesh
+                ? ""
+                : "Wash \(name.lowercased()) under running water before cutting. "
             return (
-                "Wash, open, and trim",
-                "Wash \(name.lowercased()) under running water before cutting. Remove the stem, rind, core, pit, tough peel, and any large or hard seed that is not meant to be eaten. Recheck the exposed flesh because hidden pits and seeds can remain.",
-                "Inedible parts removed"
+                form == .driedStickyFruit || form == .gratedFlesh ? "Inspect the prepared fruit" : "Wash and inspect the fruit",
+                "\(washing)\(inspection) \(safetyNote)",
+                "Fruit-specific inspection complete"
             )
         case .vegetable:
+            let form = SolidsReferenceCatalog.vegetablePreparationForm(name: name)
+            let trimming: String
+            switch form {
+            case .leafy:
+                trimming = "Separate and rinse the leaves well and remove thick, damaged, or woody stems."
+            case .flower:
+                trimming = "Rinse between florets and trim woody leaves or the dry end of the stem."
+            case .compactBud:
+                trimming = "Remove damaged outer leaves, trim the dry stem end, and rinse the compact bud."
+            case .squash:
+                trimming = "Wash the outside before cutting, then remove hard rind and seeds when this variety requires it."
+            case .roundKernel:
+                trimming = "Rinse loose kernels or peas, or wash the pod or cob before removing the edible pieces."
+            case .pod:
+                trimming = "Rinse the pods and remove the stem, strings, and tough seams."
+            case .stalk:
+                trimming = "Rinse well and trim the dry end plus any woody or stringy section."
+            case .bulb:
+                trimming = "Remove papery outer material or the root end as applicable, then rinse the edible layers."
+            case .softFlesh:
+                trimming = "Wash before cutting and remove the stem plus any tough peel or hard seed identified in the food-specific guidance."
+            case .root, .tuber:
+                trimming = "Scrub under running water, trim damaged sections, and peel when the skin is tough, damaged, or specifically excluded by the guidance."
+            case .fibrousSpecialty:
+                trimming = "Follow the food-specific trimming instructions and keep only the identified edible portion; discard tough, spiny, irritating, or fibrous material."
+            }
             return (
                 "Wash and trim",
-                "Rinse \(name.lowercased()) under running water and remove soil, woody ends, strings, spines, hard rind, or damaged leaves. For packaged frozen or canned vegetables, check sodium and prepare according to the label.",
+                "\(trimming) For packaged frozen or canned \(name.lowercased()), check sodium and prepare according to the label. \(safetyNote)",
                 "Vegetable washed and trimmed"
             )
         case .grain:
+            let form = SolidsReferenceCatalog.grainPreparationForm(name: name)
+            let check: String
+            switch form {
+            case .bread:
+                check = "Review the allergen label, sodium, whole nuts or hard seeds, crust firmness, and whether the bread tears easily instead of compressing into a gummy mass."
+            case .pasta:
+                check = "Review the allergen label and choose a shape that can be cooked very tender, shortened, or otherwise adapted. Measure enough cooking water and sauce to keep it moist."
+            case .puffedCereal:
+                check = "Check added sugar, sodium, allergens, and hard clusters, then test that the exact puff dissolves readily before it is used as a finger food."
+            case .softGrain:
+                check = "Sort whole dry grains for debris when applicable, review packaged cereal for allergens and added sugar, and measure enough liquid for a moist finished texture."
+            }
             return (
                 "Measure and inspect",
-                "Check \(name.lowercased()) for hard debris, dense clusters, whole nuts, seeds, and unexpected allergen ingredients. Measure enough liquid to keep the cooked result moist rather than dry or gluey.",
+                "Check \(name.lowercased()) before preparation. \(check)",
                 "Grain and liquid checked"
             )
         case .beanAndPlantProtein:
+            let form = SolidsReferenceCatalog.plantProteinPreparationForm(name: name)
+            if form == .wholePulse {
+                return (
+                    "Inspect, rinse, and sort",
+                    "Remove debris from dried \(name.lowercased()). Drain and rinse canned versions when appropriate, choose no-salt-added or lower-sodium products when practical, and plan to cook until the center mashes easily.",
+                    "Pulse sorted and rinsed"
+                )
+            }
+            if form == .sprout {
+                return (
+                    "Rinse and set up for thorough cooking",
+                    "Rinse \(name.lowercased()) and keep it separate from ready-to-eat food. Rinsing alone does not remove the sprout food-safety risk, so plan to cook it thoroughly until steaming hot.",
+                    "Sprouts rinsed and cooking setup ready"
+                )
+            }
             return (
-                "Inspect and rinse",
-                "Remove debris from dried \(name.lowercased()). Drain and rinse canned beans when appropriate, and check packaged tofu, patties, spreads, or fermented products for sodium and soy, wheat, sesame, or other allergens.",
-                "Product rinsed or label checked"
+                "Check the product and label",
+                "Inspect \(name.lowercased()) for damaged packaging, follow its refrigeration directions, and review sodium plus soy, wheat, sesame, or other allergens. Assess the actual firmness or thickness before preparing it.",
+                "Package, label, and texture checked"
             )
         case .meat:
+            let form = SolidsReferenceCatalog.meatPreparationForm(name: name)
+            let trimGuidance: String
+            switch form {
+            case .organ:
+                trimGuidance = "After cooking, remove membrane, tough ducts, or connective tissue."
+            case .ground:
+                trimGuidance = "Inspect the ingredient list for sodium and allergens and plan to keep any crumbles, patty, or meatball tender and moist."
+            case .boneIn:
+                trimGuidance = "After cooking, take all meat off the bone and inspect again for loose bone, cartilage, gristle, and tough skin."
+            case .tenderCut:
+                trimGuidance = "Use a boneless portion for the child's serving. If the cut was cooked on the bone, take the meat off and inspect it again, then remove any gristle or tough connective tissue actually present."
+            }
             return (
                 "Prevent cross-contamination",
-                "Keep raw \(name.lowercased()) separate from ready-to-eat food and do not rinse raw meat or poultry, which can spread droplets. Wash hands, board, knife, and surfaces, then remove visible bone, tough skin, and gristle after cooking as well as before.",
+                "Keep raw \(name.lowercased()) separate from ready-to-eat food and do not rinse raw meat or poultry, which can spread droplets. Wash hands, board, knife, and surfaces. \(trimGuidance)",
                 "Raw-meat setup is separate"
             )
         case .seafood:
+            let form = SolidsReferenceCatalog.seafoodPreparationForm(name: name)
+            let inspection: String
+            switch form {
+            case .crustacean:
+                inspection = "Remove the entire shell and tail after cooking and check for fragments."
+            case .bivalve:
+                inspection = "Use only the flesh after cooking and check it carefully for shell fragments."
+            case .cephalopod:
+                inspection = "Remove any inedible internal material and plan to discard sections that remain rubbery."
+            case .smallFish, .fillet:
+                inspection = "Plan to inspect the cooked flesh again for bones, which may be easier to find after cooking."
+            }
             return (
                 "Identify and inspect",
-                "Confirm the exact species and current fish advice, keep raw \(name.lowercased()) cold, and remove shell, tail, or obvious bones. Plan to inspect the cooked flesh again because fine bones and shell fragments can be easier to find after cooking.",
-                "Species, shell, and bones checked"
+                "Confirm the exact species and current fish advice, keep raw \(name.lowercased()) cold, and prevent cross-contamination. \(inspection)",
+                "Species and food-specific hazards checked"
             )
         case .dairy:
+            if normalizedName.contains("in food") {
+                return (
+                    "Check the dairy ingredient",
+                    "Confirm that \(name.lowercased()) is pasteurized, review the allergen label, and measure it into a dish rather than planning to offer it as the main milk drink before 12 months.",
+                    "Dairy ingredient checked"
+                )
+            }
+            if SolidsReferenceCatalog.scoopablePreparationKind(name: name, category: category) == .smoothDairy {
+                return (
+                    "Check pasteurization and the label",
+                    "Confirm that \(name.lowercased()) is pasteurized, choose an unsweetened product when available, and check the container, use-by date, sodium, and any mix-ins or hard toppings.",
+                    "Scoopable dairy checked"
+                )
+            }
             return (
-                "Check pasteurization and texture",
-                "Confirm that \(name.lowercased()) is pasteurized. Review sodium, added sugar, and ingredients, then assess the actual firmness—products with the same name can range from scoopable to rubbery.",
-                "Pasteurization and texture checked"
+                "Check pasteurization and cheese texture",
+                "Confirm that \(name.lowercased()) is pasteurized, review sodium and ingredients, and assess its actual moisture and firmness before choosing whether to crumble, grate, melt, or slice it thinly.",
+                "Pasteurization and cheese texture checked"
             )
         case .egg:
             return (
@@ -352,21 +498,47 @@ struct SolidsReferenceFood: Identifiable, Hashable {
                 "Egg and added ingredients checked"
             )
         case .nutAndSeed:
+            if normalizedName.contains("butter") || normalizedName == "tahini" {
+                return (
+                    "Choose a smooth spread",
+                    "Confirm the exact allergen on the label and choose smooth \(name.lowercased()) without crunchy pieces. Measure only the amount being thinned or spread for this meal.",
+                    "Smooth spread and allergen checked"
+                )
+            }
+            if normalizedName.contains("ground") {
+                return (
+                    "Inspect the ground product",
+                    "Confirm the exact allergen on the label and check \(name.lowercased()) for hard pieces or coarse fragments before mixing it fully into moist food.",
+                    "Ground product and allergen checked"
+                )
+            }
             return (
                 "Choose the safe form",
-                "Set aside whole nuts, hard pieces, crunchy butter, and loose hard seeds. Use a smooth butter, fine meal with no pieces, or a seed that can be fully softened, and confirm the exact allergen on the package.",
+                "Do not plate whole or chopped \(name.lowercased()) for a baby or young toddler. Set up a fine grinder or choose a smooth butter or another food-specific softened form, and confirm the exact allergen on the package.",
                 "Whole and hard pieces excluded"
             )
         case .herbAndFlavor:
+            let form = SolidsReferenceCatalog.flavorPreparationForm(name: name)
+            let preparation: String
+            switch form {
+            case .bayLeaf:
+                preparation = "Use the leaf only for infusion and plan to remove it before plating."
+            case .fibrousAromatic:
+                preparation = "Trim woody ends or outer layers and prepare to grate, pound, or infuse it finely."
+            case .leafyHerb:
+                preparation = "Wash fresh leaves and remove firm stems before finely chopping them."
+            case .groundSpice:
+                preparation = "Measure a small pinch and exclude whole hard spice pieces or loose spoonfuls of powder."
+            }
             return (
-                "Remove hard flavoring pieces",
-                "Use culinary \(name.lowercased()) without added salt or stimulant ingredients. Remove stems, sticks, pods, woody fibers, and whole hard seeds, or measure a small amount of finely ground seasoning.",
-                "Hard seasoning pieces removed"
+                "Prepare the flavoring form",
+                "Choose culinary \(name.lowercased()) without added salt or stimulant ingredients. \(preparation)",
+                "Flavoring form checked"
             )
         case .preparedFood:
             return (
                 "Audit the whole recipe",
-                "List every component in \(name.lowercased()) and identify allergens, honey, added sugar, sodium, bones, hard toppings, and the firmest or stickiest ingredient. The mixed dish is only ready when each component has a safe form.",
+                "List every component in \(name.lowercased()) and identify allergens, honey, added sugar, sodium, and the actual firmest, roundest, stickiest, or chewiest ingredient. Modify only the hazards present in this recipe, and verify that each component has a safe form.",
                 "Every component checked"
             )
         }
@@ -374,17 +546,39 @@ struct SolidsReferenceFood: Identifiable, Hashable {
 
     private var preparationActionTitle: String {
         switch category {
-        case .fruit: "Soften the edible portion"
-        case .vegetable: "Cook to the center"
-        case .grain: "Cook with enough moisture"
-        case .beanAndPlantProtein: "Cook or soften the protein"
-        case .meat: "Cook fully and retain moisture"
-        case .seafood: "Cook fully and inspect again"
-        case .dairy: "Prepare the dairy form"
-        case .egg: "Cook through without drying"
-        case .nutAndSeed: "Grind, soften, or thin"
-        case .herbAndFlavor: "Build flavor into moisture"
-        case .preparedFood: "Cook every component"
+        case .fruit:
+            return SolidsReferenceCatalog.fruitPreparationForm(name: name) == .sauce
+                ? "Set the scoopable texture"
+                : "Prepare the edible fruit"
+        case .vegetable: return "Cook and adapt the vegetable"
+        case .grain: return "Prepare the grain's actual form"
+        case .beanAndPlantProtein:
+            switch SolidsReferenceCatalog.plantProteinPreparationForm(name: name) {
+            case .spread: return "Adjust the spread"
+            case .seasoning: return "Measure into the dish"
+            case .sprout: return "Cook the sprouts thoroughly"
+            default: return "Cook or soften the protein"
+            }
+        case .meat: return "Cook fully and retain moisture"
+        case .seafood: return "Cook fully and inspect again"
+        case .dairy:
+            if normalizedName.contains("in food") { return "Cook it into the dish" }
+            return SolidsReferenceCatalog.scoopablePreparationKind(name: name, category: category) == .smoothDairy
+                ? "Keep it scoopable"
+                : "Adapt the cheese texture"
+        case .egg: return normalizedName == "egg yolk" ? "Cook and moisten the yolk" : "Cook through without drying"
+        case .nutAndSeed:
+            return normalizedName.contains("butter") || normalizedName == "tahini"
+                ? "Thin the smooth spread"
+                : "Make a fine, moist form"
+        case .herbAndFlavor:
+            return SolidsReferenceCatalog.flavorPreparationForm(name: name) == .bayLeaf
+                ? "Infuse and remove"
+                : "Prepare a small culinary amount"
+        case .preparedFood:
+            return SolidsReferenceCatalog.preparedFoodPreparationForm(name: name) == .sweetener
+                ? "Measure into another food"
+                : "Cook every component"
         }
     }
 
@@ -395,32 +589,168 @@ struct SolidsReferenceFood: Identifiable, Hashable {
         if normalizedName == "honey" {
             return "Use only after the first birthday. Measure a small amount into another food rather than offering honey directly from a spoon or container."
         }
+        if ["cactus pear", "prickly pear"].contains(normalizedName) {
+            return "After every spine, hair-like glochid, and the outer skin has been removed, use only the soft flesh. Mash it or cut it into a large soft piece, removing any unexpectedly hard seed."
+        }
         switch category {
         case .fruit:
-            return "Use ripeness, cooking, mashing, or fine grating to make \(name.lowercased()) yield easily. Check the center of the thickest piece; a soft exterior does not guarantee that the core is soft. Cool cooked fruit before shaping."
+            switch SolidsReferenceCatalog.fruitPreparationForm(name: name) {
+            case .sauce:
+                return "Stir \(name.lowercased()) and spoon a small portion into a clean bowl. It should stay on a tilted spoon but release easily, without a watery layer or dense sticky mound."
+            case .smallRoundBerry:
+                return "Cook \(name.lowercased()) if firm, then mash or flatten every berry so it no longer holds a small round shape."
+            case .aggregateBerry:
+                return "Use very ripe \(name.lowercased()), remove its stem, and mash, flatten, or tear it into soft sections. Discard a firm core if present."
+            case .roundOrSlipperyFruit:
+                return "Remove the fruit-specific pit, large seed, husk, or inedible peel, then mash the ripe flesh or cut it lengthwise so no whole round shape remains."
+            case .citrus:
+                return "Remove peel, seeds, tough membrane, and excess pith. Offer only the juicy pulp in soft pieces or a manageable membrane-free segment."
+            case .firmFruit:
+                return "Remove the core and seeds, then cook or finely grate \(name.lowercased()) until it is no longer a hard raw chunk. Cool cooked fruit before shaping."
+            case .stoneFruit:
+                return "Remove the pit, then use very ripe flesh or cook it until soft. Peel only when the skin is tough or slippery enough to interfere with eating."
+            case .melon:
+                return "Remove rind and hard seeds, then use soft flesh that crushes easily. Cut a broad slab or soft piece rather than making small slippery melon balls."
+            case .softFruit:
+                return "Use fully ripe flesh and remove only the stem, core, tough peel, or hard seed that this fruit actually has. Cook it first if the flesh does not squash easily."
+            case .seededPulp:
+                return "Scoop the soft pulp away from the rind, then remove any large or unexpectedly hard seed. Mash or stir the pulp into a scoopable food."
+            case .arils:
+                return "Separate the arils from rind and membrane, then crush or flatten every aril rather than leaving firm round pieces intact."
+            case .driedStickyFruit:
+                return "Remove the pit, soak or simmer until very soft, then mash or mince \(name.lowercased()) into moist food so it cannot form a dense sticky mouthful."
+            case .gratedFlesh:
+                return "Finely grate or grind the flesh and mix it completely into moist food. Do not leave hard chunks, chewy strips, or dry flakes."
+            case .cookBeforeServing:
+                return "Trim \(name.lowercased()) as its guidance describes, cook it thoroughly until the center crushes easily, and keep the finished portion moist."
+            }
         case .vegetable:
-            return "Steam, roast, boil, or braise \(name.lowercased()) until its thickest section crushes with light finger pressure. Follow ingredient-specific full-cooking requirements, then cool it before cutting so firmness is easier to judge."
+            switch SolidsReferenceCatalog.vegetablePreparationForm(name: name) {
+            case .leafy:
+                return "Cook the leaves and stems until tender, chop across their fibers, and mix them through moist food so they do not form a leafy wad."
+            case .flower:
+                return "Cook the thickest stem and florets until both crush easily. Offer a large soft floret or mash it after cooling."
+            case .compactBud:
+                return "Cook through the dense center, then halve, quarter, mash, or flatten the bud so it is not served whole and round."
+            case .squash:
+                return "Remove hard rind and seeds, cook the flesh until it crushes easily, and keep it moist rather than cutting firm cubes."
+            case .roundKernel:
+                return "Cook until soft, then mash or flatten every kernel or pea so it no longer remains a small round piece."
+            case .pod:
+                return "Trim strings and seams, cook the pod until soft, then split or chop it across the fibers instead of serving a firm intact pod."
+            case .stalk:
+                return "Trim woody or stringy sections, cook until tender, and cut across the fibers into a form that bends or crushes easily."
+            case .bulb:
+                return "Cook \(name.lowercased()) until soft and mix it into moist food rather than leaving firm chunks or large slippery layers."
+            case .softFlesh:
+                return "Remove the stem and any tough peel or hard seed, then use ripe or cooked flesh that squashes easily and is not cut into small slippery cubes."
+            case .root:
+                return "Cook until the center crushes easily, or use the food-specific finely grated form where the guidance permits it. Do not serve hard raw chunks."
+            case .tuber:
+                return "Cook \(name.lowercased()) fully until the center mashes easily, then add moisture if the starchy flesh is dry or dense."
+            case .fibrousSpecialty:
+                return "Use only the properly trimmed edible portion, follow its food-specific full-cooking requirement, and remove any section that remains tough or fibrous."
+            }
         case .grain:
-            return "Cook \(name.lowercased()) beyond firm or al dente with enough liquid to soften the center. Separate dense clumps and add moisture if the grain, bread, cereal, or pasta becomes dry, gummy, or difficult to tear."
+            switch SolidsReferenceCatalog.grainPreparationForm(name: name) {
+            case .bread:
+                return "Use soft or lightly toasted \(name.lowercased()) that tears easily. Moisten it when needed and do not compress it into a dense gummy ball."
+            case .pasta:
+                return "Cook past firm until tender, shorten long strands or modify large shapes, and add enough sauce or liquid to keep the pasta moist."
+            case .puffedCereal:
+                return "For a new eater, crush and moisten the cereal. For finger-food practice, use only a piece that dissolves readily when tested and offer one at a time."
+            case .softGrain:
+                return "Cook with enough liquid for every grain to become soft, then serve as a moist mash or scoopable clump without hard kernels or a dense sticky mass."
+            }
         case .beanAndPlantProtein:
-            return "Cook \(name.lowercased()) fully and keep it moist. A bean should mash through the center, tofu should compress without a rubbery edge, and a patty or cake should break apart easily rather than stretch or resist."
+            switch SolidsReferenceCatalog.plantProteinPreparationForm(name: name) {
+            case .wholePulse:
+                return "Cook until the center mashes easily, then mash or flatten each whole bean or pea and add moisture if the result is dry."
+            case .softTofu:
+                return "Keep \(name.lowercased()) scoopable or cut it into soft pieces, checking that there are no firm add-ins or rubbery surfaces."
+            case .firmTofu:
+                return "Cook as needed and use moist strips, crumbles, or soft pieces that compress and break apart easily rather than forming rubbery cubes."
+            case .fermentedCake:
+                return "Cook as directed and keep \(name.lowercased()) moist. Crumble, slice thinly, or form a tender patty rather than serving a tough or elastic chunk."
+            case .spread:
+                return "Thin \(name.lowercased()) when it is dense, then stir it into moist food or use a thin layer without a sticky mound."
+            case .seasoning:
+                return "Measure a small amount and mix it evenly through a larger dish. This concentrated seasoning is not a stand-alone serving."
+            case .sprout:
+                return "Cook \(name.lowercased()) thoroughly until steaming hot, then cool and chop across the stems before serving. Rinsing alone is not sufficient."
+            }
         case .meat:
-            return "Cook \(name.lowercased()) to a safe internal temperature using a method that avoids a hard crust. Rest it, then remove all bone, cartilage, skin, and gristle and cut across the grain before adding sauce or liquid if needed."
+            switch SolidsReferenceCatalog.meatPreparationForm(name: name) {
+            case .organ:
+                return "Cook \(name.lowercased()) fully, remove membrane, tough ducts, or connective tissue, and mince or mash it with moisture."
+            case .ground:
+                return "Cook \(name.lowercased()) fully and keep patties, meatballs, or crumbles moist. Break apart hard crusts or rubbery pieces before serving."
+            case .boneIn:
+                return "Cook fully, take all meat off the bone, and inspect it again for loose bone, cartilage, gristle, and tough skin before shredding or mincing it with moisture."
+            case .tenderCut:
+                return "Cook fully without creating a hard crust. Use a boneless portion; if the cut was cooked on the bone, take the meat off and inspect it again. Remove any gristle or tough connective tissue, then shred across the grain or mince it with moisture."
+            }
         case .seafood:
-            return "Cook \(name.lowercased()) fully until the flesh reaches its safe finished texture. Remove every shell, tail, bone, and rubbery section, then flake, mince, or chop it while checking each piece a second time."
+            switch SolidsReferenceCatalog.seafoodPreparationForm(name: name) {
+            case .crustacean:
+                return "Cook fully, remove the entire shell and tail, check for fragments, then mince or flatten firm curved flesh."
+            case .bivalve:
+                return "Cook fully, use only the flesh, remove every shell fragment, and mince the chewy flesh finely."
+            case .cephalopod:
+                return "Cook fully until tender, remove inedible internal material, and mince very finely. Do not serve rings, tentacles, or rubbery chunks."
+            case .smallFish:
+                return "Cook as appropriate, check sodium and current advice for the exact fish, and inspect every portion carefully for bones before mashing or flaking it."
+            case .fillet:
+                return "Cook fully, follow current advice for the exact species, and inspect the cooked flesh carefully for fine bones before separating it into moist flakes."
+            }
         case .dairy:
             if normalizedName.contains("in food") {
                 return "Mix the pasteurized dairy into cooked food as an ingredient and cool the dish before serving. It should not become the child's main milk drink before 12 months."
             }
-            return "Keep scoopable dairy cool and smooth. For cheese, crumble, finely grate, melt, or cook it as appropriate so the result is not a firm cube, rubbery slab, or dry pasty lump."
+            if SolidsReferenceCatalog.scoopablePreparationKind(name: name, category: category) == .smoothDairy {
+                return "Keep the pasteurized dairy scoopable and choose an unsweetened product when available. Do not add hard toppings, and loosen a thick or pasty product with another familiar food if needed."
+            }
+            return "Use pasteurized \(name.lowercased()) and adapt its actual firmness by crumbling, finely grating, melting, or slicing it thinly. Do not serve a firm cube or rubbery slab."
         case .egg:
-            return "Cook the white and yolk until safely done, but stop before the egg becomes rubbery or develops a hard browned edge. Mash dry yolk with moisture or keep an omelet tender enough to tear easily."
+            return normalizedName == "egg yolk"
+                ? "Cook the yolk fully, then mash it with moisture so it is not dry or crumbly. Egg is a major food allergen even when only yolk is being served."
+                : "Cook the egg fully, but keep it tender rather than rubbery or hard-edged. Mash it with moisture or cut a soft omelet into pieces that tear easily."
         case .nutAndSeed:
-            return "Grind until no hard piece remains, fully soak an appropriate seed, or loosen smooth butter with warm water or another familiar food. Stir until there are no dry pockets or thick gluey clumps."
+            if normalizedName.contains("butter") || normalizedName == "tahini" {
+                return "Loosen the smooth spread with warm water or another familiar food, then stir until there are no thick gluey ridges or crunchy pieces."
+            }
+            if normalizedName.contains("ground") {
+                return "Mix the fine meal completely into moist food and inspect it for hard pieces, coarse fragments, or dry powder pockets."
+            }
+            return "Grind \(name.lowercased()) finely and mix it completely into moist food, or fully soften an appropriate seed. Do not offer whole or chopped hard pieces."
         case .herbAndFlavor:
-            return "Finely mince, grate, pound, or infuse a small culinary amount of \(name.lowercased()) into moist food. Remove any infusion piece before plating and distribute ground seasoning evenly rather than leaving loose powder."
+            switch SolidsReferenceCatalog.flavorPreparationForm(name: name) {
+            case .bayLeaf:
+                return "Use the whole leaf only to infuse a cooked dish, then find and remove it completely before plating the child's portion."
+            case .fibrousAromatic:
+                return "Finely grate, pound, or infuse a small amount into moist food, removing every woody or stringy piece before serving."
+            case .leafyHerb:
+                return "Remove firm stems, finely chop the leaves across their fibers, and mix a small culinary amount through moist food."
+            case .groundSpice:
+                return "Mix a small pinch evenly through moist food. Do not leave loose powder or whole hard spice pieces in the serving."
+            }
         case .preparedFood:
-            return "Cook every part of \(name.lowercased()) safely, then set aside the child's portion before heavy seasoning. Soften, separate, shred, flatten, or moisten each component according to its own shape rather than blending away every texture by default."
+            switch SolidsReferenceCatalog.preparedFoodPreparationForm(name: name) {
+            case .soupOrStew:
+                return "Cook every component fully, keep the mixture thick enough to stay together on a spoon, and modify each firm, round, or chewy ingredient actually present."
+            case .patty:
+                return "Cook through without creating a hard crust, then make sure the patty is moist and breaks apart easily rather than bending like rubber."
+            case .spoonable:
+                return "Keep the mixture thick enough to stay on a tilted spoon but loose enough to release easily. Modify every topping or mix-in separately."
+            case .handheld:
+                return "Keep the wrapper or bread soft enough to tear, soften or separate every filling, and avoid hard toasted edges or an overfilled bite."
+            case .pastaOrRice:
+                return "Cook the grain or pasta until soft, keep it moist, and adapt each meat, vegetable, cheese, bean, or other component separately."
+            case .mixedDish:
+                return "Cook each component safely, then adapt the firmest, roundest, stickiest, or chewiest ingredient actually present instead of relying on the dish name."
+            case .sweetener:
+                return "Only after the first birthday, measure a small amount into another food rather than offering it directly from a spoon or container."
+            }
         }
     }
 
@@ -433,7 +763,7 @@ struct SolidsReferenceFood: Identifiable, Hashable {
         case .mashed:
             return "For \(ageContext), mash \(name.lowercased()) until no firm lump remains. Leave only the amount of soft texture the child can already manage, and loosen any dense or sticky mash before it reaches the spoon."
         case .spear:
-            return "For \(ageContext), make a long, broad piece that is easy to grasp and too large to disappear into the mouth whole. It must bend or squash easily; remove hard skin, crisp edges, bones, core, and slippery round ends."
+            return "For \(ageContext), make a long, broad piece that is easy to grasp and too large to disappear into the mouth whole. It must bend or squash easily; remove any inedible or tough part identified in this food's specific safety guidance."
         case .flattened:
             return "For \(ageContext), press each small round or dense piece until it loses its three-dimensional airway shape. If it springs back, stays firm, or splits into a hard fragment, cook it longer or mash it instead."
         case .shredded:
@@ -443,7 +773,7 @@ struct SolidsReferenceFood: Identifiable, Hashable {
         case .softPieces:
             return "For \(ageContext), cut pieces the child can pick up or move with a utensil without creating a whole round, hard, or rubbery shape. Test the thickest piece and keep slippery pieces from becoming overlarge mouthfuls."
         case .flakes:
-            return "For \(ageContext), separate \(name.lowercased()) along its natural seams into moist flakes. Press each flake between your fingers while checking again for bones, shell, tough skin, and dry edges."
+            return "For \(ageContext), separate \(name.lowercased()) along its natural seams into moist flakes. Press each flake between your fingers and repeat the food-specific bone or shell check described in the caution below."
         case .spoon:
             return "For \(ageContext), aim for a thick scoopable texture that stays on a tilted spoon but releases easily in the mouth. Break up lumps, loosen sticky mixtures, and use a shallow preloaded spoon for self-feeding practice."
         }
@@ -457,7 +787,7 @@ struct SolidsReferenceFood: Identifiable, Hashable {
         case .spear, .softPieces, .flattened:
             technique = "Press the thickest piece between thumb and forefinger. It should squash, bend, or tear with light pressure and should not stay round, snap hard, or rebound like rubber."
         case .shredded, .flakes:
-            technique = "Pinch a small bundle. The strands or flakes should separate easily, stay moist, and contain no bone, shell, string, hard skin, or long fibrous clump."
+            technique = "Pinch a small bundle. The strands or flakes should separate easily, stay moist, and contain none of the hard, tough, or inedible hazards named in the food-specific guidance."
         case .thinSpread:
             technique = "Tilt and scrape the prepared food. The layer should be thin, without a dense ridge, dry powder pocket, crunchy piece, or paste that holds together like glue."
         }
@@ -477,6 +807,23 @@ struct SolidsReferenceFood: Identifiable, Hashable {
         }
         return "Seat the child upright and alert, place one manageable serving at a time, and stay within arm's reach. \(allergenText) Discard food left in the child's bowl rather than returning it to storage."
     }
+}
+
+/// Search and list metadata kept separate from the much larger educational
+/// payload on `SolidsReferenceFood`. Screens that only need to find or filter
+/// foods should use this type so their first render does not build hundreds of
+/// preparation guides, questions, citations, and walkthroughs.
+struct SolidsReferenceFoodSummary: Identifiable, Hashable, Sendable {
+    var id: String
+    var name: String
+    var category: SolidsFoodCategory
+    var aliases: [String]
+    var minimumAgeMonths: Int
+    var isIronRich: Bool
+    var allergenIDs: [String]
+    var possibleAllergenIDs: [String]
+    var visualEmoji: String
+    var normalizedSearchTerms: [String]
 }
 
 enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
@@ -529,7 +876,19 @@ enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
     }
 
     func matches(_ food: SolidsReferenceFood) -> Bool {
-        let key = SolidFoodSelection.normalizedName(food.name)
+        matches(name: food.name, category: food.category, allergenIDs: food.allergenIDs)
+    }
+
+    func matches(_ food: SolidsReferenceFoodSummary) -> Bool {
+        matches(name: food.name, category: food.category, allergenIDs: food.allergenIDs)
+    }
+
+    private func matches(
+        name: String,
+        category: SolidsFoodCategory,
+        allergenIDs: [String]
+    ) -> Bool {
+        let key = SolidFoodSelection.normalizedName(name)
         let shellfishTerms = ["clam", "crab", "crayfish", "langoustine", "lobster", "mussel", "octopus", "oyster", "prawn", "scallop", "shrimp", "squid"]
         let seedTerms = ["chia", "flax", "hemp", "poppy", "pumpkin seed", "sesame", "sunflower seed"]
         let condimentTerms = ["bean dip", "hummus", "miso", "peanut sauce", "tahini"]
@@ -542,50 +901,50 @@ enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
         case .condiment:
             return condimentTerms.contains(where: key.contains)
         case .dairy:
-            return food.category == .dairy
+            return category == .dairy
         case .drink:
             return drinkTerms.contains(where: key.contains)
         case .egg:
-            return food.category == .egg
+            return category == .egg
         case .fish:
-            return food.category == .seafood && !shellfishTerms.contains(where: key.contains)
+            return category == .seafood && !shellfishTerms.contains(where: key.contains)
         case .flower:
             return flowerTerms.contains(where: key.contains)
         case .fruit:
-            return food.category == .fruit
+            return category == .fruit
         case .grain:
-            return food.category == .grain
+            return category == .grain
         case .herbSpice:
-            return food.category == .herbAndFlavor
+            return category == .herbAndFlavor
         case .legume:
-            return food.category == .beanAndPlantProtein || key == "peanut" || key == "peanut butter"
+            return category == .beanAndPlantProtein || key == "peanut" || key == "peanut butter"
         case .meat:
-            return food.category == .meat
+            return category == .meat
         case .prepared:
-            return food.category == .preparedFood
+            return category == .preparedFood
         case .pseudoGrain:
             return pseudoGrains.contains(key)
         case .seed:
             return seedTerms.contains(where: key.contains)
         case .shellfish:
-            return food.category == .seafood && shellfishTerms.contains(where: key.contains)
+            return category == .seafood && shellfishTerms.contains(where: key.contains)
         case .sweetener:
             return key == "honey"
         case .treeNut:
-            return food.allergenIDs.contains(SolidsAllergen.treeNuts.rawValue)
+            return allergenIDs.contains(SolidsAllergen.treeNuts.rawValue)
         case .vegan:
-            if [.fruit, .vegetable, .grain, .beanAndPlantProtein, .nutAndSeed, .herbAndFlavor].contains(food.category) {
+            if [.fruit, .vegetable, .grain, .beanAndPlantProtein, .nutAndSeed, .herbAndFlavor].contains(category) {
                 return true
             }
-            guard food.category == .preparedFood else { return false }
-            return food.allergenIDs.allSatisfy {
+            guard category == .preparedFood else { return false }
+            return allergenIDs.allSatisfy {
                 ![SolidsAllergen.milk.rawValue, SolidsAllergen.egg.rawValue, SolidsAllergen.fish.rawValue, SolidsAllergen.crustaceanShellfish.rawValue].contains($0)
             } && !animalPreparedFoodTerms.contains(where: key.contains)
         case .vegetable:
-            return food.category == .vegetable
+            return category == .vegetable
         case .vegetarian:
-            if food.category == .meat || food.category == .seafood { return false }
-            if food.category != .preparedFood { return true }
+            if category == .meat || category == .seafood { return false }
+            if category != .preparedFood { return true }
             return !animalPreparedFoodTerms.contains(where: key.contains)
         }
     }
@@ -653,15 +1012,47 @@ struct SolidsFoodDatabaseFilters: Equatable {
         _ food: SolidsReferenceFood,
         progress: SolidsFoodProgressFilterValue?
     ) -> Bool {
-        if let ageMonths, food.minimumAgeMonths > ageMonths { return false }
-        if !selectedTypes.isEmpty && !selectedTypes.contains(where: { $0.matches(food) }) { return false }
-        if !excludedAllergenIDs.isDisjoint(with: food.allergenIDs) { return false }
-        if !excludedAllergenIDs.isDisjoint(with: food.possibleAllergenIDs) { return false }
+        matches(
+            minimumAgeMonths: food.minimumAgeMonths,
+            isIronRich: food.isIronRich,
+            allergenIDs: food.allergenIDs,
+            possibleAllergenIDs: food.possibleAllergenIDs,
+            matchesSelectedType: selectedTypes.isEmpty || selectedTypes.contains { $0.matches(food) },
+            progress: progress
+        )
+    }
+
+    func matches(
+        _ food: SolidsReferenceFoodSummary,
+        progress: SolidsFoodProgressFilterValue?
+    ) -> Bool {
+        matches(
+            minimumAgeMonths: food.minimumAgeMonths,
+            isIronRich: food.isIronRich,
+            allergenIDs: food.allergenIDs,
+            possibleAllergenIDs: food.possibleAllergenIDs,
+            matchesSelectedType: selectedTypes.isEmpty || selectedTypes.contains { $0.matches(food) },
+            progress: progress
+        )
+    }
+
+    private func matches(
+        minimumAgeMonths: Int,
+        isIronRich: Bool,
+        allergenIDs: [String],
+        possibleAllergenIDs: [String],
+        matchesSelectedType: Bool,
+        progress: SolidsFoodProgressFilterValue?
+    ) -> Bool {
+        if let ageMonths, minimumAgeMonths > ageMonths { return false }
+        if !matchesSelectedType { return false }
+        if !excludedAllergenIDs.isDisjoint(with: allergenIDs) { return false }
+        if !excludedAllergenIDs.isDisjoint(with: possibleAllergenIDs) { return false }
 
         switch ironFilter {
         case .any: break
-        case .ironRich where !food.isIronRich: return false
-        case .notIronRich where food.isIronRich: return false
+        case .ironRich where !isIronRich: return false
+        case .notIronRich where isIronRich: return false
         default: break
         }
 
@@ -1053,6 +1444,7 @@ enum SolidsSourceLibrary {
     static let cdcChoking = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/choking-hazards.html")!
     static let fdaAllergens = URL(string: "https://www.fda.gov/industry/fda-basics-industry/what-major-food-allergen")!
     static let fdaFishAdvice = URL(string: "https://www.fda.gov/food/consumers/advice-about-eating-fish")!
+    static let fdaProduceSafety = URL(string: "https://www.fda.gov/food/buy-store-serve-safe-food/selecting-and-serving-produce-safely")!
     static let nhsFoodSafety = URL(string: "https://www.nhs.uk/best-start-in-life/baby/weaning/safe-weaning/preparing-food-safely/")!
     static let aapFruitJuice = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/Where-We-Stand-Fruit-Juice.aspx")!
     static let nccihAcai = URL(string: "https://www.nccih.nih.gov/health/acai")!
@@ -1060,6 +1452,7 @@ enum SolidsSourceLibrary {
     static let heartOfPalmAnaphylaxis = URL(string: "https://doi.org/10.1111/j.1398-9995.2006.01051.x")!
     static let whoComplementaryFeeding = URL(string: "https://www.who.int/publications/i/item/9789240081864")!
     static let espghanSugarPosition = URL(string: "https://doi.org/10.1097/MPG.0000000000001733")!
+    static let aapStartingSolids = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/Starting-Solid-Foods.aspx")!
     static let aapAllergenIntroduction = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/when-to-introduce-egg-peanut-butter-and-other-common-food-allergens-to-your-baby-food-allergy-prevention-tips.aspx")!
     static let niaidPeanutGuidance = URL(string: "https://www.niaid.nih.gov/sites/default/files/peanut-allergy-prevention-guidelines-parent-summary.pdf")!
 
@@ -1068,7 +1461,9 @@ enum SolidsSourceLibrary {
         if url == cdcIntroduction { return "CDC — Starting solid foods" }
         if url == cdcChoking { return "CDC — Choking prevention" }
         if url == aapFruitJuice { return "AAP — Fruit juice guidance" }
+        if url == aapStartingSolids { return "AAP — Starting solids and portions" }
         if url == aapAllergenIntroduction { return "AAP — Allergen introduction guidance" }
+        if url == fdaProduceSafety { return "FDA — Produce and sprout safety" }
         if url.host?.contains("healthychildren") == true { return "American Academy of Pediatrics" }
         if url.host?.contains("nccih") == true { return "NIH NCCIH — Açaí safety" }
         if source.contains("10.1034/j.1398-9995.1999.00116.x") {
@@ -1093,21 +1488,10 @@ enum SolidsSourceLibrary {
 enum SolidsReferenceCatalog {
     static let version = 8
 
-    /// Builds the generated catalog indexes away from the UI thread. The home
-    /// screen calls this after its first frame so opening search-heavy screens
-    /// does not pay the one-time 400+ item setup cost during navigation.
-    static func warmCaches() {
-        _ = foodSearchEntries.count
-        _ = foodsByCategory.count
-        _ = recipeSearchEntries.count
-        _ = recipesByFoodID.count
-        _ = recipesByAllergenID.count
-        _ = guidedCandidateFoods.count
-    }
-
-    private struct FoodSearchEntry {
-        var food: SolidsReferenceFood
-        var normalizedTerms: [String]
+    private struct FoodSeed {
+        var id: String
+        var name: String
+        var category: SolidsFoodCategory
     }
 
     private struct RecipeSearchEntry {
@@ -1115,7 +1499,7 @@ enum SolidsReferenceCatalog {
         var normalizedText: String
     }
 
-    static let foods: [SolidsReferenceFood] = {
+    private static let foodSeeds: [FoodSeed] = {
         let groups: [(SolidsFoodCategory, String)] = [
             (.fruit, fruitNames),
             (.vegetable, vegetableNames),
@@ -1132,12 +1516,58 @@ enum SolidsReferenceCatalog {
 
         var seen = Set<String>()
         return groups.flatMap { category, value in
-            names(in: value).compactMap { name -> SolidsReferenceFood? in
+            names(in: value).compactMap { name -> FoodSeed? in
                 let id = slug(name)
                 guard seen.insert(id).inserted else { return nil }
-                return makeFood(id: id, name: name, category: category)
+                return FoodSeed(id: id, name: name, category: category)
             }
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }()
+
+    /// Compact immutable records used by search, filters, pickers, and plan
+    /// selection. Building these does not create any educational page content.
+    static let foodSummaries: [SolidsReferenceFoodSummary] = foodSeeds.map { seed in
+        let foodAliases = aliases(for: seed.name)
+        let allergens = allergenIDs(name: seed.name, category: seed.category)
+        return SolidsReferenceFoodSummary(
+            id: seed.id,
+            name: seed.name,
+            category: seed.category,
+            aliases: foodAliases,
+            minimumAgeMonths: normalized(seed.name) == "honey" ? 12 : 6,
+            isIronRich: ironRichStatus(name: seed.name, category: seed.category),
+            allergenIDs: allergens,
+            possibleAllergenIDs: possibleAllergenIDs(name: seed.name, category: seed.category),
+            visualEmoji: SolidsFoodVisual.emoji(for: seed.name, category: seed.category),
+            normalizedSearchTerms: ([seed.name] + foodAliases).map(normalized)
+        )
+    }
+
+    /// The compact catalog is initialized off the main actor so a cold first
+    /// visit cannot block keyboard presentation or text input.
+    static func loadFoodSummaries() async -> [SolidsReferenceFoodSummary] {
+        await Task.detached(priority: .userInitiated) {
+            foodSummaries
+        }.value
+    }
+
+    static let foods: [SolidsReferenceFood] = foodSummaries.map { summary in
+        makeFood(summary: summary)
+    }
+
+    private static let foodSummariesByID: [String: SolidsReferenceFoodSummary] =
+        Dictionary(uniqueKeysWithValues: foodSummaries.map { ($0.id, $0) })
+
+    private static let foodSummariesByLookupName: [String: SolidsReferenceFoodSummary] = {
+        var result: [String: SolidsReferenceFoodSummary] = [:]
+        for food in foodSummaries {
+            let nameKey = normalized(food.name)
+            if result[nameKey] == nil { result[nameKey] = food }
+            for alias in food.aliases where result[normalized(alias)] == nil {
+                result[normalized(alias)] = food
+            }
+        }
+        return result
     }()
 
     private static let foodsByID: [String: SolidsReferenceFood] =
@@ -1154,13 +1584,6 @@ enum SolidsReferenceCatalog {
         }
         return result
     }()
-
-    private static let foodSearchEntries: [FoodSearchEntry] = foods.map { food in
-        FoodSearchEntry(
-            food: food,
-            normalizedTerms: ([food.name] + food.aliases).map(normalized)
-        )
-    }
 
     private static let foodsByCategory = Dictionary(grouping: foods, by: \SolidsReferenceFood.category)
 
@@ -1401,18 +1824,34 @@ enum SolidsReferenceCatalog {
         foodsByLookupName[normalized(name)]
     }
 
+    static func foodSummary(id: String) -> SolidsReferenceFoodSummary? {
+        foodSummariesByID[id]
+    }
+
+    static func foodSummary(named name: String) -> SolidsReferenceFoodSummary? {
+        foodSummariesByLookupName[normalized(name)]
+    }
+
     static func recipe(id: String) -> SolidsReferenceRecipe? {
         recipesByID[id]
     }
 
     static func search(_ query: String, category: SolidsFoodCategory? = nil) -> [SolidsReferenceFood] {
+        searchSummaries(query, category: category).compactMap { foodsByID[$0.id] }
+    }
+
+    static func searchSummaries(
+        _ query: String,
+        category: SolidsFoodCategory? = nil,
+        in foods: [SolidsReferenceFoodSummary]? = nil
+    ) -> [SolidsReferenceFoodSummary] {
         let key = normalized(query)
-        return foodSearchEntries.compactMap { entry in
-            guard category == nil || entry.food.category == category,
-                  key.isEmpty || entry.normalizedTerms.contains(where: { $0.contains(key) }) else {
-                return nil
+        return (foods ?? foodSummaries).filter { food in
+            guard category == nil || food.category == category,
+                  key.isEmpty || food.normalizedSearchTerms.contains(where: { $0.contains(key) }) else {
+                return false
             }
-            return entry.food
+            return true
         }
     }
 
@@ -1470,22 +1909,34 @@ enum SolidsReferenceCatalog {
         )
     }
 
-    private static func makeFood(
-        id: String,
-        name: String,
-        category: SolidsFoodCategory
-    ) -> SolidsReferenceFood {
-        let allergens = allergenIDs(name: name, category: category)
-        let possibleAllergens = possibleAllergenIDs(name: name, category: category)
-        let minimumAge = normalized(name) == "honey" ? 12 : 6
-        let isIronRich = ironRichStatus(name: name, category: category)
+    private static func makeFood(summary: SolidsReferenceFoodSummary) -> SolidsReferenceFood {
+        let id = summary.id
+        let name = summary.name
+        let category = summary.category
+        let allergens = summary.allergenIDs
+        let possibleAllergens = summary.possibleAllergenIDs
+        let minimumAge = summary.minimumAgeMonths
+        let isIronRich = summary.isIronRich
         let highlights = nutritionHighlights(name: name, category: category)
+        let visuals = servingVisuals(name: name, category: category)
         let preparationStages = preparations(name: name, category: category, minimumAge: minimumAge)
+            .enumerated()
+            .map { index, stage in
+                var stage = stage
+                let visual = visuals.indices.contains(index) ? visuals[index] : (visuals.last ?? .spoon)
+                stage.servingAmount = servingAmountGuidance(
+                    name: name,
+                    category: category,
+                    ageMonths: stage.minimumAgeMonths,
+                    visual: visual
+                )
+                return stage
+            }
         return SolidsReferenceFood(
             id: id,
             name: name,
             category: category,
-            aliases: aliases(for: name),
+            aliases: summary.aliases,
             minimumAgeMonths: minimumAge,
             isIronRich: isIronRich,
             allergenIDs: allergens,
@@ -1504,7 +1955,7 @@ enum SolidsReferenceCatalog {
             chokingGuidance: chokingGuidance(name: name, category: category),
             nutritionHighlights: highlights,
             preparations: preparationStages,
-            servingVisuals: servingVisuals(name: name, category: category),
+            servingVisuals: visuals,
             sourceURLs: sourceURLs(
                 name: name,
                 category: category,
@@ -1606,8 +2057,20 @@ enum SolidsReferenceCatalog {
         if key == "swordfish" {
             return "Swordfish is not recommended for young children because it is among the fish highest in mercury. Choose a lower-mercury fish from current FDA/EPA advice instead."
         }
+        if ["cactus pear", "prickly pear"].contains(key) {
+            return "\(name) can generally be introduced once a child shows developmental readiness for solids, usually around 6 months. Use only fruit with every spine and hair-like glochid removed, peel away the outer skin, and serve the ripe soft flesh in a mash or another manageable form."
+        }
         if key.contains("milk in food") || key == "buttermilk in food" {
             return "Pasteurized \(name.lowercased()) can be used as an ingredient once a child is ready for solids, generally around 6 months. Cow's milk should not replace breast milk or infant formula as the main drink before 12 months."
+        }
+        if category == .nutAndSeed {
+            if key.contains("butter") || key == "tahini" {
+                let riskGuidance = key == "peanut butter"
+                    ? " If the child has severe eczema or an egg allergy, ask their clinician how and where to introduce peanut."
+                    : ""
+                return "\(name) can generally be introduced once a child is developmentally ready for solids, usually around 6 months. Use a smooth version thinned into a familiar soft food or spread in a very thin layer; never offer a thick spoonful.\(riskGuidance)"
+            }
+            return "\(name) can generally be introduced once a child is developmentally ready for solids, usually around 6 months. Offer it finely ground into moist food or in a smooth, well-thinned butter; whole nuts and hard seed pieces are choking hazards."
         }
         if category == .herbAndFlavor {
             return "\(name) can season food from the start of solids in a finely prepared culinary amount. Mix it through moist food and keep whole pods, sticks, hard seeds, woody stems, and loose powder out of the serving."
@@ -1618,13 +2081,142 @@ enum SolidsReferenceCatalog {
         if minimumAge >= 12 {
             return "\(name) should not be offered before \(minimumAge) months. When it is introduced, use the ingredient-specific preparation and safety guidance below."
         }
-        return "\(name) can generally be introduced once a child shows developmental readiness for solids, usually around 6 months. Its natural firmness, shape, skin, bones, shell, or stickiness must be changed as described below rather than using a one-size-fits-all food shape."
+
+        let lead = "\(name) can generally be introduced once a child shows developmental readiness for solids, usually around 6 months. "
+        let guidance: String
+        switch category {
+        case .fruit:
+            switch fruitPreparationForm(name: name) {
+            case .sauce:
+                guidance = "Choose an unsweetened, spoonable sauce and check the ingredient list for honey or added sugar."
+            case .smallRoundBerry:
+                guidance = "Cook if firm, then mash or flatten every berry so it no longer keeps a small round shape."
+            case .aggregateBerry:
+                guidance = "Use very ripe fruit and mash, flatten, or tear it when a firm core or berry size makes that necessary."
+            case .roundOrSlipperyFruit:
+                guidance = "Remove any pit, large seed, husk, or inedible peel, then mash or cut the ripe flesh lengthwise so it is not served whole and round."
+            case .citrus:
+                guidance = "Remove peel, seeds, tough membrane, and excess pith, then offer the juicy pulp in a manageable soft form."
+            case .firmFruit:
+                guidance = "Cook or finely grate the fruit until it is no longer a hard raw chunk, and remove the core and seeds."
+            case .stoneFruit:
+                guidance = "Remove the pit and use very ripe, soft flesh; cook it first when the fruit is still firm."
+            case .melon:
+                guidance = "Remove rind and hard seeds, then offer soft flesh without forming small slippery balls."
+            case .softFruit:
+                guidance = "Use fully ripe flesh and remove only the stem, core, tough peel, or hard seed that this fruit actually has."
+            case .seededPulp:
+                guidance = "Scoop the soft pulp from the rind and serve it by spoon, removing any large or unexpectedly hard seed."
+            case .arils:
+                guidance = "Crush or flatten the arils rather than offering a handful of intact firm, round pieces."
+            case .driedStickyFruit:
+                guidance = "Remove the pit, soften the dried fruit thoroughly, and mash or mince it into moist food so it cannot form a dense sticky mouthful."
+            case .gratedFlesh:
+                guidance = "Use finely grated flesh or a smooth coconut product mixed into moist food, not hard chunks or chewy dry strips."
+            case .cookBeforeServing:
+                guidance = "Peel and trim it as applicable, cook it thoroughly, and serve only when the flesh is soft throughout."
+            }
+        case .vegetable:
+            switch vegetablePreparationForm(name: name) {
+            case .leafy:
+                guidance = "Cook the leaves and stems until tender, chop across the fibers, and mix them into moist food rather than offering a wad of leaves."
+            case .flower:
+                guidance = "Cook the thickest stem and florets until they crush easily, then mash or offer a large soft floret."
+            case .compactBud:
+                guidance = "Cook through the dense center and halve, quarter, mash, or flatten the round bud rather than serving it whole."
+            case .squash:
+                guidance = "Remove hard rind and seeds, cook the flesh until it crushes easily, and avoid firm cubes."
+            case .roundKernel:
+                guidance = "Cook until soft, then mash or flatten the kernels or peas so they do not remain small and round."
+            case .pod:
+                guidance = "Trim strings and seams, cook the pod until soft, and split or chop it rather than serving a firm intact pod."
+            case .stalk:
+                guidance = "Trim woody or stringy sections, cook until tender, and cut across the fibers."
+            case .bulb:
+                guidance = "Cook it until soft and use it within a moist dish rather than offering firm raw chunks or slippery layers."
+            case .softFlesh:
+                guidance = "Use ripe or cooked soft flesh, remove the stem and any tough peel or hard seed, and avoid small slippery cubes."
+            case .root:
+                guidance = "Cook until the center crushes easily, or use a specifically recommended fine-grated preparation instead of hard raw pieces."
+            case .tuber:
+                guidance = "Cook it fully and keep the starchy flesh moist rather than serving a dry, dense mouthful."
+            case .fibrousSpecialty:
+                guidance = "Use only the properly trimmed edible portion and cook it thoroughly before adapting its texture."
+            }
+        case .grain:
+            switch grainPreparationForm(name: name) {
+            case .bread:
+                guidance = "Use a soft or lightly toasted piece that tears easily, and avoid dense gummy balls or hard crusts."
+            case .pasta:
+                guidance = "Cook it past firm until tender, shorten long strands or modify large shapes, and keep it moist."
+            case .puffedCereal:
+                guidance = "Use only a product that dissolves readily, testing the exact puff before serving and avoiding dry handfuls."
+            case .softGrain:
+                guidance = "Cook it with enough liquid to make a moist mash or scoopable cereal without hard kernels or sticky clumps."
+            }
+        case .beanAndPlantProtein:
+            switch plantProteinPreparationForm(name: name) {
+            case .wholePulse:
+                guidance = "Cook until the center mashes easily, then mash or flatten whole beans and peas for an early eater."
+            case .softTofu:
+                guidance = "Offer the soft curd by spoon or in soft scoops, checking that it has no rubbery surface or firm add-ins."
+            case .firmTofu:
+                guidance = "Use moist strips, crumbles, or soft pieces that compress and break apart easily."
+            case .fermentedCake:
+                guidance = "Cook as needed and serve it moist, thin, crumbled, or in a tender patty rather than as a tough or elastic chunk."
+            case .spread:
+                guidance = "Thin the spread when it is dense and serve it by spoon or in a thin layer, checking its sodium and allergen ingredients."
+            case .seasoning:
+                guidance = "Use only a small amount mixed through a larger dish because this is a concentrated, often salty seasoning rather than a stand-alone serving."
+            case .sprout:
+                guidance = "Cook sprouts thoroughly, then chop across their length and mix them into moist food."
+            }
+        case .meat:
+            switch meatPreparationForm(name: name) {
+            case .organ:
+                guidance = "Cook it fully, keep it moist, and remove membrane, tough ducts, or connective tissue before mashing or mincing it."
+            case .ground:
+                guidance = "Cook it fully and keep crumbles, a patty, or a meatball tender and moist rather than dry or rubbery."
+            case .boneIn:
+                guidance = "Cook it fully until tender, take all meat off the bone, and remove loose bone, cartilage, gristle, and tough skin before serving."
+            case .tenderCut:
+                guidance = "Cook it fully with a moisture-retaining method and use a boneless portion. If the cut was cooked on the bone, take the meat off and inspect it again; remove any gristle or tough connective tissue, then shred across the grain or mince it with sauce."
+            }
+        case .seafood:
+            switch seafoodPreparationForm(name: name) {
+            case .crustacean:
+                guidance = "Cook it fully, remove shell and tail, and mince or flatten the flesh rather than serving a whole curled piece."
+            case .bivalve:
+                guidance = "Cook it fully, remove every shell fragment, and mince the chewy flesh finely into moist food."
+            case .cephalopod:
+                guidance = "Cook until tender and mince very finely; rings, tentacles, and rubbery chunks are not appropriate early forms."
+            case .smallFish, .fillet:
+                guidance = "Choose the species using current fish advice, cook it fully, check the portion carefully for bones, and serve moist flakes."
+            }
+        case .dairy:
+            if case .smoothDairy = scoopablePreparationKind(name: name, category: category) {
+                guidance = "Choose a pasteurized, unsweetened product and offer it by spoon or mixed into food."
+            } else {
+                guidance = "Choose pasteurized cheese and adapt its actual firmness by crumbling, grating, melting, or slicing it thinly rather than serving a firm cube."
+            }
+        case .egg:
+            guidance = key == "egg yolk"
+                ? "Cook the yolk fully, then mash it with moisture so it is soft rather than dry and crumbly."
+                : "Cook the egg fully while keeping it soft, then mash it or cut it into a shape suited to the child's skills."
+        case .nutAndSeed, .herbAndFlavor, .preparedFood:
+            guidance = "Follow the food-specific preparation and safety guidance below."
+        }
+        return lead + guidance
     }
 
     private static func ingredientBackground(
         name: String,
         category: SolidsFoodCategory
     ) -> String {
+        let key = normalized(name)
+        if ["cactus pear", "prickly pear"].contains(key) {
+            return "\(name) is the fruit of a cactus. The ripe interior can be soft and juicy, but the outer skin may carry obvious spines and tiny hair-like glochids that must be completely removed before the fruit enters the child's food-preparation area."
+        }
         switch category {
         case .fruit:
             switch fruitPreparationForm(name: name) {
@@ -1721,7 +2313,7 @@ enum SolidsReferenceCatalog {
             case .boneIn:
                 return "\(name) is a bone-in cut. The meat may become tender with slow cooking, but every loose bone, cartilage fragment, tough skin, and piece of gristle must be removed before serving."
             case .tenderCut:
-                return "\(name) is a muscle-meat cut whose tenderness depends on cooking method and direction of the grain. Moist shredding or mincing is usually more useful than dry cubes."
+                return "\(name) is a muscle-meat cut whose tenderness depends on cooking method and direction of the grain. Use a boneless portion for the child's serving, and choose moist shredding or mincing rather than dry cubes."
             }
         case .seafood:
             switch seafoodPreparationForm(name: name) {
@@ -1745,7 +2337,9 @@ enum SolidsReferenceCatalog {
             }
             return "\(name) is a cheese whose moisture, salt, and firmness vary by style. Pasteurization and the actual texture determine whether it should be crumbled, grated, melted, or offered in a paper-thin slice."
         case .egg:
-            return "\(name) is an egg or cooked egg preparation. Egg is a major allergen, and both white and yolk should be cooked through in a soft rather than rubbery texture."
+            return normalized(name) == "egg yolk"
+                ? "\(name) is the yolk portion of an egg. Egg is a major allergen, and the yolk should be cooked fully and moistened rather than served as a dry, crumbly ball."
+                : "\(name) is an egg or cooked egg preparation. Egg is a major allergen, and the finished food should be cooked through while staying soft rather than rubbery."
         case .nutAndSeed:
             if normalized(name).contains("butter") || normalized(name) == "tahini" {
                 return "\(name) is a concentrated nut or seed paste. It is introduced thinned into food or spread very thinly; a thick spoonful remains sticky regardless of age."
@@ -1792,6 +2386,12 @@ enum SolidsReferenceCatalog {
         let key = normalized(name)
         switch category {
         case .fruit:
+            if ["cactus pear", "prickly pear"].contains(key) {
+                return (
+                    "Choose commercially de-spined \(name.lowercased()) when possible. The fruit should be intact and free of mold, and every visible or hair-like spine must be treated as still present until the peel is removed safely.",
+                    "Store the intact fruit according to normal produce guidance without letting it contact ready-to-eat food. Refrigerate peeled or cut flesh promptly and discard the child's served portion."
+                )
+            }
             switch fruitPreparationForm(name: name) {
             case .sauce:
                 return (
@@ -1839,37 +2439,100 @@ enum SolidsReferenceCatalog {
             )
         case .grain:
             let isInfantCereal = key.contains("infant")
-            return (
-                isInfantCereal
+            let selection: String
+            switch grainPreparationForm(name: name) {
+            case .bread:
+                selection = "Choose plain \(name.lowercased()) with modest sodium that tears easily. Review allergens and avoid a dense loaf, hard crust, whole nuts, or hard seeds."
+            case .pasta:
+                selection = "Choose plain \(name.lowercased()) with a clear allergen label and a shape that can be cooked very tender, shortened, or otherwise adapted."
+            case .puffedCereal:
+                selection = "Choose an unsweetened, lower-sodium \(name.lowercased()), check allergens and hard clusters, and test that the exact puff dissolves readily."
+            case .softGrain:
+                selection = isInfantCereal
                     ? "Choose an iron-fortified infant cereal without added sugar. Rotate grain types rather than relying only on rice cereal, and check the label for milk, soy, or wheat ingredients."
-                    : "Choose plain \(name.lowercased()) with modest sodium and little or no added sugar. Check breads, cereals, and mixes for allergen ingredients, whole nuts, hard seeds, and dense clusters.",
+                    : "Choose plain \(name.lowercased()) with little or no added sugar and review its allergen label. Sort whole dry grains for debris when applicable."
+            }
+            return (
+                selection,
                 "Keep dry \(name.lowercased()) sealed and dry. Refrigerate cooked portions promptly, cool rice and other grains without leaving them at room temperature, and reheat only the portion being served."
             )
         case .beanAndPlantProtein:
             let form = plantProteinPreparationForm(name: name)
-            if form == .wholePulse {
+            switch form {
+            case .wholePulse:
                 return (
                     "Choose dried, frozen, or no-salt-added \(name.lowercased()) when practical. Drain and rinse canned versions, remove debris from dried pulses, and cook until the center mashes easily.",
                     "Refrigerate cooked or opened \(name.lowercased()) promptly. Store dry pulses sealed and dry, and discard any portion that has contacted the child's mouth or spoon."
                 )
+            case .sprout:
+                return (
+                    "Choose refrigerated \(name.lowercased()) from intact packaging by its use-by date. Young children should not eat raw or lightly cooked sprouts, and washing does not remove that risk.",
+                    "Keep \(name.lowercased()) refrigerated and separate from ready-to-eat food, cook thoroughly until steaming hot, and discard served leftovers."
+                )
+            case .softTofu, .firmTofu:
+                return (
+                    "Choose plain refrigerated \(name.lowercased()) from an intact package and check sodium plus the soy allergen label. Match the stated firmness to the preparation guide.",
+                    "Keep unopened and opened \(name.lowercased()) refrigerated according to the package. Use a clean utensil, chill cooked portions promptly, and discard the child's served portion."
+                )
+            case .fermentedCake:
+                return (
+                    "Choose plain \(name.lowercased()) with modest sodium and check soy, wheat, or other allergen ingredients. Avoid a product that can only be prepared with a hard crust or rubbery texture.",
+                    "Follow package refrigeration directions, cook the portion fully when required, chill leftovers promptly, and discard the child's served portion."
+                )
+            case .spread:
+                return (
+                    "Choose \(name.lowercased()) with modest sodium and review the complete allergen list. Check that it can be thinned when dense and contains no hard toppings or pieces.",
+                    "Keep \(name.lowercased()) refrigerated after opening as directed. Portion with a clean utensil and discard thinned spread or food left in the child's bowl."
+                )
+            case .seasoning:
+                return (
+                    "Choose pasteurized or commercially packaged \(name.lowercased()) with a clear allergen label and compare sodium, since only a small amount belongs in a larger dish.",
+                    "Follow package refrigeration directions after opening, use a clean utensil, and do not save food from the child's bowl."
+                )
+            }
+        case .meat:
+            let selectionDetail: String
+            switch meatPreparationForm(name: name) {
+            case .organ:
+                selectionDetail = "Choose a small fresh or properly frozen portion and plan to trim membrane, tough ducts, or connective tissue after cooking."
+            case .ground:
+                selectionDetail = "For ground or formed products, check sodium, seasoning, and allergen ingredients and choose a form that can stay tender and moist."
+            case .boneIn:
+                selectionDetail = "Choose a cut that can be cooked tender and plan to remove all meat from the bone before the child's portion is prepared."
+            case .tenderCut:
+                selectionDetail = "Choose an unseasoned cut that can be cooked tender. Use a boneless portion for the child, or plan to remove the cooked meat from the bone and inspect it again before serving."
             }
             return (
-                "Check \(name.lowercased()) for sodium and its full allergen list. Choose a plain version whose firmness can be adapted without a tough crust or dense sticky mouthful.",
-                "Follow the package directions for unopened \(name.lowercased()), refrigerate it promptly after opening or cooking, and discard the child's served portion."
-            )
-        case .meat:
-            return (
-                "Choose fresh or properly frozen \(name.lowercased()) from intact packaging. Unseasoned cuts make sodium and allergens easier to control; inspect ground or formed products for added ingredients.",
+                "Choose fresh or properly frozen \(name.lowercased()) from intact packaging. Unseasoned products make sodium and allergens easier to control. \(selectionDetail)",
                 "Keep raw \(name.lowercased()) cold and separate from ready-to-eat food. Cook to a safe internal temperature, refrigerate leftovers promptly, and never return the child's served portion to the main container."
             )
         case .seafood:
+            let finalCheck: String
+            switch seafoodPreparationForm(name: name) {
+            case .crustacean:
+                finalCheck = "Remove the full shell and tail after cooking and check for fragments."
+            case .bivalve:
+                finalCheck = "Use only fully cooked flesh and inspect it for shell fragments."
+            case .cephalopod:
+                finalCheck = "Use only fully cooked tender flesh and discard rubbery or inedible sections."
+            case .smallFish, .fillet:
+                finalCheck = "Inspect the cooked portion carefully for bones."
+            }
             return (
                 "Choose fresh or properly frozen \(name.lowercased()) from a reliable source and check current FDA/EPA mercury advice for the exact species. Avoid leaking packages or a strong off odor and inspect processed seafood for sodium and added allergens.",
-                "Keep raw \(name.lowercased()) cold and separate, cook it fully, and refrigerate leftovers promptly. Recheck the child's portion for bones or shell after cooking and discard served leftovers."
+                "Keep raw \(name.lowercased()) cold and separate, cook it fully, and refrigerate leftovers promptly. \(finalCheck) Discard served leftovers."
             )
         case .dairy:
+            let selection: String
+            if key.contains("in food") {
+                selection = "Choose pasteurized \(name.lowercased()) and review the milk-allergen label. Use it as a recipe ingredient rather than the main milk drink before 12 months."
+            } else if scoopablePreparationKind(name: name, category: category) == .smoothDairy {
+                selection = "Choose pasteurized \(name.lowercased()), preferably unsweetened, and review sodium, added sugar, and any mix-ins or hard toppings."
+            } else {
+                selection = "Choose pasteurized \(name.lowercased()), review sodium and ingredients, and assess its actual moisture and firmness before deciding whether to crumble, grate, melt, or slice it thinly."
+            }
             return (
-                "Choose pasteurized \(name.lowercased()) and review sodium, added sugar, and the full ingredient list. Select the actual moisture and firmness described below rather than assuming every product with the same name behaves identically.",
+                selection,
                 "Keep \(name.lowercased()) refrigerated, follow its package date and use-after-opening directions, and discard portions that have been in the child's bowl."
             )
         case .egg:
@@ -1878,13 +2541,32 @@ enum SolidsReferenceCatalog {
                 "Keep eggs refrigerated, cook \(name.lowercased()) until safely done, chill cooked egg promptly, and discard the child's served leftovers."
             )
         case .nutAndSeed:
+            let selection: String
+            if key.contains("butter") || key == "tahini" {
+                selection = "Choose a smooth, unsalted, unsweetened spread without crunchy pieces and confirm the exact nut or seed allergen on the label."
+            } else if key.contains("ground") {
+                selection = "Choose a finely milled, unsalted product and inspect it for coarse fragments or hard pieces before mixing it into moist food."
+            } else {
+                selection = "Choose an unsalted product that will be finely ground or otherwise prepared in the food-specific safe form; whole or chopped hard pieces are not served to a young child."
+            }
             return (
-                "Choose unsalted, unsweetened \(name.lowercased()) without whole hard add-ins. For a butter, choose smooth rather than crunchy; for a ground product, verify that no nut or seed pieces remain.",
+                selection,
                 "Seal \(name.lowercased()) tightly and follow the package's room-temperature or refrigeration directions. Discard any thinned or mixed portion left in the child's bowl."
             )
         case .herbAndFlavor:
+            let selection: String
+            switch flavorPreparationForm(name: name) {
+            case .bayLeaf:
+                selection = "Choose a whole culinary bay leaf for infusion and count how many go into the dish so every stiff leaf can be removed before serving."
+            case .fibrousAromatic:
+                selection = "Choose a fresh, firm aromatic without mold or slime and use only the section that can be finely grated, pounded, or infused."
+            case .leafyHerb:
+                selection = "Choose fresh leaves without slime or major wilting, wash them, and remove firm stems before finely chopping."
+            case .groundSpice:
+                selection = "Choose a single culinary spice without added salt, sugar, stimulant ingredients, or whole hard decorative pieces."
+            }
             return (
-                "Choose culinary \(name.lowercased()) without added salt, sugar, stimulant ingredients, or hard decorative pieces. Prefer a finely ground product or fresh ingredient that can be trimmed and minced.",
+                selection,
                 "Keep dried \(name.lowercased()) sealed, cool, and dry. Refrigerate fresh herbs or cut aromatics as appropriate and discard prepared food left in the child's bowl."
             )
         case .preparedFood:
@@ -1909,65 +2591,191 @@ enum SolidsReferenceCatalog {
         let practical: SolidsFoodQuestion
         switch category {
         case .fruit:
-            practical = SolidsFoodQuestion(
-                question: "Can I use frozen, canned, dried, or juiced \(name.lowercased())?",
-                answer: "Frozen or canned \(name.lowercased()) can work when it has no honey, little or no added sugar, and is prepared to the same safe texture. Dried fruit must be softened and finely modified if sticky or hard. Do not offer fruit juice before 12 months; after that, whole or prepared fruit usually offers more fiber."
-            )
+            if ["cactus pear", "prickly pear"].contains(normalized(name)) {
+                practical = SolidsFoodQuestion(
+                    question: "How do I prepare \(name.lowercased()) without leaving spines?",
+                    answer: "Choose commercially de-spined fruit when possible. Otherwise protect your hands, remove every visible spine and hair-like glochid, wash the fruit, cut off the ends, peel away the whole outer skin, and clean the work area before preparing the soft flesh."
+                )
+            } else {
+                switch fruitPreparationForm(name: name) {
+                case .sauce:
+                    practical = SolidsFoodQuestion(
+                        question: "What should I check when buying \(name.lowercased())?",
+                        answer: "Choose unsweetened \(name.lowercased()) with a short ingredient list and no honey before 12 months. Serve it from a bowl or preloaded spoon so its thickness can be assessed; a squeeze pouch hides the texture and does not build the same spoon skills."
+                    )
+                case .driedStickyFruit:
+                    practical = SolidsFoodQuestion(
+                        question: "Can I serve \(name.lowercased()) straight from the package?",
+                        answer: "Not as a whole dense, sticky dried fruit for a baby or young toddler. Confirm the pit is removed, soften it with liquid, and mash or mince it into moist food. Check packaged fruit for added sugar and sulfites."
+                    )
+                case .seededPulp:
+                    practical = SolidsFoodQuestion(
+                        question: "How should I serve the pulp from \(name.lowercased())?",
+                        answer: "Scoop the pulp away from the rind and offer it by spoon or mixed into another soft food. Remove any large or unexpectedly hard seed; do not turn it into juice for an infant."
+                    )
+                case .gratedFlesh:
+                    practical = SolidsFoodQuestion(
+                        question: "Which forms of \(name.lowercased()) work for a young child?",
+                        answer: "Use unsweetened finely grated flesh mixed into moist food, smooth coconut butter in a thin layer, or coconut milk as a recipe ingredient. Hard fresh chunks and dry chewy strips are not appropriate early forms."
+                    )
+                default:
+                    practical = SolidsFoodQuestion(
+                        question: "Can I use frozen or canned \(name.lowercased())?",
+                        answer: "Yes, when the product has no honey before 12 months, little or no added sugar, and can be prepared to the same food-specific shape and texture. Thaw or cook firm frozen fruit and drain canned fruit as needed. Do not offer fruit juice before 12 months."
+                    )
+                }
+            }
         case .vegetable:
             practical = SolidsFoodQuestion(
                 question: "Can \(name.lowercased()) be served raw?",
                 answer: vegetableRawAnswer(name: name)
             )
         case .grain:
+            let texture: String
+            switch grainPreparationForm(name: name) {
+            case .bread:
+                texture = "It should tear easily without forming a dense gummy ball. Light toasting can reduce gumminess, but avoid hard crusts, whole seeds, nut pieces, and thick sticky toppings."
+            case .pasta:
+                texture = "Cook it past al dente until it squashes easily. Shorten long strands, cut or mash large shapes, and add moisture if the surface becomes sticky or dry."
+            case .puffedCereal:
+                texture = "Test the exact product with saliva or warm water: it should dissolve readily rather than staying hard. Offer a few pieces at a time while the child is seated, not a dry handful."
+            case .softGrain:
+                texture = "Cook it until no hard center remains, then keep it moist and separate dense clumps. Whole kernels need mashing or another modification until the child can manage them reliably."
+            }
             practical = SolidsFoodQuestion(
-                question: "How soft should \(name.lowercased()) be?",
-                answer: "Prepare \(name.lowercased()) so it is moist and easy to squash, tear, or dissolve for the child's current skills. Break up dense sticky clumps, soften hard crusts, and avoid dry mouthfuls. Wheat-containing versions are a major-allergen exposure and mixed products may contain milk, egg, soy, sesame, or nuts."
+                question: "How should \(name.lowercased()) feel before serving?",
+                answer: "\(texture) Check the package for wheat and other major allergens."
             )
         case .beanAndPlantProtein:
+            let packagedGuidance: String
+            switch plantProteinPreparationForm(name: name) {
+            case .wholePulse:
+                packagedGuidance = "Canned or frozen versions can work. Choose no-salt-added or lower-sodium products when practical, drain and rinse canned pulses, cook until the center mashes easily, and flatten whole beans or peas."
+            case .softTofu, .firmTofu:
+                packagedGuidance = "Choose plain tofu, check the soy allergen label and sodium, and follow refrigeration directions. Adapt the actual firmness: scoop soft tofu, or use moist strips, crumbles, or pieces of firmer tofu."
+            case .fermentedCake:
+                packagedGuidance = "Review sodium and the complete allergen list, cook the product as directed, and keep the served form moist and easy to break apart rather than rubbery or crusted."
+            case .spread:
+                packagedGuidance = "Review sodium and all allergens, especially sesame in hummus. Thin a dense spread and serve it by spoon or in a thin layer rather than as a sticky scoop."
+            case .seasoning:
+                packagedGuidance = "Use only a small amount mixed through a larger dish. Check sodium and soy or other allergens; this concentrated seasoning is not a stand-alone protein serving."
+            case .sprout:
+                packagedGuidance = "Do not rely on rinsing to make raw sprouts safe. Cook them thoroughly until steaming hot, cool them, then chop across the stems before serving."
+            }
             practical = SolidsFoodQuestion(
-                question: "Can I use canned or packaged \(name.lowercased())?",
-                answer: "Yes, when the product is fully cooked and the ingredient and allergen list works for the child. Choose no-salt-added or lower-sodium versions when possible, drain and rinse beans when appropriate, and still change round, firm, sticky, or rubbery textures before serving."
+                question: "What should I check when preparing \(name.lowercased())?",
+                answer: packagedGuidance
             )
         case .meat:
+            let tenderness: String
+            switch meatPreparationForm(name: name) {
+            case .organ:
+                tenderness = "Cook it fully but gently so it stays soft, remove membrane or tough ducts, and mash or mince it with moisture. Keep portions modest because liver is concentrated in preformed vitamin A."
+            case .ground:
+                tenderness = "Cook it fully and keep patties, meatballs, or crumbles moist. Break apart any rubbery or browned crust and verify that no hard fragment remains."
+            case .boneIn:
+                tenderness = "Cook until the meat is tender, take it completely off the bone, then check again for loose bone, cartilage, gristle, and tough skin before shredding or mincing."
+            case .tenderCut:
+                tenderness = "Cook it fully with a moisture-retaining method and use a boneless portion. If the cut was cooked on the bone, take the meat off and inspect it again; remove any gristle or tough connective tissue, then shred across the grain or mince it with sauce rather than serving dry cubes."
+            }
             practical = SolidsFoodQuestion(
                 question: "How do I keep \(name.lowercased()) tender enough?",
-                answer: "Cook \(name.lowercased()) fully with a method that retains moisture, then shred across the grain, mince, or combine it with sauce. Remove every bone, hard crust, piece of skin, cartilage, and gristle; a dry cube is not made safer just by cutting it smaller."
+                answer: tenderness
             )
         case .seafood:
+            let finalCheck: String
+            switch seafoodPreparationForm(name: name) {
+            case .crustacean:
+                finalCheck = "Cook it fully, remove the entire shell and tail, then mince or flatten the curved flesh and discard rubbery sections."
+            case .bivalve:
+                finalCheck = "Use only fully cooked flesh, remove every shell fragment, and mince the chewy meat finely into moist food."
+            case .cephalopod:
+                finalCheck = "Cook it fully until tender and mince very finely. Do not offer rings, tentacles, or pieces that remain rubbery."
+            case .smallFish:
+                finalCheck = "Check the exact product for sodium and the current fish advice. Cook as needed and inspect every portion for bones, even when processing has softened some small bones."
+            case .fillet:
+                finalCheck = "Confirm the exact species against current fish advice, cook it fully, and inspect the cooked flesh carefully for fine bones before serving moist flakes."
+            }
             practical = SolidsFoodQuestion(
                 question: "What should I check before serving \(name.lowercased())?",
-                answer: "Confirm the exact species against current fish advice, cook it fully, and inspect the portion carefully for bones, shell, tail, or rubbery pieces. Fish and crustacean shellfish are separate major-allergen groups; mollusks are not included in the U.S. crustacean category but can still cause allergy."
+                answer: finalCheck
             )
         case .dairy:
+            let dairyUse: String
+            if normalized(name).contains("in food") {
+                dairyUse = "Use pasteurized \(name.lowercased()) only as an ingredient before 12 months; it should not replace breast milk or infant formula as the main drink. Check that the complete dish has an appropriate texture."
+            } else if case .smoothDairy = scoopablePreparationKind(name: name, category: category) {
+                dairyUse = "Choose a pasteurized, unsweetened product and offer it by spoon or mixed into food. It is part of complementary feeding, not a replacement for breast milk or infant formula before 12 months."
+            } else {
+                dairyUse = "Use pasteurized cheese as food, adapting its firmness by crumbling, grating, melting, or using a very thin slice. Do not offer firm cheese cubes, and do not use cheese to replace breast milk or formula."
+            }
             practical = SolidsFoodQuestion(
-                question: "Can \(name.lowercased()) replace breast milk or formula?",
-                answer: "No dairy food should replace breast milk or infant formula as the main milk source before 12 months. Use pasteurized \(name.lowercased()) as part of food in a developmentally appropriate texture and remember that milk is a major allergen."
+                question: "How does \(name.lowercased()) fit into infant feeding?",
+                answer: dairyUse
             )
         case .egg:
             practical = SolidsFoodQuestion(
                 question: "Does \(name.lowercased()) need to be fully cooked?",
-                answer: "For a young child, cook the white and yolk until safely done while keeping the finished texture soft rather than rubbery. Egg is a major allergen, so introduce a small amount in an appropriate form and follow the family's clinician-directed plan if the child is high risk."
+                answer: normalized(name) == "egg yolk"
+                    ? "Yes. Cook the yolk until safely done, then mash it with moisture so it is not dry or crumbly. Egg is a major allergen even when only the yolk is being served."
+                    : "Yes. Cook the egg until safely done while keeping it soft rather than rubbery. Egg is a major allergen, so start with a small amount in an appropriate form."
             )
         case .nutAndSeed:
+            let nutGuidance: String
+            if normalized(name).contains("butter") || normalized(name) == "tahini" {
+                nutGuidance = "Choose a smooth product, thin it into familiar moist food or spread it in a very thin layer, and never offer a thick spoonful. Confirm the exact nut or seed allergen on the label."
+            } else if normalized(name).contains("ground") {
+                nutGuidance = "Mix the fine meal thoroughly into moist food and check that no hard piece or dry pocket remains. Confirm the exact nut allergen on the label."
+            } else {
+                nutGuidance = "Do not serve it whole or chopped to a baby or young toddler. Grind it to a fine meal and mix it into moist food, fully soften an appropriate seed, or use a smooth well-thinned butter."
+            }
             practical = SolidsFoodQuestion(
-                question: "Can I serve \(name.lowercased()) whole or by the spoonful?",
-                answer: "Do not serve whole nuts, hard nut pieces, loose hard seeds, or a thick spoonful of nut or seed butter to a baby or young toddler. Finely grind and mix into moisture, fully soften an appropriate seed, or thin a smooth butter; check the exact allergen before introduction."
+                question: "What is the safe form of \(name.lowercased())?",
+                answer: nutGuidance
             )
         case .herbAndFlavor:
+            let flavorGuidance: String
+            switch flavorPreparationForm(name: name) {
+            case .bayLeaf:
+                flavorGuidance = "Use the leaf to infuse a dish, then remove it before serving. The stiff leaf is not an edible portion."
+            case .fibrousAromatic:
+                flavorGuidance = "Use a small amount finely grated, pounded, or infused into moist food, removing woody strands or infusion pieces."
+            case .leafyHerb:
+                flavorGuidance = "Finely chop a small amount, remove firm stems, and mix it through moist food so it does not form a loose leafy clump."
+            case .groundSpice:
+                flavorGuidance = "Use a small pinch distributed through moist food. Do not offer loose powder or whole hard spice pieces, and check blends for salt and allergens."
+            }
             practical = SolidsFoodQuestion(
                 question: "How much \(name.lowercased()) should I use?",
-                answer: "Use a small culinary amount to add flavor, mixed evenly through moist food. The goal is flavor exposure, not a spoonful of seasoning; avoid loose powder, whole hard spices, woody stems, excess salt, and blends with undeclared or unfamiliar allergens."
+                answer: flavorGuidance
             )
         case .preparedFood:
+            let dishGuidance: String
+            switch preparedFoodPreparationForm(name: name) {
+            case .soupOrStew:
+                dishGuidance = "Cook every component fully, remove any inedible or tough part actually present, and make the broth-and-solids mixture thick enough to stay together on a spoon. Check sodium and allergens."
+            case .patty:
+                dishGuidance = "Cook the center fully while keeping the patty tender, avoid a hard crust, and verify every binder and topping for major allergens."
+            case .spoonable:
+                dishGuidance = "Keep it thick enough to stay on a spoon, modify every topping or mix-in separately, and check the complete recipe for allergens, honey, added sugar, and sodium."
+            case .handheld:
+                dishGuidance = "Soften or separate the fillings, avoid tough or gummy wrappers, and cut the assembled food for current biting skills. Check every ingredient for allergens."
+            case .pastaOrRice:
+                dishGuidance = "Cook the grain until soft, keep the dish moist, and modify each meat, vegetable, or cheese component separately. Check sodium and major allergens in the complete recipe."
+            case .mixedDish:
+                dishGuidance = "Verify every ingredient and allergen, cook each component safely, and adapt the firmest, roundest, or stickiest component rather than relying on the dish's name."
+            case .sweetener:
+                dishGuidance = "Do not offer honey before 12 months. After the first birthday, use only a small optional amount mixed into food."
+            }
             practical = SolidsFoodQuestion(
                 question: "What makes \(name.lowercased()) appropriate for a baby?",
-                answer: "There is no single standard recipe. Verify every ingredient, major allergen, sodium source, and added sweetener, cook all components safely, and adapt the hardest or stickiest part to the child's skills. A soft-looking mixed dish can still contain a round, chewy, or bone-containing hazard."
+                answer: dishGuidance
             )
         }
         return [progression, practical]
     }
 
-    private enum VegetablePreparationForm: Equatable {
+    fileprivate enum VegetablePreparationForm: Equatable {
         case leafy
         case flower
         case compactBud
@@ -1982,7 +2790,7 @@ enum SolidsReferenceCatalog {
         case fibrousSpecialty
     }
 
-    private static func vegetablePreparationForm(name: String) -> VegetablePreparationForm {
+    fileprivate static func vegetablePreparationForm(name: String) -> VegetablePreparationForm {
         let key = normalized(name)
         if ["arugula", "beet greens", "bok choy", "cabbage", "collard greens", "endive", "green cabbage", "kale", "lettuce", "mustard greens", "napa cabbage", "pea shoot", "purple cabbage", "radicchio", "savoy cabbage", "spinach", "swiss chard", "turnip greens", "watercress"].contains(key) { return .leafy }
         if ["broccoli", "broccoli rabe", "cauliflower"].contains(key) { return .flower }
@@ -1998,7 +2806,7 @@ enum SolidsReferenceCatalog {
         return .root
     }
 
-    private enum PlantProteinPreparationForm: Equatable {
+    fileprivate enum PlantProteinPreparationForm: Equatable {
         case wholePulse
         case softTofu
         case firmTofu
@@ -2008,7 +2816,7 @@ enum SolidsReferenceCatalog {
         case sprout
     }
 
-    private static func plantProteinPreparationForm(name: String) -> PlantProteinPreparationForm {
+    fileprivate static func plantProteinPreparationForm(name: String) -> PlantProteinPreparationForm {
         let key = normalized(name)
         if key == "miso" || key == "fermented tofu" { return .seasoning }
         if key.contains("sprout") { return .sprout }
@@ -2019,14 +2827,14 @@ enum SolidsReferenceCatalog {
         return .wholePulse
     }
 
-    private enum MeatPreparationForm: Equatable {
+    fileprivate enum MeatPreparationForm: Equatable {
         case organ
         case ground
         case boneIn
         case tenderCut
     }
 
-    private static func meatPreparationForm(name: String) -> MeatPreparationForm {
+    fileprivate static func meatPreparationForm(name: String) -> MeatPreparationForm {
         let key = normalized(name)
         if key.contains("liver") { return .organ }
         if key.contains("ground") || key.contains("meatball") { return .ground }
@@ -2034,7 +2842,7 @@ enum SolidsReferenceCatalog {
         return .tenderCut
     }
 
-    private enum SeafoodPreparationForm: Equatable {
+    fileprivate enum SeafoodPreparationForm: Equatable {
         case crustacean
         case bivalve
         case cephalopod
@@ -2042,7 +2850,7 @@ enum SolidsReferenceCatalog {
         case fillet
     }
 
-    private static func seafoodPreparationForm(name: String) -> SeafoodPreparationForm {
+    fileprivate static func seafoodPreparationForm(name: String) -> SeafoodPreparationForm {
         let key = normalized(name)
         if ["crab", "crayfish", "langoustine", "lobster", "prawn", "shrimp"].contains(where: key.contains) { return .crustacean }
         if ["clam", "mussel", "oyster", "scallop"].contains(where: key.contains) { return .bivalve }
@@ -2051,7 +2859,7 @@ enum SolidsReferenceCatalog {
         return .fillet
     }
 
-    private enum PreparedFoodPreparationForm: Equatable {
+    fileprivate enum PreparedFoodPreparationForm: Equatable {
         case soupOrStew
         case patty
         case spoonable
@@ -2061,7 +2869,7 @@ enum SolidsReferenceCatalog {
         case sweetener
     }
 
-    private static func preparedFoodPreparationForm(name: String) -> PreparedFoodPreparationForm {
+    fileprivate static func preparedFoodPreparationForm(name: String) -> PreparedFoodPreparationForm {
         let key = normalized(name)
         if key == "honey" { return .sweetener }
         if ["soup", "stew", "chili", "curry", "minestrone", "mung dal"].contains(where: key.contains) { return .soupOrStew }
@@ -2076,13 +2884,21 @@ enum SolidsReferenceCatalog {
         let form = vegetablePreparationForm(name: name)
         switch form {
         case .softFlesh:
-            return "Some ripe \(name.lowercased()) may be served raw when its skin, seeds, and shape are modified, but cooking often makes it easier for a new eater. Test the actual piece; it should not be hard, round, or difficult to squash."
+            return "Some ripe \(name.lowercased()) can be served raw after its stem and any tough peel or hard seed are removed. Use a soft slice or manageable piece rather than small slippery cubes, and cook it first if the flesh does not squash easily."
         case .leafy:
             return "Cook \(name.lowercased()) for a new eater, then chop across leaves and stems and mix it into moist food. Large raw leaves and fibrous stems can be difficult to manage."
         case .tuber, .fibrousSpecialty:
             return "No. \(name) requires proper trimming and thorough cooking before it is served to a young child. Do not rely on cutting a raw piece smaller to make a hard or naturally irritating food safe."
-        default:
-            return "Cook \(name.lowercased()) until tender for early eaters unless a preparation specifically calls for very fine grating. Raw hard pieces, firm rounds, strings, and tough skins need more than smaller cutting."
+        case .bulb:
+            return "Cook \(name.lowercased()) until soft for an early eater and mix it into moist food. Firm raw chunks or large slippery layers are difficult to manage and can have an intense flavor."
+        case .pod:
+            return "Cook \(name.lowercased()) until soft, remove strings or tough seams, and split or chop it. A firm intact raw pod is not an appropriate early shape."
+        case .roundKernel, .compactBud:
+            return "Cook \(name.lowercased()) until soft, then mash, flatten, halve, or quarter it so it does not retain a small round shape."
+        case .stalk:
+            return "Cook \(name.lowercased()) until tender, trim woody ends and strings, and cut across the fibers. Raw fibrous sections can remain difficult to break down."
+        case .flower, .squash, .root:
+            return "Cook \(name.lowercased()) until the thickest part crushes easily for an early eater. Do not serve a hard raw chunk; use a specifically recommended fine-grated preparation only when the ingredient guidance calls for it."
         }
     }
 
@@ -2125,6 +2941,8 @@ enum SolidsReferenceCatalog {
         }
 
         switch category {
+        case .fruit:
+            return fruitPreparations(name: name)
         case .vegetable:
             return vegetablePreparations(name: name)
         case .grain:
@@ -2143,77 +2961,9 @@ enum SolidsReferenceCatalog {
             return nutAndSeedPreparations(name: name)
         case .herbAndFlavor:
             return flavorPreparations(name: name)
-        default:
-            break
-        }
-
-        let base: String
-        let middle: String
-        let later: String
-        switch category {
-        case .fruit:
-            base = "Wash, peel or remove pits and hard seeds as needed. Cook firm fruit until very soft, then mash or offer a large soft piece that squishes easily."
-            middle = "Serve very soft bite-size pieces or a large easy-to-hold wedge. Flatten small round fruit and remove pits and hard seeds."
-            later = "Offer soft pieces sized for developing pincer grasp. Keep hard fruit cooked or finely grated."
-        case .vegetable:
-            base = "Wash and cook until completely soft. Mash or offer a large soft piece that can be easily squished between two fingers."
-            middle = "Offer soft spears or bite-size pieces. Remove tough skins, strings, hard cores, and round shapes."
-            later = "Offer soft chopped pieces with a child-size utensil. Continue cooking hard vegetables until tender."
-        case .grain:
-            base = "Cook with water until soft and moist. Mash lumps as needed; avoid dry, sticky mouthfuls."
-            middle = "Serve soft clumps, strips, or small pieces that are easy to grasp. Moisten dry grains before serving."
-            later = "Offer soft grains or appropriately cut bread and pasta. Encourage spoon or fork practice."
-        case .beanAndPlantProtein:
-            base = "Cook until very soft, then mash or blend. Flatten whole beans and thin sticky spreads with water or another food."
-            middle = "Offer mashed beans, soft patties, or strips. Crumble firm plant proteins and keep pieces moist."
-            later = "Serve soft whole beans flattened as needed, small patties, or fork-manageable pieces."
-        case .meat:
-            base = "Cook fully. Mince or puree with liquid, or offer a large very tender strip the child can hold and mouth safely."
-            middle = "Serve moist shredded meat, tender strips, or soft ground-meat patties. Remove bones, skin, gristle, and tough pieces."
-            later = "Offer small tender pieces or ground meat with a utensil. Continue removing bones and tough connective tissue."
-        case .seafood:
-            base = "Cook fully and check carefully for bones or shell. Flake finely and moisten, or form into a soft patty."
-            middle = "Serve soft flakes, minced shellfish, or tender patties. Remove every bone, shell, and tough tail."
-            later = "Offer small fully cooked pieces, continuing to check carefully for bones and shell."
-        case .dairy:
-            base = "Use pasteurized products. Serve smooth dairy by spoon; finely grate or melt firm cheese into another food."
-            middle = "Offer pasteurized soft dairy by spoon or thin slices of soft cheese. Avoid hard cubes."
-            later = "Serve pasteurized dairy in small portions. Cut cheese thinly or grate it instead of offering firm cubes."
-        case .egg:
-            base = "Cook egg until both white and yolk are firm. Mash with water or cut an omelet into wide soft strips."
-            middle = "Serve fully cooked soft strips or small pieces. Avoid rubbery, hard pieces."
-            later = "Offer fully cooked chopped egg or fork-size pieces."
-        case .nutAndSeed:
-            base = "Never offer whole nuts or spoonfuls of thick nut or seed butter. Grind finely or thin smooth butter into another food."
-            middle = "Continue using finely ground nuts or a thin layer of smooth butter on soft food."
-            later = "Use finely ground nuts or thinly spread smooth butter; whole nuts remain a choking hazard."
-        case .herbAndFlavor:
-            base = "Wash fresh herbs. Finely mince and mix a small amount into a familiar soft food. Avoid added salt."
-            middle = "Finely chop or cook into soft food. Use mild amounts and avoid hard stems."
-            later = "Use to flavor family foods while keeping salt and added sugar low."
         case .preparedFood:
-            base = "Prepare until soft and moist, check every ingredient, and modify any round, hard, sticky, or tough components."
-            middle = "Cut or mash to match current eating skills. Keep the food moist and avoid hard or chewy pieces."
-            later = "Offer manageable pieces and utensil practice. Check sodium, added sugar, and allergen ingredients."
+            return preparedFoodPreparations(name: name)
         }
-        return [
-            SolidsPreparationStage(
-                minimumAgeMonths: 6,
-                title: "Around 6 months",
-                instructions: "\(name): \(preparationDetail(name: name, category: category, age: 6)) \(base)"
-            ),
-            SolidsPreparationStage(
-                minimumAgeMonths: 9,
-                title: "Around 9 months",
-                instructions: "\(name): \(preparationDetail(name: name, category: category, age: 9)) \(middle)"
-            ),
-            SolidsPreparationStage(
-                minimumAgeMonths: 12,
-                title: "12+ months",
-                instructions: "\(name): \(preparationDetail(name: name, category: category, age: 12)) \(later)"
-            ),
-            SolidsPreparationStage(minimumAgeMonths: 18, title: "18+ months", instructions: "Serve \(name.lowercased()) as part of family meals in safe, manageable pieces. Supervise eating and adapt texture to the child's skills.")
-        ]
     }
 
     private static func preparationStages(
@@ -2231,7 +2981,7 @@ enum SolidsReferenceCatalog {
         ]
     }
 
-    private enum FruitPreparationForm: Equatable {
+    fileprivate enum FruitPreparationForm: Equatable {
         case sauce
         case smallRoundBerry
         case aggregateBerry
@@ -2249,6 +2999,15 @@ enum SolidsReferenceCatalog {
     }
 
     private static func fruitPreparations(name: String) -> [SolidsPreparationStage] {
+        if ["cactus pear", "prickly pear"].contains(normalized(name)) {
+            return preparationStages(
+                name: name,
+                six: "Use commercially de-spined fruit when possible. Remove every spine and hair-like glochid, peel away the entire outer skin, then mash the ripe soft flesh and remove any unexpectedly hard seed.",
+                nine: "After complete de-spining and peeling, offer ripe flesh in soft small pieces or mashed on a preloaded spoon. Check the work surface and fruit again for hair-like glochids.",
+                twelve: "Serve peeled ripe flesh in soft bite-size pieces or by spoon only after every spine and glochid is removed. A fork can help with slippery pieces.",
+                eighteen: "Continue removing every spine, glochid, and the full outer skin before offering ripe soft flesh in pieces suited to chewing skill."
+            )
+        }
         switch fruitPreparationForm(name: name) {
         case .sauce:
             return preparationStages(
@@ -2365,7 +3124,7 @@ enum SolidsReferenceCatalog {
         }
     }
 
-    private static func fruitPreparationForm(name: String) -> FruitPreparationForm {
+    fileprivate static func fruitPreparationForm(name: String) -> FruitPreparationForm {
         let key = normalized(name)
         if key == "applesauce" { return .sauce }
         if key == "coconut flesh" { return .gratedFlesh }
@@ -2626,8 +3385,8 @@ enum SolidsReferenceCatalog {
         case .tenderCut:
             return preparationStages(
                 name: name,
-                six: "Cook completely with a moist method, then finely mince with liquid or offer a large tender strip cut across the grain. Remove skin, bone, and gristle.",
-                nine: "Serve moist shreds, thin tender strips, or small pieces cut across the grain. Add sauce if the meat begins to dry out.",
+                six: "Cook completely with a moist method and use a boneless portion. If the cut was cooked on the bone, take the meat off and inspect it again. Finely mince with liquid or offer a large tender strip cut across the grain, removing any gristle or tough connective tissue.",
+                nine: "Serve moist shreds, thin tender strips, or small pieces cut across the grain. Recheck any meat cooked on the bone before plating, and add sauce if the meat begins to dry out.",
                 twelve: "Offer small tender pieces with a fork or fingers. Avoid dry cubes and browned hard edges.",
                 eighteen: "Adapt the family portion into moist pieces the child can chew, continuing to cut across the grain and remove tough tissue."
             )
@@ -2683,6 +3442,15 @@ enum SolidsReferenceCatalog {
     }
 
     private static func eggPreparations(name: String) -> [SolidsPreparationStage] {
+        if normalized(name) == "egg yolk" {
+            return preparationStages(
+                name: name,
+                six: "Cook the yolk fully, then mash it with water, breast milk, formula, or another familiar moist food so it is not dry or crumbly. Offer it on a preloaded spoon.",
+                nine: "Mash or finely crumble the fully cooked yolk into a moist food. Keep the mixture soft and avoid a dry ball of yolk.",
+                twelve: "Mix fully cooked yolk into a moist family dish or offer it mashed by spoon. Check the complete dish for other allergens.",
+                eighteen: "Serve fully cooked yolk within family meals, keeping it moist and following the family's established egg-allergen plan."
+            )
+        }
         return preparationStages(
             name: name,
             six: "Cook the white and yolk until safely done while keeping the texture tender. Mash with water or yogurt, grate a hard-cooked egg into food, or cut a soft omelet into two-finger-wide strips.",
@@ -2697,7 +3465,7 @@ enum SolidsReferenceCatalog {
         case .soupOrStew:
             return preparationStages(
                 name: name,
-                six: "Cook every ingredient until very soft, remove bones and tough pieces, then mash to a thick scoopable consistency. Offer on a preloaded spoon rather than as thin hot broth.",
+                six: "Cook every ingredient until very soft, remove any inedible or tough part actually present, then mash to a thick scoopable consistency. Offer on a preloaded spoon rather than as thin hot broth.",
                 nine: "Serve thick and lukewarm with each component mashed or cut small. Press round beans or peas flat and shred meat across the grain.",
                 twelve: "Offer from a shallow bowl with a child-size spoon. Keep pieces soft, check temperature, and choose a lower-sodium child's portion.",
                 eighteen: "Adapt the family pot by modifying each hard, round, chewy, or oversized component before serving."
@@ -2738,7 +3506,7 @@ enum SolidsReferenceCatalog {
             return preparationStages(
                 name: name,
                 six: "Cook every component fully and identify the hardest or chewiest ingredient. Mash into a moist texture or offer one broad soft component at a time after checking the full allergen list.",
-                nine: "Offer small soft pieces or a scoopable mixture, adapting each round, firm, sticky, stringy, or bone-containing ingredient separately.",
+                nine: "Offer small soft pieces or a scoopable mixture, adapting each round, firm, sticky, stringy, or otherwise difficult ingredient actually present in the recipe.",
                 twelve: "Serve a child-size portion with utensils or fingers after checking sodium, added sugar, allergens, temperature, and the texture of every component.",
                 eighteen: "Adapt the family version rather than assuming the dish name guarantees a safe texture; continue changing the hardest component first."
             )
@@ -2750,14 +3518,13 @@ enum SolidsReferenceCatalog {
         }
     }
 
-    private enum ScoopablePreparationKind {
+    fileprivate enum ScoopablePreparationKind: Equatable {
         case porridge
         case smoothDairy
         case spread
-        case soup
     }
 
-    private static func scoopablePreparationKind(
+    fileprivate static func scoopablePreparationKind(
         name: String,
         category: SolidsFoodCategory
     ) -> ScoopablePreparationKind? {
@@ -2770,9 +3537,6 @@ enum SolidsReferenceCatalog {
         }
         if category == .dairy && (!key.contains("cheese") || key == "cottage cheese") && key != "paneer" {
             return .smoothDairy
-        }
-        if key.contains("soup") || key.contains("stew") || key.contains("chili") || key.contains("curry") || key == "mung dal" {
-            return .soup
         }
         return nil
     }
@@ -2806,27 +3570,19 @@ enum SolidsReferenceCatalog {
                 twelve: "Use as a thin spread, sauce, or stirred-in ingredient. Avoid a dense spoonful or a sticky lump.",
                 eighteen: "Continue serving as a thin spread or sauce and adjust thickness so it does not form a sticky mouthful."
             )
-        case .soup:
-            return preparationStages(
-                name: name,
-                six: "Cook every component until very soft, remove bones and tough pieces, then mash or blend to a thick spoonable texture. Avoid serving a bowl of thin hot liquid.",
-                nine: "Serve thick and lukewarm with very soft components mashed or cut small. Offer on a preloaded spoon and check each ingredient's shape.",
-                twelve: "Offer in a shallow bowl with a child-size spoon. Keep pieces soft and manageable and check sodium and temperature.",
-                eighteen: "Serve as a thick, scoopable family dish after modifying any hard, round, tough, or oversized component."
-            )
         case nil:
             return nil
         }
     }
 
-    private enum GrainPreparationForm {
+    fileprivate enum GrainPreparationForm {
         case bread
         case pasta
         case puffedCereal
         case softGrain
     }
 
-    private static func grainPreparationForm(name: String) -> GrainPreparationForm {
+    fileprivate static func grainPreparationForm(name: String) -> GrainPreparationForm {
         let key = normalized(name)
         if key.contains("bread") || key.contains("toast") || key.contains("tortilla") || key == "cornbread" {
             return .bread
@@ -2920,6 +3676,16 @@ enum SolidsReferenceCatalog {
         let key = normalized(name)
         let isSmallSeed = ["chia", "flax", "hemp", "poppy", "pumpkin seed", "sesame", "sunflower seed"].contains(where: key.contains)
 
+        if key.contains("ground") {
+            return preparationStages(
+                name: name,
+                six: "Inspect the meal for hard or coarse pieces, then mix a small amount completely into moist food. Do not offer a dry spoonful.",
+                nine: "Stir the fine meal into a scoopable food or press it onto a moist surface, checking again for hard fragments and dry pockets.",
+                twelve: "Use the fine meal in moist meals or baking. Keep it dispersed rather than serving a dry, dense mound.",
+                eighteen: "Continue mixing the finely ground product into food and check every batch for hard pieces."
+            )
+        }
+
         if isSmallSeed {
             return preparationStages(
                 name: name,
@@ -2939,14 +3705,14 @@ enum SolidsReferenceCatalog {
         )
     }
 
-    private enum FlavorPreparationForm {
+    fileprivate enum FlavorPreparationForm {
         case leafyHerb
         case fibrousAromatic
         case groundSpice
         case bayLeaf
     }
 
-    private static func flavorPreparationForm(name: String) -> FlavorPreparationForm {
+    fileprivate static func flavorPreparationForm(name: String) -> FlavorPreparationForm {
         let key = normalized(name)
         if key == "bay leaf flavor" {
             return .bayLeaf
@@ -2993,88 +3759,6 @@ enum SolidsReferenceCatalog {
         }
     }
 
-    private static func preparationDetail(
-        name: String,
-        category: SolidsFoodCategory,
-        age: Int
-    ) -> String {
-        let key = normalized(name)
-        let roundFoods = ["grape", "cherry", "blueberry", "cranberry", "currant", "gooseberry", "olive", "cherry tomato", "longan", "lychee"]
-        let hardFoods = ["apple", "pear", "carrot", "jicama", "radish", "celery", "turnip", "rutabaga", "beet"]
-        let pitFoods = ["avocado", "peach", "plum", "apricot", "nectarine", "mango", "date", "cherry", "olive"]
-        let leafyFoods = ["spinach", "kale", "chard", "collard", "lettuce", "arugula", "cabbage", "bok choy"]
-        if roundFoods.contains(where: key.contains) {
-            if age < 9 { return "Cook if firm, remove any pit or seed, then crush completely or quarter lengthwise into a soft graspable piece." }
-            return "Remove pits and seeds, then flatten firmly or quarter lengthwise; never serve it whole and round."
-        }
-        if hardFoods.contains(where: key.contains) {
-            if age < 9 { return "Cook or steam until it collapses under gentle finger pressure, then mash, grate, or offer a large soft section." }
-            return "Keep it cooked until tender or grate it finely; avoid raw hard chunks."
-        }
-        if pitFoods.contains(where: key.contains) {
-            return age < 9
-                ? "Remove the pit and slippery skin as needed, then offer very ripe flesh as a large soft wedge or mash."
-                : "Remove the pit, then serve ripe flesh in soft slices or small pieces that are not slippery."
-        }
-        if leafyFoods.contains(where: key.contains) {
-            return age < 9
-                ? "Cook until wilted and tender, mince across fibrous strands, and mix into a moist familiar food."
-                : "Cook until tender and chop finely so long leaves or stems do not form stringy mouthfuls."
-        }
-        if key.contains("corn on the cob") {
-            return "Cook until tender and offer a short cob section for mouthing; loose whole kernels should be mashed or cut for current skills."
-        }
-        if key.contains("corn") || key.contains("pea") || key.contains("bean") || key.contains("chickpea") || key.contains("edamame") {
-            return age < 9
-                ? "Cook until very soft and mash each round piece so it cannot remain a firm airway-sized shape."
-                : "Cook until soft and flatten individual pieces before offering; remove firm skins if they separate."
-        }
-        if key.contains("bread") || key.contains("toast") || key.contains("bagel") || key.contains("tortilla") {
-            return age < 9
-                ? "Lightly toast or moisten so it is not gummy, then cut into a wide strip; avoid dense sticky balls of bread."
-                : "Cut into narrow strips or small manageable pieces and serve with a moist topping when helpful."
-        }
-        if key.contains("pasta") || key.contains("noodle") || key.contains("couscous") {
-            return age < 9
-                ? "Cook past al dente until very soft, choose a large shape or mash, and coat lightly so it stays moist."
-                : "Cook until soft and cut long strands or large shapes into manageable pieces."
-        }
-        if category == .seafood {
-            return key.contains("shrimp") || key.contains("prawn") || key.contains("lobster") || key.contains("crab")
-                ? "Cook completely, remove every shell and tail, then mince finely into a moist food."
-                : "Cook completely, inspect carefully for bones, and separate into moist flakes that break apart easily."
-        }
-        if category == .meat {
-            return age < 9
-                ? "Cook completely and keep it juicy; offer finely minced meat, a soft patty, or a large tender strip without bone or gristle."
-                : "Cook completely, remove bone and gristle, then shred across the grain or cut into small tender pieces."
-        }
-        if category == .nutAndSeed {
-            return key.contains("butter") || key.contains("tahini")
-                ? "Thin the smooth spread well with warm water or mix a small amount into a familiar soft food; never offer a thick spoonful."
-                : "Grind to a fine powder and mix into moist food; never offer whole nuts or loose hard seeds."
-        }
-        if category == .dairy {
-            return key.contains("cheese") || key.contains("paneer")
-                ? "Use pasteurized cheese and grate, melt, crumble, or slice it thinly rather than serving firm cubes."
-                : "Use a pasteurized, unsweetened product and offer it on a preloaded spoon or mixed into another food."
-        }
-        if category == .egg {
-            return age < 9
-                ? "Cook white and yolk fully, then mash with moisture or cut a soft omelet into two-finger-wide strips."
-                : "Cook fully and serve as soft strips, grated egg, or small tender pieces."
-        }
-        if category == .herbAndFlavor {
-            return "Remove hard stems, mince finely, and mix a small amount through moist food rather than serving a loose mouthful."
-        }
-        if category == .preparedFood {
-            return "Check every ingredient and allergen label, then soften or separate components so no round, hard, sticky, or chewy piece remains."
-        }
-        return age < 9
-            ? "Prepare it until very soft, remove inedible skin, seeds, cores, or stems, and offer a mash or large graspable piece."
-            : "Prepare it until tender and serve in soft pieces suited to the child's current grasp and chewing skills."
-    }
-
     private static func sourceURLs(
         name: String,
         category: SolidsFoodCategory,
@@ -3087,6 +3771,7 @@ enum SolidsReferenceCatalog {
             usda,
             SolidsSourceLibrary.cdcIntroduction,
             SolidsSourceLibrary.cdcChoking,
+            SolidsSourceLibrary.aapStartingSolids,
             SolidsSourceLibrary.nhsFoodSafety
         ]
         if normalized(name) == "acai" {
@@ -3100,6 +3785,9 @@ enum SolidsReferenceCatalog {
             ], at: 0)
         }
         if category == .fruit { sources.append(SolidsSourceLibrary.aapFruitJuice) }
+        if category == .fruit || category == .vegetable || normalized(name).contains("sprout") {
+            sources.append(SolidsSourceLibrary.fdaProduceSafety)
+        }
         if hasAllergens {
             sources += [SolidsSourceLibrary.fdaAllergens, SolidsSourceLibrary.aapAllergenIntroduction]
         }
@@ -3115,11 +3803,8 @@ enum SolidsReferenceCatalog {
         if key == "acai" {
             return "Fresh açaí berries are small and round and contain a large hard seed. Use unsweetened prepared pulp, purée, or powder mixed into a moist food instead of serving a whole fresh berry."
         }
-        if ["grape", "cherry", "cherry tomato", "blueberry", "cranberry"].contains(where: key.contains) {
-            return "\(name) can retain a round airway-sized shape. Cook until soft when needed, remove pits or seeds, then quarter lengthwise or flatten before serving."
-        }
-        if key.contains("apple") || key.contains("carrot") || key.contains("pear") {
-            return "Raw \(name.lowercased()) can be too hard to break down safely. Cook until soft or grate finely before serving."
+        if ["cactus pear", "prickly pear"].contains(key) {
+            return "Spines and hair-like glochids can remain on the outer skin. Remove them and the entire peel before preparing the ripe flesh, then mash or cut it into a soft manageable form and remove any unexpectedly hard seed."
         }
         if key.contains("sausage") || key.contains("hot dog") {
             return "Cut \(name.lowercased()) lengthwise into thin strips and then into small pieces; never serve coin-shaped rounds. Check sodium and casing texture."
@@ -3127,19 +3812,49 @@ enum SolidsReferenceCatalog {
         if key.contains("popcorn") {
             return "Popcorn is a hard, irregular choking hazard and is not appropriate for babies or young toddlers. Choose soft cooked corn in a modified shape instead."
         }
-        if key.contains("bread") || key.contains("bagel") || key.contains("toast") {
-            return "Dense \(name.lowercased()) can form a sticky mouthful. Lightly toast or moisten it and avoid compressed balls or thick sticky toppings."
+        switch category {
+        case .fruit:
+            switch fruitPreparationForm(name: name) {
+            case .sauce:
+                return "Keep \(name.lowercased()) scoopable rather than watery, and serve it from a bowl or spoon with the pouch cap out of reach."
+            case .smallRoundBerry:
+                return "A firm whole \(name.lowercased()) can keep a small round airway shape. Cook if needed, then crush or flatten every berry."
+            case .aggregateBerry:
+                return "Use ripe \(name.lowercased()) that collapses easily; flatten, tear, or remove a firm core when the berry does not break down readily."
+            case .roundOrSlipperyFruit:
+                return "Do not serve \(name.lowercased()) whole and round. Remove its pit, large seed, husk, or inedible peel as applicable, then mash or cut the ripe flesh lengthwise."
+            case .citrus:
+                return "Tough citrus membrane and seeds can be difficult to manage. Remove them and serve the soft juicy pulp rather than an intact membrane-wrapped segment."
+            case .firmFruit:
+                return "Hard raw \(name.lowercased()) pieces can break into airway-sized chunks. Cook until soft or grate finely after removing the core and seeds."
+            case .stoneFruit:
+                return "Remove the entire pit from \(name.lowercased()) and use ripe flesh that squashes easily; cook it when firm and avoid slippery round pieces."
+            case .melon:
+                return "Remove rind and hard seeds from \(name.lowercased()). Use a broad soft piece or appropriately cut portion, not a melon ball or small slippery cube."
+            case .softFruit:
+                return "Use fully ripe \(name.lowercased()) that squashes easily and remove the specific hard seed, core, stem, or inedible peel it contains."
+            case .seededPulp:
+                return "Serve only the soft pulp of \(name.lowercased()) by spoon and remove any large or unexpectedly hard seed; keep the rind out of reach."
+            case .arils:
+                return "Intact \(name.lowercased()) arils can remain firm and round. Crush or flatten them rather than offering a handful."
+            case .driedStickyFruit:
+                return "Whole dried \(name.lowercased()) can form a dense sticky mouthful. Remove the pit, soften thoroughly, and mash or mince it into moist food."
+            case .gratedFlesh:
+                return "Hard coconut chunks and dry strips can be difficult to chew. Use finely grated flesh or a smooth coconut product mixed into moist food."
+            case .cookBeforeServing:
+                return "Raw or undercooked \(name.lowercased()) can remain firm or otherwise unsuitable. Cook it thoroughly and serve only the soft edible portion."
+            }
+        case .vegetable, .grain, .beanAndPlantProtein, .meat, .seafood, .dairy, .egg, .herbAndFlavor, .preparedFood:
+            return safetyNote(name: name, category: category)
+        case .nutAndSeed:
+            if key.contains("butter") || key == "tahini" {
+                return "A thick spoonful of \(name.lowercased()) can stick as one mass. Thin it into moist food or spread only a very thin layer."
+            }
+            if key.contains("ground") {
+                return "Mix \(name.lowercased()) fully into moist food so no hard piece, dry pocket, or dense clump remains."
+            }
+            return "Whole or chopped \(name.lowercased()) is a choking hazard for babies and young toddlers. Grind it finely into moist food or use a smooth, well-thinned butter."
         }
-        if category == .nutAndSeed {
-            return "Whole \(name.lowercased()) pieces and thick spoonfuls of nut or seed butter are choking hazards. Grind finely or thin smooth butter into food."
-        }
-        if category == .meat {
-            return "Remove every bone and tough piece from \(name.lowercased()). Keep it tender and moist; shred, mince, or offer a soft graspable strip."
-        }
-        if category == .seafood {
-            return "Remove every bone, shell, and tough tail from \(name.lowercased()). Serve fully cooked soft flakes or finely minced pieces."
-        }
-        return "\(name): \(safetyNote(name: name, category: category))"
     }
 
     private static func nutritionHighlights(name: String, category: SolidsFoodCategory) -> [String] {
@@ -3195,10 +3910,13 @@ enum SolidsReferenceCatalog {
         case .dairy:
             if key.contains("buttermilk") || key.contains("kefir") || key.contains("yogurt") || key == "skyr" || key == "labneh" { return ["Protein", "Calcium", "Live cultures vary by product"] }
             if key.contains("milk in food") { return ["Protein", "Calcium", "Vitamin D when fortified"] }
+            if ["cream cheese", "mascarpone", "sour cream"].contains(key) { return ["Fat", "Calcium varies by product", "Protein is limited in a small serving"] }
             return ["Protein", "Calcium", "Vitamin B12"]
         case .egg:
             return ["Protein", "Choline", "Vitamin B12"]
         case .nutAndSeed:
+            if key == "coconut butter" { return ["Fat is mostly saturated", "Fiber varies by product", "Manganese"] }
+            if key == "chestnut" { return ["Carbohydrate", "Fiber", "Fat is lower than in most nuts"] }
             if key.contains("walnut") || key.contains("chia") || key.contains("flax") || key.contains("hemp") { return ["Unsaturated fats", "Plant omega-3 fats", "Protein"] }
             if key.contains("brazil") { return ["Unsaturated fats", "Selenium is highly concentrated", "Protein"] }
             if key.contains("sesame") || key == "tahini" { return ["Unsaturated fats", "Calcium varies by product", "Protein"] }
@@ -3221,16 +3939,16 @@ enum SolidsReferenceCatalog {
         case .meat, .egg:
             return true
         case .beanAndPlantProtein:
-            return plantProteinPreparationForm(name: name) != .seasoning
+            return ![.seasoning, .sprout].contains(plantProteinPreparationForm(name: name))
         case .seafood:
-            return seafoodPreparationForm(name: name) != .fillet
-                || ["sardine", "anchovy", "tuna"].contains(where: key.contains)
+            return seafoodPreparationForm(name: name) == .bivalve
+                || ["sardine", "anchovy", "smelt"].contains(where: key.contains)
         case .grain:
             return key.contains("infant") || key.contains("fortified")
         case .nutAndSeed:
             return ["pumpkin seed", "sesame", "tahini"].contains(where: key.contains)
         case .preparedFood:
-            return ["beef", "chicken", "turkey", "meat", "fish", "salmon", "bean", "lentil", "tofu", "egg"].contains(where: key.contains)
+            return ["beef", "meat", "bean", "lentil", "tofu"].contains(where: key.contains)
         default:
             return false
         }
@@ -3239,6 +3957,7 @@ enum SolidsReferenceCatalog {
     private static func servingVisuals(name: String, category: SolidsFoodCategory) -> [SolidsServingVisual] {
         let key = normalized(name)
         if key == "acai" || key == "applesauce" { return [.spoon, .spoon, .spoon, .spoon] }
+        if key == "egg yolk" { return [.spoon, .spoon, .spoon, .spoon] }
         if category == .fruit {
             switch fruitPreparationForm(name: name) {
             case .sauce, .seededPulp:
@@ -3256,7 +3975,7 @@ enum SolidsReferenceCatalog {
             }
         }
         switch scoopablePreparationKind(name: name, category: category) {
-        case .porridge, .smoothDairy, .soup:
+        case .porridge, .smoothDairy:
             return [.spoon, .spoon, .spoon, .spoon]
         case .spread:
             return [.spoon, .thinSpread, .thinSpread, .thinSpread]
@@ -3328,6 +4047,12 @@ enum SolidsReferenceCatalog {
         if key == "tuna" {
             return "Mercury guidance varies by tuna species. Canned light tuna is a lower-mercury choice; avoid bigeye tuna and check FDA/EPA fish advice for other types."
         }
+        if key == "mackerel" {
+            return "Mercury guidance varies by mackerel species. Do not use king mackerel for a young child; confirm the exact species against current FDA/EPA fish advice before serving another type."
+        }
+        if ["cactus pear", "prickly pear"].contains(key) {
+            return "Use only fruit with every spine and hair-like glochid removed. Peel away the entire outer skin, clean the work area, and serve only the ripe soft flesh with any unexpectedly hard seed removed."
+        }
         if key == "cassava" || key == "yucca root" {
             return "Never serve cassava raw. Peel and cook it properly because raw or improperly processed cassava contains naturally occurring cyanogenic compounds; discard bitter-tasting cassava and its cooking water."
         }
@@ -3344,22 +4069,160 @@ enum SolidsReferenceCatalog {
             return "Cook liver fully, remove membrane and tough tissue, and serve a modest amount. Liver is concentrated in preformed vitamin A, so it should not be treated as an everyday large portion."
         }
         switch category {
-        case .nutAndSeed:
-            return "Whole nuts and thick spoonfuls of nut or seed butter are choking hazards. Use a finely ground or thinned form."
-        case .seafood:
-            return "Cook fully and remove all bones, shells, and tough tails before serving."
-        case .meat:
-            return "Cook fully and remove bones, skin, gristle, and tough pieces."
         case .fruit:
-            return "Remove pits, hard seeds, stems, and tough skin. Cook hard fruit and flatten small round fruit."
+            switch fruitPreparationForm(name: name) {
+            case .sauce:
+                return "Choose unsweetened \(name.lowercased()) with no honey before 12 months, and serve it from a bowl or spoon rather than letting the child handle a pouch cap."
+            case .smallRoundBerry, .aggregateBerry:
+                return "Wash the fruit, remove its stem or firm core when present, and mash, flatten, or cut any berry that remains firm or round."
+            case .roundOrSlipperyFruit:
+                return "Remove the fruit's pit, large seed, husk, or inedible peel as applicable, and never serve it whole and round."
+            case .citrus:
+                return "Remove peel, seeds, and tough membrane. Offer the pulp rather than a firm membrane-wrapped segment."
+            case .firmFruit:
+                return "Remove the core and seeds, then cook or finely grate the fruit instead of offering hard raw chunks."
+            case .stoneFruit:
+                return "Remove the entire pit and use only ripe soft flesh, peeling tough skin or cooking firm fruit when needed."
+            case .melon:
+                return "Remove rind and hard seeds and avoid melon balls or small slippery cubes."
+            case .softFruit:
+                return "Use fully ripe soft flesh and remove the specific stem, hard seed, core, or inedible peel the fruit contains."
+            case .seededPulp:
+                return "Keep the rind out of the serving and remove any large or unexpectedly hard seed from the soft pulp."
+            case .arils:
+                return "Remove rind and membrane, then crush or flatten every firm aril for an early eater."
+            case .driedStickyFruit:
+                return "Confirm the pit is removed, soften the fruit thoroughly, and do not serve a whole dense, sticky piece."
+            case .gratedFlesh:
+                return "Use finely grated flesh or a smooth coconut product in moist food; avoid hard chunks and dry chewy strips."
+            case .cookBeforeServing:
+                return "Cook \(name.lowercased()) thoroughly and use only the properly peeled, trimmed, soft edible portion."
+            }
         case .vegetable:
-            return "Cook hard vegetables until soft and change round shapes that could block the airway."
+            switch vegetablePreparationForm(name: name) {
+            case .leafy:
+                return "Wash well, cook until tender, remove tough stems, and chop across fibers so the leaves do not form a stringy clump."
+            case .flower:
+                return "Cook until the thickest stem and florets crush easily; trim woody leaves and avoid firm loose buds."
+            case .compactBud, .roundKernel:
+                return "Cook until soft and mash, flatten, halve, or quarter the round piece rather than serving it intact."
+            case .squash:
+                return "Remove hard rind and seeds and cook the flesh until it crushes easily."
+            case .pod:
+                return "Remove strings and tough seams, cook the pod until soft, and split or chop it."
+            case .stalk:
+                return "Trim woody ends and strings, cook until tender, and cut across the fibers."
+            case .bulb:
+                return "Cook until soft and avoid firm raw chunks or large slippery layers."
+            case .softFlesh:
+                return "Remove the stem and any tough peel or hard seed, use soft flesh, and avoid small slippery cubes."
+            case .root:
+                return "Cook until the center crushes easily or follow a specifically recommended fine-grated preparation; do not serve hard raw chunks."
+            case .tuber:
+                return "Cook fully through the center and keep the starchy flesh moist."
+            case .fibrousSpecialty:
+                return "Use only the properly trimmed edible portion, discard tough or irritating material, and cook thoroughly."
+            }
+        case .grain:
+            switch grainPreparationForm(name: name) {
+            case .bread:
+                return "Avoid hard crusts, whole seeds or nuts, and compressed gummy mouthfuls; use a piece that tears easily."
+            case .pasta:
+                return "Cook past firm, shorten strands or modify large shapes, and keep the pasta moist rather than sticky or rubbery."
+            case .puffedCereal:
+                return "Use only puffs that dissolve readily and offer a few at a time while the child is seated and supervised."
+            case .softGrain:
+                return "Cook until no hard center remains, add enough moisture, and break up dense clumps or whole kernels."
+            }
+        case .beanAndPlantProtein:
+            switch plantProteinPreparationForm(name: name) {
+            case .wholePulse:
+                return "Cook until the center mashes easily, then mash or flatten whole beans and peas for an early eater."
+            case .softTofu:
+                return "Keep the tofu scoopable and check for firm add-ins or a rubbery surface."
+            case .firmTofu:
+                return "Use moist strips, crumbles, or soft pieces that compress and break apart easily."
+            case .fermentedCake:
+                return "Cook as directed and avoid a hard crust, thick elastic chunk, or dry rubbery piece."
+            case .spread:
+                return "Thin a dense spread and avoid a thick sticky spoonful."
+            case .seasoning:
+                return "Use only a small amount mixed through a larger dish; check sodium and the complete allergen label."
+            case .sprout:
+                return "Cook sprouts thoroughly until steaming hot, cool them, and chop across the stems before serving."
+            }
+        case .meat:
+            switch meatPreparationForm(name: name) {
+            case .organ:
+                return "Cook fully, remove membrane and tough ducts, and keep the finished texture soft and moist."
+            case .ground:
+                return "Cook fully and keep patties, meatballs, or crumbles moist; break apart hard crusts and rubbery pieces."
+            case .boneIn:
+                return "Cook fully, remove the meat from the bone, and inspect again for loose bone, cartilage, gristle, and tough skin."
+            case .tenderCut:
+                return "Cook fully and use a boneless portion. If the cut was cooked on the bone, remove the meat and inspect it again; discard any gristle or tough connective tissue, then shred across the grain or mince with moisture."
+            }
+        case .seafood:
+            switch seafoodPreparationForm(name: name) {
+            case .crustacean:
+                return "Cook fully, remove the entire shell and tail, and mince or flatten any firm curved flesh."
+            case .bivalve:
+                return "Cook fully, remove every shell fragment, and mince the chewy flesh finely."
+            case .cephalopod:
+                return "Cook fully until tender and mince very finely; do not serve rings, tentacles, or rubbery chunks."
+            case .smallFish:
+                return "Check sodium and current fish advice, cook as needed, and inspect every portion carefully for bones."
+            case .fillet:
+                return "Cook fully, follow current advice for the exact species, and inspect the cooked flakes carefully for fine bones."
+            }
         case .dairy:
-            return "Use pasteurized dairy. Cow's milk can be used in food before 12 months but not as the main drink."
+            if key.contains("in food") {
+                return "Use pasteurized dairy only as a recipe ingredient before 12 months, not as the main milk drink."
+            }
+            if case .smoothDairy = scoopablePreparationKind(name: name, category: category) {
+                return "Choose a pasteurized, unsweetened product and keep it scoopable rather than adding hard toppings."
+            }
+            return "Use pasteurized cheese and grate, crumble, melt, or slice it thinly instead of serving firm cubes."
         case .egg:
-            return "Cook until the white and yolk are firm. Egg is a major food allergen."
-        default:
-            return "Seat the child upright, supervise closely, and adapt shape and texture to current eating skills."
+            return key == "egg yolk"
+                ? "Cook the yolk fully and add moisture so it is not dry or crumbly. Egg is a major food allergen."
+                : "Cook the egg fully while keeping it soft rather than rubbery. Egg is a major food allergen."
+        case .nutAndSeed:
+            if key.contains("butter") || key == "tahini" {
+                return "Use a smooth product thinned into moist food or spread very thinly; never serve a thick spoonful."
+            }
+            if key.contains("ground") {
+                return "Mix the fine meal into moist food and verify that no hard piece or dry pocket remains."
+            }
+            return "Do not serve whole or chopped nuts or hard seeds. Grind finely into moist food or use a smooth, well-thinned butter."
+        case .herbAndFlavor:
+            switch flavorPreparationForm(name: name) {
+            case .bayLeaf:
+                return "Use the leaf only to infuse flavor and remove it before serving."
+            case .fibrousAromatic:
+                return "Finely grate, pound, or infuse a small amount and remove woody strands or chunks."
+            case .leafyHerb:
+                return "Remove firm stems, chop finely, and mix a small amount through moist food."
+            case .groundSpice:
+                return "Use a small pinch mixed through food; do not offer loose powder or whole hard spice pieces."
+            }
+        case .preparedFood:
+            switch preparedFoodPreparationForm(name: name) {
+            case .soupOrStew:
+                return "Cook every component fully, remove hazards actually present in the recipe, and keep the mixture thick enough to stay together on a spoon."
+            case .patty:
+                return "Cook the center fully, keep the patty tender, avoid a hard crust, and check all binders for allergens."
+            case .spoonable:
+                return "Keep the dish scoopable and modify every topping or mix-in; check the complete recipe for allergens, honey, added sugar, and sodium."
+            case .handheld:
+                return "Soften fillings, avoid tough or gummy wrappers, and cut the assembled food for the child's biting skills."
+            case .pastaOrRice:
+                return "Cook the grain until soft, keep the dish moist, and adapt each meat, vegetable, or cheese component separately."
+            case .mixedDish:
+                return "Check every ingredient and adapt the firmest, roundest, or stickiest component in the actual recipe."
+            case .sweetener:
+                return "Do not offer honey before 12 months because of infant botulism risk."
+            }
         }
     }
 
@@ -3405,11 +4268,110 @@ enum SolidsReferenceCatalog {
         return Array(Set(values.map(\.rawValue)).subtracting(allergenIDs(name: name, category: category))).sorted()
     }
 
+    private static func servingAmountGuidance(
+        name: String,
+        category: SolidsFoodCategory,
+        ageMonths: Int,
+        visual: SolidsServingVisual
+    ) -> SolidsServingAmountGuidance {
+        let key = normalized(name)
+
+        if key == "peanut butter" {
+            return SolidsServingAmountGuidance(
+                firstServing: "1 tsp smooth peanut butter, thinned into a familiar food. Offer a small taste first, pause about 10 minutes, then continue the prepared amount if no reaction appears.",
+                routineServing: "About 2 tsp smooth peanut butter, thinned or spread very thinly. The child does not need to finish it."
+            )
+        }
+
+        if category == .nutAndSeed {
+            let safeForm: String
+            if key.contains("butter") || key == "tahini" {
+                safeForm = "smooth \(name.lowercased()), well thinned"
+            } else if key.contains("ground") {
+                safeForm = "\(name.lowercased()) mixed completely into moist food"
+            } else if ["chia", "flax", "hemp", "poppy", "pumpkin seed", "sesame", "sunflower seed"].contains(where: key.contains) {
+                safeForm = "\(name.lowercased()), finely ground or fully softened as appropriate and mixed into moist food"
+            } else {
+                safeForm = "\(name.lowercased()), finely ground into moist food"
+            }
+            return SolidsServingAmountGuidance(
+                firstServing: "1 tsp \(safeForm); begin with a small taste.",
+                routineServing: "Up to 2 tsp \(safeForm), after it is tolerated."
+            )
+        }
+
+        if category == .herbAndFlavor {
+            if flavorPreparationForm(name: name) == .bayLeaf {
+                return SolidsServingAmountGuidance(
+                    firstServing: "No leaf in the serving. Infuse the family dish with 1 whole leaf, then remove it before plating the child's portion.",
+                    routineServing: "No leaf in the serving. Use only the flavor infused into the food and remove every leaf before serving."
+                )
+            }
+            return SolidsServingAmountGuidance(
+                firstServing: "A small pinch mixed evenly through a familiar food.",
+                routineServing: "A pinch to ⅛ tsp mixed through the meal, adjusting for flavor."
+            )
+        }
+
+        if key == "honey" {
+            return SolidsServingAmountGuidance(
+                firstServing: "After 12 months only: a small drizzle mixed into food.",
+                routineServing: "Up to 1 tsp as an occasional added sweetener."
+            )
+        }
+
+        if category == .egg {
+            if key == "egg yolk" {
+                return SolidsServingAmountGuidance(
+                    firstServing: "1–2 tsp fully cooked yolk mashed into moist food; begin with a small taste.",
+                    routineServing: "Up to 1 fully cooked yolk kept moist, after egg is tolerated. The child does not need to finish it."
+                )
+            }
+            return SolidsServingAmountGuidance(
+                firstServing: "1–2 tsp fully cooked egg; begin with a small taste.",
+                routineServing: "About one-third of a fully cooked egg, after it is tolerated."
+            )
+        }
+
+        let routineVolume = ageMonths < 9 ? "1–2 tbsp" : "2–4 tbsp"
+        let firstServing: String
+        let routineServing: String
+        switch visual {
+        case .spear:
+            firstServing = "1 soft prepared piece."
+            routineServing = "1–2 soft prepared pieces, or about \(routineVolume) when mashed or chopped."
+        case .flattened:
+            firstServing = "1 soft flattened piece."
+            routineServing = "2–4 soft flattened pieces, or about \(routineVolume) prepared."
+        case .softPieces:
+            firstServing = "1–2 soft prepared pieces."
+            routineServing = "About \(routineVolume) of prepared pieces."
+        case .thinSpread:
+            firstServing = "1 tsp in a very thin layer; begin with a small taste."
+            routineServing = "Up to 2 tsp spread very thinly, after it is tolerated."
+        case .mashed, .shredded, .flakes, .spoon:
+            firstServing = "1–2 tsp prepared food."
+            routineServing = "About \(routineVolume) prepared."
+        }
+
+        return SolidsServingAmountGuidance(
+            firstServing: firstServing,
+            routineServing: routineServing
+        )
+    }
+
     private static func ingredientQuantity(for name: String) -> String {
         guard let food = food(named: name) else { return "As needed" }
         switch food.category {
-        case .herbAndFlavor: return "Pinch"
-        case .nutAndSeed: return "1–2 tsp, thinned"
+        case .herbAndFlavor:
+            return flavorPreparationForm(name: name) == .bayLeaf
+                ? "1 leaf for infusion; remove"
+                : "Pinch"
+        case .nutAndSeed:
+            let key = normalized(name)
+            return key.contains("butter") || key == "tahini"
+                ? "1–2 tsp, thinned"
+                : "1–2 tsp, finely ground into moist food"
         case .meat, .seafood, .egg, .beanAndPlantProtein: return "2 tbsp prepared"
         case .dairy: return "2 tbsp"
         default: return "2–4 tbsp prepared"

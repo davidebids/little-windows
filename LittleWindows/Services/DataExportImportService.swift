@@ -78,6 +78,11 @@ private struct BackupEnvelope: Codable {
     var careRoutines: [CareRoutineDTO]?
     var careRoutineSteps: [CareRoutineStepDTO]?
     var careRoutineRuns: [CareRoutineRunDTO]?
+    var medications: [MedicationDTO]?
+    var medicationRegimens: [MedicationRegimenDTO]?
+    var medicationSchedulePhases: [MedicationSchedulePhaseDTO]?
+    var medicationDoseRecords: [MedicationDoseRecordDTO]?
+    var medicationSupplyLogs: [MedicationSupplyLogDTO]?
 }
 
 private struct CaregiverIdentityDTO: Codable {
@@ -89,8 +94,11 @@ private struct ProfileDTO: Codable {
     var id: UUID
     var profileTypeRawValue: String?
     var name: String
-    var birthDate: Date
+    var birthDate: Date?
     var sexRawValue: String?
+    var adultRelationshipRawValue: String?
+    var sharingScopeRawValue: String?
+    var ownerIdentifier: String?
     var birthWeightKilograms: Double?
     var birthLengthCentimeters: Double?
     var birthHeadCircumferenceCentimeters: Double?
@@ -290,6 +298,7 @@ private struct EventDTO: Codable {
     var temperatureUnitRawValue: String?
     var temperatureMethodRawValue: String?
     var dogDetailsData: Data?
+    var healthObservationDetailsData: Data?
 }
 
 private struct PredictionRecordDTO: Codable {
@@ -805,22 +814,125 @@ private struct CareRoutineRunDTO: Codable {
     var updatedAt: Date
 }
 
+private struct MedicationDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var name: String
+    var formRawValue: String
+    var strength: Double?
+    var strengthUnit: String
+    var routeRawValue: String
+    var instructions: String
+    var reasonForTaking: String
+    var prescriber: String
+    var pharmacy: String
+    var currentSupply: Double?
+    var refillThreshold: Double?
+    var isArchived: Bool
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct MedicationRegimenDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var medicationID: UUID
+    var scheduleKindRawValue: String
+    var startDate: Date
+    var endDate: Date?
+    var doseAmount: Double
+    var doseUnit: String
+    var doseTimesData: Data?
+    var weekdayMask: Int
+    var intervalDays: Int
+    var cycleOnDays: Int
+    var cycleOffDays: Int
+    var minimumHoursBetweenDoses: Double?
+    var maximumDosesPerDay: Int?
+    var remindersEnabled: Bool
+    var followUpRemindersEnabled: Bool?
+    var reminderLeadMinutes: Int
+    var timeZoneBehaviorRawValue: String
+    var timeZoneIdentifier: String?
+    var instructions: String
+    var isActive: Bool
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct MedicationSchedulePhaseDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var regimenID: UUID
+    var sequence: Int
+    var durationDays: Int?
+    var doseAmount: Double
+    var doseUnit: String
+    var doseTimesData: Data?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct MedicationDoseRecordDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var medicationID: UUID
+    var regimenID: UUID?
+    var phaseID: UUID?
+    var occurrenceKey: String?
+    var scheduledAt: Date?
+    var statusRawValue: String
+    var loggedAt: Date
+    var takenAt: Date?
+    var doseAmount: Double
+    var doseUnit: String
+    var supplyAdjustmentApplied: Double
+    var caregiverIdentifier: String
+    var caregiverName: String
+    var notes: String
+    var careEventID: UUID?
+    var updatedAt: Date
+}
+
+private struct MedicationSupplyLogDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var medicationID: UUID
+    var doseRecordID: UUID?
+    var adjustment: Double
+    var resultingSupply: Double?
+    var reasonRawValue: String
+    var notes: String
+    var loggedAt: Date
+    var caregiverIdentifier: String
+    var caregiverName: String
+}
+
+enum CareDataExportProfileScope: Equatable {
+    case all
+    case familyShared
+}
+
 enum DataExportImportService {
-    private static let currentBackupVersion = 22
+    private static let currentBackupVersion = 25
     private static let recoveryBackupLimit = 3
 
     static func exportData(
         context: ModelContext,
         defaults: UserDefaults = .standard,
-        includeCaregiverIdentity: Bool = true
+        includeCaregiverIdentity: Bool = true,
+        profileScope: CareDataExportProfileScope = .all
     ) throws -> Data {
-        let profiles = try context.fetch(FetchDescriptor<BabyProfile>()).map {
+        let profiles = try context.fetch(FetchDescriptor<CareProfile>()).map {
             ProfileDTO(
                 id: $0.id,
                 profileTypeRawValue: $0.profileTypeRawValue,
                 name: $0.name,
                 birthDate: $0.birthDate,
                 sexRawValue: $0.sexRawValue,
+                adultRelationshipRawValue: $0.adultRelationshipRawValue,
+                sharingScopeRawValue: $0.sharingScopeRawValue,
+                ownerIdentifier: $0.ownerIdentifier,
                 birthWeightKilograms: $0.birthWeightKilograms,
                 birthLengthCentimeters: $0.birthLengthCentimeters,
                 birthHeadCircumferenceCentimeters: $0.birthHeadCircumferenceCentimeters,
@@ -964,7 +1076,7 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
-        let events = try context.fetch(FetchDescriptor<BabyEvent>()).map {
+        let events = try context.fetch(FetchDescriptor<CareEvent>()).map {
             EventDTO(
                 id: $0.id,
                 profileID: $0.profileID,
@@ -1016,7 +1128,8 @@ enum DataExportImportService {
                 temperatureCelsius: $0.temperatureCelsius,
                 temperatureUnitRawValue: $0.temperatureUnitRawValue,
                 temperatureMethodRawValue: $0.temperatureMethodRawValue,
-                dogDetailsData: $0.dogDetailsData
+                dogDetailsData: $0.dogDetailsData,
+                healthObservationDetailsData: $0.healthObservationDetailsData
             )
         }
         let records = try context.fetch(FetchDescriptor<SleepPredictionRecord>()).map {
@@ -1552,6 +1665,105 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
+        let medications = try context.fetch(FetchDescriptor<Medication>()).map {
+            MedicationDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                name: $0.name,
+                formRawValue: $0.formRawValue,
+                strength: $0.strength,
+                strengthUnit: $0.strengthUnit,
+                routeRawValue: $0.routeRawValue,
+                instructions: $0.instructions,
+                reasonForTaking: $0.reasonForTaking,
+                prescriber: $0.prescriber,
+                pharmacy: $0.pharmacy,
+                currentSupply: $0.currentSupply,
+                refillThreshold: $0.refillThreshold,
+                isArchived: $0.isArchived,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let medicationRegimens = try context.fetch(FetchDescriptor<MedicationRegimen>()).map {
+            MedicationRegimenDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                medicationID: $0.medicationID,
+                scheduleKindRawValue: $0.scheduleKindRawValue,
+                startDate: $0.startDate,
+                endDate: $0.endDate,
+                doseAmount: $0.doseAmount,
+                doseUnit: $0.doseUnit,
+                doseTimesData: $0.doseTimesData,
+                weekdayMask: $0.weekdayMask,
+                intervalDays: $0.intervalDays,
+                cycleOnDays: $0.cycleOnDays,
+                cycleOffDays: $0.cycleOffDays,
+                minimumHoursBetweenDoses: $0.minimumHoursBetweenDoses,
+                maximumDosesPerDay: $0.maximumDosesPerDay,
+                remindersEnabled: $0.remindersEnabled,
+                followUpRemindersEnabled: $0.followUpRemindersEnabled,
+                reminderLeadMinutes: $0.reminderLeadMinutes,
+                timeZoneBehaviorRawValue: $0.timeZoneBehaviorRawValue,
+                timeZoneIdentifier: $0.timeZoneIdentifier,
+                instructions: $0.instructions,
+                isActive: $0.isActive,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let medicationSchedulePhases = try context.fetch(FetchDescriptor<MedicationSchedulePhase>()).map {
+            MedicationSchedulePhaseDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                regimenID: $0.regimenID,
+                sequence: $0.sequence,
+                durationDays: $0.durationDays,
+                doseAmount: $0.doseAmount,
+                doseUnit: $0.doseUnit,
+                doseTimesData: $0.doseTimesData,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let medicationDoseRecords = try context.fetch(FetchDescriptor<MedicationDoseRecord>()).map {
+            MedicationDoseRecordDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                medicationID: $0.medicationID,
+                regimenID: $0.regimenID,
+                phaseID: $0.phaseID,
+                occurrenceKey: $0.occurrenceKey,
+                scheduledAt: $0.scheduledAt,
+                statusRawValue: $0.statusRawValue,
+                loggedAt: $0.loggedAt,
+                takenAt: $0.takenAt,
+                doseAmount: $0.doseAmount,
+                doseUnit: $0.doseUnit,
+                supplyAdjustmentApplied: $0.supplyAdjustmentApplied,
+                caregiverIdentifier: $0.caregiverIdentifier,
+                caregiverName: $0.caregiverName,
+                notes: $0.notes,
+                careEventID: $0.careEventID,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let medicationSupplyLogs = try context.fetch(FetchDescriptor<MedicationSupplyLog>()).map {
+            MedicationSupplyLogDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                medicationID: $0.medicationID,
+                doseRecordID: $0.doseRecordID,
+                adjustment: $0.adjustment,
+                resultingSupply: $0.resultingSupply,
+                reasonRawValue: $0.reasonRawValue,
+                notes: $0.notes,
+                loggedAt: $0.loggedAt,
+                caregiverIdentifier: $0.caregiverIdentifier,
+                caregiverName: $0.caregiverName
+            )
+        }
         let caregiverIdentity: CaregiverIdentityDTO?
         if includeCaregiverIdentity {
             let currentName = defaults.string(
@@ -1571,7 +1783,7 @@ enum DataExportImportService {
         } else {
             caregiverIdentity = nil
         }
-        let envelope = BackupEnvelope(
+        var envelope = BackupEnvelope(
             version: currentBackupVersion,
             exportedAt: Date(),
             caregiverIdentity: caregiverIdentity,
@@ -1614,8 +1826,63 @@ enum DataExportImportService {
             foodReminders: foodReminders,
             careRoutines: careRoutines,
             careRoutineSteps: careRoutineSteps,
-            careRoutineRuns: careRoutineRuns
+            careRoutineRuns: careRoutineRuns,
+            medications: medications,
+            medicationRegimens: medicationRegimens,
+            medicationSchedulePhases: medicationSchedulePhases,
+            medicationDoseRecords: medicationDoseRecords,
+            medicationSupplyLogs: medicationSupplyLogs
         )
+        if profileScope == .familyShared {
+            let sharedProfileIDs = Set(
+                envelope.profiles
+                    .filter {
+                        CareProfileSharingScope(rawValue: $0.sharingScopeRawValue ?? "") == .family
+                    }
+                    .map(\.id)
+            )
+            envelope.profiles.removeAll { !sharedProfileIDs.contains($0.id) }
+            envelope.photoAttachments = envelope.photoAttachments?.filter {
+                $0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true
+            }
+            envelope.solidsProfileStates = envelope.solidsProfileStates?.filter { sharedProfileIDs.contains($0.profileID) }
+            envelope.solidFoodProgress = envelope.solidFoodProgress?.filter { sharedProfileIDs.contains($0.profileID) }
+            envelope.solidFoodEventItems = envelope.solidFoodEventItems?.filter { sharedProfileIDs.contains($0.profileID) }
+            envelope.solidAllergenProgress = envelope.solidAllergenProgress?.filter { sharedProfileIDs.contains($0.profileID) }
+            envelope.plannedSolidMeals = envelope.plannedSolidMeals?.filter { sharedProfileIDs.contains($0.profileID) }
+            envelope.events.removeAll { $0.profileID.map(sharedProfileIDs.contains) != true }
+            envelope.predictionRecords.removeAll { $0.profileID.map(sharedProfileIDs.contains) != true }
+            envelope.milestones = envelope.milestones?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.appointments = envelope.appointments?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.ageGuideReadStates = envelope.ageGuideReadStates?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.puppyStageGuideReadStates = envelope.puppyStageGuideReadStates?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.tripTravelers = envelope.tripTravelers?.filter {
+                $0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true
+            }
+            let includedTravelerIDs = Set((envelope.tripTravelers ?? []).map(\.id))
+            envelope.packingBags = envelope.packingBags?.filter {
+                $0.travelerID == nil || $0.travelerID.map(includedTravelerIDs.contains) == true
+            }
+            let includedBagIDs = Set((envelope.packingBags ?? []).map(\.id))
+            envelope.packingItems = envelope.packingItems?.filter {
+                ($0.travelerID == nil || $0.travelerID.map(includedTravelerIDs.contains) == true)
+                    && ($0.bagID == nil || $0.bagID.map(includedBagIDs.contains) == true)
+            }
+            let includedRoutineIDs = Set((envelope.careRoutines ?? []).filter {
+                $0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true
+            }.map(\.id))
+            envelope.careRoutines = envelope.careRoutines?.filter { includedRoutineIDs.contains($0.id) }
+            envelope.careRoutineSteps = envelope.careRoutineSteps?.filter { includedRoutineIDs.contains($0.routineID) }
+            envelope.careRoutineRuns = envelope.careRoutineRuns?.filter {
+                includedRoutineIDs.contains($0.routineID)
+                    && ($0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true)
+            }
+            envelope.medications = envelope.medications?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.medicationRegimens = envelope.medicationRegimens?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.medicationSchedulePhases = envelope.medicationSchedulePhases?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.medicationDoseRecords = envelope.medicationDoseRecords?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.medicationSupplyLogs = envelope.medicationSupplyLogs?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -1628,28 +1895,49 @@ enum DataExportImportService {
         context: ModelContext,
         recordLocalSave: Bool = true,
         createRecoveryBackup: Bool = true,
+        preservePrivateProfiles: Bool = false,
         defaults: UserDefaults = .standard
     ) throws {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let envelope = try decoder.decode(BackupEnvelope.self, from: data)
+        var envelope = try decoder.decode(BackupEnvelope.self, from: data)
         guard (1...currentBackupVersion).contains(envelope.version) else {
             throw CocoaError(.fileReadUnknown)
         }
+        normalizeMedicationDoseRecords(in: &envelope)
         try validate(envelope)
         if createRecoveryBackup {
             _ = try createAutomaticRecoveryBackup(context: context, reason: "before-import")
         }
 
         do {
-            try deleteAll(context: context, saveChanges: false, recordLocalSave: false)
+            let preservedProfileIDs: Set<UUID>
+            if preservePrivateProfiles {
+                preservedProfileIDs = Set(
+                    try context.fetch(FetchDescriptor<CareProfile>())
+                        .filter { $0.sharingScope == .privateOnly }
+                        .map(\.id)
+                )
+            } else {
+                preservedProfileIDs = []
+            }
+            excludeProfileData(preservedProfileIDs, from: &envelope)
+            try deleteAll(
+                context: context,
+                saveChanges: false,
+                recordLocalSave: false,
+                preservingProfileIDs: preservedProfileIDs
+            )
 
         for value in envelope.profiles {
-            context.insert(BabyProfile(
+            context.insert(CareProfile(
                 id: value.id,
                 profileType: value.profileTypeRawValue.flatMap(CareProfileType.init(rawValue:)) ?? .child,
                 name: value.name, birthDate: value.birthDate,
-                sex: value.sexRawValue.flatMap(BabySex.init(rawValue:)) ?? .male,
+                sex: value.sexRawValue.flatMap(ProfileSex.init(rawValue:)) ?? .unknown,
+                adultRelationship: value.adultRelationshipRawValue.flatMap(AdultCareRelationship.init(rawValue:)),
+                sharingScope: value.sharingScopeRawValue.flatMap(CareProfileSharingScope.init(rawValue:)) ?? .privateOnly,
+                ownerIdentifier: value.ownerIdentifier ?? CaregiverIdentityService.stableCaregiverIdentifier(),
                 birthWeightKilograms: value.birthWeightKilograms,
                 birthLengthCentimeters: value.birthLengthCentimeters,
                 birthHeadCircumferenceCentimeters: value.birthHeadCircumferenceCentimeters,
@@ -1824,7 +2112,7 @@ enum DataExportImportService {
         }
         let fallbackProfileID = envelope.profiles.first?.id
         for value in envelope.events {
-            let event = BabyEvent(
+            let event = CareEvent(
                 id: value.id,
                 profileID: value.profileID ?? fallbackProfileID,
                 type: EventType.normalized(rawValue: value.typeRawValue),
@@ -1901,7 +2189,116 @@ enum DataExportImportService {
             event.temperatureUnitRawValue = value.temperatureUnitRawValue
             event.temperatureMethodRawValue = value.temperatureMethodRawValue
             event.dogDetailsData = value.dogDetailsData
+            event.healthObservationDetailsData = value.healthObservationDetailsData
             context.insert(event)
+        }
+        for value in envelope.medications ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID else { continue }
+            context.insert(Medication(
+                id: value.id,
+                profileID: profileID,
+                name: value.name,
+                form: MedicationForm(rawValue: value.formRawValue) ?? .other,
+                strength: value.strength,
+                strengthUnit: value.strengthUnit,
+                route: MedicationRoute(rawValue: value.routeRawValue) ?? .other,
+                instructions: value.instructions,
+                reasonForTaking: value.reasonForTaking,
+                prescriber: value.prescriber,
+                pharmacy: value.pharmacy,
+                currentSupply: value.currentSupply,
+                refillThreshold: value.refillThreshold,
+                isArchived: value.isArchived,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.medicationRegimens ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID else { continue }
+            let regimen = MedicationRegimen(
+                id: value.id,
+                profileID: profileID,
+                medicationID: value.medicationID,
+                scheduleKind: MedicationScheduleKind(rawValue: value.scheduleKindRawValue) ?? .daily,
+                startDate: value.startDate,
+                endDate: value.endDate,
+                doseAmount: value.doseAmount,
+                doseUnit: value.doseUnit,
+                doseTimes: [],
+                weekdayMask: value.weekdayMask,
+                intervalDays: value.intervalDays,
+                cycleOnDays: value.cycleOnDays,
+                cycleOffDays: value.cycleOffDays,
+                minimumHoursBetweenDoses: value.minimumHoursBetweenDoses,
+                maximumDosesPerDay: value.maximumDosesPerDay,
+                remindersEnabled: value.remindersEnabled,
+                followUpRemindersEnabled: value.followUpRemindersEnabled ?? false,
+                reminderLeadMinutes: value.reminderLeadMinutes,
+                timeZoneBehavior: MedicationTimeZoneBehavior(rawValue: value.timeZoneBehaviorRawValue) ?? .localTime,
+                timeZoneIdentifier: value.timeZoneIdentifier,
+                instructions: value.instructions,
+                isActive: value.isActive,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+            regimen.doseTimesData = value.doseTimesData
+            context.insert(regimen)
+        }
+        for value in envelope.medicationSchedulePhases ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID else { continue }
+            let phase = MedicationSchedulePhase(
+                id: value.id,
+                profileID: profileID,
+                regimenID: value.regimenID,
+                sequence: value.sequence,
+                durationDays: value.durationDays,
+                doseAmount: value.doseAmount,
+                doseUnit: value.doseUnit,
+                doseTimes: [],
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+            phase.doseTimesData = value.doseTimesData
+            context.insert(phase)
+        }
+        for value in envelope.medicationDoseRecords ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID else { continue }
+            context.insert(MedicationDoseRecord(
+                id: value.id,
+                profileID: profileID,
+                medicationID: value.medicationID,
+                regimenID: value.regimenID,
+                phaseID: value.phaseID,
+                occurrenceKey: value.occurrenceKey,
+                scheduledAt: value.scheduledAt,
+                status: MedicationDoseStatus(rawValue: value.statusRawValue) ?? .taken,
+                loggedAt: value.loggedAt,
+                takenAt: value.takenAt,
+                doseAmount: value.doseAmount,
+                doseUnit: value.doseUnit,
+                supplyAdjustmentApplied: value.supplyAdjustmentApplied,
+                caregiverIdentifier: value.caregiverIdentifier,
+                caregiverName: value.caregiverName,
+                notes: value.notes,
+                careEventID: value.careEventID,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.medicationSupplyLogs ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID else { continue }
+            context.insert(MedicationSupplyLog(
+                id: value.id,
+                profileID: profileID,
+                medicationID: value.medicationID,
+                doseRecordID: value.doseRecordID,
+                adjustment: value.adjustment,
+                resultingSupply: value.resultingSupply,
+                reason: MedicationSupplyReason(rawValue: value.reasonRawValue) ?? .correction,
+                notes: value.notes,
+                loggedAt: value.loggedAt,
+                caregiverIdentifier: value.caregiverIdentifier,
+                caregiverName: value.caregiverName
+            ))
         }
         for value in envelope.predictionRecords {
             let placeholder = SleepPrediction(
@@ -2501,10 +2898,11 @@ enum DataExportImportService {
     static func validateBackupData(_ data: Data) throws {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let envelope = try decoder.decode(BackupEnvelope.self, from: data)
+        var envelope = try decoder.decode(BackupEnvelope.self, from: data)
         guard (1...currentBackupVersion).contains(envelope.version) else {
             throw CocoaError(.fileReadUnknown)
         }
+        normalizeMedicationDoseRecords(in: &envelope)
         try validate(envelope)
     }
 
@@ -2512,18 +2910,47 @@ enum DataExportImportService {
     static func deleteAll(
         context: ModelContext,
         saveChanges: Bool = true,
-        recordLocalSave: Bool = true
+        recordLocalSave: Bool = true,
+        preservingProfileIDs: Set<UUID> = []
     ) throws {
-        try deleteAll(CareRoutineRun.self, context: context)
-        try deleteAll(CareRoutineStep.self, context: context)
-        try deleteAll(CareRoutine.self, context: context)
+        let protectedRoutineIDs = Set(
+            try context.fetch(FetchDescriptor<CareRoutine>())
+                .filter { $0.profileID.map(preservingProfileIDs.contains) == true }
+                .map(\.id)
+        )
+        let protectedTravelerIDs = Set(
+            try context.fetch(FetchDescriptor<TripTraveler>())
+                .filter { $0.profileID.map(preservingProfileIDs.contains) == true }
+                .map(\.id)
+        )
+        let protectedBagIDs = Set(
+            try context.fetch(FetchDescriptor<PackingBag>())
+                .filter { $0.travelerID.map(protectedTravelerIDs.contains) == true }
+                .map(\.id)
+        )
+        try deleteAll(CareRoutineRun.self, context: context) {
+            !protectedRoutineIDs.contains($0.routineID)
+        }
+        try deleteAll(CareRoutineStep.self, context: context) {
+            !protectedRoutineIDs.contains($0.routineID)
+        }
+        try deleteAll(CareRoutine.self, context: context) {
+            $0.profileID.map(preservingProfileIDs.contains) != true
+        }
         try deleteAll(FoodReminder.self, context: context)
         try deleteAll(TripItineraryLink.self, context: context)
         try deleteAll(TripItineraryItem.self, context: context)
         try deleteAll(TripItineraryChoiceGroup.self, context: context)
-        try deleteAll(PackingItem.self, context: context)
-        try deleteAll(PackingBag.self, context: context)
-        try deleteAll(TripTraveler.self, context: context)
+        try deleteAll(PackingItem.self, context: context) {
+            $0.travelerID.map(protectedTravelerIDs.contains) != true
+                && $0.bagID.map(protectedBagIDs.contains) != true
+        }
+        try deleteAll(PackingBag.self, context: context) {
+            !protectedBagIDs.contains($0.id)
+        }
+        try deleteAll(TripTraveler.self, context: context) {
+            !protectedTravelerIDs.contains($0.id)
+        }
         try deleteAll(PackingTrip.self, context: context)
         try deleteAll(ReturnPackage.self, context: context)
         try deleteAll(ReturnItem.self, context: context)
@@ -2540,21 +2967,28 @@ enum DataExportImportService {
         try deleteAll(FoodStoreSection.self, context: context)
         try deleteAll(FoodStore.self, context: context)
         try deleteAll(Household.self, context: context)
-        try deleteAll(PlannedSolidMeal.self, context: context)
-        try deleteAll(SolidAllergenProgress.self, context: context)
-        try deleteAll(SolidFoodEventItem.self, context: context)
-        try deleteAll(SolidFoodProgress.self, context: context)
-        try deleteAll(SolidsProfileState.self, context: context)
+        try deleteAll(PlannedSolidMeal.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
+        try deleteAll(SolidAllergenProgress.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
+        try deleteAll(SolidFoodEventItem.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
+        try deleteAll(SolidFoodProgress.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
+        try deleteAll(SolidsProfileState.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
         try deleteAll(SolidFoodCatalogItem.self, context: context)
-        try deleteAll(PhotoAttachment.self, context: context)
+        try deleteAll(PhotoAttachment.self, context: context) {
+            $0.profileID.map(preservingProfileIDs.contains) != true
+        }
         try deleteAll(PredictionFactor.self, context: context)
-        try deleteAll(SleepPredictionRecord.self, context: context)
-        try deleteAll(BabyEvent.self, context: context)
-        try deleteAll(DoctorAppointment.self, context: context)
-        try deleteAll(MilestoneEntry.self, context: context)
-        try deleteAll(AgeGuideReadState.self, context: context)
-        try deleteAll(PuppyStageGuideReadState.self, context: context)
-        try deleteAll(BabyProfile.self, context: context)
+        try deleteAllProfileScoped(MedicationSupplyLog.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(MedicationDoseRecord.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(MedicationSchedulePhase.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(MedicationRegimen.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(Medication.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(SleepPredictionRecord.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(CareEvent.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(DoctorAppointment.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(MilestoneEntry.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(AgeGuideReadState.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(PuppyStageGuideReadState.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAll(CareProfile.self, context: context) { !preservingProfileIDs.contains($0.id) }
         guard saveChanges else { return }
         do {
             try context.save()
@@ -2567,6 +3001,134 @@ enum DataExportImportService {
         }
     }
 
+    private static func normalizeMedicationDoseRecords(in envelope: inout BackupEnvelope) {
+        guard let records = envelope.medicationDoseRecords else { return }
+        var recordsWithoutOccurrence = [MedicationDoseRecordDTO]()
+        var grouped = [String: [MedicationDoseRecordDTO]]()
+        for record in records {
+            if let occurrenceKey = record.occurrenceKey {
+                grouped[occurrenceKey, default: []].append(record)
+            } else {
+                recordsWithoutOccurrence.append(record)
+            }
+        }
+
+        var discardedCareEventIDs = Set<UUID>()
+        var discardedDoseRecordIDs = Set<UUID>()
+        let scheduledRecords = grouped.values.compactMap { candidates -> MedicationDoseRecordDTO? in
+            guard let winner = candidates.max(by: { first, second in
+                if first.updatedAt != second.updatedAt {
+                    return first.updatedAt < second.updatedAt
+                }
+                return first.id.uuidString > second.id.uuidString
+            }) else { return nil }
+            for candidate in candidates where candidate.id != winner.id {
+                discardedDoseRecordIDs.insert(candidate.id)
+                if let careEventID = candidate.careEventID {
+                    discardedCareEventIDs.insert(careEventID)
+                }
+            }
+            if MedicationDoseStatus(rawValue: winner.statusRawValue) == .skipped,
+               let careEventID = winner.careEventID {
+                discardedCareEventIDs.insert(careEventID)
+            }
+            return winner
+        }
+
+        envelope.medicationDoseRecords = (recordsWithoutOccurrence + scheduledRecords)
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        envelope.events.removeAll { discardedCareEventIDs.contains($0.id) }
+        envelope.medicationSupplyLogs = envelope.medicationSupplyLogs?.filter {
+            $0.doseRecordID.map(discardedDoseRecordIDs.contains) != true
+        }
+    }
+
+    private static func excludeProfileData(
+        _ excludedProfileIDs: Set<UUID>,
+        from envelope: inout BackupEnvelope
+    ) {
+        guard !excludedProfileIDs.isEmpty else { return }
+        envelope.profiles.removeAll { excludedProfileIDs.contains($0.id) }
+        envelope.photoAttachments = envelope.photoAttachments?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.solidsProfileStates = envelope.solidsProfileStates?.filter {
+            !excludedProfileIDs.contains($0.profileID)
+        }
+        envelope.solidFoodProgress = envelope.solidFoodProgress?.filter {
+            !excludedProfileIDs.contains($0.profileID)
+        }
+        envelope.solidFoodEventItems = envelope.solidFoodEventItems?.filter {
+            !excludedProfileIDs.contains($0.profileID)
+        }
+        envelope.solidAllergenProgress = envelope.solidAllergenProgress?.filter {
+            !excludedProfileIDs.contains($0.profileID)
+        }
+        envelope.plannedSolidMeals = envelope.plannedSolidMeals?.filter {
+            !excludedProfileIDs.contains($0.profileID)
+        }
+        envelope.events.removeAll { $0.profileID.map(excludedProfileIDs.contains) == true }
+        envelope.predictionRecords.removeAll { $0.profileID.map(excludedProfileIDs.contains) == true }
+        envelope.milestones = envelope.milestones?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.appointments = envelope.appointments?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.ageGuideReadStates = envelope.ageGuideReadStates?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.puppyStageGuideReadStates = envelope.puppyStageGuideReadStates?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+
+        let excludedTravelerIDs = Set((envelope.tripTravelers ?? []).filter {
+            $0.profileID.map(excludedProfileIDs.contains) == true
+        }.map(\.id))
+        envelope.tripTravelers = envelope.tripTravelers?.filter {
+            !excludedTravelerIDs.contains($0.id)
+        }
+        let excludedBagIDs = Set((envelope.packingBags ?? []).filter {
+            $0.travelerID.map(excludedTravelerIDs.contains) == true
+        }.map(\.id))
+        envelope.packingBags = envelope.packingBags?.filter {
+            !excludedBagIDs.contains($0.id)
+        }
+        envelope.packingItems = envelope.packingItems?.filter {
+            $0.travelerID.map(excludedTravelerIDs.contains) != true
+                && $0.bagID.map(excludedBagIDs.contains) != true
+        }
+
+        let excludedRoutineIDs = Set((envelope.careRoutines ?? []).filter {
+            $0.profileID.map(excludedProfileIDs.contains) == true
+        }.map(\.id))
+        envelope.careRoutines = envelope.careRoutines?.filter {
+            !excludedRoutineIDs.contains($0.id)
+        }
+        envelope.careRoutineSteps = envelope.careRoutineSteps?.filter {
+            !excludedRoutineIDs.contains($0.routineID)
+        }
+        envelope.careRoutineRuns = envelope.careRoutineRuns?.filter {
+            !excludedRoutineIDs.contains($0.routineID)
+                && $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medications = envelope.medications?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medicationRegimens = envelope.medicationRegimens?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medicationSchedulePhases = envelope.medicationSchedulePhases?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medicationDoseRecords = envelope.medicationDoseRecords?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medicationSupplyLogs = envelope.medicationSupplyLogs?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+    }
+
     @MainActor
     private static func deleteAll<T: PersistentModel>(
         _ modelType: T.Type,
@@ -2574,6 +3136,28 @@ enum DataExportImportService {
     ) throws {
         for item in try context.fetch(FetchDescriptor<T>()) {
             context.delete(item)
+        }
+    }
+
+    @MainActor
+    private static func deleteAll<T: PersistentModel>(
+        _ modelType: T.Type,
+        context: ModelContext,
+        matching shouldDelete: (T) -> Bool
+    ) throws {
+        for item in try context.fetch(FetchDescriptor<T>()) where shouldDelete(item) {
+            context.delete(item)
+        }
+    }
+
+    @MainActor
+    private static func deleteAllProfileScoped<T: PersistentModel & ProfileScopedRecord>(
+        _ modelType: T.Type,
+        context: ModelContext,
+        preservingProfileIDs: Set<UUID>
+    ) throws {
+        try deleteAll(modelType, context: context) {
+            $0.profileID.map(preservingProfileIDs.contains) != true
         }
     }
 
@@ -2798,6 +3382,10 @@ enum DataExportImportService {
         let solidAllergenProgress = envelope.solidAllergenProgress ?? []
         let plannedSolidMeals = envelope.plannedSolidMeals ?? []
         let eventIDs = Set(envelope.events.map(\.id))
+        let eventsByID = Dictionary(
+            envelope.events.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         guard Set(solidsProfileStates.map(\.id)).count == solidsProfileStates.count,
               Set(solidFoodProgress.map(\.id)).count == solidFoodProgress.count,
               Set(solidFoodEventItems.map(\.id)).count == solidFoodEventItems.count,
@@ -2816,6 +3404,265 @@ enum DataExportImportService {
                       && ($0.completedEventID.map(eventIDs.contains) ?? true)
                       && ($0.allergenID.map { SolidsAllergen(rawValue: $0) != nil } ?? true)
                       && ($0.allergenIntroductionStep.map { (1...3).contains($0) } ?? true)
+        }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let profileTypesByID = Dictionary(
+            uniqueKeysWithValues: envelope.profiles.compactMap { profile in
+                CareProfileType(rawValue: profile.profileTypeRawValue ?? CareProfileType.child.rawValue)
+                    .map { (profile.id, $0) }
+            }
+        )
+        let healthObservationDetailsAreValid = envelope.events.allSatisfy { event in
+            let eventType = EventType.normalized(rawValue: event.typeRawValue)
+            let profileType = event.profileID.flatMap { profileTypesByID[$0] }
+                ?? event.profileTypeSnapshotRawValue.flatMap(CareProfileType.init(rawValue:))
+            if profileType == .dog {
+                return event.healthObservationDetailsData == nil
+            }
+            let healthTypes: Set<EventType> = [
+                .symptom,
+                .bloodPressure,
+                .heartRate,
+                .oxygenSaturation,
+                .respiratoryRate,
+                .glucose,
+                .pain
+            ]
+            guard let data = event.healthObservationDetailsData else {
+                return !healthTypes.contains(eventType)
+            }
+            guard let details = try? JSONDecoder().decode(
+                HealthObservationDetails.self,
+                from: data
+            ),
+                  details.symptomSeverity.map({ (0...10).contains($0) }) ?? true,
+                  details.systolicBloodPressure.map({ $0 > 0 }) ?? true,
+                  details.diastolicBloodPressure.map({ $0 > 0 }) ?? true,
+                  details.heartRateBPM.map({ $0 > 0 }) ?? true,
+                  details.oxygenSaturationPercent.map({
+                      $0.isFinite && $0 > 0 && $0 <= 100
+                  }) ?? true,
+                  details.respiratoryRatePerMinute.map({ $0 > 0 }) ?? true,
+                  details.bloodGlucoseValue.map({ $0.isFinite && $0 > 0 }) ?? true,
+                  details.bloodGlucoseUnitRawValue.map({
+                      BloodGlucoseUnit(rawValue: $0) != nil
+                  }) ?? true,
+                  details.bloodGlucoseContextRawValue.map({
+                      BloodGlucoseContext(rawValue: $0) != nil
+                  }) ?? true,
+                  details.painScore.map({ (0...10).contains($0) }) ?? true else {
+                return false
+            }
+            switch eventType {
+            case .symptom:
+                return details.symptomName.map {
+                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                } == true && details.symptomSeverity != nil
+            case .bloodPressure:
+                return details.systolicBloodPressure != nil
+                    && details.diastolicBloodPressure != nil
+            case .heartRate:
+                return details.heartRateBPM != nil
+            case .oxygenSaturation:
+                return details.oxygenSaturationPercent != nil
+            case .respiratoryRate:
+                return details.respiratoryRatePerMinute != nil
+            case .glucose:
+                return details.bloodGlucoseValue != nil
+                    && details.bloodGlucoseUnit != nil
+                    && details.bloodGlucoseContext != nil
+            case .pain:
+                return details.painScore != nil
+            default:
+                return false
+            }
+        }
+        guard healthObservationDetailsAreValid else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let medications = envelope.medications ?? []
+        let regimens = envelope.medicationRegimens ?? []
+        let phases = envelope.medicationSchedulePhases ?? []
+        let doseRecords = envelope.medicationDoseRecords ?? []
+        let supplyLogs = envelope.medicationSupplyLogs ?? []
+        let medicationIDs = Set(medications.map(\.id))
+        let regimenIDs = Set(regimens.map(\.id))
+        let phaseIDs = Set(phases.map(\.id))
+        let medicationProfileIDs = Dictionary(
+            medications.compactMap { medication in
+                medication.profileID.map { (medication.id, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let regimensByID = Dictionary(
+            regimens.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let phasesByID = Dictionary(
+            phases.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let doseRecordsByID = Dictionary(
+            doseRecords.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let occurrenceKeys = doseRecords.compactMap(\.occurrenceKey)
+        let medicationsByID = Dictionary(
+            medications.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let regimenActivityIsValid = Dictionary(grouping: regimens, by: \.medicationID)
+            .values
+            .allSatisfy { medicationRegimens in
+                medicationRegimens.filter(\.isActive).count <= 1
+                    && medicationRegimens.allSatisfy { regimen in
+                        !(regimen.isActive && (medicationsByID[regimen.medicationID]?.isArchived == true))
+                    }
+            }
+        let phasesByRegimenID = Dictionary(grouping: phases, by: \.regimenID)
+        let phaseSequencesAreUnique = phasesByRegimenID
+            .values
+            .allSatisfy { values in
+                Set(values.map(\.sequence)).count == values.count
+            }
+        let decodedDoseTimesAreValid: (Data?, Bool) -> Bool = { data, allowEmpty in
+            guard let data,
+                  let times = try? JSONDecoder().decode([MedicationDoseTime].self, from: data) else {
+                return allowEmpty
+            }
+            return (allowEmpty || !times.isEmpty)
+                && Set(times).count == times.count
+                && times.allSatisfy { (0...23).contains($0.hour) && (0...59).contains($0.minute) }
+        }
+        let regimenDoseTimesAreValid = regimens.allSatisfy { regimen in
+            guard let kind = MedicationScheduleKind(rawValue: regimen.scheduleKindRawValue) else {
+                return false
+            }
+            return decodedDoseTimesAreValid(
+                regimen.doseTimesData,
+                kind == .asNeeded
+            ) && (kind != .asNeeded || ((regimen.doseTimesData.flatMap {
+                try? JSONDecoder().decode([MedicationDoseTime].self, from: $0)
+            }) ?? []).isEmpty)
+        }
+        let phaseDoseTimesAreValid = phases.allSatisfy {
+            decodedDoseTimesAreValid($0.doseTimesData, false)
+        }
+        let phaseStructuresAreValid = regimens.allSatisfy { regimen in
+            guard let kind = MedicationScheduleKind(rawValue: regimen.scheduleKindRawValue) else {
+                return false
+            }
+            let regimenPhases = (phasesByRegimenID[regimen.id] ?? [])
+                .sorted { $0.sequence < $1.sequence }
+            let hasContiguousSequences = regimenPhases.map(\.sequence)
+                == Array(0..<regimenPhases.count)
+            switch kind {
+            case .alternating:
+                return regimenPhases.count == 2
+                    && hasContiguousSequences
+                    && regimenPhases.allSatisfy { $0.durationDays != nil }
+            case .taper:
+                return regimenPhases.count >= 2
+                    && hasContiguousSequences
+                    && regimenPhases.allSatisfy { $0.durationDays != nil }
+                    && zip(regimenPhases, regimenPhases.dropFirst()).allSatisfy {
+                        $0.0.doseAmount > $0.1.doseAmount
+                    }
+            default:
+                return regimenPhases.isEmpty
+            }
+        }
+        guard medicationIDs.count == medications.count,
+              regimenIDs.count == regimens.count,
+              phaseIDs.count == phases.count,
+              Set(doseRecords.map(\.id)).count == doseRecords.count,
+              Set(occurrenceKeys).count == occurrenceKeys.count,
+              Set(supplyLogs.map(\.id)).count == supplyLogs.count,
+              regimenActivityIsValid,
+              phaseSequencesAreUnique,
+              regimenDoseTimesAreValid,
+              phaseDoseTimesAreValid,
+              phaseStructuresAreValid,
+              medications.allSatisfy({
+                  $0.profileID.map(profileIDs.contains) == true
+                      && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && MedicationForm(rawValue: $0.formRawValue) != nil
+                      && MedicationRoute(rawValue: $0.routeRawValue) != nil
+                      && ($0.strength.map { $0 > 0 } ?? true)
+                      && ($0.currentSupply.map { $0 >= 0 } ?? true)
+                      && ($0.refillThreshold.map { $0 >= 0 } ?? true)
+              }),
+              regimens.allSatisfy({ regimen in
+                  let kind = MedicationScheduleKind(rawValue: regimen.scheduleKindRawValue)
+                  return regimen.profileID.map(profileIDs.contains) == true
+                      && medicationIDs.contains(regimen.medicationID)
+                      && regimen.profileID == medicationProfileIDs[regimen.medicationID]
+                      && regimen.doseAmount > 0
+                      && !regimen.doseUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && kind != nil
+                      && MedicationTimeZoneBehavior(rawValue: regimen.timeZoneBehaviorRawValue) != nil
+                      && regimen.doseAmount.isFinite
+                      && regimen.intervalDays > 0
+                      && regimen.cycleOnDays > 0
+                      && regimen.cycleOffDays >= 0
+                      && (regimen.minimumHoursBetweenDoses.map { $0 > 0 } ?? true)
+                      && (regimen.maximumDosesPerDay.map { $0 > 0 } ?? true)
+                      && (regimen.endDate.map { $0 >= regimen.startDate } ?? true)
+                      && (kind != .fixedCourse || regimen.endDate != nil)
+                      && (kind != .specificWeekdays || (1...127).contains(regimen.weekdayMask))
+                      && (kind != .asNeeded || (!regimen.remindersEnabled && !(regimen.followUpRemindersEnabled ?? false)))
+                      && (!(regimen.followUpRemindersEnabled ?? false) || regimen.remindersEnabled)
+                      && regimen.reminderLeadMinutes >= 0
+                      && (regimen.timeZoneBehaviorRawValue != MedicationTimeZoneBehavior.fixedTimeZone.rawValue
+                          || regimen.timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) != nil)
+              }),
+              phases.allSatisfy({
+                  $0.profileID.map(profileIDs.contains) == true
+                      && regimenIDs.contains($0.regimenID)
+                      && $0.profileID == regimensByID[$0.regimenID]?.profileID
+                      && $0.doseAmount.isFinite
+                      && $0.doseAmount > 0
+                      && !$0.doseUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && $0.sequence >= 0
+                      && ($0.durationDays.map { $0 > 0 } ?? true)
+              }),
+              doseRecords.allSatisfy({ doseRecord in
+                  doseRecord.profileID.map(profileIDs.contains) == true
+                      && medicationIDs.contains(doseRecord.medicationID)
+                      && doseRecord.profileID == medicationProfileIDs[doseRecord.medicationID]
+                      && (doseRecord.regimenID.map(regimenIDs.contains) ?? true)
+                      && (doseRecord.regimenID.map { regimenID in
+                          regimensByID[regimenID]?.medicationID == doseRecord.medicationID
+                              && regimensByID[regimenID]?.profileID == doseRecord.profileID
+                      } ?? true)
+                      && (doseRecord.phaseID.map(phaseIDs.contains) ?? true)
+                      && (doseRecord.phaseID.map { phaseID in
+                          phasesByID[phaseID]?.regimenID == doseRecord.regimenID
+                              && phasesByID[phaseID]?.profileID == doseRecord.profileID
+                      } ?? true)
+                      && (doseRecord.careEventID.map { careEventID in
+                          eventsByID[careEventID]?.profileID == doseRecord.profileID
+                              && EventType.normalized(
+                                  rawValue: eventsByID[careEventID]?.typeRawValue ?? ""
+                              ) == .medicine
+                      } ?? true)
+                      && doseRecord.doseAmount > 0
+                      && !doseRecord.doseUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && MedicationDoseStatus(rawValue: doseRecord.statusRawValue) != nil
+                      && doseRecord.supplyAdjustmentApplied <= 0
+                      && doseRecord.supplyAdjustmentApplied >= -doseRecord.doseAmount
+              }),
+              supplyLogs.allSatisfy({ supplyLog in
+                  supplyLog.profileID.map(profileIDs.contains) == true
+                      && medicationIDs.contains(supplyLog.medicationID)
+                      && supplyLog.profileID == medicationProfileIDs[supplyLog.medicationID]
+                      && MedicationSupplyReason(rawValue: supplyLog.reasonRawValue) != nil
+                      && (supplyLog.resultingSupply.map { $0 >= 0 } ?? true)
+                      && (supplyLog.doseRecordID.map { doseRecordID in
+                          doseRecordsByID[doseRecordID]?.medicationID == supplyLog.medicationID
+                              && doseRecordsByID[doseRecordID]?.profileID == supplyLog.profileID
+                      } ?? true)
               }) else {
             throw CocoaError(.fileReadCorruptFile)
         }
@@ -3158,7 +4005,7 @@ enum LegacyTrackerGrowthMigration {
         in context: ModelContext,
         saveChanges: Bool = true
     ) throws -> Int {
-        let descriptor = FetchDescriptor<BabyEvent>(
+        let descriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate {
                 $0.typeRawValue == "custom" && $0.title == "Growth"
             }
@@ -3166,7 +4013,7 @@ enum LegacyTrackerGrowthMigration {
         let legacyEvents = try context.fetch(descriptor)
         guard !legacyEvents.isEmpty else { return 0 }
 
-        let profile = try context.fetch(FetchDescriptor<BabyProfile>()).first
+        let profile = try context.fetch(FetchDescriptor<CareProfile>()).first
         var migratedCount = 0
 
         for event in legacyEvents {
@@ -3190,7 +4037,8 @@ enum LegacyTrackerGrowthMigration {
             migratedCount += 1
 
             guard let profile,
-                  event.occursOnLocalDay(profile.birthDate) else {
+                  let birthDate = profile.birthDate,
+                  event.occursOnLocalDay(birthDate) else {
                 continue
             }
             profile.birthWeightKilograms =

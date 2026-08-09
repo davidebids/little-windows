@@ -6,7 +6,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchStartsProfileScopedSleepTimer() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
@@ -45,7 +45,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchRejectsManualTimerStartOlderThanSevenDays() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
@@ -99,7 +99,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchStartsOutdoorPlayTimerWithActivitySubtype() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
@@ -135,15 +135,285 @@ final class WatchCompanionTests: XCTestCase {
     }
 
     @MainActor
+    func testAdultWatchActivityChoicesExcludeChildActivities() async throws {
+        let actions = WatchActionCatalog.actions(profileTypeRawValue: "adult")
+        let activity = try XCTUnwrap(actions.first { $0.id == "activity" })
+        let optionIDs = Set(activity.options.map(\.id))
+
+        XCTAssertTrue(activity.startsTimer)
+        XCTAssertTrue(optionIDs.contains(ActivityType.exercise.rawValue))
+        XCTAssertTrue(optionIDs.contains(ActivityType.physicalTherapy.rawValue))
+        XCTAssertFalse(optionIDs.contains(ActivityType.tummyTime.rawValue))
+        XCTAssertFalse(actions.contains { $0.id == "tummy-time" })
+
+        let container = try makeInMemoryContainer()
+        let profile = CareProfile(profileType: .adult, name: "Test Adult")
+        container.mainContext.insert(profile)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+        let eventID = UUID()
+
+        let accepted = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .performAction,
+                profileID: profile.id,
+                eventID: eventID,
+                actionID: "activity",
+                optionID: ActivityType.exercise.rawValue
+            ),
+            container: container
+        )
+        let rejected = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .performAction,
+                profileID: profile.id,
+                eventID: UUID(),
+                actionID: "tummy-time"
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(accepted.status, .applied)
+        XCTAssertEqual(fetchEvent(eventID, context: container.mainContext)?.activityType, .exercise)
+        XCTAssertEqual(rejected.status, .rejected)
+    }
+
+    @MainActor
+    func testAdultWatchStateShowsNearestUnloggedMedicationOnlyForAdultProfile() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let fixture = try makeAdultMedicationFixture(
+            container: container,
+            scheduledAt: now,
+            remindersEnabled: true
+        )
+        ProfileService.shared.switchProfile(fixture.profile)
+
+        let adultState = WatchStateFactory.make(
+            context: container.mainContext,
+            now: now
+        )
+        let medication = try XCTUnwrap(adultState.upcomingMedication)
+
+        XCTAssertEqual(medication.profileID, fixture.profile.id)
+        XCTAssertEqual(medication.medicationID, fixture.medication.id)
+        XCTAssertEqual(medication.regimenID, fixture.regimen.id)
+        XCTAssertEqual(medication.medicationName, "Test Medication")
+        XCTAssertEqual(medication.doseAmount, 1)
+        XCTAssertEqual(medication.doseUnit, "tablet")
+        XCTAssertTrue(medication.snoozeAvailable)
+
+        let child = CareProfile(
+            name: "Test Child",
+            birthDate: now.addingTimeInterval(-180 * 86_400)
+        )
+        container.mainContext.insert(child)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(child)
+
+        let childState = WatchStateFactory.make(
+            context: container.mainContext,
+            now: now
+        )
+        XCTAssertNil(childState.upcomingMedication)
+    }
+
+    @MainActor
+    func testAdultWatchStateHidesSnoozeUntilTheActiveSnoozeFires() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let fixture = try makeAdultMedicationFixture(
+            container: container,
+            scheduledAt: now,
+            remindersEnabled: true
+        )
+        let suiteName = "WatchMedicationSnoozeTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let initial = try XCTUnwrap(WatchStateFactory.upcomingMedication(
+            profileID: fixture.profile.id,
+            context: container.mainContext,
+            now: now,
+            snoozeDefaults: defaults
+        ))
+        XCTAssertTrue(initial.snoozeAvailable)
+
+        MedicationSnoozeStateStore.markSnoozed(
+            occurrenceKey: initial.occurrenceKey,
+            until: now.addingTimeInterval(10 * 60),
+            now: now,
+            defaults: defaults
+        )
+
+        XCTAssertFalse(try XCTUnwrap(WatchStateFactory.upcomingMedication(
+            profileID: fixture.profile.id,
+            context: container.mainContext,
+            now: now.addingTimeInterval(5 * 60),
+            snoozeDefaults: defaults
+        )).snoozeAvailable)
+        XCTAssertTrue(try XCTUnwrap(WatchStateFactory.upcomingMedication(
+            profileID: fixture.profile.id,
+            context: container.mainContext,
+            now: now.addingTimeInterval(11 * 60),
+            snoozeDefaults: defaults
+        )).snoozeAvailable)
+    }
+
+    @MainActor
+    func testWatchTakenMedicationUsesManagedDoseMutationAndRejectsLaterConflict() async throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let fixture = try makeAdultMedicationFixture(
+            container: container,
+            scheduledAt: now,
+            remindersEnabled: true
+        )
+        ProfileService.shared.switchProfile(fixture.profile)
+        let snapshot = try XCTUnwrap(WatchStateFactory.make(
+            context: container.mainContext,
+            now: now
+        ).upcomingMedication)
+
+        let acknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .logMedicationTaken,
+                profileID: fixture.profile.id,
+                issuedAt: now,
+                medication: snapshot
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(acknowledgement.status, .applied)
+        let record = try XCTUnwrap(
+            container.mainContext.fetch(FetchDescriptor<MedicationDoseRecord>()).first
+        )
+        XCTAssertEqual(record.status, .taken)
+        XCTAssertEqual(record.occurrenceKey, snapshot.occurrenceKey)
+        XCTAssertEqual(record.takenAt, now)
+        XCTAssertEqual(fixture.medication.currentSupply, 9)
+        let event = try XCTUnwrap(
+            container.mainContext.fetch(FetchDescriptor<CareEvent>()).first
+        )
+        XCTAssertEqual(event.profileID, fixture.profile.id)
+        XCTAssertEqual(event.profileTypeSnapshot, .adult)
+        XCTAssertNotEqual(
+            acknowledgement.state?.upcomingMedication?.occurrenceKey,
+            snapshot.occurrenceKey
+        )
+
+        let conflictingAcknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .logMedicationSkipped,
+                profileID: fixture.profile.id,
+                issuedAt: now.addingTimeInterval(1),
+                medication: snapshot
+            ),
+            container: container
+        )
+        XCTAssertEqual(conflictingAcknowledgement.status, .rejected)
+        XCTAssertEqual(record.status, .taken)
+        XCTAssertEqual(fixture.medication.currentSupply, 9)
+    }
+
+    @MainActor
+    func testWatchSkippedMedicationDoesNotDeductSupplyOrCreateTimelineEvent() async throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let fixture = try makeAdultMedicationFixture(
+            container: container,
+            scheduledAt: now,
+            remindersEnabled: false
+        )
+        ProfileService.shared.switchProfile(fixture.profile)
+        let snapshot = try XCTUnwrap(WatchStateFactory.make(
+            context: container.mainContext,
+            now: now
+        ).upcomingMedication)
+
+        let acknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .logMedicationSkipped,
+                profileID: fixture.profile.id,
+                issuedAt: now,
+                medication: snapshot
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(acknowledgement.status, .applied)
+        XCTAssertEqual(
+            try container.mainContext.fetch(FetchDescriptor<MedicationDoseRecord>()).first?.status,
+            .skipped
+        )
+        XCTAssertEqual(fixture.medication.currentSupply, 10)
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<CareEvent>()).isEmpty)
+    }
+
+    @MainActor
+    func testWatchSnoozeRejectsOccurrenceThatIsNotNearItsScheduledTime() async throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let fixture = try makeAdultMedicationFixture(
+            container: container,
+            scheduledAt: now.addingTimeInterval(2 * 60 * 60),
+            remindersEnabled: true
+        )
+        ProfileService.shared.switchProfile(fixture.profile)
+        let snapshot = try XCTUnwrap(WatchStateFactory.make(
+            context: container.mainContext,
+            now: now
+        ).upcomingMedication)
+        XCTAssertFalse(snapshot.snoozeAvailable)
+
+        let acknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .snoozeMedication,
+                profileID: fixture.profile.id,
+                issuedAt: now,
+                medication: snapshot
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(acknowledgement.status, .rejected)
+        XCTAssertEqual(
+            acknowledgement.message,
+            "Snooze becomes available near the scheduled time."
+        )
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<MedicationDoseRecord>()).isEmpty)
+    }
+
+    @MainActor
+    func testWatchDoesNotOfferSnoozeForLongOverdueMedication() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let fixture = try makeAdultMedicationFixture(
+            container: container,
+            scheduledAt: now.addingTimeInterval(-2 * 60 * 60),
+            remindersEnabled: true
+        )
+        ProfileService.shared.switchProfile(fixture.profile)
+
+        let snapshot = try XCTUnwrap(WatchStateFactory.make(
+            context: container.mainContext,
+            now: now
+        ).upcomingMedication)
+
+        XCTAssertFalse(snapshot.snoozeAvailable)
+        XCTAssertLessThan(snapshot.scheduledAt, now.addingTimeInterval(-30 * 60))
+    }
+
+    @MainActor
     func testWatchStopAndSaveUsesWatchTapTimeAtomically() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let startDate = Date().addingTimeInterval(-600)
         let stopDate = startDate.addingTimeInterval(420)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: startDate,
@@ -180,12 +450,12 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchDiscardRemovesPausedDraftWithoutSaving() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let pausedAt = Date().addingTimeInterval(-30)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: pausedAt.addingTimeInterval(-300),
@@ -221,7 +491,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchQuickLogCreatesCompleteDogPottyEvent() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .dog,
             name: "Test Dog",
             birthDate: Date().addingTimeInterval(-500 * 86_400)
@@ -254,7 +524,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testDuplicateOfflineDeliveryCreatesOnlyOneEvent() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .dog,
             name: "Test Dog",
             birthDate: Date().addingTimeInterval(-500 * 86_400)
@@ -271,7 +541,7 @@ final class WatchCompanionTests: XCTestCase {
         let first = await WatchCommandProcessor.process(command, container: container)
         let duplicate = await WatchCommandProcessor.process(command, container: container)
         let profileID = profile.id
-        let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>(
+        let events = try container.mainContext.fetch(FetchDescriptor<CareEvent>(
             predicate: #Predicate { $0.profileID == profileID }
         ))
 
@@ -284,7 +554,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testDifferentRetryCommandIDStillCannotDuplicateEvent() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .dog,
             name: "Test Dog",
             birthDate: Date().addingTimeInterval(-500 * 86_400)
@@ -314,7 +584,7 @@ final class WatchCompanionTests: XCTestCase {
             container: container
         )
         let profileID = profile.id
-        let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>(
+        let events = try container.mainContext.fetch(FetchDescriptor<CareEvent>(
             predicate: #Predicate { $0.profileID == profileID }
         ))
 
@@ -327,7 +597,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testHiddenCategoryIsRejectedEvenFromStaleWatchState() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
@@ -353,7 +623,7 @@ final class WatchCompanionTests: XCTestCase {
             container: container
         )
         let profileID = profile.id
-        let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>(
+        let events = try container.mainContext.fetch(FetchDescriptor<CareEvent>(
             predicate: #Predicate { $0.profileID == profileID }
         ))
 
@@ -365,12 +635,12 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchStateOmitsTimerActionWhileThatTypeIsActive() throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let startDate = Date().addingTimeInterval(-90)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .nursing,
             startDate: startDate,
@@ -403,13 +673,13 @@ final class WatchCompanionTests: XCTestCase {
     func testWatchStateToleratesDuplicateProfileIdentifiers() throws {
         let container = try makeInMemoryContainer()
         let profileID = UUID()
-        let firstProfile = BabyProfile(
+        let firstProfile = CareProfile(
             id: profileID,
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400),
             createdAt: Date().addingTimeInterval(-60)
         )
-        let duplicateProfile = BabyProfile(
+        let duplicateProfile = CareProfile(
             id: profileID,
             name: "Sibling",
             birthDate: Date().addingTimeInterval(-120 * 86_400),
@@ -430,17 +700,17 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchStateIncludesEveryTimerForSelectedProfile() throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
-        let otherProfile = BabyProfile(
+        let otherProfile = CareProfile(
             profileType: .dog,
             name: "Test Dog",
             birthDate: Date().addingTimeInterval(-500 * 86_400)
         )
         let now = Date()
-        let sleep = BabyEvent(
+        let sleep = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: now.addingTimeInterval(-600),
@@ -450,7 +720,7 @@ final class WatchCompanionTests: XCTestCase {
         sleep.activeTimerSegmentStartDate = sleep.startDate
         sleep.createdAt = now.addingTimeInterval(-30)
         sleep.updatedAt = sleep.startDate
-        let nursing = BabyEvent(
+        let nursing = CareEvent(
             profileID: profile.id,
             type: .nursing,
             startDate: now.addingTimeInterval(-300),
@@ -464,7 +734,7 @@ final class WatchCompanionTests: XCTestCase {
         nursing.rightDurationSeconds = 0
         nursing.createdAt = now.addingTimeInterval(-60)
         nursing.updatedAt = nursing.startDate
-        let otherProfileTimer = BabyEvent(
+        let otherProfileTimer = CareEvent(
             profileID: otherProfile.id,
             type: .walk,
             startDate: now.addingTimeInterval(-120),
@@ -473,7 +743,7 @@ final class WatchCompanionTests: XCTestCase {
         otherProfileTimer.timerState = .running
         otherProfileTimer.activeTimerSegmentStartDate = otherProfileTimer.startDate
         otherProfileTimer.updatedAt = otherProfileTimer.startDate
-        let legacyOpenEndedEvent = BabyEvent(
+        let legacyOpenEndedEvent = CareEvent(
             profileID: profile.id,
             type: .activity,
             startDate: now.addingTimeInterval(-86_400),
@@ -504,12 +774,12 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchTimerCommandOnlyMutatesTargetedTimer() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let stopDate = Date()
-        let sleep = BabyEvent(
+        let sleep = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: stopDate.addingTimeInterval(-600),
@@ -519,7 +789,7 @@ final class WatchCompanionTests: XCTestCase {
         sleep.activeTimerSegmentStartDate = sleep.startDate
         sleep.createdAt = stopDate.addingTimeInterval(-30)
         sleep.updatedAt = sleep.startDate
-        let nursing = BabyEvent(
+        let nursing = CareEvent(
             profileID: profile.id,
             type: .nursing,
             startDate: stopDate.addingTimeInterval(-300),
@@ -582,13 +852,13 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testStaleWatchTimerCommandDoesNotOverwriteNewerPhoneEdit() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let snapshotDate = Date().addingTimeInterval(-600)
         let phoneEditDate = Date().addingTimeInterval(-60)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: snapshotDate,
@@ -620,13 +890,13 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchNursingSnapshotKeepsTotalAndActiveSideInSync() throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let startDate = Date().addingTimeInterval(-300)
         let snapshotDate = startDate.addingTimeInterval(120)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .nursing,
             startDate: startDate,
@@ -669,13 +939,13 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchNursingSwitchBanksPreviousSide() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let startDate = Date().addingTimeInterval(-120)
         let switchDate = startDate.addingTimeInterval(75)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .nursing,
             startDate: startDate,
@@ -717,13 +987,13 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testWatchNursingSideSelectionUsesRequestedSide() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
         let startDate = Date().addingTimeInterval(-120)
         let selectionDate = startDate.addingTimeInterval(75)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profile.id,
             type: .nursing,
             startDate: startDate,
@@ -765,7 +1035,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testCustomWatchFavoritesKeepSavedOrderAndMaximum() throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
@@ -798,7 +1068,7 @@ final class WatchCompanionTests: XCTestCase {
     @MainActor
     func testCustomWatchFavoritesStillRespectHiddenCategories() throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
@@ -841,10 +1111,33 @@ final class WatchCompanionTests: XCTestCase {
         XCTAssertEqual(decoded.receivedAt, receipt.receivedAt)
     }
 
+    func testWatchMedicationSnapshotRoundTripsWithCompanionState() throws {
+        let medication = WatchMedicationSnapshot(
+            profileID: UUID(),
+            medicationID: UUID(),
+            regimenID: UUID(),
+            phaseID: UUID(),
+            occurrenceKey: "scheduled-dose",
+            medicationName: "Test Medication",
+            scheduledAt: Date(),
+            doseAmount: 1.5,
+            doseUnit: "tablets",
+            snoozeAvailable: true
+        )
+        var state = WatchCompanionState.empty
+        state.upcomingMedication = medication
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(WatchCompanionState.self, from: data)
+
+        XCTAssertEqual(decoded.upcomingMedication, medication)
+        XCTAssertEqual(decoded.schemaVersion, WatchCompanionProtocol.schemaVersion)
+    }
+
     @MainActor
     func testWatchStateFactoryLargeHistoryPerformance() throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Date().addingTimeInterval(-180 * 86_400)
         )
@@ -852,7 +1145,7 @@ final class WatchCompanionTests: XCTestCase {
         container.mainContext.insert(profile)
         for index in 0..<600 {
             let loggedAt = now.addingTimeInterval(TimeInterval(-index * 1_200))
-            let event = BabyEvent(
+            let event = CareEvent(
                 profileID: profile.id,
                 type: index.isMultiple(of: 2) ? .diaper : .feed,
                 startDate: loggedAt,
@@ -880,6 +1173,49 @@ final class WatchCompanionTests: XCTestCase {
     }
 
     @MainActor
+    private func makeAdultMedicationFixture(
+        container: ModelContainer,
+        scheduledAt: Date,
+        remindersEnabled: Bool
+    ) throws -> (
+        profile: CareProfile,
+        medication: Medication,
+        regimen: MedicationRegimen
+    ) {
+        let calendar = MedicationScheduleDate.currentCalendar()
+        let components = calendar.dateComponents([.hour, .minute], from: scheduledAt)
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(
+            profileID: profile.id,
+            name: "Test Medication",
+            currentSupply: 10
+        )
+        let regimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: calendar.startOfDay(for: scheduledAt),
+            doseAmount: 1,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(
+                hour: components.hour ?? 8,
+                minute: components.minute ?? 0
+            )],
+            remindersEnabled: remindersEnabled,
+            timeZoneIdentifier: calendar.timeZone.identifier
+        )
+        container.mainContext.insert(profile)
+        container.mainContext.insert(medication)
+        container.mainContext.insert(regimen)
+        try container.mainContext.save()
+        return (profile, medication, regimen)
+    }
+
+    @MainActor
     private func makeInMemoryContainer() throws -> ModelContainer {
         let schema = PersistenceService.schema
         let configuration = ModelConfiguration(
@@ -892,8 +1228,8 @@ final class WatchCompanionTests: XCTestCase {
     }
 
     @MainActor
-    private func fetchEvent(_ id: UUID, context: ModelContext) -> BabyEvent? {
-        var descriptor = FetchDescriptor<BabyEvent>(
+    private func fetchEvent(_ id: UUID, context: ModelContext) -> CareEvent? {
+        var descriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate { $0.id == id }
         )
         descriptor.fetchLimit = 1

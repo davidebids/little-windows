@@ -68,21 +68,101 @@ enum ThumbnailImageCache {
         cache.setObject(image, forKey: key, cost: max(data.count, decodedCost))
         return image
     }
+
+    /// Produces a square, orientation-normalized bitmap for fixed-size previews.
+    static func squareImage(
+        attachmentID: UUID,
+        data: Data,
+        size: CGFloat
+    ) -> UIImage? {
+        let pixelSize = max(1, Int(size.rounded(.up)))
+        let key = "\(attachmentID.uuidString)-square-\(pixelSize)-\(data.count)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        guard let source = UIImage(data: data),
+              source.size.width > 0,
+              source.size.height > 0 else { return nil }
+
+        let targetSize = CGSize(width: size, height: size)
+        let fillScale = max(
+            targetSize.width / source.size.width,
+            targetSize.height / source.size.height
+        )
+        let drawnSize = CGSize(
+            width: source.size.width * fillScale,
+            height: source.size.height * fillScale
+        )
+        let drawRect = CGRect(
+            x: (targetSize.width - drawnSize.width) / 2,
+            y: (targetSize.height - drawnSize.height) / 2,
+            width: drawnSize.width,
+            height: drawnSize.height
+        )
+        let rendered = UIGraphicsImageRenderer(size: targetSize).image { _ in
+            source.draw(in: drawRect)
+        }
+        let decodedCost = rendered.cgImage.map { $0.width * $0.height * 4 } ?? data.count
+        cache.setObject(rendered, forKey: key, cost: max(data.count, decodedCost))
+        return rendered
+    }
+
+    /// Produces the final circular bitmap before it enters a toolbar. Toolbar
+    /// layout can otherwise apply a stale SwiftUI mask while profile photo data
+    /// arrives, briefly flattening the top and bottom until another interaction.
+    static func circularImage(
+        attachmentID: UUID,
+        data: Data,
+        size: CGFloat
+    ) -> UIImage? {
+        let pixelSize = max(1, Int(size.rounded(.up)))
+        let key = "\(attachmentID.uuidString)-circle-\(pixelSize)-\(data.count)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        guard let source = UIImage(data: data),
+              source.size.width > 0,
+              source.size.height > 0 else { return nil }
+
+        let targetSize = CGSize(width: size, height: size)
+        let targetRect = CGRect(origin: .zero, size: targetSize)
+        let fillScale = max(
+            targetSize.width / source.size.width,
+            targetSize.height / source.size.height
+        )
+        let drawnSize = CGSize(
+            width: source.size.width * fillScale,
+            height: source.size.height * fillScale
+        )
+        let drawRect = CGRect(
+            x: (targetSize.width - drawnSize.width) / 2,
+            y: (targetSize.height - drawnSize.height) / 2,
+            width: drawnSize.width,
+            height: drawnSize.height
+        )
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        let rendered = UIGraphicsImageRenderer(size: targetSize, format: format).image { context in
+            context.cgContext.addEllipse(in: targetRect)
+            context.cgContext.clip()
+            source.draw(in: drawRect)
+        }
+        let decodedCost = rendered.cgImage.map { $0.width * $0.height * 4 } ?? data.count
+        cache.setObject(rendered, forKey: key, cost: max(data.count, decodedCost))
+        return rendered
+    }
 }
 
 struct EventEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @Query(sort: \BabyEvent.startDate, order: .reverse) private var allEvents: [BabyEvent]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
+    @Query(sort: \CareEvent.startDate, order: .reverse) private var allEvents: [CareEvent]
+    @Query(sort: \MedicationDoseRecord.loggedAt, order: .reverse) private var medicationDoseRecords: [MedicationDoseRecord]
     @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
     @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
     @StateObject private var profileService = ProfileService.shared
     @AppStorage("caregiverOne") private var caregiverOne = "Caregiver 1"
     @AppStorage("currentCaregiverName") private var currentCaregiverName = ""
 
-    let existingEvent: BabyEvent?
-    let onSave: (BabyEvent) -> Void
+    let existingEvent: CareEvent?
+    let onSave: (CareEvent) -> Void
 
     @State private var type: EventType
     @State private var title: String
@@ -125,7 +205,7 @@ struct EventEditorView: View {
     @State private var weightPounds: Int
     @State private var weightOunces: Double
     @State private var headCircumferenceInches: Double?
-    @State private var growthSex: BabySex
+    @State private var growthSex: ProfileSex
     @State private var growthSource: GrowthMeasurementSource
     @State private var temperatureValue: Double
     @State private var temperatureUnit: TemperatureUnit
@@ -171,6 +251,20 @@ struct EventEditorView: View {
     @State private var dogGlucoseValue: Double
     @State private var dogGlucoseUnit: DogGlucoseUnit
     @State private var dogGlucoseMealRelation: DogMealRelation
+    @State private var symptomName: String
+    @State private var symptomSeverity: Int
+    @State private var symptomBodyLocation: String
+    @State private var symptomResolved: Bool
+    @State private var systolicBloodPressure: Int
+    @State private var diastolicBloodPressure: Int
+    @State private var heartRateBPM: Int
+    @State private var oxygenSaturationPercent: Double
+    @State private var respiratoryRatePerMinute: Int
+    @State private var bloodGlucoseValue: Double
+    @State private var bloodGlucoseUnit: BloodGlucoseUnit
+    @State private var bloodGlucoseContext: BloodGlucoseContext
+    @State private var painScore: Int
+    @State private var painLocation: String
     @State private var recentMedicineNames: [String]
     @State private var growthMeasurementEditor: GrowthMeasurementEditorKind?
     @State private var showingSolidFoodPicker: Bool
@@ -178,9 +272,9 @@ struct EventEditorView: View {
 
     init(
         type: EventType,
-        event: BabyEvent? = nil,
+        event: CareEvent? = nil,
         solidPreset: SolidFeedEditorPreset? = nil,
-        onSave: @escaping (BabyEvent) -> Void
+        onSave: @escaping (CareEvent) -> Void
     ) {
         let selectedType = event?.type ?? type
         let selectedProfileID = event?.profileID
@@ -193,13 +287,13 @@ struct EventEditorView: View {
         let solidProfileID = loadsSolidData ? selectedProfileID : unloadedID
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
-        var recentSolidEventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
+        var recentSolidEventDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
                 event.profileID == solidProfileID
                     && event.typeRawValue == feedRawValue
                     && event.feedKindRawValue == solidRawValue
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         recentSolidEventDescriptor.fetchLimit = 120
         _allEvents = Query(recentSolidEventDescriptor)
@@ -267,7 +361,7 @@ struct EventEditorView: View {
         _dose = State(initialValue: event?.dose ?? 0)
         _medicineUnit = State(initialValue: event?.medicineUnit ?? .milliliters)
         _reason = State(initialValue: event?.reason ?? "")
-        _activityType = State(initialValue: event?.activityType ?? .tummyTime)
+        _activityType = State(initialValue: event?.activityType ?? .custom)
         let lengthParts = event?.canonicalLengthCentimeters.map(
             GrowthUnitConversion.centimetersToFeetAndInches
         )
@@ -335,6 +429,21 @@ struct EventEditorView: View {
         _dogGlucoseValue = State(initialValue: dog.glucoseValue ?? 0)
         _dogGlucoseUnit = State(initialValue: dog.glucoseUnit ?? .mgdl)
         _dogGlucoseMealRelation = State(initialValue: dog.glucoseMealRelation ?? .unknown)
+        let health = event?.healthObservationDetails ?? HealthObservationDetails()
+        _symptomName = State(initialValue: health.symptomName ?? "")
+        _symptomSeverity = State(initialValue: health.symptomSeverity ?? 5)
+        _symptomBodyLocation = State(initialValue: health.symptomBodyLocation ?? "")
+        _symptomResolved = State(initialValue: health.symptomResolved ?? false)
+        _systolicBloodPressure = State(initialValue: health.systolicBloodPressure ?? 120)
+        _diastolicBloodPressure = State(initialValue: health.diastolicBloodPressure ?? 80)
+        _heartRateBPM = State(initialValue: health.heartRateBPM ?? 70)
+        _oxygenSaturationPercent = State(initialValue: health.oxygenSaturationPercent ?? 98)
+        _respiratoryRatePerMinute = State(initialValue: health.respiratoryRatePerMinute ?? 16)
+        _bloodGlucoseValue = State(initialValue: health.bloodGlucoseValue ?? 100)
+        _bloodGlucoseUnit = State(initialValue: health.bloodGlucoseUnit ?? .milligramsPerDeciliter)
+        _bloodGlucoseContext = State(initialValue: health.bloodGlucoseContext ?? .unspecified)
+        _painScore = State(initialValue: health.painScore ?? 0)
+        _painLocation = State(initialValue: health.painLocation ?? "")
         _recentMedicineNames = State(initialValue: [])
         _growthMeasurementEditor = State(initialValue: nil)
         _showingSolidFoodPicker = State(initialValue: false)
@@ -373,6 +482,9 @@ struct EventEditorView: View {
     private var temperatureMethods: [TemperatureMethod] {
         isDogProfile ? [.rectal, .ear, .unknown] : TemperatureMethod.allCases
     }
+    private var availableActivityTypes: [ActivityType] {
+        ActivityType.cases(for: activeProfileType)
+    }
     private var activeCaregiverName: String {
         CaregiverIdentityService.currentCaregiverName(
             currentName: currentCaregiverName,
@@ -389,7 +501,7 @@ struct EventEditorView: View {
     }
 
     private static func initialSolidFoodDetails(
-        event: BabyEvent?,
+        event: CareEvent?,
         preset: SolidFeedEditorPreset?
     ) -> [SolidFoodLogDetail] {
         if let event, !event.solidFoodDetails.isEmpty { return event.solidFoodDetails }
@@ -403,7 +515,7 @@ struct EventEditorView: View {
         )
         let presetConfirmedAllergens = Set(preset?.confirmedAllergenPortionIDs ?? [])
         return names.map { name in
-            let reference = SolidsReferenceCatalog.food(named: name)
+            let reference = SolidsReferenceCatalog.foodSummary(named: name)
             let foodID = presetIDs[SolidFoodSelection.normalizedName(name)]
                 ?? reference?.id
                 ?? "custom-\(SolidFoodSelection.normalizedName(name).replacingOccurrences(of: " ", with: "-"))"
@@ -428,7 +540,7 @@ struct EventEditorView: View {
         solidFoodDetails = names.map { name in
             let key = SolidFoodSelection.normalizedName(name)
             if var existing = existingByName[key] {
-                let catalogAllergens = SolidsReferenceCatalog.food(id: existing.foodID)?.allergenIDs
+                let catalogAllergens = SolidsReferenceCatalog.foodSummary(id: existing.foodID)?.allergenIDs
                     ?? customSolidFoods.first(where: {
                         "custom-\($0.id.uuidString.lowercased())" == existing.foodID
                             || $0.normalizedName == key
@@ -440,7 +552,7 @@ struct EventEditorView: View {
                 }
                 return existing
             }
-            if let reference = SolidsReferenceCatalog.food(named: name) {
+            if let reference = SolidsReferenceCatalog.foodSummary(named: name) {
                 return SolidFoodLogDetail(
                     foodID: reference.id,
                     foodName: reference.name,
@@ -515,204 +627,276 @@ struct EventEditorView: View {
     }
 
     var body: some View {
+        if isManagedMedicationEvent {
+            managedMedicationEventView
+        } else {
+            editableEventView
+        }
+    }
+
+    private var isManagedMedicationEvent: Bool {
+        guard let eventID = existingEvent?.id else { return false }
+        return medicationDoseRecords.contains { $0.careEventID == eventID }
+    }
+
+    private var managedMedicationEventView: some View {
         Form {
             Section {
-                Picker("Type", selection: $type) {
-                    ForEach(EventType.cases(for: activeProfileType)) { type in
-                        Label(type.displayName, systemImage: type.systemImage(for: activeProfileType)).tag(type)
+                Label("This timeline entry comes from a medication dose record.", systemImage: "pills.fill")
+                Text("Change its taken or skipped status, or delete it, from Medication History so the schedule and supply stay in sync.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button("Open Medications") {
+                    let router = DeepLinkRouter.shared
+                    router.pendingProfileID = existingEvent?.profileID
+                    router.pendingMedications = true
+                    router.selectedTab = .milestones
+                    dismiss()
+                }
+            }
+        }
+        .navigationTitle("Medication Dose")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+    }
+
+    private var editableEventView: some View {
+        editableEventSheetsView
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .fontWeight(.semibold)
+                }
+            }
+            .alert("Check this event", isPresented: Binding(
+                get: { validationMessage != nil },
+                set: { if !$0 { validationMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(validationMessage ?? "")
+            }
+            .onChange(of: startDate) { _, newValue in
+                if endDate < newValue { endDate = newValue }
+            }
+            .onChange(of: startTimeZoneIdentifier) { oldValue, newValue in
+                if endTimeZoneIdentifier == oldValue {
+                    endTimeZoneIdentifier = newValue
+                }
+            }
+            .onChange(of: hasEndDate) { _, hasEnded in
+                if hasEnded, TimeZone(identifier: endTimeZoneIdentifier) == nil {
+                    endTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
+                }
+            }
+            .onChange(of: temperatureUnit) { oldValue, newValue in
+                guard oldValue != newValue else { return }
+                temperatureValue = newValue == .celsius
+                    ? (temperatureValue - 32) * 5 / 9
+                    : temperatureValue * 9 / 5 + 32
+            }
+            .task {
+                if type == .growth,
+                   growthSex == .unknown,
+                   let profile = profileService.selectedProfile(in: profiles) {
+                    growthSex = profile.sex
+                }
+                if type == .growth, existingEvent == nil {
+                    growthSource = activeProfileType == .child ? .pediatrician : .home
+                }
+            }
+    }
+
+    private var editableEventLifecycleView: some View {
+        editableEventForm
+            .navigationTitle(existingEvent == nil ? "Add Event" : "Edit Event")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                guard existingEvent == nil,
+                      caregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                caregiverName = activeCaregiverName
+            }
+            .onAppear(perform: refreshRecentMedicineNamesIfNeeded)
+            .onAppear(perform: normalizeDogTemperatureMethod)
+            .onAppear(perform: normalizeActivityType)
+            .onAppear {
+                if type == .feed, feedKind == .solid {
+                    syncSolidFoodDetails(names: selectedSolidFoodNames)
+                }
+            }
+            .onChange(of: type) { _, newType in
+                if newType == .temperature {
+                    normalizeDogTemperatureMethod()
+                }
+                if newType == .activity {
+                    normalizeActivityType()
+                }
+                refreshRecentMedicineNamesIfNeeded()
+            }
+            .onChange(of: activeProfileType) {
+                normalizeActivityType()
+            }
+            .onChange(of: activeProfileID) {
+                refreshRecentMedicineNamesIfNeeded()
+            }
+    }
+
+    private var editableEventSheetsView: some View {
+        editableEventLifecycleView
+            .sheet(item: $growthMeasurementEditor) { editor in
+                GrowthMeasurementInputSheet(
+                    kind: editor,
+                    initialImperialValue: growthMeasurementImperialValue(for: editor)
+                ) { value in
+                    saveGrowthMeasurement(editor, imperialValue: value)
+                }
+                .presentationDetents([.height(600), .large])
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showingSolidFoodPicker) {
+                SolidFoodPickerView(
+                    initialSelection: selectedSolidFoodNames,
+                    recentFoodNames: recentSolidFoodNames
+                ) { names in
+                    foodDescription = SolidFoodSelection.description(from: names) ?? ""
+                    syncSolidFoodDetails(names: names)
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { editingSolidFoodID != nil },
+                set: { if !$0 { editingSolidFoodID = nil } }
+            )) {
+                if let editingSolidFoodID,
+                   let index = solidFoodDetails.firstIndex(where: { $0.foodID == editingSolidFoodID }) {
+                    NavigationStack {
+                        SolidFoodLogDetailEditor(detail: $solidFoodDetails[index])
                     }
                 }
-                if type == .custom || (type == .activity && activityType == .custom) {
-                    TextField("Title", text: $title)
+            }
+            .appActionSheet(
+                isPresented: $showingSolidFeedingStyleOptions,
+                title: "Feeding style",
+                message: "Choose how the solid meal was offered.",
+                systemImage: "fork.knife",
+                tint: .orange,
+                options: SolidFeedingStyle.allCases.map { value in
+                    AppActionSheetOption(
+                        title: value.displayName,
+                        systemImage: "fork.knife",
+                        tint: .orange,
+                        isSelected: solidFeedingStyle == value
+                    ) {
+                        solidFeedingStyle = value
+                    }
                 }
-                DatePicker("Start", selection: $startDate)
-                    .environment(\.timeZone, startTimeZone)
-                if type.supportsTimer {
-                    Toggle("Has ended", isOn: $hasEndDate)
+            )
+            .appActionSheet(
+                isPresented: $showingSolidTextureOptions,
+                title: "Food texture",
+                message: "Choose the texture that best describes this meal.",
+                systemImage: "square.stack.3d.up",
+                tint: .orange,
+                options: SolidTexture.allCases.map { value in
+                    AppActionSheetOption(
+                        title: value.displayName,
+                        systemImage: "circle.grid.3x3.fill",
+                        tint: .orange,
+                        isSelected: solidTexture == value
+                    ) {
+                        solidTexture = value
+                    }
                 }
-                if type.supportsTimer, hasEndDate {
-                    DatePicker("End", selection: $endDate, in: startDate...)
-                        .environment(\.timeZone, endTimeZone)
+            )
+    }
+
+    private var editableEventForm: some View {
+        Form {
+            AnyView(eventMetadataSection)
+            AnyView(eventTimeZoneSection)
+            AnyView(eventSpecificFields)
+            AnyView(eventNotesSection)
+        }
+    }
+
+    private var eventMetadataSection: some View {
+        Section {
+            Picker("Type", selection: $type) {
+                ForEach(EventType.cases(for: activeProfileType)) { type in
+                    Label(type.displayName, systemImage: type.systemImage(for: activeProfileType)).tag(type)
                 }
-                LabeledContent("Logged by") {
-                    TextField("Name", text: $caregiverName)
-                        .textContentType(.name)
+            }
+            if type == .custom || (type == .activity && activityType == .custom) {
+                LabeledContent("Title") {
+                    TextField("Required", text: $title)
                         .multilineTextAlignment(.trailing)
                 }
-            } header: {
-                Text("Event")
-            } footer: {
-                Text("This name is saved with the event so history can show who logged it.")
+            }
+            DatePicker("Start", selection: $startDate)
+                .environment(\.timeZone, startTimeZone)
+            if type.supportsTimer {
+                Toggle("Has ended", isOn: $hasEndDate)
+            }
+            if type.supportsTimer, hasEndDate {
+                DatePicker("End", selection: $endDate, in: startDate...)
+                    .environment(\.timeZone, endTimeZone)
+            }
+            LabeledContent("Logged by") {
+                TextField("Name", text: $caregiverName)
+                    .textContentType(.name)
+                    .multilineTextAlignment(.trailing)
+            }
+        } header: {
+            Text("Event")
+        } footer: {
+            Text("This name is saved with the event so history can show who logged it.")
+        }
+    }
+
+    private var eventTimeZoneSection: some View {
+        Section {
+            NavigationLink {
+                TimeZonePickerView(selection: $startTimeZoneIdentifier)
+            } label: {
+                LabeledContent(
+                    "Start time zone",
+                    value: CareTimeZoneSettings.displayName(
+                        for: startTimeZone,
+                        on: startDate
+                    )
+                )
             }
 
-            Section {
+            if type.supportsTimer, hasEndDate {
                 NavigationLink {
-                    TimeZonePickerView(selection: $startTimeZoneIdentifier)
+                    TimeZonePickerView(selection: $endTimeZoneIdentifier)
                 } label: {
                     LabeledContent(
-                        "Start time zone",
+                        "End time zone",
                         value: CareTimeZoneSettings.displayName(
-                            for: startTimeZone,
-                            on: startDate
+                            for: endTimeZone,
+                            on: endDate
                         )
                     )
                 }
+            }
+        } header: {
+            Text("Time zones")
+        } footer: {
+            Text("Clock times stay attached to these zones when you travel. Durations use real elapsed time, even when the start and end are in different zones.")
+        }
+    }
 
-                if type.supportsTimer, hasEndDate {
-                    NavigationLink {
-                        TimeZonePickerView(selection: $endTimeZoneIdentifier)
-                    } label: {
-                        LabeledContent(
-                            "End time zone",
-                            value: CareTimeZoneSettings.displayName(
-                                for: endTimeZone,
-                                on: endDate
-                            )
-                        )
-                    }
-                }
-            } header: {
-                Text("Time zones")
-            } footer: {
-                Text("Clock times stay attached to these zones when you travel. Durations use real elapsed time, even when the start and end are in different zones.")
-            }
-
-            eventSpecificFields
-
-            Section("Notes") {
-                TextField("Optional notes", text: $notes, axis: .vertical)
-                    .lineLimit(3...6)
-            }
-        }
-        .navigationTitle(existingEvent == nil ? "Add Event" : "Edit Event")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            guard existingEvent == nil,
-                  caregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            caregiverName = activeCaregiverName
-        }
-        .onAppear(perform: refreshRecentMedicineNamesIfNeeded)
-        .onAppear(perform: normalizeDogTemperatureMethod)
-        .onAppear {
-            if type == .feed, feedKind == .solid {
-                syncSolidFoodDetails(names: selectedSolidFoodNames)
-            }
-        }
-        .onChange(of: type) { _, newType in
-            if newType == .temperature {
-                normalizeDogTemperatureMethod()
-            }
-            refreshRecentMedicineNamesIfNeeded()
-        }
-        .onChange(of: activeProfileID) {
-            refreshRecentMedicineNamesIfNeeded()
-        }
-        .sheet(item: $growthMeasurementEditor) { editor in
-            GrowthMeasurementInputSheet(
-                kind: editor,
-                initialImperialValue: growthMeasurementImperialValue(for: editor)
-            ) { value in
-                saveGrowthMeasurement(editor, imperialValue: value)
-            }
-            .presentationDetents([.height(600), .large])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showingSolidFoodPicker) {
-            SolidFoodPickerView(
-                initialSelection: selectedSolidFoodNames,
-                recentFoodNames: recentSolidFoodNames
-            ) { names in
-                foodDescription = SolidFoodSelection.description(from: names) ?? ""
-                syncSolidFoodDetails(names: names)
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { editingSolidFoodID != nil },
-            set: { if !$0 { editingSolidFoodID = nil } }
-        )) {
-            if let editingSolidFoodID,
-               let index = solidFoodDetails.firstIndex(where: { $0.foodID == editingSolidFoodID }) {
-                NavigationStack {
-                    SolidFoodLogDetailEditor(detail: $solidFoodDetails[index])
-                }
-            }
-        }
-        .appActionSheet(
-            isPresented: $showingSolidFeedingStyleOptions,
-            title: "Feeding style",
-            message: "Choose how the solid meal was offered.",
-            systemImage: "fork.knife",
-            tint: .orange,
-            options: SolidFeedingStyle.allCases.map { value in
-                AppActionSheetOption(
-                    title: value.displayName,
-                    systemImage: "fork.knife",
-                    tint: .orange,
-                    isSelected: solidFeedingStyle == value
-                ) {
-                    solidFeedingStyle = value
-                }
-            }
-        )
-        .appActionSheet(
-            isPresented: $showingSolidTextureOptions,
-            title: "Food texture",
-            message: "Choose the texture that best describes this meal.",
-            systemImage: "square.stack.3d.up",
-            tint: .orange,
-            options: SolidTexture.allCases.map { value in
-                AppActionSheetOption(
-                    title: value.displayName,
-                    systemImage: "circle.grid.3x3.fill",
-                    tint: .orange,
-                    isSelected: solidTexture == value
-                ) {
-                    solidTexture = value
-                }
-            }
-        )
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { save() }
-                    .fontWeight(.semibold)
-            }
-        }
-        .alert("Check this event", isPresented: Binding(
-            get: { validationMessage != nil },
-            set: { if !$0 { validationMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(validationMessage ?? "")
-        }
-        .onChange(of: startDate) { _, newValue in
-            if endDate < newValue { endDate = newValue }
-        }
-        .onChange(of: startTimeZoneIdentifier) { oldValue, newValue in
-            if endTimeZoneIdentifier == oldValue {
-                endTimeZoneIdentifier = newValue
-            }
-        }
-        .onChange(of: hasEndDate) { _, hasEnded in
-            if hasEnded, TimeZone(identifier: endTimeZoneIdentifier) == nil {
-                endTimeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
-            }
-        }
-        .onChange(of: temperatureUnit) { oldValue, newValue in
-            guard oldValue != newValue else { return }
-            temperatureValue = newValue == .celsius
-                ? (temperatureValue - 32) * 5 / 9
-                : temperatureValue * 9 / 5 + 32
-        }
-        .task {
-            if type == .growth,
-               growthSex == .unknown,
-               let profile = profileService.selectedProfile(in: profiles) {
-                growthSex = profile.sex
-            }
+    private var eventNotesSection: some View {
+        Section("Notes") {
+            TextField("Optional notes", text: $notes, axis: .vertical)
+                .lineLimit(3...6)
         }
     }
 
@@ -893,7 +1077,7 @@ struct EventEditorView: View {
                 }
                 .buttonStyle(.plain)
 
-                if !isDogProfile {
+                if activeProfileType == .child {
                     Button {
                         growthMeasurementEditor = .headCircumference
                     } label: {
@@ -909,9 +1093,9 @@ struct EventEditorView: View {
                         Text($0.displayName(for: activeProfileType)).tag($0)
                     }
                 }
-                if !isDogProfile {
+                if activeProfileType == .child {
                     Picker("Reference sex", selection: $growthSex) {
-                        ForEach(BabySex.allCases) {
+                        ForEach(ProfileSex.allCases) {
                             Text($0.displayName).tag($0)
                         }
                     }
@@ -948,7 +1132,7 @@ struct EventEditorView: View {
         case .activity:
             Section("Activity") {
                 Picker("Activity", selection: $activityType) {
-                    ForEach(ActivityType.allCases) {
+                    ForEach(availableActivityTypes) {
                         Label($0.displayName, systemImage: $0.systemImage).tag($0)
                     }
                 }
@@ -1096,17 +1280,77 @@ struct EventEditorView: View {
                 }
             }
         case .symptom:
-            Section("Symptom") {
-                Picker("Symptom", selection: $dogSymptomType) {
-                    ForEach(DogSymptomType.allCases) { Text($0.displayName).tag($0) }
+            if isDogProfile {
+                Section("Symptom") {
+                    Picker("Symptom", selection: $dogSymptomType) {
+                        ForEach(DogSymptomType.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Picker("Severity", selection: $dogSymptomSeverity) {
+                        ForEach(DogSymptomSeverity.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Toggle("Resolved", isOn: $dogSymptomResolved)
+                    Text("Little Windows tracks symptoms for your records and does not diagnose. Contact your vet if you're concerned.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Picker("Severity", selection: $dogSymptomSeverity) {
-                    ForEach(DogSymptomSeverity.allCases) { Text($0.displayName).tag($0) }
+            } else {
+                Section("Symptom") {
+                    LabeledContent("Symptom") {
+                        TextField("Required", text: $symptomName)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Stepper("Severity: \(symptomSeverity)/10", value: $symptomSeverity, in: 0...10)
+                    LabeledContent("Body location") {
+                        TextField("Optional", text: $symptomBodyLocation)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Toggle("Resolved", isOn: $symptomResolved)
+                    healthTrackingFooter
                 }
-                Toggle("Resolved", isOn: $dogSymptomResolved)
-                Text("Little Windows tracks symptoms for your records and does not diagnose. Contact your vet if you're concerned.")
+            }
+        case .bloodPressure:
+            Section("Blood Pressure") {
+                LabeledContent("Systolic") {
+                    TextField("120", value: $systolicBloodPressure, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Diastolic") {
+                    TextField("80", value: $diastolicBloodPressure, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                Text("Values are stored in mmHg.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                healthTrackingFooter
+            }
+        case .heartRate:
+            Section("Heart Rate") {
+                LabeledContent("Beats per minute") {
+                    TextField("70", value: $heartRateBPM, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                healthTrackingFooter
+            }
+        case .oxygenSaturation:
+            Section("Oxygen Saturation") {
+                LabeledContent("Percent") {
+                    TextField("98", value: $oxygenSaturationPercent, format: .number.precision(.fractionLength(0...1)))
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                healthTrackingFooter
+            }
+        case .respiratoryRate:
+            Section("Respiratory Rate") {
+                LabeledContent("Breaths per minute") {
+                    TextField("16", value: $respiratoryRatePerMinute, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                healthTrackingFooter
             }
         case .vaccine:
             Section("Vaccine") {
@@ -1121,21 +1365,53 @@ struct EventEditorView: View {
                 TextField("Clinic/vet optional", text: $dogVaccineClinic)
             }
         case .glucose:
-            Section("Glucose") {
-                HStack {
-                    TextField("Value", value: $dogGlucoseValue, format: .number)
-                        .keyboardType(.decimalPad)
-                    Picker("Unit", selection: $dogGlucoseUnit) {
-                        ForEach(DogGlucoseUnit.allCases) { Text($0.displayName).tag($0) }
+            if isDogProfile {
+                Section("Glucose") {
+                    LabeledContent("Reading") {
+                        HStack {
+                            TextField("Value", value: $dogGlucoseValue, format: .number)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Picker("Unit", selection: $dogGlucoseUnit) {
+                                ForEach(DogGlucoseUnit.allCases) { Text($0.displayName).tag($0) }
+                            }
+                            .labelsHidden()
+                        }
                     }
-                    .labelsHidden()
+                    Picker("Relation to meal", selection: $dogGlucoseMealRelation) {
+                        ForEach(DogMealRelation.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    Text("Glucose logs are for tracking only and are not interpreted medically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Picker("Relation to meal", selection: $dogGlucoseMealRelation) {
-                    ForEach(DogMealRelation.allCases) { Text($0.displayName).tag($0) }
+            } else {
+                Section("Blood Glucose") {
+                    LabeledContent("Reading") {
+                        HStack {
+                            TextField("Value", value: $bloodGlucoseValue, format: .number.precision(.fractionLength(0...1)))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Picker("Unit", selection: $bloodGlucoseUnit) {
+                                ForEach(BloodGlucoseUnit.allCases) { Text($0.displayName).tag($0) }
+                            }
+                            .labelsHidden()
+                        }
+                    }
+                    Picker("Context", selection: $bloodGlucoseContext) {
+                        ForEach(BloodGlucoseContext.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    healthTrackingFooter
                 }
-                Text("Glucose logs are for tracking only and are not interpreted medically.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            }
+        case .pain:
+            Section("Pain") {
+                Stepper("Pain: \(painScore)/10", value: $painScore, in: 0...10)
+                LabeledContent("Location") {
+                    TextField("Optional", text: $painLocation)
+                        .multilineTextAlignment(.trailing)
+                }
+                healthTrackingFooter
             }
         case .custom:
             EmptyView()
@@ -1163,6 +1439,12 @@ struct EventEditorView: View {
         }
         .buttonStyle(.plain)
         .accessibilityValue(value)
+    }
+
+    private var healthTrackingFooter: some View {
+        Text("This log is for personal recordkeeping and is not medical advice or an emergency alert. Contact a qualified clinician for interpretation or concerns.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     private var weightDisplayText: String {
@@ -1243,6 +1525,15 @@ struct EventEditorView: View {
     }
 
     private func save() {
+        guard EventType.cases(for: activeProfileType).contains(type) else {
+            validationMessage = "This event type isn't available for an \(activeProfileType.displayName.lowercased()) profile."
+            return
+        }
+        if type == .activity,
+           !activityType.isAvailable(for: activeProfileType) {
+            validationMessage = "Choose an activity available for an \(activeProfileType.displayName.lowercased()) profile."
+            return
+        }
         if type.supportsTimer, hasEndDate, endDate < startDate {
             validationMessage = "End time must be after the start time."
             return
@@ -1274,6 +1565,33 @@ struct EventEditorView: View {
             validationMessage = "Enter a glucose value."
             return
         }
+        if activeProfileType != .dog, type == .symptom,
+           symptomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            validationMessage = "Enter the symptom you want to track."
+            return
+        }
+        if type == .bloodPressure,
+           (systolicBloodPressure <= 0 || diastolicBloodPressure <= 0) {
+            validationMessage = "Enter both blood pressure values."
+            return
+        }
+        if type == .heartRate, heartRateBPM <= 0 {
+            validationMessage = "Enter a heart rate greater than zero."
+            return
+        }
+        if type == .oxygenSaturation,
+           !(0 < oxygenSaturationPercent && oxygenSaturationPercent <= 100) {
+            validationMessage = "Enter an oxygen saturation greater than 0 and no more than 100 percent."
+            return
+        }
+        if type == .respiratoryRate, respiratoryRatePerMinute <= 0 {
+            validationMessage = "Enter a respiratory rate greater than zero."
+            return
+        }
+        if activeProfileType != .dog, type == .glucose, bloodGlucoseValue <= 0 {
+            validationMessage = "Enter a blood glucose value greater than zero."
+            return
+        }
         if type == .growth,
            weightPounds == 0, weightOunces == 0,
            heightFeet == 0, heightInches == 0,
@@ -1283,7 +1601,7 @@ struct EventEditorView: View {
         }
 
         let wasActiveTimer = existingEvent?.isTimerDraft == true
-        let event = existingEvent ?? BabyEvent(type: type)
+        let event = existingEvent ?? CareEvent(type: type)
         event.type = type
         event.profileTypeSnapshot = activeProfileType
         event.title = title.nilIfBlank
@@ -1362,7 +1680,7 @@ struct EventEditorView: View {
         event.heightInches = type == .growth && heightInches > 0 ? heightInches : nil
         event.weightPounds = type == .growth && weightPounds > 0 ? weightPounds : nil
         event.weightOunces = type == .growth && weightOunces > 0 ? weightOunces : nil
-        event.headCircumferenceInches = type == .growth && !isDogProfile
+        event.headCircumferenceInches = type == .growth && activeProfileType == .child
             ? headCircumferenceInches.flatMap { $0 > 0 ? $0 : nil }
             : nil
         event.weightKilograms = type == .growth && (weightPounds > 0 || weightOunces > 0)
@@ -1377,12 +1695,12 @@ struct EventEditorView: View {
                 inches: heightInches
             )
             : nil
-        event.headCircumferenceCentimeters = type == .growth && !isDogProfile
+        event.headCircumferenceCentimeters = type == .growth && activeProfileType == .child
             ? headCircumferenceInches.flatMap {
                 $0 > 0 ? GrowthUnitConversion.inchesToCentimeters($0) : nil
             }
             : nil
-        event.growthSexRawValue = type == .growth && !isDogProfile ? growthSex.rawValue : nil
+        event.growthSexRawValue = type == .growth && activeProfileType == .child ? growthSex.rawValue : nil
         event.growthSource = type == .growth ? growthSource : nil
         event.temperatureCelsius = type == .temperature
             ? (temperatureUnit == .celsius ? temperatureValue : (temperatureValue - 32) * 5 / 9)
@@ -1390,6 +1708,13 @@ struct EventEditorView: View {
         event.temperatureUnitRawValue = type == .temperature ? temperatureUnit.rawValue : nil
         event.temperatureMethod = type == .temperature ? temperatureMethod : nil
         event.dogDetails = activeProfileType == .dog ? dogDetailsForSave() : DogEventDetails()
+        if activeProfileType != .dog,
+           [.symptom, .bloodPressure, .heartRate, .oxygenSaturation,
+            .respiratoryRate, .glucose, .pain].contains(type) {
+            event.healthObservationDetails = healthDetailsForSave()
+        } else {
+            event.healthObservationDetailsData = nil
+        }
         event.updatedAt = Date()
         if existingEvent == nil { modelContext.insert(event) }
         onSave(event)
@@ -1399,6 +1724,12 @@ struct EventEditorView: View {
     private func normalizeDogTemperatureMethod() {
         guard isDogProfile, type == .temperature, !temperatureMethods.contains(temperatureMethod) else { return }
         temperatureMethod = .rectal
+    }
+
+    private func normalizeActivityType() {
+        guard type == .activity,
+              !activityType.isAvailable(for: activeProfileType) else { return }
+        activityType = ActivityType.defaultValue(for: activeProfileType)
     }
 
     private func dogDetailsForSave() -> DogEventDetails {
@@ -1446,6 +1777,36 @@ struct EventEditorView: View {
         return details
     }
 
+    private func healthDetailsForSave() -> HealthObservationDetails {
+        var details = HealthObservationDetails()
+        switch type {
+        case .symptom:
+            details.symptomName = symptomName.nilIfBlank
+            details.symptomSeverity = symptomSeverity
+            details.symptomBodyLocation = symptomBodyLocation.nilIfBlank
+            details.symptomResolved = symptomResolved
+        case .bloodPressure:
+            details.systolicBloodPressure = systolicBloodPressure
+            details.diastolicBloodPressure = diastolicBloodPressure
+        case .heartRate:
+            details.heartRateBPM = heartRateBPM
+        case .oxygenSaturation:
+            details.oxygenSaturationPercent = oxygenSaturationPercent
+        case .respiratoryRate:
+            details.respiratoryRatePerMinute = respiratoryRatePerMinute
+        case .glucose:
+            details.bloodGlucoseValue = bloodGlucoseValue
+            details.bloodGlucoseUnit = bloodGlucoseUnit
+            details.bloodGlucoseContext = bloodGlucoseContext
+        case .pain:
+            details.painScore = painScore
+            details.painLocation = painLocation.nilIfBlank
+        default:
+            break
+        }
+        return details
+    }
+
     private func refreshRecentMedicineNamesIfNeeded() {
         guard type == .medicine else {
             recentMedicineNames = []
@@ -1453,20 +1814,20 @@ struct EventEditorView: View {
         }
 
         let medicineType = EventType.medicine.rawValue
-        let descriptor: FetchDescriptor<BabyEvent>
+        let descriptor: FetchDescriptor<CareEvent>
         if let activeProfileID {
-            descriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { value in
+            descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate<CareEvent> { value in
                     value.typeRawValue == medicineType && value.profileID == activeProfileID
                 },
-                sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
             )
         } else {
-            descriptor = FetchDescriptor<BabyEvent>(
-                predicate: #Predicate<BabyEvent> { value in
+            descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate<CareEvent> { value in
                     value.typeRawValue == medicineType
                 },
-                sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
             )
         }
         var limitedDescriptor = descriptor
@@ -1963,9 +2324,12 @@ private struct GrowthMeasurementInputSheet: View {
 
 private extension GrowthMeasurementSource {
     func displayName(for profileType: CareProfileType) -> String {
+        if profileType == .adult, self == .pediatrician { return "Clinician" }
         guard profileType == .dog else { return displayName }
         switch self {
         case .pediatrician:
+            return "Vet"
+        case .medicalVisit:
             return "Vet"
         case .home:
             return "Home"
@@ -2644,7 +3008,11 @@ private struct SolidFoodPickerView: View {
             }
             .navigationTitle("Choose Foods")
             .navigationBarTitleDisplayMode(.inline)
-            .debouncedSearch(text: $effectiveSearchText, prompt: "Search or enter a food")
+            .debouncedSearch(
+                text: $effectiveSearchText,
+                prompt: "Search or enter a food",
+                delay: .milliseconds(250)
+            )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -2757,7 +3125,7 @@ private struct SolidFoodPickerView: View {
         let isKnownUserFood = recentFoodNames.contains {
             SolidFoodSelection.normalizedName($0) == normalizedName
         } || customFoods.contains { $0.normalizedName == normalizedName }
-        return isKnownUserFood || SolidsReferenceCatalog.food(named: name) != nil ? nil : name
+        return isKnownUserFood || SolidsReferenceCatalog.foodSummary(named: name) != nil ? nil : name
     }
 
     private var filteredRecentFoods: [String] {
@@ -2774,8 +3142,8 @@ private struct SolidFoodPickerView: View {
         }
     }
 
-    private var filteredReferenceFoods: [SolidsReferenceFood] {
-        SolidsReferenceCatalog.search(effectiveSearchText)
+    private var filteredReferenceFoods: [SolidsReferenceFoodSummary] {
+        SolidsReferenceCatalog.searchSummaries(effectiveSearchText)
     }
 
     @ViewBuilder
@@ -2794,13 +3162,13 @@ private struct SolidFoodPickerView: View {
         }
     }
 
-    private func foodDatabaseSection(_ foods: [SolidsReferenceFood]) -> some View {
+    private func foodDatabaseSection(_ foods: [SolidsReferenceFoodSummary]) -> some View {
         let foodsByCategory = Dictionary(grouping: foods, by: \.category)
         return VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Food database")
                     .font(.headline)
-                Text("\(SolidsReferenceCatalog.foods.count) bundled foods with stable names for tracking.")
+                Text("\(SolidsReferenceCatalog.foodSummaries.count) bundled foods with stable names for tracking.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2887,7 +3255,7 @@ private struct SolidFoodPickerView: View {
     }
 
     private func visualEmoji(for name: String) -> String {
-        if let referenceFood = SolidsReferenceCatalog.food(named: name) {
+        if let referenceFood = SolidsReferenceCatalog.foodSummary(named: name) {
             return referenceFood.visualEmoji
         }
         return SolidsFoodVisual.emoji(for: name)

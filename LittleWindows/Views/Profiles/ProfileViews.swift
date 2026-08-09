@@ -32,34 +32,42 @@ struct ProfileAvatarView: View {
     }
 
     var body: some View {
-        ZStack {
-            if let attachmentID = profile.profilePhotoAttachmentID,
-               let profilePhotoData,
-               let image = ThumbnailImageCache.image(
-                attachmentID: attachmentID,
-                data: profilePhotoData
-               ) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Text(profile.initials)
-                    .font(.system(size: size * 0.34, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(profileTint.gradient)
+        ZStack(alignment: .bottomTrailing) {
+            ZStack {
+                Circle()
+                    .fill(profileTint.gradient)
+
+                if let attachmentID = profile.profilePhotoAttachmentID,
+                   let profilePhotoData,
+                   let image = ThumbnailImageCache.circularImage(
+                    attachmentID: attachmentID,
+                    data: profilePhotoData,
+                    size: size
+                   ) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: size, height: size)
+                } else {
+                    Text(profile.initials)
+                        .font(.system(size: size * 0.34, weight: .bold))
+                        .foregroundStyle(.white)
+                }
             }
-        }
             .frame(width: size, height: size)
-            .clipShape(Circle())
-            .overlay(alignment: .bottomTrailing) {
-                Image(systemName: profile.profileType.systemImage)
-                    .font(.system(size: size * 0.22, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: size * 0.38, height: size * 0.38)
-                    .background(.black.opacity(0.24), in: Circle())
-                    .offset(x: size * 0.05, y: size * 0.05)
-            }
+
+            Image(systemName: profile.profileType.systemImage)
+                .font(.system(size: size * 0.19, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: size * 0.38, height: size * 0.38)
+                .background(.black.opacity(0.32), in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.72), lineWidth: max(0.75, size * 0.018))
+                }
+                .padding(max(1, size * 0.025))
+        }
+        .frame(width: size, height: size)
     }
 
     private var profilePhotoData: Data? {
@@ -76,6 +84,38 @@ struct ProfileAvatarView: View {
         case "purple": .purple
         case "brown": .brown
         default: AppTheme.accent
+        }
+    }
+}
+
+struct ProfileToolbarSettingsButton: View {
+    let profile: CareProfile?
+    let action: () -> Void
+
+    var body: some View {
+        Group {
+            if let profile {
+                ProfileAvatarView(profile: profile, size: 34)
+            } else {
+                Image(systemName: "gearshape.fill")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+        // Navigation bars add horizontal chrome around custom toolbar items.
+        // A narrower content frame keeps the resulting control circular.
+        .frame(width: 36, height: 44)
+        .contentShape(Circle())
+        .buttonBorderShape(.circle)
+        .onTapGesture(perform: action)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
+        .accessibilityHint(profile == nil
+            ? "Opens household settings and care profile options"
+            : "Opens settings where you can switch profiles")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            action()
         }
     }
 }
@@ -157,6 +197,12 @@ struct ProfilePickerSheet: View {
                 }
             }
 
+            if !profiles.filter({ $0.profileType == .adult }).isEmpty {
+                Section("Adults") {
+                    profileRows(profiles.filter { $0.profileType == .adult })
+                }
+            }
+
             if !profiles.filter({ $0.profileType == .dog }).isEmpty {
                 Section("Dogs") {
                     profileRows(profiles.filter { $0.profileType == .dog })
@@ -207,9 +253,12 @@ struct ProfileEditorView: View {
     @State private var profileType: CareProfileType
     @State private var name: String
     @State private var birthDate: Date
+    @State private var hasBirthDate: Bool
+    @State private var adultRelationship: AdultCareRelationship
+    @State private var sharesWithFamily: Bool
     @State private var hasAdoptionDate: Bool
     @State private var adoptionDate: Date
-    @State private var sex: BabySex
+    @State private var sex: ProfileSex
     @State private var breed: String
     @State private var coatColor: String
     @State private var microchipNumber: String
@@ -237,6 +286,9 @@ struct ProfileEditorView: View {
         _profileType = State(initialValue: profile?.profileType ?? defaultType)
         _name = State(initialValue: profile?.name ?? "")
         _birthDate = State(initialValue: profile?.birthDate ?? Date())
+        _hasBirthDate = State(initialValue: profile?.birthDate != nil)
+        _adultRelationship = State(initialValue: profile?.adultRelationship ?? .myself)
+        _sharesWithFamily = State(initialValue: profile?.sharingScope == .family)
         _hasAdoptionDate = State(initialValue: profile?.adoptionDate != nil)
         _adoptionDate = State(initialValue: profile?.adoptionDate ?? Date())
         _sex = State(initialValue: profile?.sex ?? .unknown)
@@ -312,23 +364,51 @@ struct ProfileEditorView: View {
                     }
                     .pickerStyle(.segmented)
                 }
-                TextField(profileType == .dog ? "Dog name" : "Child name", text: $name)
-                DatePicker(
-                    profileType == .dog ? "Birthday or best estimate" : "Birthdate",
-                    selection: $birthDate,
-                    in: ...Date(),
-                    displayedComponents: .date
-                )
+                LabeledContent("Name") {
+                    TextField(namePrompt, text: $name)
+                        .multilineTextAlignment(.trailing)
+                }
+                if profileType == .adult {
+                    Picker("Relationship", selection: $adultRelationship) {
+                        ForEach(AdultCareRelationship.allCases) { relationship in
+                            Text(relationship.displayName).tag(relationship)
+                        }
+                    }
+                    Toggle("Add date of birth", isOn: $hasBirthDate)
+                }
+                if profileType != .adult || hasBirthDate {
+                    DatePicker(
+                        profileType == .dog ? "Birthday or best estimate" : "Date of birth",
+                        selection: $birthDate,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+                }
                 HStack {
                     Text("Sex")
                     Spacer()
                     Picker("Sex", selection: $sex) {
-                        ForEach(BabySex.allCases) { value in
+                        ForEach(ProfileSex.allCases) { value in
                             Text(value.displayName).tag(value)
                         }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                }
+            }
+
+            Section {
+                Toggle("Share this profile with Family Sync", isOn: $sharesWithFamily)
+                    .disabled(!canChangeSharingScope)
+            } header: {
+                Text("Privacy")
+            } footer: {
+                if canChangeSharingScope {
+                    Text(sharesWithFamily
+                        ? "This profile and its care records can be included when Family Sync is connected."
+                        : "This profile stays private and is excluded from Family Sync. You can opt in later.")
+                } else {
+                    Text("Only the caregiver who created this profile can change whether it is included in Family Sync.")
                 }
             }
 
@@ -410,25 +490,31 @@ struct ProfileEditorView: View {
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            validationMessage = "Enter a \(profileType == .dog ? "dog" : "child") name."
+            validationMessage = "Enter a name for this profile."
             return
         }
 
         if let profile {
             profile.name = trimmed
-            profile.birthDate = birthDate
+            profile.birthDate = profileType == .adult && !hasBirthDate ? nil : birthDate
             profile.sex = sex
+            profile.adultRelationship = profileType == .adult ? adultRelationship : nil
+            _ = profileService.setSharingScope(
+                sharesWithFamily ? .family : .privateOnly,
+                for: profile
+            )
             profile.notes = notes
             profile.displayColor = profile.displayColor ?? defaultDisplayColor
             profile.profileType = profileType
             applyDogFields(to: profile)
             applyProfilePhoto(to: profile)
-            profileService.updateChildProfile(profile)
+            profileService.updateProfile(profile)
         } else if profileType == .dog {
             let createdProfile = profileService.createDogProfile(
                 name: trimmed,
                 birthDate: birthDate,
                 sex: sex,
+                sharingScope: sharesWithFamily ? .family : .privateOnly,
                 adoptionDate: hasAdoptionDate ? adoptionDate : nil,
                 breed: breed.nilIfBlank,
                 coatColor: coatColor.nilIfBlank,
@@ -442,11 +528,24 @@ struct ProfileEditorView: View {
                 context: modelContext
             )
             applyProfilePhoto(to: createdProfile)
+        } else if profileType == .adult {
+            let createdProfile = profileService.createAdultProfile(
+                name: trimmed,
+                birthDate: hasBirthDate ? birthDate : nil,
+                sex: sex,
+                relationship: adultRelationship,
+                sharingScope: sharesWithFamily ? .family : .privateOnly,
+                notes: notes,
+                displayColor: defaultDisplayColor,
+                context: modelContext
+            )
+            applyProfilePhoto(to: createdProfile)
         } else {
             let createdProfile = profileService.createChildProfile(
                 name: trimmed,
                 birthDate: birthDate,
                 sex: sex,
+                sharingScope: sharesWithFamily ? .family : .privateOnly,
                 notes: notes,
                 displayColor: defaultDisplayColor,
                 context: modelContext
@@ -458,7 +557,25 @@ struct ProfileEditorView: View {
     }
 
     private var defaultDisplayColor: String {
-        profile?.displayColor ?? (profileType == .dog ? "teal" : "indigo")
+        if let existing = profile?.displayColor { return existing }
+        return switch profileType {
+        case .child: "indigo"
+        case .adult: "purple"
+        case .dog: "teal"
+        }
+    }
+
+    private var canChangeSharingScope: Bool {
+        guard let profile else { return true }
+        return profileService.canChangeSharingScope(for: profile)
+    }
+
+    private var namePrompt: String {
+        switch profileType {
+        case .child: "Child name"
+        case .adult: adultRelationship == .myself ? "Your name" : "Adult name"
+        case .dog: "Dog name"
+        }
     }
 
     private func applyDogFields(to profile: CareProfile) {
@@ -535,13 +652,14 @@ private struct ProfilePhotoPreview: View {
         ZStack {
             if let photoID,
                let photoData,
-               let image = ThumbnailImageCache.image(
+               let image = ThumbnailImageCache.squareImage(
                 attachmentID: photoID,
-                data: photoData
+                data: photoData,
+                size: 72
                ) {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .frame(width: 72, height: 72)
             } else {
                 Text(profile?.initials ?? initials)
                     .font(.title3.bold())
@@ -619,6 +737,12 @@ struct ManageProfilesView: View {
                 }
             }
 
+            if !activeProfiles.filter({ $0.profileType == .adult }).isEmpty {
+                Section("Adults") {
+                    manageRows(activeProfiles.filter { $0.profileType == .adult })
+                }
+            }
+
             if !activeProfiles.filter({ $0.profileType == .dog }).isEmpty {
                 Section("Dogs") {
                     manageRows(activeProfiles.filter { $0.profileType == .dog })
@@ -691,7 +815,7 @@ struct ManageProfilesView: View {
             VStack(spacing: 9) {
                 Text("No care profiles yet")
                     .font(.title2.bold())
-                Text("Add a child or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is.")
+                Text("Add a child, adult, or dog whenever you want to start care tracking. Your Home, Food, and Night Light setup will stay exactly as it is.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -703,7 +827,7 @@ struct ManageProfilesView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "plus.circle.fill")
-                    Text("Add Child or Dog")
+                    Text("Add Care Profile")
                 }
                 .font(.headline)
                 .frame(maxWidth: .infinity)
@@ -722,6 +846,9 @@ struct ManageProfilesView: View {
 
     private var profileActionTitle: String {
         if let profileToArchive {
+            if archivesLastActiveProfile {
+                return "Archive \(profileToArchive.name) and switch to Home?"
+            }
             return "Archive \(profileToArchive.name)?"
         }
         if let profileToDelete {
@@ -731,10 +858,8 @@ struct ManageProfilesView: View {
     }
 
     private var profileActionMessage: String {
-        if let profileToArchive,
-           !profileToArchive.isArchived,
-           activeProfiles.count == 1 {
-            return "This saves any open timer, pauses care tracking, and returns Little Windows to Home, Food, and Night Light. The profile and all of its history stay safely archived."
+        if archivesLastActiveProfile {
+            return "This is the last active care profile. Little Windows will hide Care and Reports and continue with Today, Home, Food, and Night Light. The profile and all care history stay safely archived, and you can restore it anytime."
         }
         if profileToArchive != nil {
             return "This saves any open timer and hides the profile from daily tracking, but keeps all history available."
@@ -752,12 +877,13 @@ struct ManageProfilesView: View {
 
     private var profileActionOptions: [AppActionSheetOption] {
         if let profile = profileToArchive {
-            let archivesLastActiveProfile = !profile.isArchived && activeProfiles.count == 1
             return [
                 AppActionSheetOption(
-                    title: "Archive Profile",
+                    title: archivesLastActiveProfile
+                        ? "Archive and Switch to Home"
+                        : "Archive Profile",
                     subtitle: archivesLastActiveProfile
-                        ? "Pause care tracking and continue with household tools."
+                        ? "Keep all history and turn off Care."
                         : "Hide this profile from daily tracking.",
                     systemImage: "archivebox.fill",
                     tint: .orange
@@ -778,6 +904,11 @@ struct ManageProfilesView: View {
                 delete(profile)
             }
         ]
+    }
+
+    private var archivesLastActiveProfile: Bool {
+        guard let profileToArchive else { return false }
+        return !profileToArchive.isArchived && activeProfiles.count == 1
     }
 
     private func manageRows(_ values: [CareProfile]) -> some View {
@@ -811,12 +942,7 @@ struct ManageProfilesView: View {
                                     .background(AppTheme.accent.opacity(0.10), in: Capsule())
                             }
                         }
-                        Text(profile.profileType == .child
-                            ? "\(profile.birthDate.formatted(date: .abbreviated, time: .omitted)) · \(profile.ageDescription)"
-                            : [profile.breed, profile.adoptionDate.map { "home \($0.formatted(date: .abbreviated, time: .omitted))" }]
-                                .compactMap { $0 }
-                                .joined(separator: " · ")
-                        )
+                        Text(profileRowSubtitle(profile))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         if profile.isArchived {
@@ -862,13 +988,15 @@ struct ManageProfilesView: View {
             }
             .buttonStyle(.plain)
             .listRowBackground(profile.isArchived ? Color.primary.opacity(0.045) : Color.clear)
-            .swipeActions {
-                Button(role: .destructive) {
-                    profileToDelete = profile
-                } label: {
-                    Label("Delete", systemImage: "trash.fill")
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if canDelete {
+                    Button {
+                        profileToDelete = profile
+                    } label: {
+                        Label("Delete", systemImage: "trash.fill")
+                    }
+                    .tint(.red)
                 }
-                .disabled(!canDelete)
                 if profile.isArchived {
                     Button {
                         restore(profile)
@@ -885,6 +1013,23 @@ struct ManageProfilesView: View {
                     .tint(.orange)
                 }
             }
+        }
+    }
+
+    private func profileRowSubtitle(_ profile: CareProfile) -> String {
+        switch profile.profileType {
+        case .child:
+            return [
+                profile.birthDate?.formatted(date: .abbreviated, time: .omitted),
+                profile.ageDescription
+            ].compactMap { $0 }.joined(separator: " · ")
+        case .adult:
+            return profile.profileSubtitle
+        case .dog:
+            return [
+                profile.breed,
+                profile.adoptionDate.map { "home \($0.formatted(date: .abbreviated, time: .omitted))" }
+            ].compactMap { $0 }.joined(separator: " · ")
         }
     }
 

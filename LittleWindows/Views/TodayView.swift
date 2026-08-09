@@ -5,7 +5,7 @@ import UIKit
 struct EventEditorRoute: Identifiable {
     let id = UUID()
     var type: EventType
-    var event: BabyEvent?
+    var event: CareEvent?
     var solidPreset: SolidFeedEditorPreset? = nil
 }
 
@@ -19,7 +19,7 @@ private struct DogPottySubtitleKey: Hashable {
 }
 
 enum TodayFeedQuickActionDetail {
-    static func solidFoodSummary(for event: BabyEvent) -> String? {
+    static func solidFoodSummary(for event: CareEvent) -> String? {
         guard event.type == .feed, event.feedKind == .solid else { return nil }
 
         let detailNames = SolidFoodSelection.deduplicatedNames(
@@ -41,16 +41,22 @@ enum TodayFeedQuickActionDetail {
     }
 }
 
+enum TodayDogQuickActionCatalog {
+    static func enabledTypes(in visibleTypes: Set<EventType>) -> [EventType] {
+        EventType.cases(for: .dog).filter(visibleTypes.contains)
+    }
+}
+
 private struct TodayRenderState {
-    var profile: BabyProfile?
+    var profile: CareProfile?
     var profileID: UUID?
-    var scopedEvents: [BabyEvent]
+    var scopedEvents: [CareEvent]
     var scopedRecords: [SleepPredictionRecord]
     var scopedAppointments: [DoctorAppointment]
     var scopedAgeGuideReadStates: [AgeGuideReadState]
     var scopedPuppyGuideReadStates: [PuppyStageGuideReadState]
-    var todayEvents: [BabyEvent]
-    var activeEvents: [BabyEvent]
+    var todayEvents: [CareEvent]
+    var activeEvents: [CareEvent]
     var prediction: SleepPrediction?
     var sleepPressure: SleepPressure?
     var isDogProfile: Bool
@@ -63,7 +69,7 @@ private struct TodayRenderState {
     var currentPuppyGuide: PuppyStageGuide?
     var shouldShowPuppyGuideCard: Bool
     var relevantAppointments: [DoctorAppointment]
-    var runningSleepTimer: BabyEvent?
+    var runningSleepTimer: CareEvent?
     var awakeSinceDate: Date?
     var isSleeping: Bool
     var sleepMiniPlan: SleepMiniPlan?
@@ -88,7 +94,7 @@ private struct TodayRenderState {
         activeEvents.contains { $0.type == type && $0.isTimerDraft }
     }
 
-    func activeTimer(of type: EventType) -> BabyEvent? {
+    func activeTimer(of type: EventType) -> CareEvent? {
         activeEvents.first { $0.type == type && $0.isTimerDraft }
     }
 
@@ -150,8 +156,8 @@ struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
-    @Query private var allEvents: [BabyEvent]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
+    @Query private var allEvents: [CareEvent]
     @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
     @Query private var records: [SleepPredictionRecord]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
@@ -175,7 +181,7 @@ struct TodayView: View {
     @AppStorage("customWakeMaximum") private var customWakeMaximum = 0.0
 
     @State private var editorRoute: EventEditorRoute?
-    @State private var activeTimerToEdit: BabyEvent?
+    @State private var activeTimerToEdit: CareEvent?
     @State private var showingExplanation = false
     @State private var showingBackwardsPlanner = false
     @State private var duplicateTimerMessage: String?
@@ -185,15 +191,16 @@ struct TodayView: View {
     @State private var showingNursingChooser = false
     @State private var showingActivityChooser = false
     @State private var showingAppointments = false
+    @State private var showingMedications = false
     @State private var appointmentToOpen: DoctorAppointment?
     @State private var selectedMilestoneTemplate: MilestoneTemplate?
     @State private var puppyGuideToOpen: PuppyStageGuide?
-    @State private var puppyGuideProfileToOpen: BabyProfile?
+    @State private var puppyGuideProfileToOpen: CareProfile?
     @State private var showingProfileEditor = false
     @State private var showingRoutineManager = false
     @State private var routineRunRoute: CareRoutineRunRoute?
     @State private var pendingRoutineStepCompletion: PendingRoutineStepCompletion?
-    @State private var eventPendingDelete: BabyEvent?
+    @State private var eventPendingDelete: CareEvent?
     @State private var activeSleepPlan: ActiveSleepPlan?
     @State private var pinnedQuickActionRevision = 0
     @State private var categoryPreferenceRevision = 0
@@ -212,11 +219,11 @@ struct TodayView: View {
         let selectedProfileID = profileID ?? ProfileService.shared.selectedProfileID
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
-        var eventDescriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
+        var eventDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
                 event.profileID == selectedProfileID && event.startDate >= recentCutoff
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         eventDescriptor.fetchLimit = 900
         _allEvents = Query(eventDescriptor)
@@ -286,11 +293,11 @@ struct TodayView: View {
             sortBy: [SortDescriptor(\SolidAllergenProgress.updatedAt, order: .reverse)]
         ))
     }
-    private var profile: BabyProfile? {
+    private var profile: CareProfile? {
         cachedRenderState.profile
     }
     private var selectedProfileID: UUID? { cachedRenderState.profileID }
-    private var scopedEvents: [BabyEvent] {
+    private var scopedEvents: [CareEvent] {
         cachedRenderState.scopedEvents
     }
     private var scopedRecords: [SleepPredictionRecord] {
@@ -305,7 +312,7 @@ struct TodayView: View {
     private var visibleCareRoutines: [CareRoutine] {
         cachedRenderState.visibleCareRoutines
     }
-    private var activeEvents: [BabyEvent] {
+    private var activeEvents: [CareEvent] {
         cachedRenderState.activeEvents
     }
     private var prediction: SleepPrediction? {
@@ -326,7 +333,7 @@ struct TodayView: View {
             customBaselineMaximum: customWakeMaximum > 0 ? customWakeMaximum : nil
         )
     }
-    private var runningSleepTimer: BabyEvent? {
+    private var runningSleepTimer: CareEvent? {
         cachedRenderState.runningSleepTimer
     }
     private var preferenceRevision: TodayPreferenceRevision {
@@ -402,14 +409,14 @@ struct TodayView: View {
         } else {
             shouldShowPuppyGuideCard = false
         }
-        var todayEvents: [BabyEvent] = []
-        var activeEvents: [BabyEvent] = []
-        var sleepPressureEvents: [BabyEvent] = []
+        var todayEvents: [CareEvent] = []
+        var activeEvents: [CareEvent] = []
+        var sleepPressureEvents: [CareEvent] = []
         var latestCompletedSleepEnd: Date?
         var latestStoppedDraftSleepEnd: Date?
-        var dogLatestEvents: [EventType: BabyEvent] = [:]
-        var latestPeeEvent: BabyEvent?
-        var latestPoopEvent: BabyEvent?
+        var dogLatestEvents: [EventType: CareEvent] = [:]
+        var latestPeeEvent: CareEvent?
+        var latestPoopEvent: CareEvent?
         var lastLoggedDates: [EventType: Date] = [:]
         var latestSolidFoodSummary: String?
         var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date] = [:]
@@ -661,10 +668,7 @@ struct TodayView: View {
                             Text("Good \(greeting), \(activeCaregiverName)")
                                 .font(.title2.bold())
                             if let profile {
-                                Text(profile.profileType == .dog
-                                    ? "\(profile.name) · \(profile.profileSubtitle)"
-                                    : "\(profile.name) is \(DateFormatting.age(from: profile.birthDate))"
-                                )
+                                Text("\(profile.name) · \(profile.profileSubtitle)")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -712,7 +716,7 @@ struct TodayView: View {
                         puppyStageGuideSection(state)
                     }
 
-                    if !state.isDogProfile {
+                    if profile?.profileType == .child {
                         Section {
                             PredictionCard(
                                 prediction: prediction,
@@ -737,6 +741,8 @@ struct TodayView: View {
 
                     if state.isDogProfile {
                         dogQuickActionsSection(state)
+                    } else if profile?.profileType == .adult {
+                        adultQuickActionsSection(state)
                     } else {
                         childQuickActionsSection(state)
                     }
@@ -833,22 +839,9 @@ struct TodayView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
+                ProfileToolbarSettingsButton(profile: profile) {
                     deepLinkRouter.presentSettings()
-                } label: {
-                    if let profile {
-                        ProfileAvatarView(profile: profile, size: 32)
-                    } else {
-                        Image(systemName: "gearshape.fill")
-                            .font(.headline)
-                            .foregroundStyle(AppTheme.accent)
-                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Settings")
-                .accessibilityHint(profile == nil
-                    ? "Opens household settings and care profile options"
-                    : "Opens settings where you can switch profiles")
             }
         }
         .sheet(item: $editorRoute) { route in
@@ -915,6 +908,13 @@ struct TodayView: View {
                 AppointmentsListView()
             }
         }
+        .sheet(isPresented: $showingMedications) {
+            if let profile {
+                NavigationStack {
+                    MedicationsView(profile: profile)
+                }
+            }
+        }
         .sheet(item: $appointmentToOpen) { appointment in
             NavigationStack {
                 AppointmentDetailView(appointment: appointment)
@@ -922,12 +922,16 @@ struct TodayView: View {
         }
         .sheet(item: $selectedMilestoneTemplate) { template in
             NavigationStack {
-                MilestoneEditorView(template: template)
+                MilestoneEditorView(template: template, profileID: profile?.id)
             }
         }
         .sheet(item: $puppyGuideToOpen) { guide in
             NavigationStack {
-                PuppyStageGuideDetailView(guide: guide, profile: puppyGuideProfileToOpen ?? profile)
+                PuppyStageGuideDetailView(
+                    guide: guide,
+                    profile: puppyGuideProfileToOpen ?? profile,
+                    showsCloseButton: true
+                )
             }
         }
         .sheet(isPresented: $showingProfileEditor) {
@@ -1155,7 +1159,7 @@ struct TodayView: View {
                         .font(.title3.bold())
                         .multilineTextAlignment(.center)
 
-                    Text("Add a child or dog profile to start logging care, or import an existing backup from Settings.")
+                    Text("Add a child, adult, or dog profile to start logging care, or import an existing backup from Settings.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -1452,7 +1456,7 @@ struct TodayView: View {
         case .customSolidFood(let id): .customSolidFood(id)
         case .solidsPlan: .solidsPlan
         case .plannedSolidMeal(let id): .plannedSolidMeal(id)
-        case .solidsTracker: .solidsTracker
+        case .solidsTracker(let initialFilter): .solidsTracker(initialFilter)
         case .solidMeal(let id): .solidMeal(id)
         case .solidsAllergens: .solidsAllergens
         case .solidAllergen(let id): .solidAllergen(id)
@@ -1662,6 +1666,103 @@ struct TodayView: View {
         }
     }
 
+    private func adultQuickActionsSection(_ state: TodayRenderState) -> some View {
+        Section {
+            VStack(spacing: 14) {
+                smartQuickActionsRow(state.smartQuickActions.filter { $0.id != "sleep" })
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                    spacing: 14
+                ) {
+                    QuickActionButton(title: "Medications", icon: "pills.fill", color: .red) {
+                        showingMedications = true
+                    }
+                    adultHealthQuickAction(.symptom, title: "Symptom", color: .orange, state: state)
+                    adultHealthQuickAction(.bloodPressure, title: "Blood pressure", color: .red, state: state)
+                    adultHealthQuickAction(.heartRate, title: "Pulse", color: .pink, state: state)
+                    adultHealthQuickAction(.oxygenSaturation, title: "Oxygen", color: .blue, state: state)
+                    adultHealthQuickAction(.respiratoryRate, title: "Respiratory", color: .cyan, state: state)
+                    adultHealthQuickAction(.glucose, title: "Glucose", color: .purple, state: state)
+                    adultHealthQuickAction(.temperature, title: "Temperature", color: .red, state: state)
+                    adultHealthQuickAction(.pain, title: "Pain", color: .orange, state: state)
+                    adultHealthQuickAction(.growth, title: "Weight & height", color: .mint, state: state)
+                    if state.shows(.sleep) {
+                        QuickActionButton(
+                            title: "Sleep",
+                            subtitle: state.hasActiveTimer(of: .sleep)
+                                ? "Timer active"
+                                : lastEventSubtitle(.sleep, state: state),
+                            icon: "moon.stars.fill",
+                            color: .indigo
+                        ) {
+                            if let activeSleep = state.activeTimer(of: .sleep) {
+                                activeTimerToEdit = activeSleep
+                            } else {
+                                showingSleepChooser = true
+                            }
+                        }
+                    }
+                    if state.shows(.activity) {
+                        QuickActionButton(
+                            title: "Activity",
+                            subtitle: state.hasActiveTimer(of: .activity)
+                                ? "Timer active"
+                                : lastEventSubtitle(.activity, state: state),
+                            icon: "figure.play",
+                            color: .green,
+                            isEnabled: !state.hasActiveTimer(of: .activity)
+                        ) {
+                            showingActivityChooser = true
+                        }
+                    }
+                    QuickActionButton(title: "Visits", icon: "stethoscope", color: .indigo) {
+                        showingAppointments = true
+                    }
+                    if state.shows(.custom) {
+                        adultHealthQuickAction(.custom, title: "Custom", color: .gray, state: state)
+                    }
+                }
+                Button {
+                    showingCareCustomization = true
+                } label: {
+                    Label("Customize", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(14)
+            .appSurface()
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } header: {
+            AppSectionHeader(title: "Log care or health")
+        } footer: {
+            Text("Use Medications for scheduled and as-needed doses so reminders, history, and supply stay together.")
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func adultHealthQuickAction(
+        _ type: EventType,
+        title: String,
+        color: Color,
+        state: TodayRenderState
+    ) -> some View {
+        if state.shows(type) {
+            QuickActionButton(
+                title: title,
+                subtitle: lastEventSubtitle(type, state: state),
+                icon: type.systemImage(for: .adult),
+                color: color
+            ) {
+                editorRoute = EventEditorRoute(type: type)
+            }
+        }
+    }
+
     private func dogQuickActionsSection(_ state: TodayRenderState) -> some View {
         Section {
             VStack(spacing: 14) {
@@ -1671,104 +1772,8 @@ struct TodayView: View {
                     columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
                     spacing: 14
                 ) {
-                    if state.shows(.food) {
-                        QuickActionButton(
-                            title: "Food",
-                            subtitle: lastEventSubtitle(.food, state: state),
-                            icon: "fork.knife",
-                            color: .orange
-                        ) {
-                            editorRoute = EventEditorRoute(type: .food)
-                        }
-                    }
-                    if state.shows(.water) {
-                        QuickActionButton(
-                            title: "Water",
-                            subtitle: lastEventSubtitle(.water, state: state),
-                            icon: "drop.fill",
-                            color: .cyan
-                        ) {
-                            editorRoute = EventEditorRoute(type: .water)
-                        }
-                    }
-                    if state.shows(.walk) {
-                        QuickActionButton(
-                            title: "Start Walk",
-                            subtitle: state.hasActiveTimer(of: .walk)
-                                ? "Timer active"
-                                : lastEventSubtitle(.walk, state: state),
-                            icon: "figure.walk",
-                            color: .green,
-                            isEnabled: !state.hasActiveTimer(of: .walk)
-                        ) {
-                            startTimer(.walk)
-                        }
-                    }
-                    if state.shows(.potty) {
-                        QuickActionButton(
-                            title: "Pee",
-                            subtitle: dogPottySubtitle(.pee, state: state),
-                            icon: "pawprint.fill",
-                            color: .teal
-                        ) {
-                            logDogPotty(.pee, accident: false)
-                        }
-                    }
-                    if state.shows(.potty) {
-                        QuickActionButton(
-                            title: "Poop",
-                            subtitle: dogPottySubtitle(.poop, state: state),
-                            icon: "pawprint.circle.fill",
-                            color: .teal
-                        ) {
-                            logDogPotty(.poop, accident: false)
-                        }
-                    }
-                    if state.shows(.potty) {
-                        QuickActionButton(
-                            title: "Accident",
-                            subtitle: dogPottySubtitle(.pee, state: state, accident: true),
-                            icon: "exclamationmark.triangle.fill",
-                            color: .orange
-                        ) {
-                            logDogPotty(.pee, accident: true)
-                        }
-                    }
-                    if state.shows(.rest) {
-                        QuickActionButton(
-                            title: "Rest",
-                            subtitle: state.hasActiveTimer(of: .rest)
-                                ? "Timer active"
-                                : lastEventSubtitle(.rest, state: state),
-                            icon: "bed.double.fill",
-                            color: .indigo,
-                            isEnabled: !state.hasActiveTimer(of: .rest)
-                        ) {
-                            startTimer(.rest)
-                        }
-                    }
-                    if state.shows(.training) {
-                        QuickActionButton(
-                            title: "Training",
-                            subtitle: state.hasActiveTimer(of: .training)
-                                ? "Timer active"
-                                : lastEventSubtitle(.training, state: state),
-                            icon: "graduationcap.fill",
-                            color: .purple,
-                            isEnabled: !state.hasActiveTimer(of: .training)
-                        ) {
-                            startTimer(.training)
-                        }
-                    }
-                    if state.shows(.medicine) {
-                        QuickActionButton(
-                            title: "Medicine",
-                            subtitle: lastEventSubtitle(.medicine, state: state),
-                            icon: "cross.case.fill",
-                            color: .red
-                        ) {
-                            editorRoute = EventEditorRoute(type: .medicine)
-                        }
+                    ForEach(TodayDogQuickActionCatalog.enabledTypes(in: state.visibleCareTypes)) { type in
+                        dogQuickAction(type, state: state)
                     }
                 }
                 Button {
@@ -1788,8 +1793,69 @@ struct TodayView: View {
         } header: {
             AppSectionHeader(title: "Log something")
         } footer: {
-            Text("Walk, training, and rest timers use the same Live Activity and widget controls. No GPS route tracking or location permission is used.")
+            Text("Walk, training, rest, and grooming timers use the same Live Activity and widget controls. No GPS route tracking or location permission is used.")
                 .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func dogQuickAction(_ type: EventType, state: TodayRenderState) -> some View {
+        switch type {
+        case .potty:
+            QuickActionButton(
+                title: "Pee",
+                subtitle: dogPottySubtitle(.pee, state: state),
+                icon: "pawprint.fill",
+                color: .teal
+            ) {
+                logDogPotty(.pee, accident: false)
+            }
+            .accessibilityIdentifier("dog-quick-action-potty-pee")
+            QuickActionButton(
+                title: "Poop",
+                subtitle: dogPottySubtitle(.poop, state: state),
+                icon: "pawprint.circle.fill",
+                color: .teal
+            ) {
+                logDogPotty(.poop, accident: false)
+            }
+            .accessibilityIdentifier("dog-quick-action-potty-poop")
+            QuickActionButton(
+                title: "Accident",
+                subtitle: dogPottySubtitle(.pee, state: state, accident: true),
+                icon: "exclamationmark.triangle.fill",
+                color: .orange
+            ) {
+                logDogPotty(.pee, accident: true)
+            }
+            .accessibilityIdentifier("dog-quick-action-potty-accident")
+        case .walk, .rest, .training, .grooming:
+            QuickActionButton(
+                title: type == .walk ? "Start Walk" : type.displayName,
+                subtitle: state.hasActiveTimer(of: type)
+                    ? "Timer active"
+                    : lastEventSubtitle(type, state: state),
+                icon: type.systemImage(for: .dog),
+                color: type.tint,
+                isEnabled: !state.hasActiveTimer(of: type)
+            ) {
+                startTimer(type)
+            }
+            .accessibilityIdentifier("dog-quick-action-\(type.rawValue)")
+        case .food, .water, .treat, .medicine, .symptom, .growth,
+             .temperature, .vaccine, .glucose, .custom:
+            QuickActionButton(
+                title: type.displayName,
+                subtitle: lastEventSubtitle(type, state: state),
+                icon: type.systemImage(for: .dog),
+                color: type.tint
+            ) {
+                editorRoute = EventEditorRoute(type: type)
+            }
+            .accessibilityIdentifier("dog-quick-action-\(type.rawValue)")
+        case .sleep, .feed, .nursing, .pumping, .diaper, .activity,
+             .bloodPressure, .heartRate, .oxygenSaturation, .respiratoryRate, .pain:
+            EmptyView()
         }
     }
 
@@ -1889,7 +1955,7 @@ struct TodayView: View {
     }
 
     @ViewBuilder
-    private func activeTimersSection(_ events: [BabyEvent]) -> some View {
+    private func activeTimersSection(_ events: [CareEvent]) -> some View {
         if !events.isEmpty {
             Section {
                 ForEach(events) { event in
@@ -1967,7 +2033,7 @@ struct TodayView: View {
         }
     }
 
-    private func activeTimerCard(for event: BabyEvent) -> some View {
+    private func activeTimerCard(for event: CareEvent) -> some View {
         ActiveTimerCard(
             event: event,
             planWakeAlert: wakeAlert(for: event),
@@ -1984,7 +2050,7 @@ struct TodayView: View {
         .listRowSeparator(.hidden)
     }
 
-    private func activeTimerEditor(for event: BabyEvent) -> some View {
+    private func activeTimerEditor(for event: CareEvent) -> some View {
         ActiveTimerEditorView(
             event: event,
             adjustStart: { date in adjustStart(of: event, to: date) },
@@ -2000,12 +2066,12 @@ struct TodayView: View {
         )
     }
 
-    private func nursingSideSwitcher(for event: BabyEvent) -> (() -> Void)? {
+    private func nursingSideSwitcher(for event: CareEvent) -> (() -> Void)? {
         guard event.type == .nursing else { return nil }
         return { switchNursingSide(event) }
     }
 
-    private func nursingSideSetter(for event: BabyEvent) -> ((NursingSide) -> Void)? {
+    private func nursingSideSetter(for event: CareEvent) -> ((NursingSide) -> Void)? {
         guard event.type == .nursing else { return nil }
         return { side in setNursingSide(side, for: event) }
     }
@@ -2017,7 +2083,7 @@ struct TodayView: View {
         sleepKind: SleepKind? = nil,
         activityType: ActivityType? = nil,
         presentsEditor: Bool = true
-    ) -> BabyEvent? {
+    ) -> CareEvent? {
         if let existingTimer = activeTimer(of: type) {
             if presentsEditor {
                 activeTimerToEdit = existingTimer
@@ -2056,7 +2122,7 @@ struct TodayView: View {
         }
     }
 
-    private func activeTimer(of type: EventType) -> BabyEvent? {
+    private func activeTimer(of type: EventType) -> CareEvent? {
         cachedRenderState.activeTimer(of: type)
     }
 
@@ -2067,7 +2133,7 @@ struct TodayView: View {
         details.accident = accident
         let now = Date()
         let timeZoneIdentifier = CareTimeZoneSettings.effectiveIdentifier()
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: selectedProfileID,
             type: .potty,
             startDate: now,
@@ -2545,7 +2611,7 @@ struct TodayView: View {
         }
     }
 
-    private func stop(_ event: BabyEvent) {
+    private func stop(_ event: CareEvent) {
         EventMutationService.stopTimer(event, context: modelContext)
         Task {
             await eventChanged(
@@ -2557,7 +2623,7 @@ struct TodayView: View {
         }
     }
 
-    private func resume(_ event: BabyEvent) {
+    private func resume(_ event: CareEvent) {
         EventMutationService.resumeTimer(event, context: modelContext)
         Task {
             await eventChanged(
@@ -2569,7 +2635,7 @@ struct TodayView: View {
         }
     }
 
-    private func reset(_ event: BabyEvent) {
+    private func reset(_ event: CareEvent) {
         EventMutationService.resetTimer(event, context: modelContext)
         Task {
             await eventChanged(
@@ -2581,7 +2647,7 @@ struct TodayView: View {
         }
     }
 
-    private func setStartTimeZone(_ identifier: String, for event: BabyEvent) {
+    private func setStartTimeZone(_ identifier: String, for event: CareEvent) {
         event.startTimeZoneIdentifier = identifier
         Task {
             await eventChanged(
@@ -2592,7 +2658,7 @@ struct TodayView: View {
         }
     }
 
-    private func setEndTimeZone(_ identifier: String, for event: BabyEvent) {
+    private func setEndTimeZone(_ identifier: String, for event: CareEvent) {
         event.endTimeZoneIdentifier = identifier
         Task {
             await eventChanged(
@@ -2603,7 +2669,7 @@ struct TodayView: View {
         }
     }
 
-    private func save(_ event: BabyEvent, endDate: Date? = nil) {
+    private func save(_ event: CareEvent, endDate: Date? = nil) {
         EventMutationService.saveTimer(event, context: modelContext, endDate: endDate)
         Task {
             await eventChanged(
@@ -2615,7 +2681,7 @@ struct TodayView: View {
         }
     }
 
-    private func switchNursingSide(_ event: BabyEvent) {
+    private func switchNursingSide(_ event: CareEvent) {
         EventTimerService.switchNursingSide(event, context: modelContext)
         Task {
             await eventChanged(
@@ -2627,7 +2693,7 @@ struct TodayView: View {
         }
     }
 
-    private func setNursingSide(_ side: NursingSide, for event: BabyEvent) {
+    private func setNursingSide(_ side: NursingSide, for event: CareEvent) {
         EventTimerService.setNursingSide(event, to: side, context: modelContext)
         Task {
             await eventChanged(
@@ -2696,13 +2762,16 @@ struct TodayView: View {
                 startTimer(type, nursingSide: side)
             }
         case .startActivity(let activity):
+            guard let profile,
+                  activity.isAvailable(for: profile.profileType) else { return }
             startTimer(.activity, activityType: activity)
         case .logDiaper:
             editorRoute = EventEditorRoute(type: .diaper)
         case .logEvent(let type):
-            editorRoute = EventEditorRoute(
-                type: profile?.profileType == .dog && type == .feed ? .food : type
-            )
+            guard let profile else { return }
+            let resolvedType = profile.profileType == .dog && type == .feed ? .food : type
+            guard EventType.cases(for: profile.profileType).contains(resolvedType) else { return }
+            editorRoute = EventEditorRoute(type: resolvedType)
         case .logSolidFeed(let preset):
             guard let profile, profile.profileType == .child else { return }
             let state = solidsProfileStates.first { $0.profileID == profile.id }
@@ -2778,7 +2847,7 @@ struct TodayView: View {
         showingRoutineManager = true
     }
 
-    private func dogProfileForPuppyGuide() -> BabyProfile? {
+    private func dogProfileForPuppyGuide() -> CareProfile? {
         if let profile, profile.profileType == .dog {
             return profile
         }
@@ -2786,7 +2855,7 @@ struct TodayView: View {
     }
 
     private func eventChanged(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         refreshPrediction: Bool = true,
         waitForSystemIntegrations: Bool = false,
         solidPreset: SolidFeedEditorPreset? = nil
@@ -2810,7 +2879,7 @@ struct TodayView: View {
         )
     }
 
-    private func adjustStart(of event: BabyEvent, to date: Date) {
+    private func adjustStart(of event: CareEvent, to date: Date) {
         EventTimerService.adjustStartDate(event, to: date)
         Task {
             await eventChanged(
@@ -2822,7 +2891,7 @@ struct TodayView: View {
         }
     }
 
-    private func delete(_ event: BabyEvent) {
+    private func delete(_ event: CareEvent) {
         Task {
             await EventMutationService.delete(
                 event,
@@ -2892,7 +2961,7 @@ struct TodayView: View {
         }
     }
 
-    private func wakeAlert(for event: BabyEvent?) -> ActiveSleepPlanWakeAlert? {
+    private func wakeAlert(for event: CareEvent?) -> ActiveSleepPlanWakeAlert? {
         ActiveSleepPlanService.wakeAlert(
             for: activeSleepPlan,
             profile: profile,
@@ -2911,7 +2980,7 @@ struct TodayView: View {
         }
     }
 
-    private func syncActiveSleepPlanWakeAlert(for event: BabyEvent? = nil) async {
+    private func syncActiveSleepPlanWakeAlert(for event: CareEvent? = nil) async {
         refreshActiveSleepPlan()
         let alert = wakeAlert(for: event ?? runningSleepTimer)
         if let alert {
@@ -2952,7 +3021,8 @@ struct TodayView: View {
     }
 
     private func activityOptions(state: TodayRenderState) -> [AppActionSheetOption] {
-        ActivityType.allCases.map { activity in
+        let profileType = profile?.profileType ?? .child
+        return ActivityType.cases(for: profileType).map { activity in
             let timerAlreadyActive = activity != .custom && state.hasActiveTimer(of: .activity)
             return AppActionSheetOption(
                 title: activity.displayName,

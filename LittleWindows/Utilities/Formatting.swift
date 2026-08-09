@@ -106,6 +106,38 @@ enum DateFormatting {
         let weeks = max(0, (components.day ?? 0) / 7)
         return weeks > 0 ? "\(weeks) weeks old" : "Newborn"
     }
+
+    static func timeSince(
+        _ startDate: Date,
+        to date: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        let components = calendar.dateComponents(
+            [.year, .month, .day],
+            from: startDate,
+            to: date
+        )
+        let years = max(0, components.year ?? 0)
+        let months = max(0, components.month ?? 0)
+        let days = max(0, components.day ?? 0)
+
+        if years > 0 {
+            if months > 0 { return "\(years)y \(months)m ago" }
+            return years == 1 ? "1 year ago" : "\(years) years ago"
+        }
+        if months > 0 {
+            return months == 1 ? "1 month ago" : "\(months) months ago"
+        }
+
+        let weeks = days / 7
+        if weeks > 0 {
+            return weeks == 1 ? "1 week ago" : "\(weeks) weeks ago"
+        }
+        if days > 0 {
+            return days == 1 ? "1 day ago" : "\(days) days ago"
+        }
+        return "today"
+    }
 }
 
 extension Calendar {

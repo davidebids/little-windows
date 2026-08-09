@@ -3,6 +3,7 @@ import CoreData
 import XCTest
 import SwiftData
 import SwiftUI
+import UIKit
 @testable import LittleWindows
 
 final class SleepPredictionEngineTests: XCTestCase {
@@ -115,7 +116,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         switch mode {
         case "write":
             let profile = try fetchOrCreateSmokeProfile(named: profileName, context: context)
-            let event = BabyEvent(
+            let event = CareEvent(
                 profileID: profile.id,
                 type: .custom,
                 title: "CloudKit sync smoke",
@@ -1021,11 +1022,11 @@ final class SleepPredictionEngineTests: XCTestCase {
     private func fetchOrCreateSmokeProfile(
         named name: String,
         context: ModelContext
-    ) throws -> BabyProfile {
+    ) throws -> CareProfile {
         if let existing = try fetchSmokeProfile(named: name, context: context) {
             return existing
         }
-        let profile = BabyProfile(name: name, birthDate: Date(), sex: .unknown)
+        let profile = CareProfile(name: name, birthDate: Date(), sex: .unknown)
         context.insert(profile)
         return profile
     }
@@ -1034,9 +1035,9 @@ final class SleepPredictionEngineTests: XCTestCase {
     private func fetchSmokeProfile(
         named name: String,
         context: ModelContext
-    ) throws -> BabyProfile? {
-        let descriptor = FetchDescriptor<BabyProfile>(
-            predicate: #Predicate<BabyProfile> { profile in
+    ) throws -> CareProfile? {
+        let descriptor = FetchDescriptor<CareProfile>(
+            predicate: #Predicate<CareProfile> { profile in
                 profile.name == name
             }
         )
@@ -1048,8 +1049,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         profileID: UUID,
         context: ModelContext
     ) throws -> Int {
-        let descriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { event in
+        let descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
                 event.profileID == profileID
             }
         )
@@ -1131,9 +1132,9 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     @MainActor
     func testSleepAndCareTimerStateChangesRefreshLittleWindowAlerts() {
-        let sleep = BabyEvent(type: .sleep, startDate: Date())
-        let nursing = BabyEvent(type: .nursing, startDate: Date())
-        let diaper = BabyEvent(type: .diaper, startDate: Date(), endDate: Date())
+        let sleep = CareEvent(type: .sleep, startDate: Date())
+        let nursing = CareEvent(type: .nursing, startDate: Date())
+        let diaper = CareEvent(type: .diaper, startDate: Date(), endDate: Date())
 
         XCTAssertTrue(EventMutationService.shouldRefreshLittleWindowAlert(after: sleep))
         XCTAssertTrue(EventMutationService.shouldRefreshLittleWindowAlert(after: nursing))
@@ -1319,7 +1320,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testProfileMigrationCreatesImportedChildAndAssignsLegacyRecords() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let legacyEvent = BabyEvent(type: .feed, startDate: Date())
+        let legacyEvent = CareEvent(type: .feed, startDate: Date())
         let legacyMilestone = MilestoneEntry(
             title: "First smile",
             date: Date(),
@@ -1332,7 +1333,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         ProfileMigrationService.ensureProfilesAndAssignments(context: context)
 
-        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        let profiles = try context.fetch(FetchDescriptor<CareProfile>())
         XCTAssertEqual(profiles.count, 1)
         XCTAssertEqual(profiles.first?.name, "Imported Child")
         XCTAssertEqual(legacyEvent.profileID, profiles.first?.id)
@@ -1345,21 +1346,21 @@ final class SleepPredictionEngineTests: XCTestCase {
         let context = container.mainContext
         let profileID = UUID()
         let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
-        let original = BabyProfile(
+        let original = CareProfile(
             id: profileID,
             name: "Test Child",
             birthDate: birthDate,
             sex: .unknown,
             createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
         )
-        let duplicate = BabyProfile(
+        let duplicate = CareProfile(
             id: profileID,
             name: "Test Child",
             birthDate: birthDate,
             sex: .unknown,
             createdAt: Date(timeIntervalSinceReferenceDate: 300_000)
         )
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profileID,
             type: .feed,
             startDate: Date(timeIntervalSinceReferenceDate: 400_000)
@@ -1372,8 +1373,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(ProfileService.shared.allProfiles(in: [duplicate, original]).count, 1)
         XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 1)
 
-        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
-        let events = try context.fetch(FetchDescriptor<BabyEvent>())
+        let profiles = try context.fetch(FetchDescriptor<CareProfile>())
+        let events = try context.fetch(FetchDescriptor<CareEvent>())
         XCTAssertEqual(profiles.count, 1)
         XCTAssertEqual(profiles.first?.id, profileID)
         XCTAssertEqual(profiles.first?.createdAt, original.createdAt)
@@ -1385,13 +1386,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
         let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
-        let restoredProfile = BabyProfile(
+        let restoredProfile = CareProfile(
             name: "Test Child",
             birthDate: birthDate,
             sex: .unknown,
             createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
         )
-        let setupShell = BabyProfile(
+        let setupShell = CareProfile(
             name: "Test Child",
             birthDate: birthDate,
             sex: .unknown,
@@ -1404,9 +1405,9 @@ final class SleepPredictionEngineTests: XCTestCase {
         ProfileService.shared.switchProfile(setupShell)
 
         XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 0)
-        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BabyProfile>()), 2)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<CareProfile>()), 2)
 
-        let restoredEvent = BabyEvent(
+        let restoredEvent = CareEvent(
             profileID: restoredProfile.id,
             type: .diaper,
             startDate: Date(timeIntervalSinceReferenceDate: 300_000)
@@ -1415,11 +1416,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         try context.save()
         XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 1)
 
-        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        let profiles = try context.fetch(FetchDescriptor<CareProfile>())
         XCTAssertEqual(profiles.map(\.id), [restoredProfile.id])
         XCTAssertEqual(ProfileService.shared.selectedProfileID, restoredProfile.id)
         XCTAssertEqual(
-            try context.fetch(FetchDescriptor<BabyEvent>()).map(\.profileID),
+            try context.fetch(FetchDescriptor<CareEvent>()).map(\.profileID),
             [restoredProfile.id]
         )
     }
@@ -1429,13 +1430,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
         let birthDate = Date(timeIntervalSinceReferenceDate: 100_000)
-        let firstProfile = BabyProfile(
+        let firstProfile = CareProfile(
             name: "Test Child",
             birthDate: birthDate,
             sex: .unknown,
             createdAt: Date(timeIntervalSinceReferenceDate: 200_000)
         )
-        let secondProfile = BabyProfile(
+        let secondProfile = CareProfile(
             name: "Test Child",
             birthDate: birthDate,
             sex: .unknown,
@@ -1443,12 +1444,12 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         context.insert(firstProfile)
         context.insert(secondProfile)
-        context.insert(BabyEvent(
+        context.insert(CareEvent(
             profileID: firstProfile.id,
             type: .feed,
             startDate: Date(timeIntervalSinceReferenceDate: 300_000)
         ))
-        context.insert(BabyEvent(
+        context.insert(CareEvent(
             profileID: secondProfile.id,
             type: .diaper,
             startDate: Date(timeIntervalSinceReferenceDate: 500_000)
@@ -1456,15 +1457,15 @@ final class SleepPredictionEngineTests: XCTestCase {
         try context.save()
 
         XCTAssertEqual(ProfileDuplicateRepairService.repair(context: context), 0)
-        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BabyProfile>()), 2)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<CareProfile>()), 2)
     }
 
     @MainActor
     func testProfileSelectionFallsBackToActiveChild() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
-        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = CareProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
         context.insert(testChild)
         context.insert(sibling)
         try context.save()
@@ -1477,11 +1478,50 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testUnassignedProfileCanBeClaimedWhenChangingFamilySharing() {
+        let currentCaregiverID = UUID().uuidString
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: Date(),
+            ownerIdentifier: ""
+        )
+
+        XCTAssertTrue(ProfileService.shared.canChangeSharingScope(
+            for: profile,
+            caregiverIdentifier: currentCaregiverID
+        ))
+        XCTAssertTrue(ProfileService.shared.setSharingScope(
+            .family,
+            for: profile,
+            caregiverIdentifier: currentCaregiverID
+        ))
+        XCTAssertEqual(profile.ownerIdentifier, currentCaregiverID)
+        XCTAssertEqual(profile.sharingScope, .family)
+    }
+
+    @MainActor
+    func testProfileOwnedByAnotherCaregiverKeepsFamilySharingLocked() {
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: Date(),
+            sharingScope: .privateOnly,
+            ownerIdentifier: UUID().uuidString
+        )
+
+        XCTAssertFalse(ProfileService.shared.setSharingScope(
+            .family,
+            for: profile,
+            caregiverIdentifier: UUID().uuidString
+        ))
+        XCTAssertEqual(profile.sharingScope, .privateOnly)
+    }
+
+    @MainActor
     func testArchivedProfileCanBeRestoredAndSelected() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
-        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = CareProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
         context.insert(testChild)
         context.insert(sibling)
         try context.save()
@@ -1503,8 +1543,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testLastActiveProfileCanBeArchivedWithoutDeletingItsHistory() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
-        let event = BabyEvent(
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let event = CareEvent(
             profileID: testChild.id,
             type: .sleep,
             startDate: Date().addingTimeInterval(-120)
@@ -1524,7 +1564,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertNil(ProfileService.shared.selectedProfileID)
         XCTAssertNil(ProfileService.shared.selectedProfile(in: [testChild]))
         XCTAssertEqual(
-            try context.fetch(FetchDescriptor<BabyEvent>()).map(\.id),
+            try context.fetch(FetchDescriptor<CareEvent>()).map(\.id),
             [event.id]
         )
         XCTAssertNotNil(event.endDate)
@@ -1536,8 +1576,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testArchivingArchivedProfileIsNoOp() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
-        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = CareProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
         testChild.isArchived = true
         let updatedAt = Date(timeIntervalSinceReferenceDate: 1_000)
         testChild.updatedAt = updatedAt
@@ -1561,14 +1601,14 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testDeletingProfileRemovesScopedRecordsAndSelectsFallback() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
-        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
-        let solidEvent = BabyEvent(profileID: testChild.id, type: .feed, startDate: Date())
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = CareProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        let solidEvent = CareEvent(profileID: testChild.id, type: .feed, startDate: Date())
         solidEvent.feedKind = .solid
         context.insert(testChild)
         context.insert(sibling)
         context.insert(solidEvent)
-        context.insert(BabyEvent(profileID: sibling.id, type: .diaper, startDate: Date()))
+        context.insert(CareEvent(profileID: sibling.id, type: .diaper, startDate: Date()))
         context.insert(SleepPredictionRecord(
             prediction: makeLittleWindowPrediction(),
             basedOnLastSleepEventID: nil,
@@ -1618,8 +1658,8 @@ final class SleepPredictionEngineTests: XCTestCase {
             context: context
         )
 
-        let profiles = try context.fetch(FetchDescriptor<BabyProfile>())
-        let events = try context.fetch(FetchDescriptor<BabyEvent>())
+        let profiles = try context.fetch(FetchDescriptor<CareProfile>())
+        let events = try context.fetch(FetchDescriptor<CareEvent>())
         let predictions = try context.fetch(FetchDescriptor<SleepPredictionRecord>())
         let milestones = try context.fetch(FetchDescriptor<MilestoneEntry>())
         let appointments = try context.fetch(FetchDescriptor<DoctorAppointment>())
@@ -1687,7 +1727,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testWidgetTimerSnapshotCarriesProfileScope() {
         let profileID = UUID()
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: profileID,
             type: .sleep,
             startDate: Date(timeIntervalSinceReferenceDate: 1_000)
@@ -1710,11 +1750,11 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testProfileIDsRoundTripThroughJSONBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
-        let sibling = BabyProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let sibling = CareProfile(name: "Sibling", birthDate: Date(), sex: .unknown)
         context.insert(testChild)
         context.insert(sibling)
-        let event = BabyEvent(
+        let event = CareEvent(
             profileID: sibling.id,
             type: .diaper,
             startDate: Date(timeIntervalSinceReferenceDate: 1_000),
@@ -1732,7 +1772,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let backup = try DataExportImportService.exportData(context: context)
         try DataExportImportService.importData(backup, context: context)
 
-        let importedEvents = try context.fetch(FetchDescriptor<BabyEvent>())
+        let importedEvents = try context.fetch(FetchDescriptor<CareEvent>())
         let importedAppointments = try context.fetch(FetchDescriptor<DoctorAppointment>())
         XCTAssertEqual(importedEvents.first?.profileID, sibling.id)
         XCTAssertEqual(importedEvents.first?.startTimeZoneIdentifier, "America/New_York")
@@ -1743,7 +1783,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testInvalidBackupLeavesExistingDataUntouched() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let existingProfile = BabyProfile(
+        let existingProfile = CareProfile(
             name: "Test Child",
             birthDate: Date(timeIntervalSince1970: 1_700_000_000)
         )
@@ -1767,7 +1807,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             )
         )
 
-        let profilesAfterFailure = try context.fetch(FetchDescriptor<BabyProfile>())
+        let profilesAfterFailure = try context.fetch(FetchDescriptor<CareProfile>())
         XCTAssertEqual(profilesAfterFailure.map(\.id), [existingProfile.id])
         XCTAssertEqual(profilesAfterFailure.first?.name, "Test Child")
     }
@@ -1776,7 +1816,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let formatter = ISO8601DateFormatter()
         let start = try XCTUnwrap(formatter.date(from: "2026-07-15T14:00:00Z"))
         let end = try XCTUnwrap(formatter.date(from: "2026-07-15T15:00:00Z"))
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .sleep,
             startDate: start,
             endDate: end,
@@ -1821,7 +1861,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testRecordedZonePreventsEntryMovingToPreviousDayAfterTravel() throws {
         let formatter = ISO8601DateFormatter()
         let eastCoastOneAM = try XCTUnwrap(formatter.date(from: "2026-01-15T06:00:00Z"))
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .diaper,
             startDate: eastCoastOneAM,
             startTimeZoneIdentifier: "America/New_York"
@@ -1858,8 +1898,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testDogProfilesAreSelectableFamilyProfiles() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .male)
-        let testDog = BabyProfile(
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .male)
+        let testDog = CareProfile(
             profileType: .dog,
             name: "Test Dog",
             birthDate: Date().addingTimeInterval(-12 * 7 * 24 * 60 * 60),
@@ -1879,13 +1919,83 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(testDog.profileSubtitle, "Mini Goldendoodle")
     }
 
+    func testDogAgeUsesBirthDateThenFallsBackToAdoptionDate() throws {
+        let calendar = Calendar.current
+        let birthDate = try XCTUnwrap(calendar.date(byAdding: .year, value: -4, to: Date()))
+        let adoptionDate = try XCTUnwrap(calendar.date(byAdding: .year, value: -1, to: Date()))
+        let dog = CareProfile(
+            profileType: .dog,
+            name: "Test Dog",
+            birthDate: birthDate,
+            adoptionDate: adoptionDate,
+            species: "dog"
+        )
+        let dogWithoutBirthDate = CareProfile(
+            profileType: .dog,
+            name: "Test Dog",
+            adoptionDate: adoptionDate,
+            species: "dog"
+        )
+        let dogWithoutDates = CareProfile(
+            profileType: .dog,
+            name: "Test Dog",
+            species: "dog"
+        )
+
+        XCTAssertEqual(dog.ageDescription, DateFormatting.age(from: birthDate))
+        XCTAssertEqual(dogWithoutBirthDate.ageDescription, "Adopted 1 year ago")
+        XCTAssertEqual(dogWithoutDates.ageDescription, "Age not set")
+    }
+
+    func testDogTodayActionsIncludeEveryEnabledCategory() {
+        let allDogTypes = EventType.cases(for: .dog)
+        XCTAssertEqual(
+            TodayDogQuickActionCatalog.enabledTypes(in: Set(allDogTypes)),
+            allDogTypes
+        )
+
+        let visibleTypes = Set(allDogTypes).subtracting([.treat, .vaccine])
+        let enabledTypes = TodayDogQuickActionCatalog.enabledTypes(in: visibleTypes)
+        XCTAssertFalse(enabledTypes.contains(.treat))
+        XCTAssertFalse(enabledTypes.contains(.vaccine))
+        XCTAssertEqual(enabledTypes.count, allDogTypes.count - 2)
+    }
+
+    func testAdultProfileSubtitlePrefersAgeWhenBirthDateIsSet() throws {
+        let birthDate = try XCTUnwrap(
+            Calendar.current.date(byAdding: .year, value: -40, to: Date())
+        )
+        let ownProfile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            birthDate: birthDate,
+            adultRelationship: .myself
+        )
+        let lovedOneProfile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            birthDate: birthDate,
+            adultRelationship: .parent
+        )
+        let profileWithoutBirthDate = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+
+        let expectedAge = DateFormatting.age(from: birthDate)
+        XCTAssertEqual(ownProfile.profileSubtitle, expectedAge)
+        XCTAssertEqual(lovedOneProfile.profileSubtitle, expectedAge)
+        XCTAssertEqual(profileWithoutBirthDate.profileSubtitle, "My care")
+    }
+
     func testDogEventDetailsDriveTimelineSummaries() {
         var pottyDetails = DogEventDetails()
         pottyDetails.pottyType = .poop
         pottyDetails.pottyLocation = .walk
         pottyDetails.stoolQuality = .normal
         pottyDetails.poopColor = .brown
-        let potty = BabyEvent(type: .potty, startDate: Date(), endDate: Date())
+        let potty = CareEvent(type: .potty, startDate: Date(), endDate: Date())
         potty.profileTypeSnapshot = .dog
         potty.dogDetails = pottyDetails
 
@@ -1897,7 +2007,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         walkDetails.peeCount = 1
         walkDetails.poopCount = 1
         walkDetails.leashBehavior = .pulled
-        let walk = BabyEvent(
+        let walk = CareEvent(
             type: .walk,
             startDate: Date(timeIntervalSinceReferenceDate: 1_000),
             endDate: Date(timeIntervalSinceReferenceDate: 1_000 + 34 * 60)
@@ -1909,13 +2019,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(walk.displayTitle.contains("1.2 mi"))
         XCTAssertTrue(walk.displayTitle.contains("pulled"))
 
-        let plainWalk = BabyEvent(type: .walk, startDate: Date(), endDate: Date())
+        let plainWalk = CareEvent(type: .walk, startDate: Date(), endDate: Date())
         plainWalk.profileTypeSnapshot = .dog
         XCTAssertEqual(plainWalk.displayTitle, "Walk")
     }
 
     func testChildProductionEventDetailsDriveTimelineSummaries() {
-        let solid = BabyEvent(type: .feed, startDate: Date())
+        let solid = CareEvent(type: .feed, startDate: Date())
         solid.profileTypeSnapshot = .child
         solid.feedKind = .solid
         solid.foodDescription = "Avocado"
@@ -1924,11 +2034,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         solid.solidReaction = .liked
         solid.solidAllergenExposure = true
 
-        let pumping = BabyEvent(type: .pumping, startDate: Date())
+        let pumping = CareEvent(type: .pumping, startDate: Date())
         pumping.profileTypeSnapshot = .child
         pumping.amountOz = 3.2
 
-        let potty = BabyEvent(type: .potty, startDate: Date())
+        let potty = CareEvent(type: .potty, startDate: Date())
         potty.profileTypeSnapshot = .child
         potty.childPottyKind = .both
         potty.childPottyLocation = .pottyChair
@@ -1943,7 +2053,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testPuppyStageGuideMatchesDogAgeAndPersistsReadState() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testDog = BabyProfile(
+        let testDog = CareProfile(
             profileType: .dog,
             name: "Test Dog",
             birthDate: Date().addingTimeInterval(-12 * 7 * 24 * 60 * 60),
@@ -1971,7 +2081,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testDogProfileAndDogDetailsRoundTripThroughJSONBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testDog = BabyProfile(
+        let testDog = CareProfile(
             profileType: .dog,
             name: "Test Dog",
             birthDate: Date(timeIntervalSinceReferenceDate: 1_000),
@@ -1988,7 +2098,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         details.foodUnit = .ounces
         details.mealType = .dinner
         details.eatenAmount = .most
-        let food = BabyEvent(
+        let food = CareEvent(
             profileID: testDog.id,
             type: .food,
             startDate: Date(timeIntervalSinceReferenceDate: 3_000)
@@ -2001,12 +2111,12 @@ final class SleepPredictionEngineTests: XCTestCase {
         let backup = try DataExportImportService.exportData(context: context)
         try DataExportImportService.importData(backup, context: context)
 
-        let importedProfiles = try context.fetch(FetchDescriptor<BabyProfile>())
+        let importedProfiles = try context.fetch(FetchDescriptor<CareProfile>())
         let importedDog = try XCTUnwrap(importedProfiles.first { $0.profileType == .dog })
         XCTAssertEqual(importedDog.breed, "Mini Goldendoodle")
         XCTAssertEqual(importedDog.coatColor, "Apricot")
 
-        let importedEvent = try XCTUnwrap(try context.fetch(FetchDescriptor<BabyEvent>()).first { $0.type == .food })
+        let importedEvent = try XCTUnwrap(try context.fetch(FetchDescriptor<CareEvent>()).first { $0.type == .food })
         XCTAssertEqual(importedEvent.profileID, testDog.id)
         XCTAssertEqual(importedEvent.profileTypeSnapshot, .dog)
         XCTAssertEqual(importedEvent.dogDetails.foodName, "Chicken and rice")
@@ -2017,10 +2127,10 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testChildProductionDetailsRoundTripThroughJSONBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let testChild = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let testChild = CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
         context.insert(testChild)
 
-        let solid = BabyEvent(
+        let solid = CareEvent(
             profileID: testChild.id,
             type: .feed,
             startDate: Date(timeIntervalSinceReferenceDate: 3_000)
@@ -2035,7 +2145,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         solid.solidSensitivityObserved = true
         context.insert(solid)
 
-        let diaper = BabyEvent(
+        let diaper = CareEvent(
             profileID: testChild.id,
             type: .diaper,
             startDate: Date(timeIntervalSinceReferenceDate: 3_300)
@@ -2045,7 +2155,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         diaper.diaperRash = true
         context.insert(diaper)
 
-        let potty = BabyEvent(
+        let potty = CareEvent(
             profileID: testChild.id,
             type: .potty,
             startDate: Date(timeIntervalSinceReferenceDate: 3_600)
@@ -2064,7 +2174,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let backup = try DataExportImportService.exportData(context: context)
         try DataExportImportService.importData(backup, context: context)
 
-        let importedEvents = try context.fetch(FetchDescriptor<BabyEvent>())
+        let importedEvents = try context.fetch(FetchDescriptor<CareEvent>())
         let importedSolid = try XCTUnwrap(importedEvents.first { $0.feedKind == .solid })
         XCTAssertEqual(importedSolid.solidFeedingStyle, .pureeSpoonFed)
         XCTAssertEqual(importedSolid.solidTexture, .fingerFood)
@@ -2135,7 +2245,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = Date(timeIntervalSinceReferenceDate: 500_000)
-        let profile = BabyProfile(name: "Test Child", birthDate: now.addingTimeInterval(-120 * 24 * 60 * 60), sex: .unknown)
+        let profile = CareProfile(name: "Test Child", birthDate: now.addingTimeInterval(-120 * 24 * 60 * 60), sex: .unknown)
 
         let baseline = SleepMiniPlanService.plan(
             profile: profile,
@@ -2147,7 +2257,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         XCTAssertEqual(baseline?.id, "baseline")
 
-        let nap = BabyEvent(
+        let nap = CareEvent(
             type: .sleep,
             startDate: now.addingTimeInterval(-4 * 60 * 60),
             endDate: now.addingTimeInterval(-3 * 60 * 60)
@@ -2171,23 +2281,23 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 13))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
-        let nap = BabyEvent(
+        let nap = CareEvent(
             type: .sleep,
             startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 9))!,
             endDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
         )
         nap.sleepKind = .nap
-        let bedtime = BabyEvent(
+        let bedtime = CareEvent(
             type: .sleep,
             startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 19, hour: 20))!,
             endDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 6))!
         )
         bedtime.sleepKind = .nightSleep
-        let nightWaking = BabyEvent(
+        let nightWaking = CareEvent(
             type: .sleep,
             startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 2))!,
             endDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 2, minute: 15))!
@@ -2216,19 +2326,19 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testSleepMiniPlanUsesCircularBedtimeSpreadAcrossMidnight() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let profile = BabyProfile(name: "Test Child", birthDate: Date(timeIntervalSinceReferenceDate: 0), sex: .unknown)
+        let profile = CareProfile(name: "Test Child", birthDate: Date(timeIntervalSinceReferenceDate: 0), sex: .unknown)
 
         func date(day: Int, hour: Int, minute: Int = 0) throws -> Date {
             try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: day, hour: hour, minute: minute)))
         }
 
-        let nearMidnightOne = BabyEvent(
+        let nearMidnightOne = CareEvent(
             type: .sleep,
             startDate: try date(day: 12, hour: 23, minute: 45),
             endDate: try date(day: 13, hour: 6)
         )
         nearMidnightOne.sleepKind = .nightSleep
-        let nearMidnightTwo = BabyEvent(
+        let nearMidnightTwo = CareEvent(
             type: .sleep,
             startDate: try date(day: 14, hour: 0, minute: 15),
             endDate: try date(day: 14, hour: 7)
@@ -2247,13 +2357,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         XCTAssertEqual(steady?.id, "steady-rhythm")
 
-        let early = BabyEvent(
+        let early = CareEvent(
             type: .sleep,
             startDate: try date(day: 12, hour: 20),
             endDate: try date(day: 13, hour: 5)
         )
         early.sleepKind = .nightSleep
-        let late = BabyEvent(
+        let late = CareEvent(
             type: .sleep,
             startDate: try date(day: 13, hour: 23),
             endDate: try date(day: 14, hour: 7)
@@ -2275,17 +2385,17 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 10))!
-        let sleep = BabyEvent(
+        let sleep = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(9 * 3600),
             endDate: day.addingTimeInterval(10 * 3600)
         )
-        let feed = BabyEvent(
+        let feed = CareEvent(
             type: .feed,
             startDate: day.addingTimeInterval(9.5 * 3600),
             endDate: day.addingTimeInterval(9.75 * 3600)
         )
-        let diaper = BabyEvent(
+        let diaper = CareEvent(
             type: .diaper,
             startDate: day.addingTimeInterval(11 * 3600),
             endDate: day.addingTimeInterval(11 * 3600)
@@ -2310,7 +2420,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 10))!
-        let diaper = BabyEvent(
+        let diaper = CareEvent(
             type: .diaper,
             startDate: day.addingTimeInterval(8 * 3600),
             endDate: day.addingTimeInterval(8 * 3600)
@@ -2329,13 +2439,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         let selectedProfileID = UUID()
         let otherProfileID = UUID()
         let now = Date()
-        let diaper = BabyEvent(profileID: selectedProfileID, type: .diaper, startDate: now, endDate: nil)
+        let diaper = CareEvent(profileID: selectedProfileID, type: .diaper, startDate: now, endDate: nil)
         diaper.diaperKind = .wet
-        let legacyDiaper = BabyEvent(type: .diaper, startDate: now, endDate: nil)
+        let legacyDiaper = CareEvent(type: .diaper, startDate: now, endDate: nil)
         legacyDiaper.diaperKind = .dirty
-        let otherProfileDiaper = BabyEvent(profileID: otherProfileID, type: .diaper, startDate: now, endDate: nil)
+        let otherProfileDiaper = CareEvent(profileID: otherProfileID, type: .diaper, startDate: now, endDate: nil)
         otherProfileDiaper.diaperKind = .both
-        let timerDraft = BabyEvent(profileID: selectedProfileID, type: .sleep, startDate: now, endDate: nil)
+        let timerDraft = CareEvent(profileID: selectedProfileID, type: .sleep, startDate: now, endDate: nil)
 
         XCTAssertTrue(HistoryView.visibleDayEvent(diaper, selectedProfileID: selectedProfileID))
         XCTAssertFalse(HistoryView.visibleDayEvent(legacyDiaper, selectedProfileID: selectedProfileID))
@@ -2682,7 +2792,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testLiveActivityStopCommandPausesSelectedTimerDraft() async throws {
         let container = try makeInMemoryContainer()
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .sleep,
             startDate: Date().addingTimeInterval(-300)
         )
@@ -2706,7 +2816,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let container = try makeInMemoryContainer()
         let startedAt = Date().addingTimeInterval(-300)
         let requestedAt = Date().addingTimeInterval(-2)
-        let event = BabyEvent(type: .sleep, startDate: startedAt)
+        let event = CareEvent(type: .sleep, startDate: startedAt)
         event.updatedAt = startedAt
         container.mainContext.insert(event)
         try container.mainContext.save()
@@ -2730,7 +2840,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let container = try makeInMemoryContainer()
         let startedAt = Date().addingTimeInterval(-300)
         let requestedAt = Date().addingTimeInterval(-2)
-        let event = BabyEvent(type: .sleep, startDate: startedAt)
+        let event = CareEvent(type: .sleep, startDate: startedAt)
         event.activeTimerSegmentStartDate = startedAt
         // Startup sync or bookkeeping can touch the event after the widget
         // tap without representing a newer timer action.
@@ -2756,7 +2866,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testDelayedWidgetStopDoesNotOverrideNewerTimerAction() async throws {
         let container = try makeInMemoryContainer()
         let requestedAt = Date().addingTimeInterval(-2)
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .sleep,
             startDate: Date().addingTimeInterval(-300)
         )
@@ -2777,7 +2887,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testLiveActivityStopActiveCommandPausesPrimaryTimerDraft() async throws {
         let container = try makeInMemoryContainer()
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .nursing,
             startDate: Date().addingTimeInterval(-300)
         )
@@ -2892,18 +3002,18 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testCurrentPredictionIgnoresRecordBasedOnOlderSleep() throws {
         let now = Date()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: now.addingTimeInterval(-150 * 86_400)
         )
-        let firstSleep = BabyEvent(
+        let firstSleep = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: now.addingTimeInterval(-6 * 60 * 60),
             endDate: now.addingTimeInterval(-5 * 60 * 60)
         )
         firstSleep.sleepKind = .nightSleep
-        let latestSleep = BabyEvent(
+        let latestSleep = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: now.addingTimeInterval(-2 * 60 * 60),
@@ -2940,18 +3050,18 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testCurrentPredictionIgnoresRecordWithDifferentTuningSettings() throws {
         let now = Date()
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: now.addingTimeInterval(-150 * 86_400)
         )
-        let nightSleep = BabyEvent(
+        let nightSleep = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: now.addingTimeInterval(-10 * 60 * 60),
             endDate: now.addingTimeInterval(-6 * 60 * 60)
         )
         nightSleep.sleepKind = .nightSleep
-        let latestSleep = BabyEvent(
+        let latestSleep = CareEvent(
             profileID: profile.id,
             type: .sleep,
             startDate: now.addingTimeInterval(-2 * 60 * 60),
@@ -3021,11 +3131,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20))!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20, minute: 1))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 31))!
         )
-        var events = [BabyEvent]()
+        var events = [CareEvent]()
         for offset in -14 ... -1 {
             let day = calendar.date(byAdding: .day, value: offset, to: today)!
             let firstNapStart = calendar.date(bySettingHour: 16, minute: 8, second: 0, of: day)!
@@ -3076,7 +3186,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3112,7 +3222,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3142,7 +3252,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3187,7 +3297,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 15))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3214,7 +3324,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3238,7 +3348,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3276,12 +3386,12 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
         var events = makeTwoNapHistory(today: today, calendar: calendar)
-        let activeSleep = BabyEvent(
+        let activeSleep = CareEvent(
             type: .sleep,
             startDate: calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 6, minute: 45))!,
             endDate: nil
@@ -3306,7 +3416,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let today = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 7))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3351,7 +3461,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8, minute: 45))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3397,7 +3507,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8, minute: 45))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3444,7 +3554,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 8, minute: 45))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 19, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3488,7 +3598,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 18))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3532,7 +3642,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 21, minute: 30))!
         let target = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 20, minute: 30))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 2, day: 20))!
         )
@@ -3562,7 +3672,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 4, day: 1))!
         )
@@ -3589,7 +3699,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 10))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
         )
@@ -3625,7 +3735,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20, hour: 9))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
         )
@@ -3667,9 +3777,9 @@ final class SleepPredictionEngineTests: XCTestCase {
         today: Date,
         calendar: Calendar,
         dayOffsets: ClosedRange<Int> = -7 ... -1
-    ) -> [BabyEvent] {
+    ) -> [CareEvent] {
         let todayStart = calendar.startOfDay(for: today)
-        return dayOffsets.flatMap { offset -> [BabyEvent] in
+        return dayOffsets.flatMap { offset -> [CareEvent] in
             let day = calendar.date(byAdding: .day, value: offset, to: todayStart)!
             let nightStart = calendar.date(bySettingHour: 19, minute: 30, second: 0, of: day)!
             let nightEnd = calendar.date(byAdding: .hour, value: 11, to: nightStart)!
@@ -3685,8 +3795,8 @@ final class SleepPredictionEngineTests: XCTestCase {
         }
     }
 
-    private func makeSleep(kind: SleepKind, start: Date, end: Date) -> BabyEvent {
-        let event = BabyEvent(type: .sleep, startDate: start, endDate: end)
+    private func makeSleep(kind: SleepKind, start: Date, end: Date) -> CareEvent {
+        let event = CareEvent(type: .sleep, startDate: start, endDate: end)
         event.sleepKind = kind
         return event
     }
@@ -3694,8 +3804,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     private func activeNap(
         profileID: UUID,
         start: Date
-    ) -> BabyEvent {
-        let event = BabyEvent(profileID: profileID, type: .sleep, startDate: start)
+    ) -> CareEvent {
+        let event = CareEvent(profileID: profileID, type: .sleep, startDate: start)
         event.sleepKind = .nap
         event.timerState = .running
         event.activeTimerSegmentStartDate = start
@@ -3711,7 +3821,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let data = try SampleData.bundledLegacyTrackerHistory()
         try DataExportImportService.importData(data, context: container.mainContext)
 
-        let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>())
+        let events = try container.mainContext.fetch(FetchDescriptor<CareEvent>())
         XCTAssertEqual(events.count, 4_774)
         XCTAssertEqual(events.filter { $0.type == .growth }.count, 10)
         XCTAssertEqual(events.filter { $0.type == .custom }.count, 35)
@@ -3723,7 +3833,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         })
 
         let profile = try XCTUnwrap(
-            container.mainContext.fetch(FetchDescriptor<BabyProfile>()).first
+            container.mainContext.fetch(FetchDescriptor<CareProfile>()).first
         )
         let growthEvents = events.filter { $0.type == .growth }
         XCTAssertEqual(
@@ -3758,8 +3868,8 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         await SampleData.seedIfNeeded(in: container.mainContext)
 
-        let profiles = try container.mainContext.fetch(FetchDescriptor<BabyProfile>())
-        let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>())
+        let profiles = try container.mainContext.fetch(FetchDescriptor<CareProfile>())
+        let events = try container.mainContext.fetch(FetchDescriptor<CareEvent>())
         let records = try container.mainContext.fetch(FetchDescriptor<SleepPredictionRecord>())
 
         XCTAssertTrue(profiles.isEmpty)
@@ -3779,7 +3889,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             households: []
         ))
 
-        let existingProfile = BabyProfile(
+        let existingProfile = CareProfile(
             name: "Sample Child",
             birthDate: Date(),
             sex: .unknown
@@ -3834,7 +3944,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testFirstRunICloudRestoreDetectsImportedProfilesWithoutWriting() async throws {
         let container = try makeInMemoryContainer()
-        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let profile = CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
         container.mainContext.insert(profile)
 
         let outcome = await ICloudRestoreService.waitForImportedData(
@@ -3918,13 +4028,18 @@ final class SleepPredictionEngineTests: XCTestCase {
         let schema = PersistenceService.schema
         let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
-        let profile = BabyProfile(name: "Test Child", birthDate: SampleData.defaultBirthDate)
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: SampleData.defaultBirthDate,
+            sex: .male
+        )
+        let birthDate = try XCTUnwrap(profile.birthDate)
         container.mainContext.insert(profile)
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .custom,
             title: "Growth",
-            startDate: profile.birthDate,
-            endDate: profile.birthDate,
+            startDate: birthDate,
+            endDate: birthDate,
             notes: "Weight: 8.6lbs.oz\nLength: 1.68ft.in\nHead: 14.2in\nBirth visit"
         )
         container.mainContext.insert(event)
@@ -3960,9 +4075,9 @@ final class SleepPredictionEngineTests: XCTestCase {
             context: container.mainContext
         )
         let profile = try XCTUnwrap(
-            container.mainContext.fetch(FetchDescriptor<BabyProfile>()).first
+            container.mainContext.fetch(FetchDescriptor<CareProfile>()).first
         )
-        let events = try container.mainContext.fetch(FetchDescriptor<BabyEvent>())
+        let events = try container.mainContext.fetch(FetchDescriptor<CareEvent>())
 
         let startedAt = CFAbsoluteTimeGetCurrent()
         _ = SleepPredictionEngine.predict(profile: profile, events: events)
@@ -4019,7 +4134,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             now: Date(timeIntervalSinceReferenceDate: 800_000_000)
         )
 
-        let events = try context.fetch(FetchDescriptor<BabyEvent>())
+        let events = try context.fetch(FetchDescriptor<CareEvent>())
         let diaper = try XCTUnwrap(events.first { $0.type == .diaper })
         let medicine = try XCTUnwrap(events.first { $0.type == .medicine })
         let bottle = try XCTUnwrap(events.first { $0.type == .feed })
@@ -4045,13 +4160,13 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testNapIndexDetection() {
         let calendar = Calendar(identifier: .gregorian)
         let day = calendar.startOfDay(for: Date())
-        let first = BabyEvent(
+        let first = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(9 * 3600),
             endDate: day.addingTimeInterval(10 * 3600)
         )
         first.sleepKind = .nap
-        let second = BabyEvent(
+        let second = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(13 * 3600),
             endDate: day.addingTimeInterval(14 * 3600)
@@ -4065,13 +4180,13 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testWakeWindowExtraction() {
         let day = Calendar.current.startOfDay(for: Date())
-        let first = BabyEvent(
+        let first = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(7 * 3600),
             endDate: day.addingTimeInterval(8 * 3600)
         )
         first.sleepKind = .nightSleep
-        let second = BabyEvent(
+        let second = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(10 * 3600),
             endDate: day.addingTimeInterval(11 * 3600)
@@ -4085,19 +4200,19 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testWakeWindowSamplesIgnoreNightWakingLogs() {
         let day = Calendar.current.startOfDay(for: Date())
-        let first = BabyEvent(
+        let first = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(7 * 3600),
             endDate: day.addingTimeInterval(8 * 3600)
         )
         first.sleepKind = .nightSleep
-        let waking = BabyEvent(
+        let waking = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(9 * 3600),
             endDate: day.addingTimeInterval(9 * 3600 + 10 * 60)
         )
         waking.sleepKind = .nightWaking
-        let second = BabyEvent(
+        let second = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(11 * 3600),
             endDate: day.addingTimeInterval(12 * 3600)
@@ -4153,19 +4268,19 @@ final class SleepPredictionEngineTests: XCTestCase {
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
         let nextDay = calendar.date(byAdding: .day, value: 1, to: day)!
 
-        let evening = BabyEvent(
+        let evening = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(20 * 3600),
             endDate: day.addingTimeInterval(23 * 3600)
         )
         evening.sleepKind = .nightSleep
-        let morning = BabyEvent(
+        let morning = CareEvent(
             type: .sleep,
             startDate: nextDay.addingTimeInterval(1 * 3600),
             endDate: nextDay.addingTimeInterval(6 * 3600)
         )
         morning.sleepKind = .nightSleep
-        let nap = BabyEvent(
+        let nap = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(10 * 3600),
             endDate: day.addingTimeInterval(11 * 3600)
@@ -4190,19 +4305,19 @@ final class SleepPredictionEngineTests: XCTestCase {
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
         let nextDay = calendar.date(byAdding: .day, value: 1, to: day)!
 
-        let nightSleep = BabyEvent(
+        let nightSleep = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(20 * 3600),
             endDate: day.addingTimeInterval(23 * 3600)
         )
         nightSleep.sleepKind = .nightSleep
-        let nightWaking = BabyEvent(
+        let nightWaking = CareEvent(
             type: .sleep,
             startDate: nextDay.addingTimeInterval(1 * 3600),
             endDate: nextDay.addingTimeInterval(1 * 3600 + 20 * 60)
         )
         nightWaking.sleepKind = .nightWaking
-        let nap = BabyEvent(
+        let nap = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(10 * 3600),
             endDate: day.addingTimeInterval(11 * 3600)
@@ -4228,19 +4343,19 @@ final class SleepPredictionEngineTests: XCTestCase {
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
         let nextDay = calendar.date(byAdding: .day, value: 1, to: day)!
 
-        let firstSegment = BabyEvent(
+        let firstSegment = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(20 * 3600),
             endDate: nextDay
         )
         firstSegment.sleepKind = .nightSleep
-        let secondSegment = BabyEvent(
+        let secondSegment = CareEvent(
             type: .sleep,
             startDate: nextDay.addingTimeInterval(30 * 60),
             endDate: nextDay.addingTimeInterval(4 * 3600)
         )
         secondSegment.sleepKind = .nightSleep
-        let nap = BabyEvent(
+        let nap = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(12 * 3600),
             endDate: day.addingTimeInterval(13 * 3600)
@@ -4268,19 +4383,19 @@ final class SleepPredictionEngineTests: XCTestCase {
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
         let nextDay = calendar.date(byAdding: .day, value: 1, to: day)!
 
-        let firstSegment = BabyEvent(
+        let firstSegment = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(20 * 3600),
             endDate: nextDay
         )
         firstSegment.sleepKind = .nightSleep
-        let explicitWaking = BabyEvent(
+        let explicitWaking = CareEvent(
             type: .sleep,
             startDate: nextDay.addingTimeInterval(5 * 60),
             endDate: nextDay.addingTimeInterval(20 * 60)
         )
         explicitWaking.sleepKind = .nightWaking
-        let secondSegment = BabyEvent(
+        let secondSegment = CareEvent(
             type: .sleep,
             startDate: nextDay.addingTimeInterval(30 * 60),
             endDate: nextDay.addingTimeInterval(4 * 3600)
@@ -4308,7 +4423,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let secondDay = calendar.date(byAdding: .day, value: 1, to: firstDay)!
         let thirdDay = calendar.date(byAdding: .day, value: 2, to: firstDay)!
         let events = [firstDay, secondDay, thirdDay].map { day in
-            let event = BabyEvent(
+            let event = CareEvent(
                 type: .sleep,
                 startDate: day.addingTimeInterval(10 * 3600),
                 endDate: day.addingTimeInterval(11 * 3600)
@@ -4343,7 +4458,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 20))!
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
         )
@@ -4412,7 +4527,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testInsightsViewModelCalculatesSleepPressureOnlyForWakeWindows() {
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: Date(timeIntervalSinceReferenceDate: 804_000_000))
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(byAdding: .day, value: -180, to: day)!
         )
@@ -4448,13 +4563,13 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
         let end = calendar.date(byAdding: .day, value: 2, to: day)!
-        let evening = BabyEvent(
+        let evening = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(20 * 3600),
             endDate: day.addingTimeInterval(23 * 3600)
         )
         evening.sleepKind = .nightSleep
-        let earlyMorning = BabyEvent(
+        let earlyMorning = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(26 * 3600),
             endDate: day.addingTimeInterval(29 * 3600)
@@ -4473,13 +4588,13 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testInsightsFeedToSleepIntervalsUsesLatestCareSession() {
         let now = Date()
-        let nursing = BabyEvent(
+        let nursing = CareEvent(
             type: .nursing,
             startDate: now,
             endDate: now.addingTimeInterval(10 * 60)
         )
         nursing.nursingSide = .left
-        let sleep = BabyEvent(
+        let sleep = CareEvent(
             type: .sleep,
             startDate: now.addingTimeInterval(25 * 60),
             endDate: now.addingTimeInterval(60 * 60)
@@ -4498,11 +4613,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: Date())
         let end = calendar.startOfNextDay(for: day)
-        let wet = BabyEvent(type: .diaper, startDate: day.addingTimeInterval(3600), endDate: nil)
+        let wet = CareEvent(type: .diaper, startDate: day.addingTimeInterval(3600), endDate: nil)
         wet.diaperKind = .wet
-        let both = BabyEvent(type: .diaper, startDate: day.addingTimeInterval(7200), endDate: nil)
+        let both = CareEvent(type: .diaper, startDate: day.addingTimeInterval(7200), endDate: nil)
         both.diaperKind = .both
-        let tummy = BabyEvent(
+        let tummy = CareEvent(
             type: .activity,
             startDate: day.addingTimeInterval(10_800),
             endDate: day.addingTimeInterval(12_000)
@@ -4563,14 +4678,14 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     @MainActor
     func testEventTimerPriorityPrefersSleepThenNursing() {
-        let bath = BabyEvent(type: .activity, startDate: Date())
+        let bath = CareEvent(type: .activity, startDate: Date())
         bath.activityType = .bath
-        let nursing = BabyEvent(type: .nursing, startDate: Date())
+        let nursing = CareEvent(type: .nursing, startDate: Date())
         nursing.nursingSide = .left
         nursing.activeNursingSide = .left
-        let pumping = BabyEvent(type: .pumping, startDate: Date())
-        let feed = BabyEvent(type: .feed, startDate: Date())
-        let sleep = BabyEvent(type: .sleep, startDate: Date())
+        let pumping = CareEvent(type: .pumping, startDate: Date())
+        let feed = CareEvent(type: .feed, startDate: Date())
+        let sleep = CareEvent(type: .sleep, startDate: Date())
         sleep.sleepKind = .nap
 
         XCTAssertEqual(
@@ -4590,9 +4705,9 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testWidgetSnapshotIncludesPrimaryTimerAndAdditionalCount() {
         let start = Date().addingTimeInterval(-600)
-        let sleep = BabyEvent(type: .sleep, startDate: start)
+        let sleep = CareEvent(type: .sleep, startDate: start)
         sleep.sleepKind = .nap
-        let bath = BabyEvent(type: .activity, startDate: start)
+        let bath = CareEvent(type: .activity, startDate: start)
         bath.activityType = .bath
 
         let snapshot = WidgetSnapshotService.makeSnapshot(
@@ -4609,9 +4724,9 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testWidgetSnapshotIncludesRankedQuickActions() {
         let now = Date(timeIntervalSinceReferenceDate: 340_000)
-        let feed = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-3_600))
-        let diaper = BabyEvent(type: .diaper, startDate: now.addingTimeInterval(-7_200))
-        let sleep = BabyEvent(
+        let feed = CareEvent(type: .feed, startDate: now.addingTimeInterval(-3_600))
+        let diaper = CareEvent(type: .diaper, startDate: now.addingTimeInterval(-7_200))
+        let sleep = CareEvent(
             type: .sleep,
             startDate: now.addingTimeInterval(-14_400),
             endDate: now.addingTimeInterval(-10_800)
@@ -4630,6 +4745,23 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(actionIDs.contains("diaper"))
         XCTAssertTrue(actionIDs.contains("sleep"))
         XCTAssertEqual(snapshot.resolvedQuickActions.count, 6)
+    }
+
+    @MainActor
+    func testAdultWidgetQuickActionsExcludeChildCare() {
+        let snapshot = WidgetSnapshotService.makeSnapshot(
+            profileType: .adult,
+            babyName: "Test Adult",
+            events: [],
+            prediction: nil
+        )
+
+        let actionIDs = Set(snapshot.resolvedQuickActions.map(\.id))
+        XCTAssertTrue(actionIDs.contains("medicine"))
+        XCTAssertTrue(actionIDs.contains("symptom"))
+        XCTAssertFalse(actionIDs.contains("tummy-time"))
+        XCTAssertFalse(actionIDs.contains("diaper"))
+        XCTAssertFalse(actionIDs.contains("feed"))
     }
 
     @MainActor
@@ -4674,11 +4806,11 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testQuickActionsOmitStartsForTimerTypesThatAreAlreadyActive() {
         let now = Date(timeIntervalSinceReferenceDate: 342_000)
-        let sleep = BabyEvent(
+        let sleep = CareEvent(
             type: .sleep,
             startDate: now.addingTimeInterval(-600)
         )
-        let nursing = BabyEvent(
+        let nursing = CareEvent(
             type: .nursing,
             startDate: now.addingTimeInterval(-300)
         )
@@ -4709,8 +4841,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testDogQuickActionsPreferDogCareEvents() {
         let now = Date(timeIntervalSinceReferenceDate: 345_000)
-        let food = BabyEvent(type: .food, startDate: now.addingTimeInterval(-3_600))
-        let walk = BabyEvent(
+        let food = CareEvent(type: .food, startDate: now.addingTimeInterval(-3_600))
+        let walk = CareEvent(
             type: .walk,
             startDate: now.addingTimeInterval(-9_000),
             endDate: now.addingTimeInterval(-7_200)
@@ -4731,9 +4863,9 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testQuickActionsIncludeRepeatLastAndPinnedActionsFirst() {
         let now = Date(timeIntervalSinceReferenceDate: 346_000)
-        let feed = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-1_800), endDate: now.addingTimeInterval(-1_800))
+        let feed = CareEvent(type: .feed, startDate: now.addingTimeInterval(-1_800), endDate: now.addingTimeInterval(-1_800))
         feed.feedKind = .bottle
-        let diaper = BabyEvent(type: .diaper, startDate: now.addingTimeInterval(-7_200), endDate: now.addingTimeInterval(-7_200))
+        let diaper = CareEvent(type: .diaper, startDate: now.addingTimeInterval(-7_200), endDate: now.addingTimeInterval(-7_200))
         diaper.diaperKind = .wet
 
         let actions = WidgetSnapshotService.makeQuickActions(
@@ -4789,21 +4921,21 @@ final class SleepPredictionEngineTests: XCTestCase {
         CareCategoryPreferenceStore.reset(profileID: profileID)
         let now = Date(timeIntervalSinceReferenceDate: 346_800)
 
-        let hiddenPump = BabyEvent(
+        let hiddenPump = CareEvent(
             profileID: profileID,
             type: .pumping,
             startDate: now.addingTimeInterval(-1_200),
             endDate: now.addingTimeInterval(-900)
         )
         hiddenPump.amountOz = 2
-        let ownFeed = BabyEvent(
+        let ownFeed = CareEvent(
             profileID: profileID,
             type: .feed,
             startDate: now.addingTimeInterval(-2_400),
             endDate: now.addingTimeInterval(-2_400)
         )
         ownFeed.feedKind = .bottle
-        let otherActiveSleep = BabyEvent(
+        let otherActiveSleep = CareEvent(
             profileID: otherProfileID,
             type: .sleep,
             startDate: now.addingTimeInterval(-600)
@@ -4832,7 +4964,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let profileID = UUID()
         let oldStart = Date(timeIntervalSinceReferenceDate: 300_000)
         let now = Date(timeIntervalSinceReferenceDate: 350_000)
-        let source = BabyEvent(
+        let source = CareEvent(
             profileID: profileID,
             type: .diaper,
             startDate: oldStart,
@@ -4878,7 +5010,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let profileID = UUID()
         let oldStart = Date(timeIntervalSinceReferenceDate: 305_000)
         let now = Date(timeIntervalSinceReferenceDate: 355_000)
-        let solid = BabyEvent(
+        let solid = CareEvent(
             profileID: profileID,
             type: .feed,
             startDate: oldStart,
@@ -4911,7 +5043,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(repeatedSolid.solidAllergenExposure, false)
         XCTAssertEqual(repeatedSolid.solidSensitivityObserved, false)
 
-        let potty = BabyEvent(
+        let potty = CareEvent(
             profileID: profileID,
             type: .potty,
             startDate: oldStart,
@@ -5035,6 +5167,49 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testActivityTypesAreScopedToTheSelectedProfileType() {
+        let childActivities = ActivityType.cases(for: .child)
+        let adultActivities = ActivityType.cases(for: .adult)
+
+        XCTAssertTrue(childActivities.contains(.tummyTime))
+        XCTAssertFalse(childActivities.contains(.physicalTherapy))
+        XCTAssertTrue(adultActivities.contains(.exercise))
+        XCTAssertTrue(adultActivities.contains(.bath))
+        XCTAssertFalse(adultActivities.contains(.tummyTime))
+        XCTAssertFalse(adultActivities.contains(.storyTime))
+        XCTAssertTrue(ActivityType.cases(for: .dog).isEmpty)
+    }
+
+    @MainActor
+    func testAdultActivityTimerRejectsChildSubtype() throws {
+        let container = try makeInMemoryContainer()
+        let profileID = UUID()
+
+        let rejected = EventTimerService.start(
+            type: .activity,
+            activityType: .tummyTime,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            profileID: profileID,
+            profileType: .adult
+        )
+        let accepted = EventTimerService.start(
+            type: .activity,
+            activityType: .physicalTherapy,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            profileID: profileID,
+            profileType: .adult
+        )
+
+        XCTAssertNil(rejected)
+        XCTAssertEqual(accepted?.activityType, .physicalTherapy)
+        XCTAssertEqual(accepted?.profileTypeSnapshot, .adult)
+    }
+
+    @MainActor
     func testTimerStartRejectsSameTypeDraftButAllowsDifferentType() throws {
         let container = try makeInMemoryContainer()
         let now = Date(timeIntervalSinceReferenceDate: 355_000)
@@ -5075,21 +5250,21 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testDailySummaryTracksDogCareMetricsSeparately() {
         let now = Date(timeIntervalSinceReferenceDate: 360_000)
-        let food = BabyEvent(type: .food, startDate: now)
-        let water = BabyEvent(type: .water, startDate: now)
-        let potty = BabyEvent(type: .potty, startDate: now)
+        let food = CareEvent(type: .food, startDate: now)
+        let water = CareEvent(type: .water, startDate: now)
+        let potty = CareEvent(type: .potty, startDate: now)
         potty.dogDetails.accident = true
-        let walk = BabyEvent(
+        let walk = CareEvent(
             type: .walk,
             startDate: now,
             endDate: now.addingTimeInterval(1_200)
         )
-        let training = BabyEvent(
+        let training = CareEvent(
             type: .training,
             startDate: now,
             endDate: now.addingTimeInterval(600)
         )
-        let diaper = BabyEvent(type: .diaper, startDate: now)
+        let diaper = CareEvent(type: .diaper, startDate: now)
         diaper.diaperKind = .wet
 
         let summary = DailySummaryService.summary(
@@ -5107,35 +5282,35 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testDailySummaryTracksUnifiedChildCareMetrics() {
         let now = Date(timeIntervalSinceReferenceDate: 361_000)
-        let bottle = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-600))
+        let bottle = CareEvent(type: .feed, startDate: now.addingTimeInterval(-600))
         bottle.feedKind = .bottle
         bottle.amountOz = 3
-        let solid = BabyEvent(type: .feed, startDate: now)
+        let solid = CareEvent(type: .feed, startDate: now)
         solid.feedKind = .solid
         solid.solidReaction = .sensitivity
         solid.solidAllergenExposure = true
         solid.solidSensitivityObserved = true
 
-        let pump = BabyEvent(
+        let pump = CareEvent(
             type: .pumping,
             startDate: now.addingTimeInterval(600),
             endDate: now.addingTimeInterval(1_500)
         )
         pump.amountOz = 4
 
-        let potty = BabyEvent(type: .potty, startDate: now.addingTimeInterval(1_800))
+        let potty = CareEvent(type: .potty, startDate: now.addingTimeInterval(1_800))
         potty.profileTypeSnapshot = .child
         potty.childPottyKind = .both
         potty.childPottyAccident = true
-        let activity = BabyEvent(
+        let activity = CareEvent(
             type: .activity,
             startDate: now.addingTimeInterval(2_400),
             endDate: now.addingTimeInterval(3_000)
         )
         activity.activityType = .tummyTime
-        let growth = BabyEvent(type: .growth, startDate: now.addingTimeInterval(3_600))
-        let temperature = BabyEvent(type: .temperature, startDate: now.addingTimeInterval(4_200))
-        let custom = BabyEvent(type: .custom, startDate: now.addingTimeInterval(4_800))
+        let growth = CareEvent(type: .growth, startDate: now.addingTimeInterval(3_600))
+        let temperature = CareEvent(type: .temperature, startDate: now.addingTimeInterval(4_200))
+        let custom = CareEvent(type: .custom, startDate: now.addingTimeInterval(4_800))
 
         let summary = DailySummaryService.summary(for: [
             bottle, solid, pump, potty, activity, growth, temperature, custom
@@ -5165,10 +5340,10 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testWidgetSnapshotUsesDogSummaryMetricsForDogProfiles() {
         let now = Date(timeIntervalSinceReferenceDate: 370_000)
-        let food = BabyEvent(type: .food, startDate: now)
-        let water = BabyEvent(type: .water, startDate: now)
-        let potty = BabyEvent(type: .potty, startDate: now)
-        let walk = BabyEvent(
+        let food = CareEvent(type: .food, startDate: now)
+        let water = CareEvent(type: .water, startDate: now)
+        let potty = CareEvent(type: .potty, startDate: now)
+        let walk = CareEvent(
             type: .walk,
             startDate: now.addingTimeInterval(-1_500),
             endDate: now.addingTimeInterval(-300)
@@ -5195,7 +5370,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 15, hour: 12))!
-        let pump = BabyEvent(
+        let pump = CareEvent(
             type: .pumping,
             startDate: now.addingTimeInterval(-900)
         )
@@ -5203,19 +5378,19 @@ final class SleepPredictionEngineTests: XCTestCase {
         pump.profileTypeSnapshot = .child
         pump.amountOz = 2.5
 
-        let solid = BabyEvent(type: .feed, startDate: now.addingTimeInterval(-600))
+        let solid = CareEvent(type: .feed, startDate: now.addingTimeInterval(-600))
         solid.endDate = solid.startDate
         solid.profileTypeSnapshot = .child
         solid.feedKind = .solid
         solid.solidSensitivityObserved = true
 
-        let potty = BabyEvent(type: .potty, startDate: now.addingTimeInterval(-120))
+        let potty = CareEvent(type: .potty, startDate: now.addingTimeInterval(-120))
         potty.profileTypeSnapshot = .child
         potty.childPottyKind = .pee
         potty.childPottyAccident = true
-        let growth = BabyEvent(type: .growth, startDate: now.addingTimeInterval(-60))
-        let temperature = BabyEvent(type: .temperature, startDate: now.addingTimeInterval(-45))
-        let custom = BabyEvent(type: .custom, startDate: now.addingTimeInterval(-30))
+        let growth = CareEvent(type: .growth, startDate: now.addingTimeInterval(-60))
+        let temperature = CareEvent(type: .temperature, startDate: now.addingTimeInterval(-45))
+        let custom = CareEvent(type: .custom, startDate: now.addingTimeInterval(-30))
         custom.endDate = custom.startDate
 
         let snapshot = WidgetSnapshotService.makeSnapshot(
@@ -5343,8 +5518,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testSwitchNursingSideAccumulatesElapsedSideTime() throws {
         let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
+            CareProfile.self,
+            CareEvent.self,
             DoctorAppointment.self,
             MilestoneEntry.self,
             AgeGuideReadState.self,
@@ -5355,7 +5530,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let start = Date().addingTimeInterval(-300)
-        let event = BabyEvent(type: .nursing, startDate: start)
+        let event = CareEvent(type: .nursing, startDate: start)
         event.nursingSide = .left
         event.activeNursingSide = .left
         event.updatedAt = start
@@ -5375,8 +5550,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testSettingNursingSideAccumulatesOnlyPreviousSide() throws {
         let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
+            CareProfile.self,
+            CareEvent.self,
             DoctorAppointment.self,
             MilestoneEntry.self,
             AgeGuideReadState.self,
@@ -5387,7 +5562,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let start = Date().addingTimeInterval(-300)
-        let event = BabyEvent(type: .nursing, startDate: start)
+        let event = CareEvent(type: .nursing, startDate: start)
         event.nursingSide = .left
         event.activeNursingSide = .left
         event.activeTimerSegmentStartDate = start
@@ -5416,7 +5591,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testAdjustingActiveTimerStartImmediatelyChangesSnapshot() {
         let now = Date(timeIntervalSinceReferenceDate: 100_000)
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .sleep,
             startDate: now.addingTimeInterval(-120)
         )
@@ -5452,7 +5627,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testNursingTimerSnapshotCarriesLiveTotalAndActiveSideTime() {
         let now = Date(timeIntervalSinceReferenceDate: 150_000)
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .nursing,
             startDate: now.addingTimeInterval(-900)
         )
@@ -5484,7 +5659,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testActiveTimerStartCannotMoveIntoFuture() {
         let now = Date(timeIntervalSinceReferenceDate: 200_000)
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .activity,
             startDate: now.addingTimeInterval(-60)
         )
@@ -5501,8 +5676,8 @@ final class SleepPredictionEngineTests: XCTestCase {
     @MainActor
     func testBackdatingActiveNursingTimerCreditsCurrentSide() throws {
         let schema = Schema([
-            BabyProfile.self,
-            BabyEvent.self,
+            CareProfile.self,
+            CareEvent.self,
             DoctorAppointment.self,
             MilestoneEntry.self,
             AgeGuideReadState.self,
@@ -5515,7 +5690,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let now = Date(timeIntervalSinceReferenceDate: 300_000)
         let originalStart = now.addingTimeInterval(-120)
         let correctedStart = now.addingTimeInterval(-300)
-        let event = BabyEvent(type: .nursing, startDate: originalStart)
+        let event = CareEvent(type: .nursing, startDate: originalStart)
         event.nursingSide = .left
         event.activeNursingSide = .left
         event.activeTimerSegmentStartDate = originalStart
@@ -5660,6 +5835,43 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         router.route(URL(string: "littlewindows://quick-log/walk")!)
         XCTAssertEqual(router.consumeAction(), .startTimer(.walk, nil))
+
+        let adultQuickLogs: [(String, EventType)] = [
+            ("symptom", .symptom),
+            ("blood-pressure", .bloodPressure),
+            ("heart-rate", .heartRate),
+            ("oxygen-saturation", .oxygenSaturation),
+            ("glucose", .glucose),
+            ("pain", .pain)
+        ]
+        for (path, expectedType) in adultQuickLogs {
+            router.route(URL(string: "littlewindows://quick-log/\(path)")!)
+            XCTAssertEqual(router.consumeAction(), .logEvent(expectedType))
+        }
+
+        router.pendingMedications = false
+        router.route(URL(string: "littlewindows://quick-log/medicine")!)
+        XCTAssertTrue(router.pendingMedications)
+        XCTAssertEqual(router.selectedTab, .milestones)
+        router.pendingMedications = false
+
+        let doseCommand = MedicationDoseRouteCommand(
+            profileID: UUID(),
+            medicationID: UUID(),
+            regimenID: UUID(),
+            phaseID: nil,
+            occurrenceKey: "scheduled-dose",
+            scheduledAt: Date(timeIntervalSinceReferenceDate: 700_000),
+            doseAmount: 1,
+            doseUnit: "tablet",
+            status: .taken
+        )
+        router.openMedicationDose(doseCommand)
+        XCTAssertEqual(router.pendingMedicationDoseCommand, doseCommand)
+        XCTAssertEqual(router.pendingProfileID, doseCommand.profileID)
+        XCTAssertTrue(router.pendingMedications)
+        XCTAssertEqual(router.selectedTab, .milestones)
+        router.discardCareNavigationRequest()
     }
 
     @MainActor
@@ -5675,11 +5887,11 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     func testLegacyActivityTypesNormalizeWithoutLosingSubtype() {
-        let tummy = BabyEvent(type: .custom)
+        let tummy = CareEvent(type: .custom)
         tummy.typeRawValue = "tummyTime"
-        let reading = BabyEvent(type: .custom)
+        let reading = CareEvent(type: .custom)
         reading.typeRawValue = "reading"
-        let bath = BabyEvent(type: .custom)
+        let bath = CareEvent(type: .custom)
         bath.typeRawValue = "bath"
 
         XCTAssertEqual(tummy.type, .activity)
@@ -5689,14 +5901,14 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     func testRichDiaperAndMedicineTimelineSummaries() {
-        let diaper = BabyEvent(type: .diaper)
+        let diaper = CareEvent(type: .diaper)
         diaper.diaperKind = .both
         diaper.peeAmount = .big
         diaper.pooAmount = .little
         diaper.pooColor = .brown
         diaper.diaperRash = true
 
-        let medicine = BabyEvent(type: .medicine)
+        let medicine = CareEvent(type: .medicine)
         medicine.medicineName = "Tylenol"
         medicine.dose = 2.5
         medicine.medicineUnit = .milliliters
@@ -5707,7 +5919,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testNursingTimelineDurationPrefersSideTotalOverWindowDuration() {
         let start = Date()
-        let event = BabyEvent(
+        let event = CareEvent(
             type: .nursing,
             startDate: start,
             endDate: start.addingTimeInterval(4 * 60)
@@ -5720,7 +5932,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     func testTemperatureStoresCanonicalCelsiusAndConvertsForDisplay() {
-        let event = BabyEvent(type: .temperature)
+        let event = CareEvent(type: .temperature)
         event.temperatureCelsius = 37
         event.temperatureUnit = .fahrenheit
         event.temperatureMethod = .forehead
@@ -5732,7 +5944,7 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     @MainActor
     func testActivityTimerSnapshotUsesSpecificSubtype() {
-        let bath = BabyEvent(type: .activity, startDate: Date())
+        let bath = CareEvent(type: .activity, startDate: Date())
         bath.activityType = .bath
 
         let snapshot = WidgetSnapshotService.activeSnapshot(
@@ -5749,14 +5961,14 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testGrowthTemperatureAndActivityInsightsUseNewFields() {
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: Date())
-        let growth = BabyEvent(type: .growth, startDate: day)
+        let growth = CareEvent(type: .growth, startDate: day)
         growth.weightPounds = 14
         growth.weightOunces = 8
         growth.heightFeet = 2
         growth.heightInches = 1.5
-        let temperature = BabyEvent(type: .temperature, startDate: day.addingTimeInterval(60))
+        let temperature = CareEvent(type: .temperature, startDate: day.addingTimeInterval(60))
         temperature.temperatureCelsius = 37
-        let outdoor = BabyEvent(
+        let outdoor = CareEvent(
             type: .activity,
             startDate: day.addingTimeInterval(120),
             endDate: day.addingTimeInterval(42 * 60 + 120)
@@ -5912,8 +6124,8 @@ final class SleepPredictionEngineTests: XCTestCase {
 
     func testGrowthChartDataUsesCanonicalValuesAndProfileSex() {
         let birthDate = Date(timeIntervalSince1970: 1_767_225_600)
-        let profile = BabyProfile(name: "Test Child", birthDate: birthDate, sex: .male)
-        let event = BabyEvent(
+        let profile = CareProfile(name: "Test Child", birthDate: birthDate, sex: .male)
+        let event = CareEvent(
             type: .growth,
             startDate: birthDate.addingTimeInterval(90 * 24 * 60 * 60),
             notes: "Three-month visit"
@@ -5973,7 +6185,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let now = try XCTUnwrap(
             calendar.date(byAdding: .day, value: 305, to: birthDate)
         )
-        let profile = BabyProfile(name: "Test Child", birthDate: birthDate)
+        let profile = CareProfile(name: "Test Child", birthDate: birthDate)
 
         let summaries = AutomaticMilestoneSummaryService.summaries(
             profile: profile,
@@ -5996,7 +6208,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let birthDate = try XCTUnwrap(
             calendar.date(from: DateComponents(year: 2025, month: 1, day: 1))
         )
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: birthDate,
             birthWeightKilograms: 3
@@ -6016,71 +6228,71 @@ final class SleepPredictionEngineTests: XCTestCase {
             )
         }
 
-        let sleepOne = BabyEvent(
+        let sleepOne = CareEvent(
             type: .sleep,
             startDate: try date(day: 5, hour: 9),
             endDate: try date(day: 5, hour: 10)
         )
-        let sleepTwo = BabyEvent(
+        let sleepTwo = CareEvent(
             type: .sleep,
             startDate: try date(day: 6, hour: 20),
             endDate: try date(day: 6, hour: 22)
         )
-        let draftSleep = BabyEvent(
+        let draftSleep = CareEvent(
             type: .sleep,
             startDate: try date(day: 7, hour: 9)
         )
-        let nightWaking = BabyEvent(
+        let nightWaking = CareEvent(
             type: .sleep,
             startDate: try date(day: 7, hour: 2),
             endDate: try date(day: 7, hour: 2, minute: 20)
         )
         nightWaking.sleepKind = .nightWaking
 
-        let nursingOne = BabyEvent(
+        let nursingOne = CareEvent(
             type: .nursing,
             startDate: try date(day: 10, hour: 10),
             endDate: try date(day: 10, hour: 10, minute: 20)
         )
         nursingOne.leftDurationSeconds = 20 * 60
-        let nursingTwo = BabyEvent(
+        let nursingTwo = CareEvent(
             type: .nursing,
             startDate: try date(day: 10, hour: 10, minute: 30),
             endDate: try date(day: 10, hour: 10, minute: 45)
         )
         nursingTwo.rightDurationSeconds = 15 * 60
-        let nursingThree = BabyEvent(
+        let nursingThree = CareEvent(
             type: .nursing,
             startDate: try date(day: 11, hour: 10),
             endDate: try date(day: 11, hour: 10, minute: 10)
         )
         nursingThree.leftDurationSeconds = 10 * 60
 
-        let pump = BabyEvent(
+        let pump = CareEvent(
             type: .custom,
             title: "Pump",
             startDate: try date(day: 20, hour: 8),
             endDate: try date(day: 20, hour: 8, minute: 15)
         )
-        let diaperOne = BabyEvent(type: .diaper, startDate: try date(day: 4))
-        let diaperTwo = BabyEvent(type: .diaper, startDate: try date(day: 8))
+        let diaperOne = CareEvent(type: .diaper, startDate: try date(day: 4))
+        let diaperTwo = CareEvent(type: .diaper, startDate: try date(day: 8))
 
-        let growth = BabyEvent(type: .growth, startDate: try date(day: 90))
+        let growth = CareEvent(type: .growth, startDate: try date(day: 90))
         growth.weightKilograms = 5
 
-        let tummyOne = BabyEvent(
+        let tummyOne = CareEvent(
             type: .activity,
             startDate: try date(day: 30, hour: 9),
             endDate: try date(day: 30, hour: 9, minute: 10)
         )
         tummyOne.activityType = .tummyTime
-        let tummyTwo = BabyEvent(
+        let tummyTwo = CareEvent(
             type: .activity,
             startDate: try date(day: 31, hour: 9),
             endDate: try date(day: 31, hour: 9, minute: 10)
         )
         tummyTwo.activityType = .tummyTime
-        let bath = BabyEvent(
+        let bath = CareEvent(
             type: .activity,
             startDate: try date(day: 32, hour: 18),
             endDate: try date(day: 32, hour: 18, minute: 30)
@@ -6116,6 +6328,50 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testProfileAvatarPhotoIsCircularBeforeSwiftUILayout() throws {
+        let source = UIGraphicsImageRenderer(
+            size: CGSize(width: 240, height: 100)
+        ).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 240, height: 100))
+        }
+        let data = try XCTUnwrap(source.jpegData(compressionQuality: 0.9))
+        let result = try XCTUnwrap(ThumbnailImageCache.circularImage(
+            attachmentID: UUID(),
+            data: data,
+            size: 40
+        ))
+
+        XCTAssertEqual(result.size.width, 40, accuracy: 0.001)
+        XCTAssertEqual(result.size.height, 40, accuracy: 0.001)
+
+        let cgImage = try XCTUnwrap(result.cgImage)
+        let width = cgImage.width
+        let height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = try XCTUnwrap(CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        func alpha(x: Int, y: Int) -> UInt8 {
+            pixels[(y * width + x) * 4 + 3]
+        }
+
+        XCTAssertLessThan(alpha(x: 0, y: 0), 10)
+        XCTAssertLessThan(alpha(x: width - 1, y: height - 1), 10)
+        XCTAssertGreaterThan(alpha(x: width / 2, y: 1), 50)
+        XCTAssertGreaterThan(alpha(x: width / 2, y: height - 2), 50)
+    }
+
+    @MainActor
     func testMilestonesRoundTripThroughJSONBackup() throws {
         let schema = PersistenceService.schema
         let configuration = Self.uniqueInMemoryConfiguration(schema: schema)
@@ -6126,7 +6382,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let photoID = UUID()
         let profilePhotoID = UUID()
 
-        let profile = BabyProfile(name: "Test Child", birthDate: birthDate)
+        let profile = CareProfile(name: "Test Child", birthDate: birthDate)
         profile.profilePhotoAttachmentID = profilePhotoID
         context.insert(profile)
         context.insert(PhotoAttachment(
@@ -6173,7 +6429,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(imported.sortOrder, 2)
 
         let importedProfile = try XCTUnwrap(
-            context.fetch(FetchDescriptor<BabyProfile>()).first
+            context.fetch(FetchDescriptor<CareProfile>()).first
         )
         XCTAssertEqual(importedProfile.profilePhotoAttachmentID, profilePhotoID)
 
@@ -6273,7 +6529,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let growthID = UUID()
         let temperatureID = UUID()
 
-        context.insert(BabyProfile(name: "Test Child", birthDate: birthDate))
+        context.insert(CareProfile(name: "Test Child", birthDate: birthDate))
         context.insert(DoctorAppointment(
             title: "6-month wellness check",
             appointmentType: .wellnessCheck,
@@ -6363,7 +6619,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let birthDate = calendar.date(from: DateComponents(year: 2026, month: 1, day: 31))!
         let now = calendar.date(from: DateComponents(year: 2026, month: 5, day: 31))!
-        let profile = BabyProfile(name: "Test Child", birthDate: birthDate)
+        let profile = CareProfile(name: "Test Child", birthDate: birthDate)
         let service = AgeGuideService(calendar: calendar)
 
         let guide = try XCTUnwrap(service.currentAgeGuide(for: profile, now: now))
@@ -6399,7 +6655,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let openedAt = Date(timeIntervalSince1970: 1_780_000_000)
         let notifiedAt = openedAt.addingTimeInterval(-60 * 60)
 
-        context.insert(BabyProfile(name: "Test Child", birthDate: SampleData.defaultBirthDate))
+        context.insert(CareProfile(name: "Test Child", birthDate: SampleData.defaultBirthDate))
         context.insert(AgeGuideReadState(
             guideID: "age-04",
             firstOpenedAt: openedAt,
@@ -7827,7 +8083,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testCaregiverIdentityRoundTripsThroughJSONBackupButNotFamilyDataset() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        context.insert(BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown))
+        context.insert(CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown))
         try context.save()
 
         let sourceSuite = "CaregiverIdentityBackupSource-\(UUID().uuidString)"
@@ -8184,7 +8440,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let laterStart = Date(timeIntervalSince1970: 200)
         let resolutionDate = Date(timeIntervalSince1970: 500)
 
-        let first = BabyEvent(
+        let first = CareEvent(
             id: UUID(),
             profileID: profileID,
             type: .sleep,
@@ -8197,7 +8453,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         first.timerAccumulatedSeconds = 0
         first.activeTimerSegmentStartDate = earlyStart
 
-        let duplicate = BabyEvent(
+        let duplicate = CareEvent(
             id: UUID(),
             profileID: profileID,
             type: .sleep,
@@ -8273,7 +8529,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testCareRoutineTemplateCreatesScopedRoutineAndSteps() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let profile = CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
         let household = Household(name: "Home")
         context.insert(profile)
         context.insert(household)
@@ -8385,7 +8641,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(run.resolutionRecord(for: first.id)?.resolution, .completed)
         XCTAssertEqual(run.resolutionRecord(for: second.id)?.caregiverName, "Caregiver B")
         XCTAssertEqual(run.resolutionRecord(for: second.id)?.resolution, .skipped)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<BabyEvent>()).count, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CareEvent>()).count, 0)
     }
 
     @MainActor
@@ -8453,7 +8709,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testCustomCareRoutineCreatesActionConfiguredSteps() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let profile = CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
         context.insert(profile)
 
         let routine = try XCTUnwrap(CareRoutineService.createRoutine(
@@ -8486,6 +8742,38 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(steps[1].eventType, .sleep)
         XCTAssertEqual(steps[1].sleepKind, .nightSleep)
         XCTAssertNil(steps[2].eventType)
+    }
+
+    @MainActor
+    func testAdultRoutineNormalizesChildOnlyActivitySubtype() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = CareProfile(profileType: .adult, name: "Test Adult")
+        context.insert(profile)
+
+        let routine = try XCTUnwrap(CareRoutineService.createRoutine(
+            title: "Movement",
+            scope: .profile,
+            steps: [
+                CareRoutineStepInput(
+                    title: "Start movement",
+                    action: .startTimer,
+                    eventType: .activity,
+                    activityType: .tummyTime
+                )
+            ],
+            profileID: profile.id,
+            profileType: .adult,
+            householdID: nil,
+            existingRoutines: [],
+            context: context
+        ))
+
+        let step = try XCTUnwrap(
+            context.fetch(FetchDescriptor<CareRoutineStep>())
+                .first { $0.routineID == routine.id }
+        )
+        XCTAssertEqual(step.activityType, .exercise)
     }
 
     @MainActor
@@ -8525,7 +8813,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testUpdatingCustomCareRoutinePreservesReorderedStepsAndReminder() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let profile = CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
         let household = Household(name: "Home")
         context.insert(profile)
         context.insert(household)
@@ -8588,7 +8876,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testCareRoutineDuplicateCopiesStepsWithoutReminder() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let profile = BabyProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
+        let profile = CareProfile(name: "Test Child", birthDate: Date(), sex: .unknown)
         context.insert(profile)
 
         let routine = try XCTUnwrap(CareRoutineService.createRoutine(
@@ -8655,7 +8943,7 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testCareRoutinesRoundTripThroughBackup() throws {
         let container = try makeInMemoryContainer()
         let context = container.mainContext
-        let profile = BabyProfile(profileType: .dog, name: "Test Dog", birthDate: Date(), sex: .unknown)
+        let profile = CareProfile(profileType: .dog, name: "Test Dog", birthDate: Date(), sex: .unknown)
         let household = Household(name: "Home")
         context.insert(profile)
         context.insert(household)
@@ -9083,7 +9371,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         let context = container.mainContext
         let householdID = UUID()
         let household = Household(id: householdID, name: "Test Home")
-        let profile = BabyProfile(
+        let profile = CareProfile(
             profileType: .dog,
             name: "Sample Dog",
             birthDate: Date(timeIntervalSince1970: 1_700_000_000)

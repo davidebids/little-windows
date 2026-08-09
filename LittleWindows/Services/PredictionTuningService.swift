@@ -16,8 +16,8 @@ struct AccuracyBreakdown: Identifiable, Hashable {
 
 enum PredictionTuningService {
     static func currentPrediction(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         settings: PredictionSettings = .default
     ) -> SleepPrediction? {
@@ -41,8 +41,8 @@ enum PredictionTuningService {
 
     @MainActor
     static func refreshCurrentPrediction(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         context: ModelContext,
         settings: PredictionSettings = .default
@@ -86,7 +86,7 @@ enum PredictionTuningService {
     }
 
     static func resolveLatestPrediction(
-        with sleepEvent: BabyEvent,
+        with sleepEvent: CareEvent,
         records: [SleepPredictionRecord]
     ) {
         guard sleepEvent.isSleepBlock else { return }
@@ -172,7 +172,7 @@ enum PredictionTuningService {
             .max { $0.generatedAt < $1.generatedAt }
     }
 
-    private static func latestCompletedSleepID(in events: [BabyEvent]) -> UUID? {
+    private static func latestCompletedSleepID(in events: [CareEvent]) -> UUID? {
         events
             .filter { $0.isSleepBlock && $0.endDate != nil }
             .max { $0.startDate < $1.startDate }?

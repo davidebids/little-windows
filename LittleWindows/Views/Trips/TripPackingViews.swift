@@ -10,7 +10,7 @@ struct TripsHomeView: View {
     let trips: [PackingTrip]
     let travelers: [TripTraveler]
     let items: [PackingItem]
-    let profiles: [BabyProfile]
+    let profiles: [CareProfile]
     let openTrip: (UUID) -> Void
 
     @State private var showingNewTrip = false
@@ -404,7 +404,7 @@ struct PackingTripCreationView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var notificationManager = NotificationManager.shared
     let household: Household
-    let profiles: [BabyProfile]
+    let profiles: [CareProfile]
     let existingTrips: [PackingTrip]
     let onCreated: (PackingTrip) -> Void
 
@@ -536,7 +536,9 @@ struct PackingTripCreationView: View {
                     )) {
                         Label(
                             profile.name,
-                            systemImage: profile.profileType == .dog ? "pawprint.fill" : "figure.child"
+                            systemImage: profile.profileType == .dog
+                                ? "pawprint.fill"
+                                : profile.profileType == .adult ? "person.fill" : "figure.child"
                         )
                     }
                 }
@@ -640,7 +642,7 @@ struct PackingTripCreationView: View {
         }
         travelerInputs.append(contentsOf: profiles.filter { selectedProfileIDs.contains($0.id) }.map {
             TripTravelerInput(
-                kind: $0.profileType == .dog ? .dog : .child,
+                kind: $0.profileType.tripTravelerKind,
                 profileID: $0.id,
                 displayName: $0.name
             )
@@ -708,7 +710,7 @@ struct PackingListDetailView: View {
     let itineraryChoiceGroups: [TripItineraryChoiceGroup]
     let itineraryItems: [TripItineraryItem]
     let itineraryLinks: [TripItineraryLink]
-    let profiles: [BabyProfile]
+    let profiles: [CareProfile]
     let shoppingLists: [ShoppingList]
     let shoppingItems: [ShoppingListItem]
 
@@ -2077,7 +2079,7 @@ private struct PackingTravelersEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     let trip: PackingTrip
-    let profiles: [BabyProfile]
+    let profiles: [CareProfile]
 
     @State private var currentTravelers: [TripTraveler]
     @State private var currentBags: [PackingBag]
@@ -2092,7 +2094,7 @@ private struct PackingTravelersEditorView: View {
         travelers: [TripTraveler],
         bags: [PackingBag],
         items: [PackingItem],
-        profiles: [BabyProfile]
+        profiles: [CareProfile]
     ) {
         self.trip = trip
         self.profiles = profiles
@@ -2107,7 +2109,7 @@ private struct PackingTravelersEditorView: View {
         ))
     }
 
-    private var availableProfiles: [BabyProfile] {
+    private var availableProfiles: [CareProfile] {
         let linkedIDs = Set(currentTravelers.compactMap(\.profileID))
         return profiles.filter { !linkedIDs.contains($0.id) }
     }
@@ -2176,14 +2178,16 @@ private struct PackingTravelersEditorView: View {
             }
 
             if !availableProfiles.isEmpty {
-                Section("Add Child or Dog") {
+                Section("Add Care Profile") {
                     ForEach(availableProfiles) { profile in
                         Button {
                             addProfile(profile)
                         } label: {
                             Label(
                                 profile.name,
-                                systemImage: profile.profileType == .dog ? "pawprint.fill" : "figure.child"
+                                systemImage: profile.profileType == .dog
+                                    ? "pawprint.fill"
+                                    : profile.profileType == .adult ? "person.fill" : "figure.child"
                             )
                         }
                     }
@@ -2247,10 +2251,10 @@ private struct PackingTravelersEditorView: View {
         refreshRelatedData()
     }
 
-    private func addProfile(_ profile: BabyProfile) {
+    private func addProfile(_ profile: CareProfile) {
         guard let traveler = TripPackingService.addTraveler(
             to: trip,
-            kind: profile.profileType == .dog ? .dog : .child,
+            kind: profile.profileType.tripTravelerKind,
             profileID: profile.id,
             displayName: profile.name,
             includeStarterItems: includeStarterItems,
@@ -2288,6 +2292,16 @@ private struct PackingTravelersEditorView: View {
             predicate: #Predicate { $0.tripID == tripID },
             sortBy: [SortDescriptor(\PackingItem.sortOrder)]
         ))) ?? []
+    }
+}
+
+private extension CareProfileType {
+    var tripTravelerKind: TripTravelerKind {
+        switch self {
+        case .child: .child
+        case .adult: .adult
+        case .dog: .dog
+        }
     }
 }
 

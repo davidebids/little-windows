@@ -79,7 +79,11 @@ final class PuppyStageGuideService {
     }
 
     func ageWeeks(for profile: CareProfile, now: Date = Date(), calendar: Calendar = .current) -> Double {
-        let days = calendar.dateComponents([.day], from: profile.birthDate, to: now).day ?? 0
+        guard profile.profileType.capabilities.supportsPuppyGuide,
+              let birthDate = profile.birthDate else {
+            return 0
+        }
+        let days = calendar.dateComponents([.day], from: birthDate, to: now).day ?? 0
         return max(0, Double(days) / 7)
     }
 

@@ -144,6 +144,38 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
         submit(command)
     }
 
+    @discardableResult
+    func logMedicationTaken(_ medication: WatchMedicationSnapshot) -> Bool {
+        submitMedicationCommand(.logMedicationTaken, medication: medication)
+    }
+
+    @discardableResult
+    func logMedicationSkipped(_ medication: WatchMedicationSnapshot) -> Bool {
+        submitMedicationCommand(.logMedicationSkipped, medication: medication)
+    }
+
+    @discardableResult
+    func snoozeMedication(_ medication: WatchMedicationSnapshot) -> Bool {
+        guard medication.snoozeAvailable else { return false }
+        return submitMedicationCommand(.snoozeMedication, medication: medication)
+    }
+
+    private func submitMedicationCommand(
+        _ kind: WatchCommandKind,
+        medication: WatchMedicationSnapshot
+    ) -> Bool {
+        guard state.selectedProfileID == medication.profileID,
+              state.upcomingMedication?.id == medication.id else { return false }
+        let command = WatchCommand(
+            kind: kind,
+            profileID: medication.profileID,
+            medication: medication
+        )
+        applyOptimistic(command, action: nil)
+        submit(command)
+        return true
+    }
+
     func handle(_ tasks: Set<WKRefreshBackgroundTask>) {
         for task in tasks {
             if let connectivityTask = task as? WKWatchConnectivityRefreshBackgroundTask {
@@ -453,6 +485,16 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
                 timer.updatedAt = command.issuedAt
                 optimisticState.activeTimers[index] = timer
             }
+        case .logMedicationTaken, .logMedicationSkipped:
+            if optimisticState.upcomingMedication?.id == command.medication?.id {
+                optimisticState.upcomingMedication = nil
+            }
+        case .snoozeMedication:
+            if var medication = optimisticState.upcomingMedication,
+               medication.id == command.medication?.id {
+                medication.snoozeAvailable = false
+                optimisticState.upcomingMedication = medication
+            }
         case .selectProfile:
             optimisticState.selectedProfileID = command.profileID
             if let profile = optimisticState.profiles.first(where: {
@@ -474,6 +516,7 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
                 optimisticState.activeTimers = []
                 optimisticState.prediction = nil
                 optimisticState.todayMetrics = []
+                optimisticState.upcomingMedication = nil
             }
         }
         return optimisticState
@@ -523,7 +566,7 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
     }
 
     private let timerActionIDs: Set<String> = [
-        "sleep", "nursing", "pumping", "tummy-time", "story-time",
+        "sleep", "nursing", "pumping", "activity", "tummy-time", "story-time",
         "brush-teeth", "indoor-play", "outdoor-play", "screen-time", "bath",
         "walk", "rest", "training", "grooming"
     ]

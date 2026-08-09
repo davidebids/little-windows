@@ -58,7 +58,7 @@ struct SolidsReportSnapshot: Hashable {
 enum SolidsReportingService {
     static func snapshot(
         profileID: UUID,
-        events: [BabyEvent],
+        events: [CareEvent],
         eventItems: [SolidFoodEventItem],
         progress: [SolidFoodProgress],
         period: ClosedRange<Date>,
@@ -241,14 +241,14 @@ struct InsightsSnapshot {
     var bedtimes: [ChartDataPoint]
     var morningWakes: [ChartDataPoint]
     var sleepScores: [NightSleepScoreSummary]
-    var sleepBlocks: [BabyEvent]
+    var sleepBlocks: [CareEvent]
     var medicineNames: [String]
     var growthMetrics: [InsightMetric] = []
     var temperatureMetrics: [InsightMetric] = []
     var medicineMetrics: [InsightMetric] = []
     var growthMeasurements: [GrowthMeasurementSummary] = []
     var temperatureMeasurements: [TemperatureMeasurementSummary] = []
-    var medicineEvents: [BabyEvent] = []
+    var medicineEvents: [CareEvent] = []
     var pooColorShare: [CategoryValue] = []
     var peeAmountShare: [CategoryValue] = []
     var pooAmountShare: [CategoryValue] = []
@@ -309,8 +309,8 @@ struct InsightsSnapshotOptions {
 enum InsightsAnalyticsService {
     static func snapshot(
         profileName: String,
-        profile: BabyProfile? = nil,
-        events: [BabyEvent],
+        profile: CareProfile? = nil,
+        events: [CareEvent],
         records: [SleepPredictionRecord],
         periodStart: Date,
         periodEnd: Date,
@@ -888,7 +888,7 @@ enum InsightsAnalyticsService {
     }
 
     static func dailySleepTotals(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [DailySleepSummary] {
@@ -914,12 +914,12 @@ enum InsightsAnalyticsService {
     }
 
     static func wakeWindowCalculations(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [WakeWindowSummary] {
         let sleeps = events.filter { $0.isSleepBlock && $0.endDate != nil }
-        let sleepsByStartDate = sleeps.reduce(into: [Date: BabyEvent]()) { values, sleep in
+        let sleepsByStartDate = sleeps.reduce(into: [Date: CareEvent]()) { values, sleep in
             values[sleep.startDate] = sleep
         }
         return SleepPredictionEngine.wakeWindowSamples(from: sleeps, now: range.upperBound, calendar: calendar)
@@ -937,8 +937,8 @@ enum InsightsAnalyticsService {
     }
 
     static func sleepPressureBeforeSleepCalculations(
-        profile: BabyProfile?,
-        events: [BabyEvent],
+        profile: CareProfile?,
+        events: [CareEvent],
         records: [SleepPredictionRecord] = [],
         range: Range<Date>,
         calendar: Calendar = .current
@@ -990,7 +990,7 @@ enum InsightsAnalyticsService {
     }
 
     static func bedtimeExtraction(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [ChartDataPoint] {
@@ -1009,7 +1009,7 @@ enum InsightsAnalyticsService {
     }
 
     static func morningWakeExtraction(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [ChartDataPoint] {
@@ -1032,7 +1032,7 @@ enum InsightsAnalyticsService {
     }
 
     static func nightSleepScores(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [NightSleepScoreSummary] {
@@ -1104,7 +1104,7 @@ enum InsightsAnalyticsService {
     }
 
     static func feedingAggregation(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [DailyFeedingSummary] {
@@ -1137,7 +1137,7 @@ enum InsightsAnalyticsService {
     }
 
     static func diaperAggregation(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [DailyDiaperSummary] {
@@ -1159,7 +1159,7 @@ enum InsightsAnalyticsService {
     }
 
     static func activityAggregation(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [DailyActivitySummary] {
@@ -1222,7 +1222,7 @@ enum InsightsAnalyticsService {
     }
 
     static func feedToSleepIntervals(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [Double] {
@@ -1287,7 +1287,7 @@ enum InsightsAnalyticsService {
     }
 
     private static func localRangeContains(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         range: Range<Date>,
         calendar: Calendar
     ) -> Bool {
@@ -1299,7 +1299,7 @@ enum InsightsAnalyticsService {
         return range.contains(event.startDate)
     }
 
-    private static func sleepBucketDate(for event: BabyEvent, calendar: Calendar) -> Date {
+    private static func sleepBucketDate(for event: CareEvent, calendar: Calendar) -> Date {
         guard event.sleepKind == .nightSleep || event.sleepKind == .nightWaking else {
             return event.localStartDay(calendar: calendar)
         }
@@ -1310,15 +1310,15 @@ enum InsightsAnalyticsService {
     }
 
     private static func careSessions(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
-    ) -> [BabyEvent] {
+    ) -> [CareEvent] {
         let values = events.filter {
             ($0.type == .feed || $0.type == .nursing) &&
                 localRangeContains($0, range: range, calendar: calendar)
         }.sorted { $0.startDate < $1.startDate }
-        var sessions = [BabyEvent]()
+        var sessions = [CareEvent]()
         for event in values {
             if let previous = sessions.last,
                event.startDate.timeIntervalSince(previous.startDate) < 45 * 60 {
@@ -1330,14 +1330,14 @@ enum InsightsAnalyticsService {
     }
 
     private static func groupedNursingSessions(
-        events: [BabyEvent],
+        events: [CareEvent],
         range: Range<Date>,
         calendar: Calendar = .current
-    ) -> [BabyEvent] {
+    ) -> [CareEvent] {
         let values = events.filter {
             $0.type == .nursing && localRangeContains($0, range: range, calendar: calendar)
         }.sorted { $0.startDate < $1.startDate }
-        var sessions = [BabyEvent]()
+        var sessions = [CareEvent]()
         for event in values {
             if let previous = sessions.last,
                event.startDate.timeIntervalSince(previous.startDate) < 45 * 60 {
@@ -1400,7 +1400,7 @@ enum InsightsAnalyticsService {
         ]
     }
 
-    private static func hourBuckets(events: [BabyEvent], calendar: Calendar) -> [CategoryValue] {
+    private static func hourBuckets(events: [CareEvent], calendar: Calendar) -> [CategoryValue] {
         let ranges = [(0, 6, "12-6a"), (6, 12, "6a-12p"), (12, 18, "12-6p"), (18, 24, "6p-12a")]
         return ranges.map { lower, upper, label in
             CategoryValue(
@@ -1591,7 +1591,7 @@ enum InsightsAnalyticsService {
 
     private static func diaperTimeTrend(
         profileName: String,
-        events: [BabyEvent],
+        events: [CareEvent],
         calendar: Calendar
     ) -> InsightTrend? {
         let dirty = events.filter { $0.diaperKind == .dirty || $0.diaperKind == .both }
@@ -1624,7 +1624,7 @@ enum InsightsAnalyticsService {
 
     private static func bathTimeTrend(
         profileName: String,
-        events: [BabyEvent],
+        events: [CareEvent],
         calendar: Calendar
     ) -> InsightTrend? {
         guard !events.isEmpty else { return nil }

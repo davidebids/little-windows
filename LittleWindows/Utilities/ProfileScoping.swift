@@ -1,10 +1,10 @@
 import Foundation
 
-protocol ProfileScopedRecord {
+protocol ProfileScopedRecord: AnyObject {
     var profileID: UUID? { get set }
 }
 
-extension BabyEvent: ProfileScopedRecord {}
+extension CareEvent: ProfileScopedRecord {}
 extension SleepPredictionRecord: ProfileScopedRecord {}
 extension MilestoneEntry: ProfileScopedRecord {}
 extension DoctorAppointment: ProfileScopedRecord {}

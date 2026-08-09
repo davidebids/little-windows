@@ -83,7 +83,7 @@ struct ReportsView: View {
 
 struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \BabyProfile.createdAt) private var profiles: [BabyProfile]
+    @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query private var records: [SleepPredictionRecord]
     @AppStorage("feedAdjustmentEnabled") private var feedAdjustmentEnabled = true
     @AppStorage("nursingAdjustmentEnabled") private var nursingAdjustmentEnabled = true
@@ -94,12 +94,12 @@ struct HistoryView: View {
     @AppStorage("customWakeMaximum") private var customWakeMaximum = 0.0
     @AppStorage("historyDisplayMode") private var displayModeRawValue = HistoryDisplayMode.list.rawValue
     @State private var internalSelectedDate: Date
-    @State private var events: [BabyEvent] = []
+    @State private var events: [CareEvent] = []
     @State private var appointments: [DoctorAppointment] = []
     @State private var milestones: [MilestoneEntry] = []
     @State private var editorRoute: EventEditorRoute?
-    @State private var activeTimerToEdit: BabyEvent?
-    @State private var eventPendingDelete: BabyEvent?
+    @State private var activeTimerToEdit: CareEvent?
+    @State private var eventPendingDelete: CareEvent?
     @State private var milestonePendingDelete: MilestoneEntry?
     @State private var appointmentPendingDelete: DoctorAppointment?
     @State private var showingDeleteEventConfirmation = false
@@ -149,7 +149,7 @@ struct HistoryView: View {
         return Date()
     }
 
-    private var profile: BabyProfile? {
+    private var profile: CareProfile? {
         profileService.selectedProfile(in: profiles)
     }
     private var scopedRecords: [SleepPredictionRecord] {
@@ -533,13 +533,13 @@ struct HistoryView: View {
 
         do {
             if let selectedProfileID {
-                let eventDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                let eventDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == selectedProfileID &&
                             event.startDate >= eventFetchStart &&
                             event.startDate < eventFetchEnd
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 events = try modelContext.fetch(eventDescriptor)
                     .filter {
@@ -568,12 +568,12 @@ struct HistoryView: View {
                 )
                 milestones = try modelContext.fetch(milestoneDescriptor)
             } else {
-                let eventDescriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                let eventDescriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.startDate >= eventFetchStart &&
                             event.startDate < eventFetchEnd
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 events = try modelContext.fetch(eventDescriptor)
                     .filter {
@@ -605,7 +605,7 @@ struct HistoryView: View {
         }
     }
 
-    static func visibleDayEvent(_ event: BabyEvent, selectedProfileID: UUID?) -> Bool {
+    static func visibleDayEvent(_ event: CareEvent, selectedProfileID: UUID?) -> Bool {
         event.matchesProfile(selectedProfileID) && !event.isTimerDraft
     }
 
@@ -620,7 +620,7 @@ struct HistoryView: View {
     }
 
     private func eventChanged(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         refreshPrediction: Bool = true,
         waitForSystemIntegrations: Bool = false
     ) async {
@@ -640,7 +640,7 @@ struct HistoryView: View {
         refreshDayData()
     }
 
-    private func recentPredictionEvents(including event: BabyEvent? = nil) -> [BabyEvent] {
+    private func recentPredictionEvents(including event: CareEvent? = nil) -> [CareEvent] {
         let selectedProfileID = profile?.id
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let cutoff = Calendar.current.date(
@@ -648,11 +648,11 @@ struct HistoryView: View {
             value: -45,
             to: Calendar.current.startOfDay(for: Date())
         ) ?? Date()
-        var descriptor = FetchDescriptor<BabyEvent>(
-            predicate: #Predicate<BabyEvent> { value in
+        var descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { value in
                 value.profileID == selectedProfileID && value.startDate >= cutoff
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         descriptor.fetchLimit = 900
         var values = (try? modelContext.fetch(descriptor)) ?? []
@@ -662,7 +662,7 @@ struct HistoryView: View {
         return values
     }
 
-    private func open(_ event: BabyEvent) {
+    private func open(_ event: CareEvent) {
         if event.type == .feed, event.feedKind == .solid {
             let router = DeepLinkRouter.shared
             router.openSolids(
@@ -679,7 +679,7 @@ struct HistoryView: View {
         }
     }
 
-    private func confirmDelete(_ event: BabyEvent) {
+    private func confirmDelete(_ event: CareEvent) {
         eventPendingDelete = event
         showingDeleteEventConfirmation = true
     }
@@ -694,7 +694,7 @@ struct HistoryView: View {
         showingDeleteAppointmentConfirmation = true
     }
 
-    private func adjustStart(of event: BabyEvent, to date: Date) {
+    private func adjustStart(of event: CareEvent, to date: Date) {
         EventTimerService.adjustStartDate(event, to: date)
         Task {
             await eventChanged(
@@ -705,7 +705,7 @@ struct HistoryView: View {
         }
     }
 
-    private func stop(_ event: BabyEvent) {
+    private func stop(_ event: CareEvent) {
         EventMutationService.stopTimer(event, context: modelContext)
         Task {
             await eventChanged(
@@ -716,7 +716,7 @@ struct HistoryView: View {
         }
     }
 
-    private func resume(_ event: BabyEvent) {
+    private func resume(_ event: CareEvent) {
         EventMutationService.resumeTimer(event, context: modelContext)
         Task {
             await eventChanged(
@@ -727,7 +727,7 @@ struct HistoryView: View {
         }
     }
 
-    private func reset(_ event: BabyEvent) {
+    private func reset(_ event: CareEvent) {
         EventMutationService.resetTimer(event, context: modelContext)
         Task {
             await eventChanged(
@@ -738,7 +738,7 @@ struct HistoryView: View {
         }
     }
 
-    private func setStartTimeZone(_ identifier: String, for event: BabyEvent) {
+    private func setStartTimeZone(_ identifier: String, for event: CareEvent) {
         event.startTimeZoneIdentifier = identifier
         Task {
             await eventChanged(
@@ -749,7 +749,7 @@ struct HistoryView: View {
         }
     }
 
-    private func setEndTimeZone(_ identifier: String, for event: BabyEvent) {
+    private func setEndTimeZone(_ identifier: String, for event: CareEvent) {
         event.endTimeZoneIdentifier = identifier
         Task {
             await eventChanged(
@@ -760,7 +760,7 @@ struct HistoryView: View {
         }
     }
 
-    private func save(_ event: BabyEvent, endDate: Date? = nil) {
+    private func save(_ event: CareEvent, endDate: Date? = nil) {
         EventMutationService.saveTimer(event, context: modelContext, endDate: endDate)
         Task {
             await eventChanged(
@@ -771,7 +771,7 @@ struct HistoryView: View {
         }
     }
 
-    private func switchNursingSide(_ event: BabyEvent) {
+    private func switchNursingSide(_ event: CareEvent) {
         EventTimerService.switchNursingSide(event, context: modelContext)
         Task {
             await eventChanged(
@@ -782,7 +782,7 @@ struct HistoryView: View {
         }
     }
 
-    private func setNursingSide(_ side: NursingSide, for event: BabyEvent) {
+    private func setNursingSide(_ side: NursingSide, for event: CareEvent) {
         EventTimerService.setNursingSide(event, to: side, context: modelContext)
         Task {
             await eventChanged(
@@ -793,7 +793,7 @@ struct HistoryView: View {
         }
     }
 
-    private func delete(_ event: BabyEvent) {
+    private func delete(_ event: CareEvent) {
         Task {
             await EventMutationService.delete(
                 event,
@@ -914,7 +914,7 @@ enum DayTimelineLayout {
     }
 
     static func placements(
-        for events: [BabyEvent],
+        for events: [CareEvent],
         on date: Date,
         now: Date = Date(),
         calendar: Calendar = .current
@@ -982,9 +982,9 @@ enum DayTimelineLayout {
 
 private struct CalendarDayView: View {
     let date: Date
-    let events: [BabyEvent]
-    let edit: (BabyEvent) -> Void
-    let delete: (BabyEvent) -> Void
+    let events: [CareEvent]
+    let edit: (CareEvent) -> Void
+    let delete: (CareEvent) -> Void
 
     private let calendar = Calendar.current
     private let hourHeight: CGFloat = 68
@@ -1136,7 +1136,7 @@ private struct CalendarDayView: View {
     }
 
     private func eventBlock(
-        _ event: BabyEvent,
+        _ event: CareEvent,
         placement: DayTimelinePlacement,
         availableWidth: CGFloat
     ) -> some View {
@@ -1183,7 +1183,7 @@ private struct CalendarDayView: View {
 }
 
 private struct CalendarEventBlock: View {
-    let event: BabyEvent
+    let event: CareEvent
     let height: CGFloat
 
     var body: some View {
@@ -1290,6 +1290,20 @@ private struct SummaryGrid: View {
                 SummaryCell("Symptoms", "\(summary.symptomCount)", icon: "exclamationmark.triangle.fill", color: .orange)
                 SummaryCell("Vaccines", "\(summary.vaccineCount)", icon: "syringe.fill", color: .blue)
                 SummaryCell("Glucose", "\(summary.glucoseCount)", icon: "drop.triangle.fill", color: .pink)
+            } else if profileType == .adult {
+                SummaryCell("Medicine", "\(summary.medicineNames.count)", icon: "cross.case.fill", color: .red)
+                SummaryCell("Symptoms", "\(summary.symptomCount)", icon: "exclamationmark.triangle.fill", color: .orange)
+                SummaryCell("Blood pressure", "\(summary.bloodPressureCount)", icon: "heart.text.square.fill", color: .red)
+                SummaryCell("Pulse", "\(summary.heartRateCount)", icon: "waveform.path.ecg", color: .pink)
+                SummaryCell("Oxygen", "\(summary.oxygenSaturationCount)", icon: "lungs.fill", color: .blue)
+                SummaryCell("Respiratory rate", "\(summary.respiratoryRateCount)", icon: "wind", color: .cyan)
+                SummaryCell("Glucose", "\(summary.glucoseCount)", icon: "drop.triangle.fill", color: .purple)
+                SummaryCell("Temperature", "\(summary.temperatureCount)", icon: "thermometer.medium", color: .red)
+                SummaryCell("Pain", "\(summary.painCount)", icon: "bandage.fill", color: .orange)
+                SummaryCell("Weight & height", "\(summary.growthCount)", icon: "ruler.fill", color: .green)
+                SummaryCell("Sleep", DurationFormatting.string(seconds: summary.totalSleep), icon: "moon.fill", color: .indigo)
+                SummaryCell("Activities", "\(summary.activityCount)", icon: "figure.play", color: .green)
+                SummaryCell("Custom", "\(summary.customCount)", icon: "sparkles", color: .gray)
             } else {
                 SummaryCell("Total sleep", DurationFormatting.string(seconds: summary.totalSleep), icon: "moon.fill", color: .indigo)
                 SummaryCell("Day sleep", DurationFormatting.string(seconds: summary.daytimeSleep), icon: "sun.haze.fill", color: .orange)

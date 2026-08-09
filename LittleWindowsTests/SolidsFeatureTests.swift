@@ -4,7 +4,7 @@ import XCTest
 
 final class SolidsFeatureTests: XCTestCase {
     func testTodayFeedQuickActionShowsLatestSolidFoodNamesCompactly() {
-        let event = BabyEvent(type: .feed)
+        let event = CareEvent(type: .feed)
         event.feedKind = .solid
         event.solidFoodDetails = [
             SolidFoodLogDetail(foodID: "huckleberry", foodName: "Huckleberry"),
@@ -19,7 +19,7 @@ final class SolidsFeatureTests: XCTestCase {
     }
 
     func testTodayFeedQuickActionFallsBackToLegacySolidFoodDescription() {
-        let event = BabyEvent(type: .feed)
+        let event = CareEvent(type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Huckleberry, Yogurt"
 
@@ -45,6 +45,9 @@ final class SolidsFeatureTests: XCTestCase {
             XCTAssertFalse(food.sourceURLs.isEmpty, food.name)
             XCTAssertTrue(food.preparations.allSatisfy { !$0.instructions.isEmpty }, food.name)
             XCTAssertTrue(food.preparations.allSatisfy {
+                !$0.servingAmount.firstServing.isEmpty && !$0.servingAmount.routineServing.isEmpty
+            }, "\(food.name) should include first and routine serving amounts")
+            XCTAssertTrue(food.preparations.allSatisfy {
                 $0.instructions.localizedCaseInsensitiveContains(food.name)
             }, "Preparation guidance should identify \(food.name), not just its category")
             XCTAssertTrue(food.preparations.map(\.minimumAgeMonths).allSatisfy {
@@ -68,6 +71,32 @@ final class SolidsFeatureTests: XCTestCase {
                 $0.host == "fdc.nal.usda.gov" && $0.absoluteString.localizedCaseInsensitiveContains("food-search")
             }, "\(food.name) should have an ingredient-specific USDA lookup")
         }
+    }
+
+    func testPeanutButterUsesSpecificCopyAndServingAmounts() throws {
+        let peanutButter = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Peanut butter"))
+        let firstStage = try XCTUnwrap(peanutButter.preparations.first)
+
+        XCTAssertTrue(firstStage.servingAmount.firstServing.contains("1 tsp"))
+        XCTAssertTrue(firstStage.servingAmount.routineServing.contains("2 tsp"))
+        XCTAssertTrue(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("smooth"))
+        XCTAssertTrue(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("thinned"))
+
+        let displayedCopy = [
+            peanutButter.details.introductionSummary,
+            peanutButter.details.backgroundSummary ?? "",
+            peanutButter.details.nutritionSummary,
+            peanutButter.details.allergenSummary,
+            peanutButter.details.choosingGuidance,
+            peanutButter.details.storageGuidance,
+            peanutButter.safetyNote,
+            peanutButter.chokingGuidance
+        ] + peanutButter.preparations.flatMap { stage in
+            [stage.instructions, stage.servingAmount.firstServing, stage.servingAmount.routineServing]
+        } + peanutButter.preparationWalkthrough(stageIndex: 0).actions.map(\.detail)
+
+        XCTAssertFalse(displayedCopy.contains { $0.localizedCaseInsensitiveContains("bones") })
+        XCTAssertFalse(displayedCopy.contains { $0.localizedCaseInsensitiveContains("skin") })
     }
 
     func testEveryIngredientUsesRichEditorialCopyInsteadOfCategoryBoilerplate() {
@@ -104,6 +133,143 @@ final class SolidsFeatureTests: XCTestCase {
                 "Every practical answer should stay anchored to \(food.name)"
             )
         }
+    }
+
+    func testCatalogCopyStaysAccurateToEachFoodsPhysicalForm() throws {
+        func displayedCopy(for food: SolidsReferenceFood) -> String {
+            let details = [
+                food.details.introductionSummary,
+                food.details.backgroundSummary ?? "",
+                food.details.nutritionSummary,
+                food.details.allergenSummary,
+                food.details.choosingGuidance,
+                food.details.storageGuidance,
+                food.safetyNote,
+                food.chokingGuidance
+            ]
+            let questions = food.details.questions.flatMap { [$0.question, $0.answer] }
+            let stages = food.preparations.flatMap {
+                [$0.instructions, $0.servingAmount.firstServing, $0.servingAmount.routineServing]
+            }
+            let walkthroughs = food.preparations.indices.flatMap { index in
+                food.preparationWalkthrough(stageIndex: index).actions.flatMap {
+                    [$0.title, $0.detail, $0.completionLabel]
+                }
+            }
+            return (details + questions + stages + walkthroughs).joined(separator: "\n").lowercased()
+        }
+
+        let retiredCrossCategoryCopy = [
+            "skin, bones, shell",
+            "one-size-fits-all food shape",
+            "a bean should mash through the center, tofu should compress",
+            "remove every shell, tail, bone",
+            "remove all bone, cartilage, skin, and gristle",
+            "stems, sticks, pods, woody fibers"
+        ]
+        for food in SolidsReferenceCatalog.foods {
+            let copy = displayedCopy(for: food)
+            XCTAssertFalse(copy.contains("\\(name"), "\(food.name) contains an uninterpolated template placeholder")
+            for phrase in retiredCrossCategoryCopy {
+                XCTAssertFalse(copy.contains(phrase), "\(food.name) contains cross-category copy: \(phrase)")
+            }
+        }
+
+        let applesauce = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Applesauce"))
+        let applesauceCopy = displayedCopy(for: applesauce)
+        XCTAssertFalse(applesauceCopy.contains("wash applesauce"))
+        XCTAssertFalse(applesauceCopy.contains("raw applesauce"))
+        XCTAssertFalse(applesauceCopy.contains("pit"))
+        XCTAssertFalse(applesauceCopy.contains("core"))
+        XCTAssertTrue(applesauceCopy.contains("unsweetened"))
+        XCTAssertTrue(applesauceCopy.contains("scoopable"))
+
+        let pineapple = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Pineapple"))
+        XCTAssertFalse(pineapple.chokingGuidance.localizedCaseInsensitiveContains("hard raw pineapple chunks"))
+
+        let breadfruit = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Breadfruit"))
+        let breadfruitCopy = displayedCopy(for: breadfruit)
+        XCTAssertFalse(breadfruitCopy.contains("gummy ball"))
+        XCTAssertTrue(breadfruitCopy.contains("cook"))
+
+        let groundBeef = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Ground beef"))
+        let groundBeefCopy = displayedCopy(for: groundBeef)
+        XCTAssertFalse(groundBeefCopy.contains("bone"))
+        XCTAssertFalse(groundBeefCopy.contains("shell"))
+        XCTAssertFalse(groundBeefCopy.contains("tough skin"))
+        XCTAssertTrue(groundBeefCopy.contains("moist"))
+
+        let chickenThigh = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Chicken thigh"))
+        let chickenThighCopy = displayedCopy(for: chickenThigh)
+        XCTAssertTrue(chickenThighCopy.contains("boneless portion"))
+        XCTAssertTrue(chickenThighCopy.contains("cooked on the bone"))
+        XCTAssertTrue(chickenThighCopy.contains("inspect it again"))
+
+        let peanutButter = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Peanut butter"))
+        let peanutButterCopy = displayedCopy(for: peanutButter)
+        XCTAssertFalse(peanutButterCopy.contains("whole peanut butter"))
+        XCTAssertFalse(peanutButterCopy.contains("bone"))
+        XCTAssertFalse(peanutButterCopy.contains("skin"))
+        XCTAssertTrue(peanutButterCopy.contains("thin"))
+
+        let smoothie = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Fruit smoothie bowl"))
+        let smoothieCopy = displayedCopy(for: smoothie)
+        XCTAssertFalse(smoothieCopy.contains("bone"))
+        XCTAssertFalse(smoothieCopy.contains("shell"))
+        XCTAssertTrue(smoothieCopy.contains("spoon"))
+
+        let eggYolk = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Egg yolk"))
+        let eggYolkCopy = displayedCopy(for: eggYolk)
+        XCTAssertFalse(eggYolkCopy.contains("white and yolk"))
+        XCTAssertFalse(eggYolkCopy.contains("both white"))
+        XCTAssertTrue(eggYolkCopy.contains("moist"))
+        XCTAssertEqual(eggYolk.servingVisuals, [.spoon, .spoon, .spoon, .spoon])
+
+        let silkenTofu = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Silken tofu"))
+        let silkenTofuCopy = displayedCopy(for: silkenTofu)
+        XCTAssertFalse(silkenTofuCopy.contains("a bean should"))
+        XCTAssertFalse(silkenTofuCopy.contains("patty or cake"))
+        XCTAssertFalse(silkenTofuCopy.contains("rubbery skin"))
+        XCTAssertTrue(silkenTofuCopy.contains("scoopable"))
+
+        let tahini = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Tahini"))
+        let tahiniCopy = displayedCopy(for: tahini)
+        XCTAssertFalse(tahiniCopy.contains("whole tahini"))
+        XCTAssertFalse(tahiniCopy.contains("grind tahini"))
+        XCTAssertTrue(tahiniCopy.contains("smooth"))
+
+        let bayLeaf = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Bay leaf flavor"))
+        let bayLeafCopy = displayedCopy(for: bayLeaf)
+        XCTAssertTrue(bayLeafCopy.contains("remove"))
+        XCTAssertTrue(bayLeaf.preparations.allSatisfy {
+            $0.servingAmount.firstServing.localizedCaseInsensitiveContains("no leaf in the serving")
+        })
+
+        let sprouts = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Mung bean sprout"))
+        let sproutCopy = displayedCopy(for: sprouts)
+        XCTAssertTrue(sproutCopy.contains("steaming hot"))
+        XCTAssertTrue(sprouts.sourceURLs.contains(SolidsSourceLibrary.fdaProduceSafety))
+        XCTAssertFalse(sprouts.isIronRich)
+
+        for name in ["Cactus pear", "Prickly pear"] {
+            let pear = try XCTUnwrap(SolidsReferenceCatalog.food(named: name))
+            let pearCopy = displayedCopy(for: pear)
+            XCTAssertTrue(pearCopy.contains("glochid"), name)
+            XCTAssertTrue(pearCopy.contains("spine"), name)
+            XCTAssertTrue(pearCopy.contains("outer skin"), name)
+        }
+
+        let swordfish = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Swordfish"))
+        XCTAssertFalse(swordfish.isEligibleForGuidedPath)
+        XCTAssertTrue(swordfish.safetyNote.localizedCaseInsensitiveContains("choice to avoid"))
+
+        let mackerel = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Mackerel"))
+        XCTAssertFalse(mackerel.isEligibleForGuidedPath)
+        XCTAssertTrue(mackerel.safetyNote.localizedCaseInsensitiveContains("king mackerel"))
+
+        let tuna = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Tuna"))
+        XCTAssertFalse(tuna.isEligibleForGuidedPath)
+        XCTAssertTrue(tuna.safetyNote.localizedCaseInsensitiveContains("bigeye tuna"))
     }
 
     func testIngredientFormsKeepTheirOwnPreparationProgressions() throws {
@@ -199,12 +365,14 @@ final class SolidsFeatureTests: XCTestCase {
         let choking = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.cdcChoking)
         let fruitJuice = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.aapFruitJuice)
         let allergens = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.aapAllergenIntroduction)
+        let produceSafety = SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.fdaProduceSafety)
 
         XCTAssertEqual(introduction, "CDC — Starting solid foods")
         XCTAssertEqual(choking, "CDC — Choking prevention")
         XCTAssertNotEqual(introduction, choking)
         XCTAssertEqual(fruitJuice, "AAP — Fruit juice guidance")
         XCTAssertEqual(allergens, "AAP — Allergen introduction guidance")
+        XCTAssertEqual(produceSafety, "FDA — Produce and sprout safety")
         XCTAssertNotEqual(fruitJuice, allergens)
     }
 
@@ -546,7 +714,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedRecipeSuggestionsContainTheFoodsInTheirLinkedRecipe() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -12, to: now)!
         )
@@ -586,7 +754,30 @@ final class SolidsFeatureTests: XCTestCase {
 
     func testCatalogIndexesPreserveFoodRecipeAndSearchResults() throws {
         let foods = SolidsReferenceCatalog.foods
+        let summaries = SolidsReferenceCatalog.foodSummaries
         let recipes = SolidsReferenceCatalog.recipes
+
+        XCTAssertEqual(summaries.map(\.id), foods.map(\.id))
+        for (summary, food) in zip(summaries, foods) {
+            XCTAssertEqual(summary.name, food.name)
+            XCTAssertEqual(summary.category, food.category)
+            XCTAssertEqual(summary.aliases, food.aliases)
+            XCTAssertEqual(summary.minimumAgeMonths, food.minimumAgeMonths)
+            XCTAssertEqual(summary.isIronRich, food.isIronRich)
+            XCTAssertEqual(summary.allergenIDs, food.allergenIDs)
+            XCTAssertEqual(summary.possibleAllergenIDs, food.possibleAllergenIDs)
+            XCTAssertEqual(summary.visualEmoji, food.visualEmoji)
+            XCTAssertEqual(SolidsReferenceCatalog.foodSummary(id: summary.id), summary)
+            XCTAssertEqual(SolidsReferenceCatalog.foodSummary(named: summary.name), summary)
+        }
+
+        for type in SolidsFoodTypeFilter.allCases {
+            XCTAssertEqual(
+                summaries.filter(type.matches).map(\.id),
+                foods.filter(type.matches).map(\.id),
+                type.displayName
+            )
+        }
 
         for recipe in recipes {
             XCTAssertEqual(SolidsReferenceCatalog.recipe(id: recipe.id), recipe)
@@ -625,6 +816,11 @@ final class SolidsFeatureTests: XCTestCase {
                 }
             }.map(\.id)
             XCTAssertEqual(SolidsReferenceCatalog.search(query).map(\.id), expectedFoodIDs, query)
+            XCTAssertEqual(
+                SolidsReferenceCatalog.searchSummaries(query).map(\.id),
+                expectedFoodIDs,
+                query
+            )
 
             let expectedRecipeIDs = recipes.filter { recipe in
                 recipe.title.localizedCaseInsensitiveContains(query)
@@ -697,25 +893,25 @@ final class SolidsFeatureTests: XCTestCase {
         let fiveMonthsOld = calendar.date(byAdding: .month, value: -5, to: now)!
         let sixMonthsOld = calendar.date(byAdding: .month, value: -6, to: now)!
 
-        let infant = BabyProfile(name: "Test Child", birthDate: oneMonthOld)
+        let infant = CareProfile(name: "Test Child", birthDate: oneMonthOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: infant, events: [], state: nil, now: now, calendar: calendar),
             .hidden
         )
 
-        let previewChild = BabyProfile(name: "Test Child", birthDate: fiveMonthsOld)
+        let previewChild = CareProfile(name: "Test Child", birthDate: fiveMonthsOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: previewChild, events: [], state: nil, now: now, calendar: calendar),
             .readinessPreview
         )
 
-        let eligibleChild = BabyProfile(name: "Test Child", birthDate: sixMonthsOld)
+        let eligibleChild = CareProfile(name: "Test Child", birthDate: sixMonthsOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: eligibleChild, events: [], state: nil, now: now, calendar: calendar),
             .full
         )
 
-        let dog = BabyProfile(profileType: .dog, name: "Test Dog", birthDate: sixMonthsOld)
+        let dog = CareProfile(profileType: .dog, name: "Test Dog", birthDate: sixMonthsOld)
         XCTAssertEqual(
             SolidsTrackingService.accessLevel(for: dog, events: [], state: nil, now: now, calendar: calendar),
             .hidden
@@ -731,14 +927,14 @@ final class SolidsFeatureTests: XCTestCase {
         let periodStart = calendar.startOfDay(for: firstDay)
         let periodEnd = calendar.startOfDay(for: secondDay)
 
-        let firstMeal = BabyEvent(
+        let firstMeal = CareEvent(
             profileID: profileID,
             type: .feed,
             startDate: firstDay,
             startTimeZoneIdentifier: "UTC"
         )
         firstMeal.feedKind = .solid
-        let secondMeal = BabyEvent(
+        let secondMeal = CareEvent(
             profileID: profileID,
             type: .feed,
             startDate: secondDay,
@@ -815,11 +1011,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: configuration
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado, Egg"
         context.insert(profile)
@@ -853,14 +1049,14 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -12, to: Date())!
         )
         context.insert(profile)
         let start = Date(timeIntervalSince1970: 2_000_000_000)
         let events = (0..<24).map { index in
-            let event = BabyEvent(
+            let event = CareEvent(
                 profileID: profile.id,
                 type: .feed,
                 startDate: start.addingTimeInterval(Double(index) * 86_400)
@@ -918,11 +1114,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado, Egg"
         event.solidFoodDetails = [
@@ -985,11 +1181,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Egg"
         event.solidFoodDetails = [
@@ -1025,11 +1221,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Egg"
         event.solidFoodDetails = [
@@ -1077,11 +1273,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: Date())!
         )
-        let source = BabyEvent(profileID: profile.id, type: .feed)
+        let source = CareEvent(profileID: profile.id, type: .feed)
         source.feedKind = .solid
         source.endDate = source.startDate
         source.foodDescription = "Egg"
@@ -1125,13 +1321,13 @@ final class SolidsFeatureTests: XCTestCase {
         let profileID = UUID()
         let olderDate = Date(timeIntervalSince1970: 2_000_000_000)
         let newerDate = olderDate.addingTimeInterval(86_400)
-        let older = BabyEvent(profileID: profileID, type: .feed, startDate: olderDate)
+        let older = CareEvent(profileID: profileID, type: .feed, startDate: olderDate)
         older.feedKind = .solid
         older.foodDescription = "Egg"
         older.solidFoodDetails = [
             SolidFoodLogDetail(foodID: "egg", foodName: "Egg", preference: .liked)
         ]
-        let newer = BabyEvent(profileID: profileID, type: .feed, startDate: newerDate)
+        let newer = CareEvent(profileID: profileID, type: .feed, startDate: newerDate)
         newer.feedKind = .solid
         newer.foodDescription = "Egg"
         newer.solidFoodDetails = [
@@ -1184,7 +1380,7 @@ final class SolidsFeatureTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: calendar.date(byAdding: .month, value: -9, to: now)!
         )
@@ -1238,7 +1434,7 @@ final class SolidsFeatureTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let startDate = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: try XCTUnwrap(calendar.date(byAdding: .month, value: -6, to: startDate))
         )
@@ -1279,7 +1475,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedAllergensFollowAStableOrderAndCompleteEachSeries() {
         let startDate = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -6, to: startDate)!
         )
@@ -1323,7 +1519,7 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: Date())!
         )
@@ -1454,6 +1650,12 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(FoodRoute.self, from: encoded), route)
     }
 
+    func testFilteredFoodTrackerRouteRestoresItsSelection() throws {
+        let route = FoodRoute.solidsTracker(.wantToTry)
+        let encoded = try JSONEncoder().encode(route)
+        XCTAssertEqual(try JSONDecoder().decode(FoodRoute.self, from: encoded), route)
+    }
+
     @MainActor
     func testAllergenProgressCountsUniqueMealsAndMarksThreeAsTolerated() throws {
         let container = try ModelContainer(
@@ -1461,7 +1663,7 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = container.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: Date())!
         )
@@ -1470,7 +1672,7 @@ final class SolidsFeatureTests: XCTestCase {
 
         for day in 0..<3 {
             let date = Calendar.current.date(byAdding: .day, value: day, to: baseDate)!
-            let event = BabyEvent(profileID: profile.id, type: .feed, startDate: date)
+            let event = CareEvent(profileID: profile.id, type: .feed, startDate: date)
             event.feedKind = .solid
             event.foodDescription = "Egg"
             event.solidFoodDetails = [
@@ -1515,7 +1717,7 @@ final class SolidsFeatureTests: XCTestCase {
 
         for day in 0..<3 {
             let date = Calendar.current.date(byAdding: .day, value: day, to: baseDate)!
-            let event = BabyEvent(profileID: profileID, type: .feed, startDate: date)
+            let event = CareEvent(profileID: profileID, type: .feed, startDate: date)
             event.feedKind = .solid
             event.foodDescription = "Egg"
             event.solidFoodDetails = [
@@ -1616,7 +1818,7 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(egg.status, .tolerated)
         XCTAssertEqual(egg.statusOverride, .tolerated)
 
-        let newReaction = BabyEvent(profileID: profileID, type: .feed)
+        let newReaction = CareEvent(profileID: profileID, type: .feed)
         newReaction.feedKind = .solid
         newReaction.foodDescription = "Egg"
         newReaction.solidFoodDetails = [
@@ -1971,7 +2173,7 @@ final class SolidsFeatureTests: XCTestCase {
         )
         let profileID = UUID()
         let startDate = Date(timeIntervalSince1970: 2_010_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -8, to: startDate)!
         )
@@ -2145,7 +2347,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedJourneyCanBuildACompleteFirstHundred() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -6, to: now)!
         )
@@ -2170,7 +2372,7 @@ final class SolidsFeatureTests: XCTestCase {
         let scheduledAt = try XCTUnwrap(
             calendar.date(from: DateComponents(year: 2026, month: 7, day: 28, hour: 11, minute: 30))
         )
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: try XCTUnwrap(calendar.date(byAdding: .month, value: -12, to: scheduledAt))
         )
@@ -2203,7 +2405,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedAllergenStepsOnlyCountConfirmedIntroductionPortions() throws {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: now)!
         )
@@ -2236,7 +2438,7 @@ final class SolidsFeatureTests: XCTestCase {
     @MainActor
     func testGuidedSuggestionsUseObservedSkillsAndSubstituteForBlockedAllergens() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -12, to: now)!
         )
@@ -2325,7 +2527,7 @@ final class SolidsFeatureTests: XCTestCase {
         )
         let context = container.mainContext
         let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: now)!
         )
@@ -2460,7 +2662,7 @@ final class SolidsFeatureTests: XCTestCase {
         let context = container.mainContext
         let profileID = UUID()
         let customID = "custom-test-spread"
-        let event = BabyEvent(profileID: profileID, type: .feed)
+        let event = CareEvent(profileID: profileID, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Test spread"
         context.insert(event)
@@ -2575,7 +2777,7 @@ final class SolidsFeatureTests: XCTestCase {
         )
         let context = container.mainContext
         let profileID = UUID()
-        let event = BabyEvent(profileID: profileID, type: .feed)
+        let event = CareEvent(profileID: profileID, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado"
         event.solidFoodDetails = [
@@ -2710,11 +2912,11 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let sourceContext = source.mainContext
-        let profile = BabyProfile(
+        let profile = CareProfile(
             name: "Test Child",
             birthDate: Calendar.current.date(byAdding: .month, value: -9, to: Date())!
         )
-        let event = BabyEvent(profileID: profile.id, type: .feed)
+        let event = CareEvent(profileID: profile.id, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Avocado"
         event.solidFoodDetails = [
@@ -2897,7 +3099,7 @@ final class SolidsFeatureTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let profileID = UUID()
-        let event = BabyEvent(profileID: profileID, type: .feed)
+        let event = CareEvent(profileID: profileID, type: .feed)
         event.feedKind = .solid
         event.foodDescription = "Egg"
         event.solidFoodDetails = [

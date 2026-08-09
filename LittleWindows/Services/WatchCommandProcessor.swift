@@ -57,6 +57,12 @@ enum WatchCommandProcessor {
         case .stopTimer, .stopAndSaveTimer, .discardTimer,
              .resumeTimer, .switchNursingSide:
             outcome = mutateTimer(command, profile: profile, context: context)
+        case .logMedicationTaken, .logMedicationSkipped, .snoozeMedication:
+            outcome = await performMedicationAction(
+                command,
+                profile: profile,
+                context: context
+            )
         }
 
         switch outcome {
@@ -76,6 +82,7 @@ enum WatchCommandProcessor {
             )
         case .applied:
             if command.kind != .selectProfile,
+               command.kind != .snoozeMedication,
                !PersistenceService.save(context: context) {
                 return acknowledgement(
                     for: command,
@@ -88,19 +95,129 @@ enum WatchCommandProcessor {
 
         rememberProcessed(command.id)
         let state = WatchStateFactory.make(context: context)
-        SystemIntegrationReconciler.requestReconciliation()
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
-            Task { @MainActor [container] in
-                await SystemIntegrationReconciler.reconcile(context: container.mainContext)
-                WatchConnectivityService.shared.publishCurrentState()
+        if command.kind != .snoozeMedication {
+            SystemIntegrationReconciler.requestReconciliation()
+            if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+                Task { @MainActor [container] in
+                    await SystemIntegrationReconciler.reconcile(context: container.mainContext)
+                    WatchConnectivityService.shared.publishCurrentState()
+                }
             }
         }
         return acknowledgement(for: command, status: .applied, state: state)
     }
 
+    private static func performMedicationAction(
+        _ command: WatchCommand,
+        profile: CareProfile,
+        context: ModelContext
+    ) async -> MutationOutcome {
+        guard profile.profileType == .adult else {
+            return .rejected("Medication actions are available for adult profiles.")
+        }
+        guard let payload = command.medication,
+              payload.profileID == profile.id,
+              !payload.occurrenceKey.isEmpty,
+              payload.doseAmount > 0,
+              !payload.doseUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .rejected("That medication reminder is incomplete. Refresh the Watch and try again.")
+        }
+        let reference = MedicationScheduledDoseReference(
+            profileID: profile.id,
+            medicationID: payload.medicationID,
+            regimenID: payload.regimenID,
+            phaseID: payload.phaseID,
+            occurrenceKey: payload.occurrenceKey,
+            scheduledAt: payload.scheduledAt,
+            doseAmount: payload.doseAmount,
+            doseUnit: payload.doseUnit
+        )
+        let medication: Medication
+        let regimen: MedicationRegimen
+        let occurrence: MedicationOccurrence
+        let existingRecord: MedicationDoseRecord?
+        switch MedicationService.resolveScheduledDose(reference, context: context) {
+        case .rejected:
+            return .rejected("That medication schedule changed. Refresh the Watch before logging it.")
+        case .valid(
+            let resolvedMedication,
+            let resolvedRegimen,
+            let resolvedOccurrence,
+            let resolvedRecord
+        ):
+            medication = resolvedMedication
+            regimen = resolvedRegimen
+            occurrence = resolvedOccurrence
+            existingRecord = resolvedRecord
+        }
+        if let existingRecord {
+            switch command.kind {
+            case .logMedicationTaken where existingRecord.status == .taken,
+                 .logMedicationSkipped where existingRecord.status == .skipped:
+                return .duplicate
+            default:
+                return .rejected("That dose was already recorded on another device.")
+            }
+        }
+
+        switch command.kind {
+        case .logMedicationTaken, .logMedicationSkipped:
+            let status: MedicationDoseStatus = command.kind == .logMedicationTaken
+                ? .taken
+                : .skipped
+            guard MedicationService.recordDose(
+                medication: medication,
+                regimen: regimen,
+                occurrence: occurrence,
+                status: status,
+                at: command.issuedAt,
+                context: context
+            ) != nil else {
+                return .rejected("That dose could not be recorded. Refresh the Watch and try again.")
+            }
+            return .applied
+        case .snoozeMedication:
+            guard regimen.remindersEnabled,
+                  abs(occurrence.scheduledAt.timeIntervalSince(command.issuedAt)) <= 30 * 60 else {
+                return .rejected("Snooze becomes available near the scheduled time.")
+            }
+            if MedicationSnoozeStateStore.isSnoozed(
+                occurrenceKey: occurrence.occurrenceKey,
+                now: command.issuedAt
+            ) {
+                return .duplicate
+            }
+            let fireDate = command.issuedAt.addingTimeInterval(10 * 60)
+            guard fireDate > Date().addingTimeInterval(1) else {
+                return .rejected("That snooze expired while the Watch was disconnected.")
+            }
+            let currentSnapshot = WatchMedicationSnapshot(
+                profileID: profile.id,
+                medicationID: medication.id,
+                regimenID: regimen.id,
+                phaseID: occurrence.phaseID,
+                occurrenceKey: occurrence.occurrenceKey,
+                medicationName: medication.name,
+                scheduledAt: occurrence.scheduledAt,
+                doseAmount: occurrence.doseAmount,
+                doseUnit: occurrence.doseUnit,
+                snoozeAvailable: true
+            )
+            guard await MedicationNotificationScheduler.scheduleWatchSnooze(
+                medication: currentSnapshot,
+                fireDate: fireDate
+            ) else {
+                return .rejected("Medication notifications are unavailable. Check notification settings on the iPhone.")
+            }
+            return .applied
+        default:
+            return .rejected("That medication action is not supported.")
+        }
+    }
+
     private static func performAction(
         _ command: WatchCommand,
-        profile: BabyProfile,
+        profile: CareProfile,
         context: ModelContext
     ) -> MutationOutcome {
         guard let actionID = command.actionID,
@@ -148,6 +265,14 @@ enum WatchCommandProcessor {
             )
         case "pumping":
             return startTimer(command, profile: profile, type: .pumping, context: context)
+        case "activity":
+            return startTimer(
+                command,
+                profile: profile,
+                type: .activity,
+                activityType: command.optionID.flatMap(ActivityType.init(rawValue:)),
+                context: context
+            )
         case "tummy-time":
             return startTimer(
                 command,
@@ -221,7 +346,7 @@ enum WatchCommandProcessor {
 
     private static func startTimer(
         _ command: WatchCommand,
-        profile: BabyProfile,
+        profile: CareProfile,
         type: EventType,
         nursingSide: NursingSide? = nil,
         sleepKind: SleepKind? = nil,
@@ -262,7 +387,7 @@ enum WatchCommandProcessor {
 
     private static func logEvent(
         _ command: WatchCommand,
-        profile: BabyProfile,
+        profile: CareProfile,
         actionID: String,
         context: ModelContext
     ) -> MutationOutcome {
@@ -276,7 +401,7 @@ enum WatchCommandProcessor {
         default: .custom
         }
         let timeZoneIdentifier = validTimeZoneIdentifier(command.timeZoneIdentifier)
-        let event = BabyEvent(
+        let event = CareEvent(
             id: command.eventID ?? UUID(),
             profileID: profile.id,
             type: type,
@@ -311,7 +436,7 @@ enum WatchCommandProcessor {
 
     private static func mutateTimer(
         _ command: WatchCommand,
-        profile: BabyProfile,
+        profile: CareProfile,
         context: ModelContext
     ) -> MutationOutcome {
         guard let eventID = command.eventID,
@@ -379,7 +504,8 @@ enum WatchCommandProcessor {
                     at: command.issuedAt
                 )
             }
-        case .selectProfile, .performAction:
+        case .selectProfile, .performAction, .logMedicationTaken,
+             .logMedicationSkipped, .snoozeMedication:
             return .rejected("Unsupported timer action.")
         }
         return .applied
@@ -388,8 +514,8 @@ enum WatchCommandProcessor {
     private static func fetchProfile(
         _ id: UUID,
         context: ModelContext
-    ) -> BabyProfile? {
-        var descriptor = FetchDescriptor<BabyProfile>(
+    ) -> CareProfile? {
+        var descriptor = FetchDescriptor<CareProfile>(
             predicate: #Predicate { $0.id == id && !$0.isArchived }
         )
         descriptor.fetchLimit = 1
@@ -399,8 +525,8 @@ enum WatchCommandProcessor {
     private static func fetchEvent(
         _ id: UUID,
         context: ModelContext
-    ) -> BabyEvent? {
-        var descriptor = FetchDescriptor<BabyEvent>(
+    ) -> CareEvent? {
+        var descriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate { $0.id == id }
         )
         descriptor.fetchLimit = 1
@@ -410,12 +536,12 @@ enum WatchCommandProcessor {
     private static func fetchActiveEvents(
         profileID: UUID,
         context: ModelContext
-    ) -> [BabyEvent] {
-        var descriptor = FetchDescriptor<BabyEvent>(
+    ) -> [CareEvent] {
+        var descriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate { event in
                 event.profileID == profileID && event.endDate == nil
             },
-            sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         descriptor.fetchLimit = 30
         return (try? context.fetch(descriptor)) ?? []

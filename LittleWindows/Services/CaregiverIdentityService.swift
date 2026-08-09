@@ -7,8 +7,10 @@ enum CaregiverIdentityService {
     static let needsLogNamePromptKey = "familySync.needsLogNamePrompt"
     static let familySyncCaregiverNamesKey = "familySync.acceptedCaregiverNames"
     static let lastModifiedAtKey = "caregiverIdentity.lastModifiedAt"
+    static let stableCaregiverIdentifierKey = "caregiverIdentity.stableIdentifier"
 
     private static let iCloudPayloadKey = "caregiverIdentity.v1"
+    private static let iCloudStableIdentifierKey = "caregiverIdentity.stableIdentifier.v1"
 
     @MainActor
     private static var iCloudChangeObserver: NSObjectProtocol?
@@ -36,6 +38,30 @@ enum CaregiverIdentityService {
         }
 
         return fallback
+    }
+
+    /// A display name can change and is not safe for ownership or conflict resolution.
+    /// This identifier follows the same Apple Account through the ubiquitous key-value
+    /// store and remains local when iCloud is unavailable.
+    static func stableCaregiverIdentifier(
+        defaults: UserDefaults = .standard,
+        store: NSUbiquitousKeyValueStore = .default
+    ) -> String {
+        if let existing = defaults.string(forKey: stableCaregiverIdentifierKey),
+           UUID(uuidString: existing) != nil {
+            return existing
+        }
+        _ = store.synchronize()
+        if let existing = store.string(forKey: iCloudStableIdentifierKey),
+           UUID(uuidString: existing) != nil {
+            defaults.set(existing, forKey: stableCaregiverIdentifierKey)
+            return existing
+        }
+        let created = UUID().uuidString
+        defaults.set(created, forKey: stableCaregiverIdentifierKey)
+        store.set(created, forKey: iCloudStableIdentifierKey)
+        _ = store.synchronize()
+        return created
     }
 
     static func currentCaregiverName(
@@ -161,7 +187,7 @@ enum CaregiverIdentityService {
         guard !hasExplicitCurrentCaregiverName(defaults: defaults) else { return nil }
 
         do {
-            var candidates = try context.fetch(FetchDescriptor<BabyEvent>()).map(\.caregiverName)
+            var candidates = try context.fetch(FetchDescriptor<CareEvent>()).map(\.caregiverName)
             candidates.append(contentsOf: try context.fetch(
                 FetchDescriptor<DoctorAppointment>()
             ).map(\.caregiverName))

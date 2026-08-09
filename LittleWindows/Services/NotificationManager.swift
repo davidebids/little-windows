@@ -461,6 +461,32 @@ final class NotificationManager: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
+        let snoozeMedication = UNNotificationAction(
+            identifier: MedicationNotificationScheduler.snoozeActionIdentifier,
+            title: "Snooze 10 min",
+            options: []
+        )
+        let takeMedication = UNNotificationAction(
+            identifier: MedicationNotificationScheduler.takenActionIdentifier,
+            title: "Log Taken",
+            options: [.foreground]
+        )
+        let skipMedication = UNNotificationAction(
+            identifier: MedicationNotificationScheduler.skippedActionIdentifier,
+            title: "Log Skipped",
+            options: [.foreground]
+        )
+        let openMedications = UNNotificationAction(
+            identifier: MedicationNotificationScheduler.openActionIdentifier,
+            title: "Open Medications",
+            options: [.foreground]
+        )
+        let medicationCategory = UNNotificationCategory(
+            identifier: MedicationNotificationScheduler.categoryIdentifier,
+            actions: [takeMedication, skipMedication, snoozeMedication, openMedications],
+            intentIdentifiers: [],
+            options: []
+        )
         UNUserNotificationCenter.current().setNotificationCategories([
             category,
             appointmentCategory,
@@ -470,7 +496,8 @@ final class NotificationManager: NSObject, ObservableObject {
             packingTripCategory,
             itineraryCategory,
             routineCategory,
-            familySyncActivityCategory
+            familySyncActivityCategory,
+            medicationCategory
         ])
     }
 
@@ -808,6 +835,15 @@ final class NotificationManager: NSObject, ObservableObject {
         await cancelPendingSleepPressureAlerts(profileID: profileID)
         await cancelActiveSleepPlanWakeAlert(profileID: profileID)
         await cancelMonthlyAgeGuideNotifications(profileID: profileID)
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        center.removePendingNotificationRequests(withIdentifiers: pending.compactMap { request in
+            let requestProfileID = request.content.userInfo["profileID"] as? String
+            return request.content.categoryIdentifier == MedicationNotificationScheduler.categoryIdentifier
+                && requestProfileID == profileID.uuidString
+                ? request.identifier
+                : nil
+        })
     }
 
     func cancelInactiveActiveSleepPlanWakeAlerts(activeProfileIDs: Set<UUID>) async {
@@ -886,7 +922,7 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     func scheduleMonthlyAgeGuideNotification(
-        profile: BabyProfile,
+        profile: CareProfile,
         readStates: [AgeGuideReadState],
         context: ModelContext,
         timing: MonthlyAgeGuideNotificationTiming,
@@ -1428,8 +1464,8 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func reconcileScheduledNotifications(
         context: ModelContext,
-        profiles: [BabyProfile],
-        events: [BabyEvent],
+        profiles: [CareProfile],
+        events: [CareEvent],
         predictionRecords: [SleepPredictionRecord],
         appointments: [DoctorAppointment],
         foodReminders: [FoodReminder],
@@ -1826,6 +1862,27 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func handleNotificationAction(_ response: UNNotificationResponse) async {
         let action = response.actionIdentifier
+        if action == MedicationNotificationScheduler.takenActionIdentifier ||
+            action == MedicationNotificationScheduler.skippedActionIdentifier {
+            let status: MedicationDoseStatus = action == MedicationNotificationScheduler.takenActionIdentifier
+                ? .taken
+                : .skipped
+            if let command = MedicationNotificationScheduler.doseCommand(
+                from: response.notification.request.content.userInfo,
+                status: status
+            ) {
+                DeepLinkRouter.shared.openMedicationDose(command)
+            } else {
+                DeepLinkRouter.shared.route(URL(string: "littlewindows://medications")!)
+            }
+            return
+        }
+        if action == MedicationNotificationScheduler.snoozeActionIdentifier {
+            if await MedicationNotificationScheduler.snooze(response) {
+                WatchConnectivityService.shared.publishCurrentState()
+            }
+            return
+        }
         if action == Self.snoozeActionID {
             let content = response.notification.request.content.mutableCopy()
                 as? UNMutableNotificationContent
@@ -1847,7 +1904,15 @@ final class NotificationManager: NSObject, ObservableObject {
             return
         }
 
-        if action == Self.openAppointmentActionID ||
+        if action == MedicationNotificationScheduler.openActionIdentifier ||
+            response.notification.request.content.categoryIdentifier == MedicationNotificationScheduler.categoryIdentifier {
+            if let deepLink = response.notification.request.content.userInfo["deepLink"] as? String,
+               let url = URL(string: deepLink) {
+                DeepLinkRouter.shared.route(url)
+            } else {
+                DeepLinkRouter.shared.route(URL(string: "littlewindows://medications")!)
+            }
+        } else if action == Self.openAppointmentActionID ||
             action == Self.completeAppointmentActionID ||
             action == Self.addVisitNotesActionID {
             if let id = response.notification.request.content.userInfo["appointmentID"] as? String {
@@ -2351,7 +2416,7 @@ enum SystemIntegrationReconciler {
     private static func performReconciliation(context: ModelContext) async {
         await AppInteractionMonitor.waitUntilIdle()
         guard !Task.isCancelled else { return }
-        let profiles = (try? context.fetch(FetchDescriptor<BabyProfile>())) ?? []
+        let profiles = (try? context.fetch(FetchDescriptor<CareProfile>())) ?? []
         let profile = ProfileService.shared.ensureSelection(in: profiles)
         let recentCutoff = Calendar.current.date(
             byAdding: .day,
@@ -2499,14 +2564,75 @@ enum SystemIntegrationReconciler {
             routines: routines,
             ageGuideReadStates: ageGuideReadStates
         )
+        await reconcileMedicationNotifications(
+            activeProfileIDs: activeProfileIDSet,
+            context: context
+        )
+    }
+
+    private static func reconcileMedicationNotifications(
+        activeProfileIDs: Set<UUID>,
+        context: ModelContext
+    ) async {
+        let medications = (try? context.fetch(FetchDescriptor<Medication>())) ?? []
+        let regimens = (try? context.fetch(FetchDescriptor<MedicationRegimen>())) ?? []
+        let phases = (try? context.fetch(FetchDescriptor<MedicationSchedulePhase>())) ?? []
+        let doseRecords = (try? context.fetch(FetchDescriptor<MedicationDoseRecord>())) ?? []
+        let medicationByID = Dictionary(
+            medications.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let eligibleRegimens = regimens.filter { regimen in
+            regimen.isActive &&
+                regimen.remindersEnabled &&
+                regimen.scheduleKind.isScheduled &&
+                regimen.profileID.map(activeProfileIDs.contains) == true &&
+                medicationByID[regimen.medicationID].map { !$0.isArchived } == true
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+
+        for regimen in regimens where !eligibleRegimens.contains(where: { $0.id == regimen.id }) {
+            guard !Task.isCancelled else { return }
+            await MedicationNotificationScheduler.cancel(regimenID: regimen.id)
+        }
+
+        let pendingRequests = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let nonMedicationPendingRequestCount = pendingRequests.count {
+            $0.content.categoryIdentifier != MedicationNotificationScheduler.categoryIdentifier
+        }
+        let activeMedicationSnoozeCount = pendingRequests.count {
+            $0.content.categoryIdentifier == MedicationNotificationScheduler.categoryIdentifier
+                && $0.identifier.contains(".snooze")
+        }
+        var remainingRequestBudget = max(
+            MedicationNotificationScheduler.availableMedicationRequestCount(
+                nonMedicationPendingRequestCount: nonMedicationPendingRequestCount
+            ) - activeMedicationSnoozeCount,
+            0
+        )
+        for (index, regimen) in eligibleRegimens.enumerated() {
+            guard !Task.isCancelled else { return }
+            guard let medication = medicationByID[regimen.medicationID] else { continue }
+            let remainingRegimenCount = eligibleRegimens.count - index
+            let requestAllocation = remainingRequestBudget > 0
+                ? max(1, remainingRequestBudget / max(remainingRegimenCount, 1))
+                : 0
+            let scheduledCount = await MedicationNotificationScheduler.reschedule(
+                medication: medication,
+                regimen: regimen,
+                phases: phases.filter { $0.regimenID == regimen.id },
+                records: doseRecords.filter { $0.regimenID == regimen.id },
+                maximumRequestCount: requestAllocation
+            )
+            remainingRequestBudget = max(remainingRequestBudget - scheduledCount, 0)
+        }
     }
 
     private static func recentEvents(
         profileIDs: [UUID],
         recentCutoff: Date,
         context: ModelContext
-    ) async -> [BabyEvent] {
-        var result: [BabyEvent] = []
+    ) async -> [CareEvent] {
+        var result: [CareEvent] = []
         let pageSize = 200
         let maximumPerProfile = 900
         for profileID in profileIDs {
@@ -2518,12 +2644,12 @@ enum SystemIntegrationReconciler {
                 // monopolize the main actor again.
                 await AppInteractionMonitor.waitUntilIdle()
                 guard !Task.isCancelled else { return result }
-                var descriptor = FetchDescriptor<BabyEvent>(
-                    predicate: #Predicate<BabyEvent> { event in
+                var descriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate<CareEvent> { event in
                         event.profileID == profileID
                             && (event.startDate >= recentCutoff || event.endDate == nil)
                     },
-                    sortBy: [SortDescriptor(\BabyEvent.startDate, order: .reverse)]
+                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
                 )
                 descriptor.fetchLimit = min(pageSize, maximumPerProfile - offset)
                 descriptor.fetchOffset = offset
