@@ -365,9 +365,15 @@ struct TodayView: View {
     private func scheduleIntegrationAnalysisRefresh() {
         integrationAnalysisTask?.cancel()
         guard let profile = cachedRenderState.profile,
-              profile.profileType == .child else {
+              profile.profileType == .child,
+              cachedRenderState.activeEvents.isEmpty else {
+            // A timer draft already carries the exact live state needed by
+            // Today, widgets, and Live Activities. Fetching and faulting up to
+            // 60 days of history while its editor is open can contend with the
+            // SwiftData insert and starve TimelineView updates on real devices.
             cachedRenderState.sleepPressure = nil
             cachedRenderState.sleepMiniPlan = nil
+            integrationAnalysisTask = nil
             return
         }
         let profileID = profile.id
@@ -2847,7 +2853,9 @@ struct TodayView: View {
                     waitForSystemIntegrations: true,
                     eventAlreadyPersisted: persistenceRequest != nil
                 )
-            } else {
+            } else if discardedTimerID != nil {
+                // Removing a draft can make planning and notifications active
+                // again, so rebuild derived state once the delete commits.
                 await EventMutationService.refreshTimerSystemIntegrations(
                     profile: currentProfile,
                     events: events,
@@ -2858,8 +2866,29 @@ struct TodayView: View {
                     notificationLeadMinutes: leadMinutes,
                     scheduleNotification: scheduleNotification
                 )
+            } else {
+                // Starting, stopping, resuming, backdating, or changing sides
+                // on a draft does not create a completed history sample. The
+                // lightweight timer snapshots above are authoritative; a full
+                // integration analysis here only faults old history while the
+                // timer editor is trying to tick. Sleep drafts still cancel a
+                // stale Little Window alert without rebuilding predictions.
+                if scheduleNotification {
+                    let hasSleepDraft = activeTimers.contains {
+                        $0.isSleepBlock && $0.isTimerDraft
+                    }
+                    await notificationManager.schedule(
+                        prediction: prediction,
+                        babyName: currentProfile?.name ?? "Baby",
+                        profileID: currentProfile?.id,
+                        leadMinutes: leadMinutes,
+                        enabled: alertsEnabled,
+                        isSleeping: hasSleepDraft
+                    )
+                }
             }
             guard !Task.isCancelled else { return }
+            WatchConnectivityService.shared.scheduleCurrentStatePublish()
             if syncWakeAlert {
                 await syncActiveSleepPlanWakeAlert()
             }
