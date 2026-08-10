@@ -393,25 +393,27 @@ struct TodayView: View {
         }
         let profileID = profile.id
         let settings = predictionSettings
+        let container = modelContext.container
         let revision = UUID()
         integrationAnalysisRevision = revision
-        integrationAnalysisTask = Task { @MainActor in
+        integrationAnalysisTask = Task.detached(priority: .utility) {
             let analysis = await EventMutationService.integrationAnalysis(
                 profileID: profileID,
-                context: modelContext,
+                container: container,
                 settings: settings
             )
-            guard analysis.isAuthoritative,
-                  !Task.isCancelled,
-                  integrationAnalysisRevision == revision,
-                  cachedRenderState.profileID == profileID,
-                  cachedRenderState.isSleeping == analysis.isSleeping else { return }
-            var state = cachedRenderState
-            state.prediction = analysis.prediction
-            state.sleepPressure = state.isSleeping ? nil : analysis.pressure
-            state.sleepMiniPlan = analysis.miniPlan
-            cachedRenderState = state
-            integrationAnalysisTask = nil
+            guard analysis.isAuthoritative, !Task.isCancelled else { return }
+            await MainActor.run {
+                guard integrationAnalysisRevision == revision,
+                      cachedRenderState.profileID == profileID,
+                      cachedRenderState.isSleeping == analysis.isSleeping else { return }
+                var state = cachedRenderState
+                state.prediction = analysis.prediction
+                state.sleepPressure = state.isSleeping ? nil : analysis.pressure
+                state.sleepMiniPlan = analysis.miniPlan
+                cachedRenderState = state
+                integrationAnalysisTask = nil
+            }
         }
     }
 
@@ -576,10 +578,18 @@ struct TodayView: View {
         }
         activeEvents.sort { $0.startDate < $1.startDate }
         // Prediction, pressure, and the day-ahead plan are carried forward
-        // until the isolated analysis worker publishes a fresh result.
+        // until the isolated analysis worker publishes a fresh result. On a
+        // cold launch with a timer already open, restore the latest unresolved
+        // prediction record without scanning history so discarding the draft
+        // can reveal it immediately.
+        let storedPrediction = scopedRecords
+            .lazy
+            .filter { $0.actualSleepEventID == nil }
+            .max { $0.generatedAt < $1.generatedAt }?
+            .prediction
         let prediction = cachedRenderState.profileID == profileID
-            ? cachedRenderState.prediction
-            : nil
+            ? cachedRenderState.prediction ?? storedPrediction
+            : storedPrediction
         let sleepPressure = cachedRenderState.profileID == profileID
             ? cachedRenderState.sleepPressure
             : nil
@@ -767,7 +777,8 @@ struct TodayView: View {
                         puppyStageGuideSection(state)
                     }
 
-                    if profile?.profileType == .child, !state.isSleeping {
+                    if profile?.profileType == .child,
+                       !state.activeEvents.contains(where: { $0.isSleepBlock }) {
                         Section {
                             PredictionCard(
                                 prediction: prediction,
@@ -1251,7 +1262,9 @@ struct TodayView: View {
 
     @ViewBuilder
     private func sleepMiniPlanSection(_ state: TodayRenderState) -> some View {
-        if !state.isDogProfile, let plan = state.sleepMiniPlan {
+        if !state.isDogProfile,
+           !state.activeEvents.contains(where: { $0.isSleepBlock }),
+           let plan = state.sleepMiniPlan {
             Section {
                 SleepMiniPlanCard(plan: plan) {
                     showingBackwardsPlanner = true
@@ -2810,8 +2823,6 @@ struct TodayView: View {
             state.runningSleepTimer = event.isTimerRunning ? event : nil
             state.isSleeping = event.isTimerRunning
             state.awakeSinceDate = event.isTimerRunning ? nil : event.updatedAt
-            state.sleepPressure = nil
-            state.sleepMiniPlan = nil
         }
         cachedRenderState = state
     }
@@ -2860,12 +2871,11 @@ struct TodayView: View {
             )
         }
 
-        if event == nil, discardedTimerID == nil {
+        if event == nil {
             // Draft changes are a one-row durable write followed by optional
-            // system notifications. Run the workflow outside the task created
-            // by the tap so a slow CloudKit-backed save cannot keep Today's
-            // gesture transaction open. The only main-actor hop is the small
-            // completion/failure state correction below.
+            // system notifications. A discarded draft uses the same fast path:
+            // it never changed historical prediction inputs, so rebuilding the
+            // entire profile here only burns CPU while Today is scrolling.
             timerSystemRefreshTask = Task.detached(priority: .userInitiated) {
                 let persisted: Bool
                 if let persistenceRequest {
@@ -2882,6 +2892,9 @@ struct TodayView: View {
                     guard timerSystemRefreshRevision == refreshRevision else { return false }
                     timerMutationRenderDeferralActive = false
                     if !persisted {
+                        if let discardedTimerID {
+                            EventVisibilityStore.restore(discardedTimerID)
+                        }
                         refreshCachedRenderState()
                         timerSystemRefreshTask = nil
                     }
@@ -2908,6 +2921,14 @@ struct TodayView: View {
                         await NotificationManager.shared.cancelActiveSleepPlanWakeAlert(
                             profileID: profileID
                         )
+                    }
+                }
+                if discardedTimerID != nil {
+                    // Restore pressure/day-ahead details with one low-priority
+                    // scan. The pre-timer prediction remains visible instantly,
+                    // and this work cannot inherit the discard tap's priority.
+                    await MainActor.run {
+                        scheduleIntegrationAnalysisRefresh()
                     }
                 }
                 await MainActor.run {
@@ -2949,19 +2970,6 @@ struct TodayView: View {
                     refreshPrediction: true,
                     waitForSystemIntegrations: true,
                     eventAlreadyPersisted: persistenceRequest != nil
-                )
-            } else if discardedTimerID != nil {
-                // Removing a draft can make planning and notifications active
-                // again, so rebuild derived state once the delete commits.
-                await EventMutationService.refreshTimerSystemIntegrations(
-                    profile: currentProfile,
-                    events: events,
-                    records: currentRecords,
-                    context: modelContext,
-                    settings: currentSettings,
-                    notificationsEnabled: alertsEnabled,
-                    notificationLeadMinutes: leadMinutes,
-                    scheduleNotification: scheduleNotification
                 )
             }
             guard !Task.isCancelled else { return }
@@ -3309,8 +3317,6 @@ struct TodayView: View {
                 }
                 .max()
         }
-        state.sleepPressure = nil
-        state.sleepMiniPlan = nil
         cachedRenderState = state
     }
 

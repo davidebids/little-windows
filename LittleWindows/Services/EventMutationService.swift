@@ -991,13 +991,13 @@ enum EventMutationService {
         )
     }
 
-    static func persistTimerMutation(
+    nonisolated static func persistTimerMutation(
         _ request: TimerPersistenceRequest,
         container: ModelContainer
     ) async -> Bool {
         let worker = await EventPersistenceWorkerPool.shared.worker(for: container)
         if let error = await worker.persistTimer(request) {
-            PersistenceService.recordLocalSaveFailure(error)
+            await PersistenceService.recordLocalSaveFailure(error)
             return false
         }
         return true
@@ -1161,42 +1161,27 @@ enum EventMutationService {
         PersistenceService.save(context: context)
     }
 
-    static func refreshTimerSystemIntegrations(
-        profile: CareProfile?,
-        events: [CareEvent],
-        records: [SleepPredictionRecord],
-        context: ModelContext,
-        settings: PredictionSettings,
-        notificationsEnabled: Bool,
-        notificationLeadMinutes: Int,
-        scheduleNotification: Bool
-    ) async {
-        _ = records
-        let state = await integrationAnalysis(
-            profileID: profile?.id,
-            context: context,
-            settings: settings
-        )
-        guard state.isAuthoritative else { return }
-        let revision = beginSystemIntegrationUpdate()
-        await refreshSystemIntegrations(
-            profile: profile,
-            widgetSnapshot: state.widgetSnapshot,
-            prediction: state.prediction,
-            pressure: state.pressure,
-            scheduleNotification: scheduleNotification,
-            notificationsEnabled: notificationsEnabled,
-            notificationLeadMinutes: notificationLeadMinutes,
-            revision: revision
-        )
-    }
-
     static func integrationAnalysis(
         profileID: UUID?,
         context: ModelContext,
         settings: PredictionSettings
     ) async -> EventIntegrationAnalysis {
-        let worker = await EventPersistenceWorkerPool.shared.worker(for: context.container)
+        await integrationAnalysis(
+            profileID: profileID,
+            container: context.container,
+            settings: settings
+        )
+    }
+
+    /// Performs the history scan entirely through the model actor. Callers that
+    /// only need immutable analysis can start this from a detached utility task
+    /// without carrying a SwiftUI-owned `ModelContext` across executors.
+    nonisolated static func integrationAnalysis(
+        profileID: UUID?,
+        container: ModelContainer,
+        settings: PredictionSettings
+    ) async -> EventIntegrationAnalysis {
+        let worker = await EventPersistenceWorkerPool.shared.worker(for: container)
         let result = await worker.integrationState(
             profileID: profileID,
             settings: settings

@@ -2754,13 +2754,22 @@ final class UserVisibleFlowUITests: XCTestCase {
         confirmDiscard.tap()
 
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
-        let scrollStartedAt = ContinuousClock.now
-        app.swipeUp(velocity: .fast)
-        XCTAssertLessThan(
-            scrollStartedAt.duration(to: .now),
-            .seconds(3.5),
-            "A production-scale Today view should scroll immediately after discard."
-        )
+        let postDiscardDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        scrollsUp = true
+        while ContinuousClock.now < postDiscardDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Discard completion work must not freeze Today several seconds later."
+            )
+            scrollsUp.toggle()
+        }
         XCTAssertFalse(app.staticTexts["active-timer.status.sleep"].exists)
     }
 

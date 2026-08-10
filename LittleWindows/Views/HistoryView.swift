@@ -106,6 +106,7 @@ struct HistoryView: View {
     @State private var showingDeleteMilestoneConfirmation = false
     @State private var showingDeleteAppointmentConfirmation = false
     @State private var timerSystemRefreshTask: Task<Void, Never>?
+    @State private var timerSystemRefreshRevision = UUID()
     @StateObject private var profileService = ProfileService.shared
     private let forcedDisplayMode: HistoryDisplayMode?
     private let showsDisplayModePicker: Bool
@@ -844,25 +845,86 @@ struct HistoryView: View {
         discardedTimerID: UUID? = nil
     ) {
         timerSystemRefreshTask?.cancel()
+        let refreshRevision = UUID()
+        timerSystemRefreshRevision = refreshRevision
         let currentProfile = profile
         let currentRecords = scopedRecords
         let currentSettings = settings
         let alertsEnabled = notificationsEnabled
         let leadMinutes = notificationLeadMinutes
         let surfaceRevision = Date()
+        let timerSnapshot = WidgetSnapshotService.refreshActiveTimerState(
+            profile: currentProfile,
+            events: activeTimers,
+            now: surfaceRevision
+        )
+        let container = modelContext.container
+        let profileID = currentProfile?.id
+        let profileName = currentProfile?.name ?? "Baby"
+        let currentPrediction = currentRecords
+            .lazy
+            .filter { $0.actualSleepEventID == nil }
+            .max { $0.generatedAt < $1.generatedAt }?
+            .prediction
+        let hasSleepDraft = activeTimers.contains {
+            $0.isSleepBlock && $0.isTimerDraft
+        }
+
+        Task.detached(priority: .utility) {
+            await LiveActivityManager.shared.synchronize(
+                timer: timerSnapshot,
+                revision: surfaceRevision
+            )
+        }
+
+        if event == nil {
+            // Pausing, resuming, and discarding drafts do not alter completed
+            // history. Persist the one row without starting a full prediction
+            // scan or retaining the Reports interaction transaction.
+            timerSystemRefreshTask = Task.detached(priority: .userInitiated) {
+                let persisted: Bool
+                if let persistenceRequest {
+                    persisted = await EventMutationService.persistTimerMutation(
+                        persistenceRequest,
+                        container: container
+                    )
+                } else {
+                    persisted = true
+                }
+                guard !Task.isCancelled else { return }
+                if !persisted {
+                    await MainActor.run {
+                        guard timerSystemRefreshRevision == refreshRevision else { return }
+                        if let discardedTimerID {
+                            EventVisibilityStore.restore(discardedTimerID)
+                        }
+                        timerSystemRefreshTask = nil
+                    }
+                    return
+                }
+                if scheduleNotification {
+                    await NotificationManager.shared.schedule(
+                        prediction: currentPrediction,
+                        babyName: profileName,
+                        profileID: profileID,
+                        leadMinutes: leadMinutes,
+                        enabled: alertsEnabled,
+                        isSleeping: hasSleepDraft
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                WatchConnectivityService.shared.scheduleCurrentStatePublish()
+                await MainActor.run {
+                    guard timerSystemRefreshRevision == refreshRevision else { return }
+                    timerSystemRefreshTask = nil
+                }
+            }
+            return
+        }
+
         timerSystemRefreshTask = Task { @MainActor in
             await Task.yield()
             guard !Task.isCancelled else { return }
-            _ = WidgetSnapshotService.refreshActiveTimerState(
-                profile: currentProfile,
-                events: activeTimers,
-                now: surfaceRevision
-            )
-            await LiveActivityManager.shared.synchronize(
-                profile: currentProfile,
-                events: activeTimers,
-                revision: surfaceRevision
-            )
 
             if let persistenceRequest,
                !(await EventMutationService.persistTimerMutation(
@@ -890,18 +952,6 @@ struct HistoryView: View {
                     refreshPrediction: true,
                     waitForSystemIntegrations: false,
                     eventAlreadyPersisted: persistenceRequest != nil
-                )
-            } else {
-                let currentEvents = recentPredictionEvents()
-                await EventMutationService.refreshTimerSystemIntegrations(
-                    profile: currentProfile,
-                    events: currentEvents,
-                    records: currentRecords,
-                    context: modelContext,
-                    settings: currentSettings,
-                    notificationsEnabled: alertsEnabled,
-                    notificationLeadMinutes: leadMinutes,
-                    scheduleNotification: scheduleNotification
                 )
             }
             guard !Task.isCancelled else { return }
