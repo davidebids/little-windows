@@ -853,7 +853,7 @@ struct HistoryView: View {
         timerSystemRefreshTask = Task { @MainActor in
             await Task.yield()
             guard !Task.isCancelled else { return }
-            WidgetSnapshotService.refreshActiveTimerState(
+            _ = WidgetSnapshotService.refreshActiveTimerState(
                 profile: currentProfile,
                 events: activeTimers,
                 now: surfaceRevision

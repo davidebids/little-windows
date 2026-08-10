@@ -141,7 +141,7 @@ enum WidgetSnapshotService {
         profile: CareProfile?,
         events: [CareEvent],
         now: Date = Date()
-    ) {
+    ) -> ActiveTimerSnapshot? {
         let timerDrafts = EventVisibilityStore.visibleEvents(in: events)
             .filter(\.isTimerDraft)
         let primary = EventTimerService.primaryActiveEvent(in: timerDrafts)
@@ -164,6 +164,7 @@ enum WidgetSnapshotService {
             profileName: profileName,
             now: now
         )
+        return timer
     }
 
     nonisolated static func makeSnapshot(

@@ -159,6 +159,7 @@ struct TodayView: View {
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query private var allEvents: [CareEvent]
+    @Query private var activeTimerEvents: [CareEvent]
     @Query(sort: \DoctorAppointment.startDate) private var appointments: [DoctorAppointment]
     @Query private var records: [SleepPredictionRecord]
     @Query(sort: \AgeGuideReadState.updatedAt) private var ageGuideReadStates: [AgeGuideReadState]
@@ -214,6 +215,7 @@ struct TodayView: View {
     @State private var integrationAnalysisRevision = UUID()
     @State private var timerMutationRenderDeferralActive = false
     @State private var timerSystemRefreshTask: Task<Void, Never>?
+    @State private var timerSystemRefreshRevision = UUID()
     @State private var localEventMutationCount = 0
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
@@ -227,12 +229,25 @@ struct TodayView: View {
 
         var eventDescriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate<CareEvent> { event in
-                event.profileID == selectedProfileID && event.startDate >= recentCutoff
+                event.profileID == selectedProfileID &&
+                    event.startDate >= recentCutoff &&
+                    (event.timerStateRawValue == nil || event.endDate != nil)
             },
             sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
         eventDescriptor.fetchLimit = 900
         _allEvents = Query(eventDescriptor)
+
+        var activeTimerDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
+                event.profileID == selectedProfileID &&
+                    event.timerStateRawValue != nil &&
+                    event.endDate == nil
+            },
+            sortBy: [SortDescriptor(\CareEvent.updatedAt, order: .reverse)]
+        )
+        activeTimerDescriptor.fetchLimit = 30
+        _activeTimerEvents = Query(activeTimerDescriptor)
 
         let appointmentEnd = calendar.date(byAdding: .day, value: 3, to: todayStart)
             ?? todayStart.addingTimeInterval(3 * 24 * 60 * 60)
@@ -414,7 +429,13 @@ struct TodayView: View {
         let todayStart = calendar.startOfDay(for: now)
         // Every query owned by TodayView is already scoped to the selected profile.
         // Do not re-read every SwiftData property just to apply the same filter.
-        let scopedEvents = EventVisibilityStore.visibleEvents(in: allEvents)
+        // Timer drafts are intentionally queried separately from history. A
+        // pause or resume updates one high-churn row; keeping it out of the
+        // bounded history query prevents SwiftData from re-merging hundreds of
+        // timeline rows while the user is scrolling Today.
+        let scopedEvents = EventVisibilityStore.visibleEvents(
+            in: activeTimerEvents + allEvents
+        ).sorted { $0.startDate > $1.startDate }
         let scopedRecords = records
         let scopedAppointments = appointments
         let scopedAgeGuideReadStates = ageGuideReadStates
@@ -2805,25 +2826,101 @@ struct TodayView: View {
         discardedTimerID: UUID? = nil
     ) {
         timerSystemRefreshTask?.cancel()
+        let refreshRevision = UUID()
+        timerSystemRefreshRevision = refreshRevision
         let currentProfile = profile
         let currentRecords = scopedRecords
         let currentSettings = predictionSettings
         let alertsEnabled = notificationsEnabled
         let leadMinutes = notificationLeadMinutes
         let surfaceRevision = Date()
+        let timerSnapshot = WidgetSnapshotService.refreshActiveTimerState(
+            profile: currentProfile,
+            events: activeTimers,
+            now: surfaceRevision
+        )
+        let container = modelContext.container
+        let currentPrediction = prediction
+        let profileID = currentProfile?.id
+        let profileName = currentProfile?.name ?? "Baby"
+        let hasSleepDraft = activeTimers.contains {
+            $0.isSleepBlock && $0.isTimerDraft
+        }
+        let hasRunningSleepDraft = activeTimers.contains {
+            $0.isSleepBlock && $0.isTimerRunning
+        }
+
+        // ActivityKit coordination can take several seconds. Dispatching it
+        // independently preserves mutation ordering through the snapshot
+        // revision without retaining the SwiftUI interaction transaction.
+        Task.detached(priority: .utility) {
+            await LiveActivityManager.shared.synchronize(
+                timer: timerSnapshot,
+                revision: surfaceRevision
+            )
+        }
+
+        if event == nil, discardedTimerID == nil {
+            // Draft changes are a one-row durable write followed by optional
+            // system notifications. Run the workflow outside the task created
+            // by the tap so a slow CloudKit-backed save cannot keep Today's
+            // gesture transaction open. The only main-actor hop is the small
+            // completion/failure state correction below.
+            timerSystemRefreshTask = Task.detached(priority: .userInitiated) {
+                let persisted: Bool
+                if let persistenceRequest {
+                    persisted = await EventMutationService.persistTimerMutation(
+                        persistenceRequest,
+                        container: container
+                    )
+                } else {
+                    persisted = true
+                }
+                guard !Task.isCancelled else { return }
+
+                let shouldContinue = await MainActor.run {
+                    guard timerSystemRefreshRevision == refreshRevision else { return false }
+                    timerMutationRenderDeferralActive = false
+                    if !persisted {
+                        refreshCachedRenderState()
+                        timerSystemRefreshTask = nil
+                    }
+                    return persisted
+                }
+                guard shouldContinue, !Task.isCancelled else { return }
+
+                if scheduleNotification {
+                    await NotificationManager.shared.schedule(
+                        prediction: currentPrediction,
+                        babyName: profileName,
+                        profileID: profileID,
+                        leadMinutes: leadMinutes,
+                        enabled: alertsEnabled,
+                        isSleeping: hasSleepDraft
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                WatchConnectivityService.shared.scheduleCurrentStatePublish()
+                if syncWakeAlert {
+                    if hasRunningSleepDraft {
+                        await syncActiveSleepPlanWakeAlert()
+                    } else {
+                        await NotificationManager.shared.cancelActiveSleepPlanWakeAlert(
+                            profileID: profileID
+                        )
+                    }
+                }
+                await MainActor.run {
+                    guard timerSystemRefreshRevision == refreshRevision else { return }
+                    timerSystemRefreshTask = nil
+                }
+            }
+            return
+        }
+
         timerSystemRefreshTask = Task { @MainActor in
             await Task.yield()
             guard !Task.isCancelled else { return }
-            WidgetSnapshotService.refreshActiveTimerState(
-                profile: currentProfile,
-                events: activeTimers,
-                now: surfaceRevision
-            )
-            await LiveActivityManager.shared.synchronize(
-                profile: currentProfile,
-                events: activeTimers,
-                revision: surfaceRevision
-            )
 
             if let persistenceRequest,
                !(await EventMutationService.persistTimerMutation(
@@ -2866,26 +2963,6 @@ struct TodayView: View {
                     notificationLeadMinutes: leadMinutes,
                     scheduleNotification: scheduleNotification
                 )
-            } else {
-                // Starting, stopping, resuming, backdating, or changing sides
-                // on a draft does not create a completed history sample. The
-                // lightweight timer snapshots above are authoritative; a full
-                // integration analysis here only faults old history while the
-                // timer editor is trying to tick. Sleep drafts still cancel a
-                // stale Little Window alert without rebuilding predictions.
-                if scheduleNotification {
-                    let hasSleepDraft = activeTimers.contains {
-                        $0.isSleepBlock && $0.isTimerDraft
-                    }
-                    await notificationManager.schedule(
-                        prediction: prediction,
-                        babyName: currentProfile?.name ?? "Baby",
-                        profileID: currentProfile?.id,
-                        leadMinutes: leadMinutes,
-                        enabled: alertsEnabled,
-                        isSleeping: hasSleepDraft
-                    )
-                }
             }
             guard !Task.isCancelled else { return }
             WatchConnectivityService.shared.scheduleCurrentStatePublish()

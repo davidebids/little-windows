@@ -2699,16 +2699,47 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         assertActiveTimerAdvancesWithinThreeSeconds()
 
-        let stop = app.scrollViews.buttons["Stop"].firstMatch
+        // Exercise the compact Today card, which is where a delayed SwiftData
+        // merge previously interrupted an already-active scroll gesture.
+        let sheetTop = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
+        let sheetBottom = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92))
+        sheetTop.press(forDuration: 0.05, thenDragTo: sheetBottom)
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+
+        let stop = app.buttons["active-timer.toggle.sleep"].firstMatch
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
         let pauseStartedAt = ContinuousClock.now
         stop.tap()
-        XCTAssertTrue(app.staticTexts["Stopped"].exists)
+        XCTAssertTrue(app.staticTexts["active-timer.status.sleep"].label.contains("Stopped"))
         XCTAssertLessThan(
             pauseStartedAt.duration(to: .now),
             .seconds(2.5),
             "A production-scale history must not delay pausing a timer."
         )
+
+        let scrollingDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        var scrollsUp = true
+        while ContinuousClock.now < scrollingDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "A delayed timer persistence or system-surface callback must not freeze Today."
+            )
+            scrollsUp.toggle()
+        }
+
+        for _ in 0..<8 where !app.staticTexts["active-timer.status.sleep"].isHittable {
+            app.swipeDown(velocity: .fast)
+        }
+        let timerStatus = app.staticTexts["active-timer.status.sleep"]
+        XCTAssertTrue(timerStatus.isHittable)
+        timerStatus.tap()
 
         let discard = app.buttons["Discard Timer"].firstMatch
         for _ in 0..<5 where !discard.isHittable {

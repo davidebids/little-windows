@@ -10,7 +10,9 @@ struct ActiveTimerCard: View {
     var setNursingSide: ((NursingSide) -> Void)?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(
+            .animation(minimumInterval: 1, paused: !event.isTimerRunning)
+        ) { context in
             VStack(alignment: .leading, spacing: 14) {
                 Button(action: edit) {
                     HStack {
@@ -179,7 +181,9 @@ struct ActiveTimerEditorView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
+                TimelineView(
+                    .animation(minimumInterval: 1, paused: !event.isTimerRunning)
+                ) { context in
                     VStack(spacing: 12) {
                         Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
                             .font(.title2.bold())
@@ -237,7 +241,9 @@ struct ActiveTimerEditorView: View {
                 }
 
                 if event.type == .nursing {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(
+                        .animation(minimumInterval: 1, paused: !event.isTimerRunning)
+                    ) { context in
                         VStack(alignment: .leading, spacing: 14) {
                             HStack {
                                 Label(

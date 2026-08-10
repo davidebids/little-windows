@@ -44,12 +44,10 @@ enum LiveActivityReconciliationPlan: Equatable, Sendable {
     }
 }
 
-@MainActor
-final class LiveActivityManager {
+final class LiveActivityManager: @unchecked Sendable {
     static let shared = LiveActivityManager()
 
     private let systemWriter = LiveActivitySystemWriter()
-    private var latestAcceptedRevision: Date?
 
     private init() {}
 
@@ -57,10 +55,10 @@ final class LiveActivityManager {
         _ timer: ActiveTimerSnapshot,
         revision: Date = Date()
     ) async {
-        guard accept(revision) else { return }
-        await systemWriter.updateTimer(timer)
+        await systemWriter.synchronize(timer: timer, revision: revision)
     }
 
+    @MainActor
     func synchronize(
         profile: CareProfile?,
         events: [CareEvent],
@@ -90,21 +88,11 @@ final class LiveActivityManager {
         timer: ActiveTimerSnapshot?,
         revision: Date = Date()
     ) async {
-        guard accept(revision) else { return }
-        await systemWriter.synchronize(timer: timer)
+        await systemWriter.synchronize(timer: timer, revision: revision)
     }
 
     func endAll(revision: Date = Date()) async {
-        guard accept(revision) else { return }
-        await systemWriter.endAll()
-    }
-
-    private func accept(_ revision: Date) -> Bool {
-        if let latestAcceptedRevision, revision < latestAcceptedRevision {
-            return false
-        }
-        latestAcceptedRevision = revision
-        return true
+        await systemWriter.synchronize(timer: nil, revision: revision)
     }
 }
 
@@ -115,24 +103,18 @@ final class LiveActivityManager {
 private actor LiveActivitySystemWriter {
     private typealias TimerActivity = Activity<LittleWindowsActivityAttributes>
 
+    private var latestAcceptedRevision: Date?
     // Swift actors are reentrant at every ActivityKit `await`. Keep an explicit
     // operation chain so an older end request cannot resume after a newer start
     // and remove the replacement Live Activity.
     private var operationTail: Task<Void, Never>?
 
-    func updateTimer(_ timer: ActiveTimerSnapshot) async {
-        // A widget command can arrive after iOS removed the old system surface.
-        // Full synchronization updates it when present and recreates it when it
-        // is genuinely missing.
+    func synchronize(timer: ActiveTimerSnapshot?, revision: Date) async {
+        if let latestAcceptedRevision, revision < latestAcceptedRevision {
+            return
+        }
+        latestAcceptedRevision = revision
         await enqueue(timer: timer)
-    }
-
-    func synchronize(timer: ActiveTimerSnapshot?) async {
-        await enqueue(timer: timer)
-    }
-
-    func endAll() async {
-        await enqueue(timer: nil)
     }
 
     private func enqueue(timer: ActiveTimerSnapshot?) async {
