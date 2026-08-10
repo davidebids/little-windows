@@ -679,6 +679,27 @@ final class UserVisibleFlowUITests: XCTestCase {
             "Saving intake must not make the next primary-tab transition wait for derived nutrition or history work."
         )
         app.swipeUp(velocity: .fast)
+
+        let postSaveDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var opensToday = true
+        while ContinuousClock.now < postSaveDeadline {
+            let transitionStartedAt = ContinuousClock.now
+            if opensToday {
+                app.tabBars.buttons["Today"].tap()
+                XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 3))
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.tabBars.buttons["Care"].tap()
+                XCTAssertTrue(app.navigationBars["Care"].waitForExistence(timeout: 3))
+                app.swipeUp(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                transitionStartedAt.duration(to: .now),
+                .seconds(6),
+                "Nutrition reconciliation and sleep analysis must not freeze either primary tab after intake is saved."
+            )
+            opensToday.toggle()
+        }
     }
 
     func testProductionScaleCustomRecipeSaveDeleteKeepsRecipesScrollable() {
@@ -737,7 +758,25 @@ final class UserVisibleFlowUITests: XCTestCase {
             .seconds(3.5),
             "The recipes list must accept scrolling immediately after a custom recipe is saved."
         )
-        app.swipeDown(velocity: .fast)
+        let postSaveDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var scrollsUp = false
+        while ContinuousClock.now < postSaveDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Recipe persistence and query merging must not freeze the recipes list after save."
+            )
+            scrollsUp.toggle()
+        }
+        for _ in 0..<5 {
+            app.swipeDown(velocity: .fast)
+        }
 
         let customRecipe = app.buttons.matching(NSPredicate(
             format: "label CONTAINS[c] %@",
@@ -771,6 +810,22 @@ final class UserVisibleFlowUITests: XCTestCase {
             .seconds(3.5),
             "The recipes list must accept scrolling immediately after a custom recipe is deleted."
         )
+        let postDeleteDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        scrollsUp = false
+        while ContinuousClock.now < postDeleteDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Recipe deletion and query merging must not freeze the recipes list at a later callback boundary."
+            )
+            scrollsUp.toggle()
+        }
         XCTAssertFalse(customRecipe.exists)
     }
 
@@ -2391,22 +2446,26 @@ final class UserVisibleFlowUITests: XCTestCase {
             "Today should accept scrolling immediately after a timer is saved."
         )
         XCTAssertFalse(
-            app.staticTexts["Stopped · Ready to save"].waitForExistence(timeout: 1),
+            app.staticTexts["Stopped · Ready to save"].exists,
             "Finishing in the editor must remove the paused timer from Today without a second save."
         )
 
-        let delayedRebuildStarted = expectation(description: "Delayed save rebuild started")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8.2) {
-            delayedRebuildStarted.fulfill()
+        let postSaveDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var scrollsUp = false
+        while ContinuousClock.now < postSaveDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Prediction, persistence, or system-surface work must not freeze Today at any point after a timer save."
+            )
+            scrollsUp.toggle()
         }
-        wait(for: [delayedRebuildStarted], timeout: 9)
-        let delayedScrollStartedAt = ContinuousClock.now
-        app.swipeDown(velocity: .fast)
-        XCTAssertLessThan(
-            delayedScrollStartedAt.duration(to: .now),
-            .seconds(3.5),
-            "Delayed prediction and system-surface rebuilding must not freeze Today after a timer save."
-        )
 
         let savedSleep = app.buttons["today-timeline.event.sleep"].firstMatch
         let tabBar = app.tabBars.firstMatch
@@ -2450,18 +2509,22 @@ final class UserVisibleFlowUITests: XCTestCase {
             )
         }
 
-        let delayedDeleteStarted = expectation(description: "Delayed event deletion started")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8.2) {
-            delayedDeleteStarted.fulfill()
+        let postDeleteDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        scrollsUp = true
+        while ContinuousClock.now < postDeleteDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "SwiftData deletion and related reconciliation must not freeze Today at any later callback boundary."
+            )
+            scrollsUp.toggle()
         }
-        wait(for: [delayedDeleteStarted], timeout: 9)
-        let postDeletePersistenceScrollStartedAt = ContinuousClock.now
-        app.swipeUp(velocity: .fast)
-        XCTAssertLessThan(
-            postDeletePersistenceScrollStartedAt.duration(to: .now),
-            .seconds(3.5),
-            "SwiftData deletion and related reconciliation must not freeze Today later."
-        )
         if let savedEventID {
             XCTAssertFalse(
                 app.buttons.matching(NSPredicate(format: "value == %@", savedEventID)).firstMatch.exists,
@@ -2771,6 +2834,73 @@ final class UserVisibleFlowUITests: XCTestCase {
             scrollsUp.toggle()
         }
         XCTAssertFalse(app.staticTexts["active-timer.status.sleep"].exists)
+    }
+
+    func testProductionScaleTimerStartTimeEditingStaysResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
+        app.buttons["Nap"].tap()
+        assertActiveTimerAdvancesWithinThreeSeconds()
+
+        let adjustStart = app.buttons["−5 min"]
+        for _ in 0..<5 where !adjustStart.isHittable {
+            app.swipeUp(velocity: .fast)
+        }
+        XCTAssertTrue(adjustStart.waitForExistence(timeout: 3))
+        XCTAssertTrue(adjustStart.isHittable)
+
+        // Date controls can publish a stream of intermediate values. Every tap
+        // must remain an editor-local change rather than synchronously queuing a
+        // store save, widget refresh, prediction scan, and Live Activity update.
+        for _ in 0..<6 {
+            let adjustmentStartedAt = ContinuousClock.now
+            adjustStart.tap()
+            XCTAssertLessThan(
+                adjustmentStartedAt.duration(to: .now),
+                .seconds(1.5),
+                "Backdating an active timer must stay responsive on every intermediate edit."
+            )
+        }
+        assertActiveTimerAdvancesWithinThreeSeconds()
+
+        let editorScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            editorScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Editing a timer start time must not leave persistence work blocking the timer editor."
+        )
+
+        let keepTimer = app.navigationBars["Timer"].buttons["Keep Timer"]
+        XCTAssertTrue(keepTimer.waitForExistence(timeout: 3))
+        keepTimer.tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+
+        let scrollingDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        var scrollsUp = true
+        while ContinuousClock.now < scrollingDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Persisting the final backdated start must not freeze Today later."
+            )
+            scrollsUp.toggle()
+        }
+        for _ in 0..<5 where !app.staticTexts["active-timer.status.sleep"].exists {
+            app.swipeDown(velocity: .fast)
+        }
+        XCTAssertTrue(app.staticTexts["active-timer.status.sleep"].exists)
     }
 
     func testPlanDayArcAppearsInPlanner() {

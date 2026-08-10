@@ -641,8 +641,6 @@ struct HistoryView: View {
         await EventMutationService.eventDidChange(
             event,
             profile: profile,
-            events: recentPredictionEvents(including: event),
-            records: scopedRecords,
             context: modelContext,
             settings: settings,
             notificationsEnabled: notificationsEnabled,
@@ -651,28 +649,6 @@ struct HistoryView: View {
             waitForSystemIntegrations: waitForSystemIntegrations
         )
         refreshDayData()
-    }
-
-    private func recentPredictionEvents(including event: CareEvent? = nil) -> [CareEvent] {
-        let selectedProfileID = profile?.id
-            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let cutoff = Calendar.current.date(
-            byAdding: .day,
-            value: -45,
-            to: Calendar.current.startOfDay(for: Date())
-        ) ?? Date()
-        var descriptor = FetchDescriptor<CareEvent>(
-            predicate: #Predicate<CareEvent> { value in
-                value.profileID == selectedProfileID && value.startDate >= cutoff
-            },
-            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
-        )
-        descriptor.fetchLimit = 900
-        var values = (try? modelContext.fetch(descriptor)) ?? []
-        if let event, !values.contains(where: { $0.id == event.id }) {
-            values.append(event)
-        }
-        return values
     }
 
     private func open(_ event: CareEvent) {
@@ -943,8 +919,6 @@ struct HistoryView: View {
                 await EventMutationService.eventDidChange(
                     event,
                     profile: currentProfile,
-                    events: recentPredictionEvents(including: event),
-                    records: currentRecords,
                     context: modelContext,
                     settings: currentSettings,
                     notificationsEnabled: alertsEnabled,
@@ -977,8 +951,6 @@ struct HistoryView: View {
     private func delete(_ event: CareEvent) {
         let eventID = event.id
         let currentProfile = profile
-        let currentEvents = recentPredictionEvents(including: event)
-        let currentRecords = scopedRecords
         let currentSettings = settings
         let alertsEnabled = notificationsEnabled
         let leadMinutes = notificationLeadMinutes
@@ -989,17 +961,15 @@ struct HistoryView: View {
         Task { @MainActor in
             await Task.yield()
             guard !Task.isCancelled else { return }
-            let didDelete = await EventMutationService.delete(
+            let outcome = await EventMutationService.delete(
                 event,
                 profile: currentProfile,
-                events: currentEvents,
-                records: currentRecords,
                 context: modelContext,
                 settings: currentSettings,
                 notificationsEnabled: alertsEnabled,
                 notificationLeadMinutes: leadMinutes
             )
-            if !didDelete {
+            if !outcome.didPersist {
                 EventVisibilityStore.restore(eventID)
             }
             refreshDayData()

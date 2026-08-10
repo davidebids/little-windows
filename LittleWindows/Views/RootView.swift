@@ -1592,7 +1592,7 @@ private struct FirstRunOnboardingView: View {
 
 #if DEBUG
 enum DebugSimulatorSmokeSeedService {
-    private static let performanceSeededKey = "debug.performanceSeeded.v4"
+    private static let performanceSeededKey = "debug.performanceSeeded.v5"
     static var isEnabled: Bool {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
@@ -1651,6 +1651,7 @@ enum DebugSimulatorSmokeSeedService {
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v1")
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v2")
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v3")
+        UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v4")
         UserDefaults.standard.removeObject(forKey: performanceSeededKey)
         PersistenceService.setICloudSyncEnabled(false)
     }
@@ -1685,7 +1686,10 @@ enum DebugSimulatorSmokeSeedService {
         )
         solidsState.guidedStartDate = calendar.startOfDay(for: now)
 
-        for index in 0..<3_000 {
+        // Match the largest reported child profile so timer, Today, and solids
+        // performance tests exercise production-scale history rather than a
+        // smaller synthetic workload that can conceal main-actor scans.
+        for index in 0..<6_000 {
             let date = calendar.date(byAdding: .hour, value: -index * 5, to: now) ?? now
             let type: EventType = switch index % 4 {
             case 0: .sleep

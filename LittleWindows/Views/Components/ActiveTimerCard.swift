@@ -133,6 +133,7 @@ struct ActiveTimerEditorView: View {
     @State private var showingResetConfirmation = false
     @State private var showingDiscardConfirmation = false
     @State private var showingSaveFailure = false
+    @State private var finalizedEditorAction = false
 
     init(
         event: CareEvent,
@@ -285,9 +286,11 @@ struct ActiveTimerEditorView: View {
                     HStack(spacing: 12) {
                         Button {
                             if event.isTimerRunning {
+                                apply(selectedStart)
                                 stop()
                                 selectedEnd = Self.defaultEndDate(for: event)
                             } else {
+                                apply(selectedStart)
                                 resume()
                             }
                         } label: {
@@ -338,6 +341,7 @@ struct ActiveTimerEditorView: View {
                     .onChange(of: selectedStart) { _, newValue in
                         clampStartIfNeeded(newValue)
                     }
+                    .accessibilityIdentifier("active-timer.start-date")
 
                     Divider()
 
@@ -401,6 +405,7 @@ struct ActiveTimerEditorView: View {
                     Button {
                         apply(selectedStart)
                         if save(event.isTimerRunning ? nil : selectedEnd) {
+                            finalizedEditorAction = true
                             dismiss()
                         } else {
                             showingSaveFailure = true
@@ -434,6 +439,7 @@ struct ActiveTimerEditorView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Keep Timer") {
                     apply(selectedStart)
+                    finalizedEditorAction = true
                     dismiss()
                 }
             }
@@ -481,6 +487,7 @@ struct ActiveTimerEditorView: View {
                     tint: .red,
                     role: .destructive
                 ) {
+                    finalizedEditorAction = true
                     discard()
                     dismiss()
                 }
@@ -510,20 +517,15 @@ struct ActiveTimerEditorView: View {
         .onChange(of: endTimeZoneIdentifier) { _, identifier in
             setEndTimeZone(identifier)
         }
-        .task(id: selectedStart) {
-            // Compact DatePicker controls can publish several intermediate values
-            // while their wheels or calendar are moving. Keep that interaction
-            // local, then persist and refresh system surfaces once it settles.
-            guard abs(event.startDate.timeIntervalSince(selectedStart)) > 0.5 else {
-                return
+        .onDisappear {
+            // DatePicker can publish many intermediate values while its wheels
+            // are moving. Keep those edits local so they never enqueue a burst
+            // of SwiftData writes and system-surface refreshes. Explicit editor
+            // actions persist once; an interactive dismissal persists the final
+            // value here after the timer UI is already offscreen.
+            if !finalizedEditorAction {
+                apply(selectedStart)
             }
-            do {
-                try await Task.sleep(for: .milliseconds(180))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            apply(selectedStart)
         }
     }
 

@@ -1399,8 +1399,6 @@ final class SolidsFeatureTests: XCTestCase {
         await EventMutationService.delete(
             event,
             profile: profile,
-            events: [event],
-            records: [],
             context: context,
             settings: .default,
             notificationsEnabled: false,

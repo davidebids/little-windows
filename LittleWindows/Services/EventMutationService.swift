@@ -69,6 +69,11 @@ struct EventIntegrationAnalysis: Sendable {
     var isAuthoritative: Bool
 }
 
+struct EventMutationOutcome: Sendable {
+    var didPersist: Bool
+    var analysis: EventIntegrationAnalysis?
+}
+
 struct CareEventPersistenceSnapshot: Sendable {
     var id: UUID
     var profileID: UUID?
@@ -453,6 +458,16 @@ private actor EventPersistenceWorker {
             events: events,
             settings: settings
         )
+        let miniPlan = profile.flatMap {
+            SleepMiniPlanService.plan(
+                profile: $0,
+                events: events,
+                records: resolvedRecords,
+                prediction: prediction,
+                now: Date(),
+                calendar: .current
+            )
+        }
         let widgetSnapshot = makeWidgetSnapshot(
             profile: profile,
             events: events,
@@ -488,6 +503,8 @@ private actor EventPersistenceWorker {
                 prediction: prediction,
                 refreshesSleepPrediction: refreshesSleepPrediction,
                 pressure: pressure,
+                miniPlan: miniPlan,
+                isSleeping: events.contains { $0.isSleepBlock && $0.isTimerRunning },
                 widgetSnapshot: widgetSnapshot,
                 removedMedicationDose: removedMedicationDose,
                 allergenProfileIDs: Array(allergenProfileIDs),
@@ -545,6 +562,16 @@ private actor EventPersistenceWorker {
             events: events,
             settings: settings
         )
+        let miniPlan = profile.flatMap {
+            SleepMiniPlanService.plan(
+                profile: $0,
+                events: events,
+                records: records,
+                prediction: prediction,
+                now: Date(),
+                calendar: .current
+            )
+        }
         let widgetSnapshot = makeWidgetSnapshot(
             profile: profile,
             events: events,
@@ -558,6 +585,8 @@ private actor EventPersistenceWorker {
                 prediction: prediction,
                 refreshesSleepPrediction: shouldRefresh,
                 pressure: pressure,
+                miniPlan: miniPlan,
+                isSleeping: events.contains { $0.isSleepBlock && $0.isTimerRunning },
                 widgetSnapshot: widgetSnapshot
             )
         } catch {
@@ -1200,13 +1229,11 @@ enum EventMutationService {
     static func delete(
         _ event: CareEvent,
         profile: CareProfile?,
-        events: [CareEvent],
-        records: [SleepPredictionRecord],
         context: ModelContext,
         settings: PredictionSettings,
         notificationsEnabled: Bool,
         notificationLeadMinutes: Int
-    ) async -> Bool {
+    ) async -> EventMutationOutcome {
         EventVisibilityStore.markPendingDeletion(event.id)
         let request = EventDeletionRequest(
             eventID: event.id,
@@ -1215,7 +1242,6 @@ enum EventMutationService {
             refreshesSleepPrediction: affectsSleepPredictionRefresh(event),
             needsAllergenReconciliation: event.type == .feed && event.feedKind == .solid
         )
-        _ = events
         // Keep the SwiftUI-owned context read-only. The optimistic tombstone
         // removes the row immediately while the model actor deletes and saves
         // the stored event together with all linked cleanup.
@@ -1225,12 +1251,8 @@ enum EventMutationService {
             if let errorDescription = result.errorDescription {
                 PersistenceService.recordLocalSaveFailure(errorDescription)
             }
-            // The requested event deletion already committed. Keep it deleted
-            // and report the derived-data failure instead of resurrecting a
-            // partially deleted timeline row.
-            return true
+            return EventMutationOutcome(didPersist: false, analysis: nil)
         }
-        _ = records
         if result.removedMedicationDose {
             SystemIntegrationReconciler.requestReconciliation()
         }
@@ -1258,14 +1280,16 @@ enum EventMutationService {
                 pendingSystemIntegrationTask = nil
             }
         }
-        return true
+        return EventMutationOutcome(
+            didPersist: true,
+            analysis: integrationAnalysis(from: result)
+        )
     }
 
+    @discardableResult
     static func eventDidChange(
         _ event: CareEvent,
         profile: CareProfile?,
-        events: [CareEvent],
-        records: [SleepPredictionRecord],
         context: ModelContext,
         settings: PredictionSettings,
         notificationsEnabled: Bool,
@@ -1274,7 +1298,7 @@ enum EventMutationService {
         waitForSystemIntegrations: Bool = false,
         solidPreset: SolidFeedEditorPreset? = nil,
         eventAlreadyPersisted: Bool = false
-    ) async {
+    ) async -> EventMutationOutcome {
         if !eventAlreadyPersisted {
             event.updatedAt = Date()
         }
@@ -1285,7 +1309,9 @@ enum EventMutationService {
             guard await persistTimerMutation(
                 request,
                 container: context.container
-            ) else { return }
+            ) else {
+                return EventMutationOutcome(didPersist: false, analysis: nil)
+            }
         }
         let eventUpdatedAt = event.updatedAt
         let solidsWriter = await SolidsWriterPool.shared.eventWriter(for: context.container)
@@ -1296,7 +1322,7 @@ enum EventMutationService {
         )
         if let error = solidsResult.error {
             PersistenceService.recordLocalSaveFailure(error)
-            return
+            return EventMutationOutcome(didPersist: true, analysis: nil)
         }
         if solidsResult.changedLinkedRecords,
            !solidsResult.allergenIDsToReconcile.isEmpty,
@@ -1318,7 +1344,7 @@ enum EventMutationService {
             if let errorDescription = result.errorDescription {
                 PersistenceService.recordLocalSaveFailure(errorDescription)
             }
-            return
+            return EventMutationOutcome(didPersist: true, analysis: nil)
         }
         let prediction = result.prediction
         if waitForSystemIntegrations {
@@ -1355,6 +1381,10 @@ enum EventMutationService {
                 }
             }
         }
+        return EventMutationOutcome(
+            didPersist: true,
+            analysis: integrationAnalysis(from: result)
+        )
     }
 
     static func refreshPrediction(
@@ -1444,6 +1474,19 @@ enum EventMutationService {
             .filter { $0.actualSleepEventID == nil }
             .max { $0.generatedAt < $1.generatedAt }?
             .prediction
+    }
+
+    private static func integrationAnalysis(
+        from result: EventPersistenceResult
+    ) -> EventIntegrationAnalysis {
+        EventIntegrationAnalysis(
+            prediction: result.prediction,
+            pressure: result.pressure,
+            miniPlan: result.miniPlan,
+            isSleeping: result.isSleeping,
+            widgetSnapshot: result.widgetSnapshot,
+            isAuthoritative: result.didSave
+        )
     }
 
     private static func refreshSystemIntegrations(

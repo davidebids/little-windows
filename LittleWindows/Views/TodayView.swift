@@ -407,14 +407,20 @@ struct TodayView: View {
                 guard integrationAnalysisRevision == revision,
                       cachedRenderState.profileID == profileID,
                       cachedRenderState.isSleeping == analysis.isSleeping else { return }
-                var state = cachedRenderState
-                state.prediction = analysis.prediction
-                state.sleepPressure = state.isSleeping ? nil : analysis.pressure
-                state.sleepMiniPlan = analysis.miniPlan
-                cachedRenderState = state
+                applyIntegrationAnalysis(analysis)
                 integrationAnalysisTask = nil
             }
         }
+    }
+
+    private func applyIntegrationAnalysis(_ analysis: EventIntegrationAnalysis) {
+        guard analysis.isAuthoritative,
+              cachedRenderState.isSleeping == analysis.isSleeping else { return }
+        var state = cachedRenderState
+        state.prediction = analysis.prediction
+        state.sleepPressure = state.isSleeping ? nil : analysis.pressure
+        state.sleepMiniPlan = analysis.miniPlan
+        cachedRenderState = state
     }
 
     private func invalidateIntegrationAnalysis() {
@@ -2925,10 +2931,14 @@ struct TodayView: View {
                 }
                 if discardedTimerID != nil {
                     // Restore pressure/day-ahead details with one low-priority
-                    // scan. The pre-timer prediction remains visible instantly,
-                    // and this work cannot inherit the discard tap's priority.
+                    // scan only after a cold launch that had no pre-timer
+                    // analysis to retain. A draft never changes historical
+                    // inputs, so the normal discard path needs no rebuild.
                     await MainActor.run {
-                        scheduleIntegrationAnalysisRefresh()
+                        if cachedRenderState.sleepPressure == nil,
+                           cachedRenderState.sleepMiniPlan == nil {
+                            scheduleIntegrationAnalysisRefresh()
+                        }
                     }
                 }
                 await MainActor.run {
@@ -2958,19 +2968,20 @@ struct TodayView: View {
             }
             guard !Task.isCancelled else { return }
             if let event {
-                await EventMutationService.eventDidChange(
+                let outcome = await EventMutationService.eventDidChange(
                     event,
                     profile: currentProfile,
-                    events: events,
-                    records: currentRecords,
                     context: modelContext,
                     settings: currentSettings,
                     notificationsEnabled: alertsEnabled,
                     notificationLeadMinutes: leadMinutes,
                     refreshPrediction: true,
-                    waitForSystemIntegrations: true,
+                    waitForSystemIntegrations: false,
                     eventAlreadyPersisted: persistenceRequest != nil
                 )
+                if let analysis = outcome.analysis {
+                    applyIntegrationAnalysis(analysis)
+                }
             }
             guard !Task.isCancelled else { return }
             WatchConnectivityService.shared.scheduleCurrentStatePublish()
@@ -2981,10 +2992,10 @@ struct TodayView: View {
             // that the isolated writer committed. Rebuilding every Today
             // section here needlessly competes with a gesture if persistence
             // finishes while the user is scrolling. Clear the merge guard and
-            // refresh only the derived sleep analysis; a persistence failure
-            // above still performs the full corrective render-state rebuild.
+            // publish the isolated worker's immutable analysis directly; a
+            // persistence failure above still performs the full corrective
+            // render-state rebuild.
             timerMutationRenderDeferralActive = false
-            scheduleIntegrationAnalysisRefresh()
             timerSystemRefreshTask = nil
         }
     }
@@ -3202,19 +3213,11 @@ struct TodayView: View {
         applyChangedEventToCachedRenderState(event)
         defer {
             localEventMutationCount = max(0, localEventMutationCount - 1)
-            if localEventMutationCount == 0 {
-                scheduleRenderStateRefresh()
-            }
         }
         event.profileID = event.profileID ?? selectedProfileID
-        let currentEvents = scopedEvents.contains(where: { $0.id == event.id })
-            ? scopedEvents
-            : scopedEvents + [event]
-        await EventMutationService.eventDidChange(
+        let outcome = await EventMutationService.eventDidChange(
             event,
             profile: profile,
-            events: currentEvents,
-            records: scopedRecords,
             context: modelContext,
             settings: predictionSettings,
             notificationsEnabled: notificationsEnabled,
@@ -3223,6 +3226,12 @@ struct TodayView: View {
             waitForSystemIntegrations: waitForSystemIntegrations,
             solidPreset: solidPreset
         )
+        if let analysis = outcome.analysis {
+            applyIntegrationAnalysis(analysis)
+        }
+        if !outcome.didPersist {
+            refreshCachedRenderState()
+        }
     }
 
     private func applyChangedEventToCachedRenderState(_ event: CareEvent) {
@@ -3323,8 +3332,6 @@ struct TodayView: View {
     private func delete(_ event: CareEvent) {
         let eventID = event.id
         let currentProfile = profile
-        let currentEvents = scopedEvents
-        let currentRecords = scopedRecords
         let currentSettings = predictionSettings
         let alertsEnabled = notificationsEnabled
         let leadMinutes = notificationLeadMinutes
@@ -3334,28 +3341,24 @@ struct TodayView: View {
         localEventMutationCount += 1
 
         Task { @MainActor in
-            defer {
-                localEventMutationCount = max(0, localEventMutationCount - 1)
-                if localEventMutationCount == 0 {
-                    scheduleRenderStateRefresh()
-                }
-            }
+            defer { localEventMutationCount = max(0, localEventMutationCount - 1) }
             // Finish the confirmation action's update cycle, then let the
             // isolated SwiftData worker perform the actual deletion.
             await Task.yield()
             guard !Task.isCancelled else { return }
-            let didDelete = await EventMutationService.delete(
+            let outcome = await EventMutationService.delete(
                 event,
                 profile: currentProfile,
-                events: currentEvents,
-                records: currentRecords,
                 context: modelContext,
                 settings: currentSettings,
                 notificationsEnabled: alertsEnabled,
                 notificationLeadMinutes: leadMinutes
             )
-            if !didDelete {
+            if !outcome.didPersist {
                 EventVisibilityStore.restore(eventID)
+                refreshCachedRenderState()
+            } else if let analysis = outcome.analysis {
+                applyIntegrationAnalysis(analysis)
             }
         }
     }
@@ -3375,6 +3378,39 @@ struct TodayView: View {
                 return logDate <= now ? logDate : nil
             }
             .max()
+        if event.type == .feed, event.feedKind == .solid {
+            let remainingSolidFeeds = state.scopedEvents.lazy.filter {
+                $0.type == .feed && $0.feedKind == .solid && !$0.isTimerDraft
+            }
+            state.hasSolidHistory = !remainingSolidFeeds.isEmpty
+            state.latestSolidFoodSummary = remainingSolidFeeds
+                .filter { ($0.endDate ?? $0.startDate) <= now }
+                .max { ($0.endDate ?? $0.startDate) < ($1.endDate ?? $1.startDate) }
+                .flatMap(TodayFeedQuickActionDetail.solidFoodSummary)
+        }
+        if state.isDogProfile {
+            switch event.type {
+            case .food, .water, .walk, .medicine:
+                state.dogLastEventTitles[event.type] = state.scopedEvents.lazy
+                    .filter { $0.type == event.type && !$0.isTimerDraft }
+                    .max { $0.startDate < $1.startDate }?
+                    .displayTitle ?? "Not logged"
+            case .potty:
+                let remainingPottyEvents = state.scopedEvents.lazy.filter {
+                    $0.type == .potty && !$0.isTimerDraft
+                }
+                state.dogPottyTitles[.pee] = remainingPottyEvents
+                    .filter { $0.dogDetails.pottyType?.hasPee == true }
+                    .max { $0.startDate < $1.startDate }?
+                    .displayTitle ?? "Not logged"
+                state.dogPottyTitles[.poop] = remainingPottyEvents
+                    .filter { $0.dogDetails.pottyType?.hasPoop == true }
+                    .max { $0.startDate < $1.startDate }?
+                    .displayTitle ?? "Not logged"
+            default:
+                break
+            }
+        }
         if event.isSleepBlock {
             state.prediction = nil
             state.sleepPressure = nil
