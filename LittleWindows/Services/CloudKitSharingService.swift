@@ -651,12 +651,17 @@ final class CloudKitSharingService {
             .max { $0.generatedAt < $1.generatedAt }?
             .prediction
 
+        let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        var solidsStateDescriptor = FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID }
+        )
+        solidsStateDescriptor.fetchLimit = 1
         WidgetSnapshotService.refresh(
             profile: profile,
             events: events,
             prediction: prediction,
-            solidsState: ((try? context.fetch(FetchDescriptor<SolidsProfileState>())) ?? [])
-                .first { $0.profileID == profile?.id }
+            solidsState: (try? context.fetch(solidsStateDescriptor))?.first
         )
         await LiveActivityManager.shared.synchronize(profile: profile, events: events)
     }

@@ -79,11 +79,34 @@ struct SolidsCustomFoodWrite: Sendable {
     var minimumAgeMonths: Int
     var preparationNotes: String
     var safetyNotes: String
+    var nutritionLabel: SolidManualNutritionLabel? = nil
+}
+
+struct SolidsCustomRecipeWrite: Sendable {
+    var recipeID: UUID?
+    var name: String
+    var ingredients: [CustomSolidRecipeIngredient]
+    var servings: Double
+    var minimumAgeMonths: Int
+    var instructions: String
+    var notes: String
+}
+
+struct SolidsCustomRecipeWriteResult: Sendable {
+    var recipeID: UUID?
+    var error: String?
 }
 
 struct SolidsCustomFoodWriteResult: Sendable {
     var itemID: UUID?
     var name: String?
+    var error: String?
+}
+
+struct SolidsEventReconcileResult: Sendable {
+    var profileID: UUID?
+    var changedLinkedRecords: Bool
+    var allergenIDsToReconcile: [String] = []
     var error: String?
 }
 
@@ -124,6 +147,8 @@ actor SolidsWriterPool {
     }
 
     private var customFoodWriters: [ObjectIdentifier: WeakWriterBox] = [:]
+    private var customRecipeWriters: [ObjectIdentifier: WeakWriterBox] = [:]
+    private var eventWriters: [ObjectIdentifier: WeakWriterBox] = [:]
     private var mealPrepWriters: [ObjectIdentifier: WeakWriterBox] = [:]
     private var backfillWriters: [ObjectIdentifier: WeakWriterBox] = [:]
     private var shoppingListWriters: [ObjectIdentifier: WeakWriterBox] = [:]
@@ -138,6 +163,18 @@ actor SolidsWriterPool {
     func customFoodWriter(for container: ModelContainer) -> SolidsCustomFoodWriter {
         resolve(container, storage: &customFoodWriters) {
             SolidsCustomFoodWriter(modelContainer: $0)
+        }
+    }
+
+    func customRecipeWriter(for container: ModelContainer) -> SolidsCustomRecipeWriter {
+        resolve(container, storage: &customRecipeWriters) {
+            SolidsCustomRecipeWriter(modelContainer: $0)
+        }
+    }
+
+    func eventWriter(for container: ModelContainer) -> SolidsEventWriter {
+        resolve(container, storage: &eventWriters) {
+            SolidsEventWriter(modelContainer: $0)
         }
     }
 
@@ -218,6 +255,71 @@ actor SolidsWriterPool {
 }
 
 @ModelActor
+actor SolidsEventWriter {
+    func reconcile(
+        eventID: UUID,
+        preset: SolidFeedEditorPreset?,
+        now: Date = Date()
+    ) -> SolidsEventReconcileResult {
+        var descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate { $0.id == eventID }
+        )
+        descriptor.fetchLimit = 1
+        guard let event = try? modelContext.fetch(descriptor).first else {
+            return SolidsEventReconcileResult(
+                profileID: nil,
+                changedLinkedRecords: false,
+                error: nil
+            )
+        }
+        let hadTrackedRecords = SolidsTrackingService.hasTrackedSolidFeedRecords(
+            eventID: eventID,
+            context: modelContext
+        )
+        let needsReconciliation = (event.type == .feed && event.feedKind == .solid)
+            || hadTrackedRecords
+        guard needsReconciliation else {
+            return SolidsEventReconcileResult(
+                profileID: event.profileID,
+                changedLinkedRecords: false,
+                error: nil
+            )
+        }
+        let previousItems = (try? modelContext.fetch(FetchDescriptor<SolidFoodEventItem>(
+            predicate: #Predicate { $0.eventID == eventID }
+        ))) ?? []
+        let previousAllergenIDs = Set(previousItems.flatMap(\.allergenIDs))
+        SolidsTrackingService.reconcileSolidFeed(
+            event: event,
+            preset: preset,
+            context: modelContext,
+            now: now,
+            persist: false
+        )
+        let currentAllergenIDs = Set(event.solidFoodDetails.flatMap(\.allergenIDs))
+        do {
+            try modelContext.save()
+            PersistenceService.recordLocalSave()
+            return SolidsEventReconcileResult(
+                profileID: event.profileID,
+                changedLinkedRecords: true,
+                allergenIDsToReconcile: Array(
+                    previousAllergenIDs.union(currentAllergenIDs)
+                ).sorted(),
+                error: nil
+            )
+        } catch {
+            modelContext.rollback()
+            return SolidsEventReconcileResult(
+                profileID: event.profileID,
+                changedLinkedRecords: false,
+                error: error.localizedDescription
+            )
+        }
+    }
+}
+
+@ModelActor
 actor SolidsCustomFoodWriter {
     func save(
         _ write: SolidsCustomFoodWrite,
@@ -229,12 +331,18 @@ actor SolidsCustomFoodWriter {
             return SolidsCustomFoodWriteResult(error: "Enter a food name.")
         }
 
-        let existingDescriptor = FetchDescriptor<SolidFoodCatalogItem>()
+        var existingDescriptor = FetchDescriptor<SolidFoodCatalogItem>(
+            predicate: #Predicate { $0.normalizedName == normalizedName }
+        )
+        existingDescriptor.fetchLimit = 2
         let duplicate = ((try? modelContext.fetch(existingDescriptor)) ?? []).contains {
             $0.id != write.itemID && $0.normalizedName == normalizedName
         }
         guard !duplicate else {
             return SolidsCustomFoodWriteResult(error: "A custom food with this name already exists.")
+        }
+        guard write.nutritionLabel?.isValid != false else {
+            return SolidsCustomFoodWriteResult(error: "Check the serving amount and nutrition values on the manual label.")
         }
 
         let item: SolidFoodCatalogItem
@@ -272,13 +380,18 @@ actor SolidsCustomFoodWriter {
             item.photoAttachmentID = nil
         }
 
+        let previousName = item.name
         item.name = cleanedName
         item.normalizedName = normalizedName
         item.allergenIDs = write.allergenIDs
         item.minimumAgeMonths = write.minimumAgeMonths
         item.preparationNotes = write.preparationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         item.safetyNotes = write.safetyNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.nutritionLabel = write.nutritionLabel
         item.updatedAt = now
+        if previousName != cleanedName {
+            updateReferences(to: item, now: now)
+        }
 
         do {
             try modelContext.save()
@@ -295,6 +408,24 @@ actor SolidsCustomFoodWriter {
             predicate: #Predicate { $0.id == itemID }
         )
         guard let item = try? modelContext.fetch(descriptor).first else { return nil }
+        let trackingID = item.trackingID
+        let trackingToken = "\"\(trackingID)\""
+        var recipeDescriptor = FetchDescriptor<CustomSolidRecipe>(
+            predicate: #Predicate { $0.ingredientsJSON.contains(trackingToken) }
+        )
+        recipeDescriptor.fetchLimit = 1
+        if (try? modelContext.fetch(recipeDescriptor).first) != nil {
+            return "Remove this food from your recipes before deleting it."
+        }
+        var planDescriptor = FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate {
+                $0.completedEventID == nil && $0.foodIDsJSON.contains(trackingToken)
+            }
+        )
+        planDescriptor.fetchLimit = 1
+        if (try? modelContext.fetch(planDescriptor).first) != nil {
+            return "Remove this food from meal plans that have not been logged before deleting it."
+        }
         if let photoAttachmentID = item.photoAttachmentID {
             deletePhoto(id: photoAttachmentID)
         }
@@ -316,6 +447,159 @@ actor SolidsCustomFoodWriter {
         descriptor.fetchLimit = 1
         if let photo = try? modelContext.fetch(descriptor).first {
             modelContext.delete(photo)
+        }
+    }
+
+    private func updateReferences(to item: SolidFoodCatalogItem, now: Date) {
+        let trackingID = item.trackingID
+        let trackingToken = "\"\(trackingID)\""
+        let recipes = (try? modelContext.fetch(FetchDescriptor<CustomSolidRecipe>(
+            predicate: #Predicate { $0.ingredientsJSON.contains(trackingToken) }
+        ))) ?? []
+        for recipe in recipes {
+            recipe.ingredients = recipe.ingredients.map { ingredient in
+                guard ingredient.foodID == trackingID else { return ingredient }
+                var updated = ingredient
+                updated.foodName = item.name
+                return updated
+            }
+            recipe.updatedAt = now
+        }
+
+        let plans = (try? modelContext.fetch(FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate {
+                $0.completedEventID == nil && $0.foodIDsJSON.contains(trackingToken)
+            }
+        ))) ?? []
+        for plan in plans {
+            var names = plan.foodNames
+            for index in plan.foodIDs.indices where plan.foodIDs[index] == trackingID && names.indices.contains(index) {
+                names[index] = item.name
+            }
+            plan.foodNames = names
+            plan.updatedAt = now
+        }
+    }
+}
+
+@ModelActor
+actor SolidsCustomRecipeWriter {
+    func save(
+        _ write: SolidsCustomRecipeWrite,
+        now: Date = Date()
+    ) -> SolidsCustomRecipeWriteResult {
+        let name = write.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return SolidsCustomRecipeWriteResult(error: "Enter a recipe name.") }
+        guard write.servings.isFinite, write.servings > 0 else {
+            return SolidsCustomRecipeWriteResult(error: "Enter a recipe yield greater than zero.")
+        }
+        guard !write.ingredients.isEmpty,
+              write.ingredients.allSatisfy({
+                  $0.amount.isFinite
+                      && $0.amount > 0
+                      && !$0.foodID.isEmpty
+                      && !$0.foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }) else {
+            return SolidsCustomRecipeWriteResult(error: "Add at least one ingredient with an amount greater than zero.")
+        }
+        guard Set(write.ingredients.map(\.foodID)).count == write.ingredients.count,
+              Set(write.ingredients.map(\.id)).count == write.ingredients.count else {
+            return SolidsCustomRecipeWriteResult(error: "Each food can appear only once in a recipe.")
+        }
+        for ingredient in write.ingredients {
+            if ingredient.foodID.hasPrefix("custom-"),
+               let customFoodID = UUID(uuidString: String(ingredient.foodID.dropFirst("custom-".count))) {
+                var descriptor = FetchDescriptor<SolidFoodCatalogItem>(
+                    predicate: #Predicate { $0.id == customFoodID }
+                )
+                descriptor.fetchLimit = 1
+                guard (try? modelContext.fetch(descriptor).first) != nil else {
+                    return SolidsCustomRecipeWriteResult(error: "One or more recipe ingredients are no longer available.")
+                }
+            } else if SolidsReferenceCatalog.foodSummary(id: ingredient.foodID) == nil {
+                return SolidsCustomRecipeWriteResult(error: "One or more recipe ingredients are no longer available.")
+            }
+        }
+        let normalizedName = SolidFoodSelection.normalizedName(name)
+        let recipes = (try? modelContext.fetch(FetchDescriptor<CustomSolidRecipe>())) ?? []
+        guard !recipes.contains(where: {
+            $0.id != write.recipeID && SolidFoodSelection.normalizedName($0.name) == normalizedName
+        }) else {
+            return SolidsCustomRecipeWriteResult(error: "A custom recipe with this name already exists.")
+        }
+
+        let recipe: CustomSolidRecipe
+        if let recipeID = write.recipeID {
+            var descriptor = FetchDescriptor<CustomSolidRecipe>(
+                predicate: #Predicate { $0.id == recipeID }
+            )
+            descriptor.fetchLimit = 1
+            guard let existing = try? modelContext.fetch(descriptor).first else {
+                return SolidsCustomRecipeWriteResult(error: "This recipe is no longer available.")
+            }
+            recipe = existing
+        } else {
+            recipe = CustomSolidRecipe(name: name, ingredients: [], createdAt: now, updatedAt: now)
+            modelContext.insert(recipe)
+        }
+        recipe.name = name
+        recipe.ingredients = write.ingredients
+        recipe.servings = write.servings
+        recipe.minimumAgeMonths = write.minimumAgeMonths
+        recipe.instructions = write.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        recipe.notes = write.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        recipe.updatedAt = now
+        synchronizeUpcomingPlans(with: recipe, now: now)
+
+        do {
+            try modelContext.save()
+            PersistenceService.recordLocalSave()
+            return SolidsCustomRecipeWriteResult(recipeID: recipe.id)
+        } catch {
+            modelContext.rollback()
+            return SolidsCustomRecipeWriteResult(error: error.localizedDescription)
+        }
+    }
+
+    func delete(recipeID: UUID) -> String? {
+        var descriptor = FetchDescriptor<CustomSolidRecipe>(
+            predicate: #Predicate { $0.id == recipeID }
+        )
+        descriptor.fetchLimit = 1
+        guard let recipe = try? modelContext.fetch(descriptor).first else { return nil }
+        let trackingID = recipe.trackingID
+        var linkedPlanDescriptor = FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate {
+                $0.completedEventID == nil && $0.recipeID == trackingID
+            }
+        )
+        linkedPlanDescriptor.fetchLimit = 1
+        if (try? modelContext.fetch(linkedPlanDescriptor).first) != nil {
+            return "Remove this recipe from meal plans that have not been logged before deleting it."
+        }
+        modelContext.delete(recipe)
+        do {
+            try modelContext.save()
+            PersistenceService.recordLocalSave()
+            return nil
+        } catch {
+            modelContext.rollback()
+            return error.localizedDescription
+        }
+    }
+
+    private func synchronizeUpcomingPlans(with recipe: CustomSolidRecipe, now: Date) {
+        let trackingID = recipe.trackingID
+        let plans = (try? modelContext.fetch(FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate {
+                $0.completedEventID == nil && $0.recipeID == trackingID
+            }
+        ))) ?? []
+        for plan in plans {
+            plan.title = recipe.name
+            plan.foodIDs = recipe.ingredients.map(\.foodID)
+            plan.foodNames = recipe.ingredients.map(\.foodName)
+            plan.updatedAt = now
         }
     }
 }
@@ -480,6 +764,13 @@ actor SolidsBackfillWriter {
                     confirmedAllergenPortionIDs: detail.confirmedAllergenPortionIDs,
                     reactionRawValue: detail.preference.rawValue,
                     servingAmount: detail.servingAmount ?? "",
+                    amountOffered: detail.amountOffered,
+                    amountEaten: detail.amountEaten,
+                    portionUnit: detail.portionUnit,
+                    consumptionEstimate: detail.consumptionEstimate,
+                    nutritionSnapshot: detail.nutritionSnapshot,
+                    recipeID: detail.recipeID,
+                    recipeNameSnapshot: detail.recipeName,
                     notes: detail.notes ?? "",
                     suspectedReaction: detail.suspectedReaction,
                     symptoms: detail.symptoms,
@@ -1575,6 +1866,129 @@ actor SolidsAllergenProgressWriter {
         return await saveAndRefreshReminder(record)
     }
 
+    /// Rebuilds derived allergen state on this model actor after an event or
+    /// its linked solid-food rows change. This replaces the old main-actor
+    /// formerly deferred reconciliation work.
+    func reconcileDerivedProgress(
+        profileID: UUID,
+        allergenIDs: Set<String>? = nil,
+        now: Date = Date()
+    ) async -> String? {
+        let recognizedIDs = Set(SolidsAllergen.allCases.map(\.rawValue))
+        let targetIDs = allergenIDs.map { $0.intersection(recognizedIDs) }
+            ?? recognizedIDs
+        guard !targetIDs.isEmpty else { return nil }
+
+        let items: [SolidFoodEventItem]
+        if allergenIDs == nil {
+            let itemDescriptor = FetchDescriptor<SolidFoodEventItem>(
+                predicate: #Predicate { $0.profileID == profileID },
+                sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt)]
+            )
+            items = (try? modelContext.fetch(itemDescriptor)) ?? []
+        } else {
+            var itemByID: [UUID: SolidFoodEventItem] = [:]
+            for allergenID in targetIDs {
+                let token = "\"\(allergenID)\""
+                let itemDescriptor = FetchDescriptor<SolidFoodEventItem>(
+                    predicate: #Predicate {
+                        $0.profileID == profileID && $0.allergenIDsJSON.contains(token)
+                    },
+                    sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt)]
+                )
+                for item in (try? modelContext.fetch(itemDescriptor)) ?? [] {
+                    itemByID[item.id] = item
+                }
+            }
+            items = Array(itemByID.values)
+        }
+        let progressDescriptor = FetchDescriptor<SolidAllergenProgress>(
+            predicate: #Predicate { $0.profileID == profileID }
+        )
+        var existingByID = Dictionary(uniqueKeysWithValues:
+            ((try? modelContext.fetch(progressDescriptor)) ?? []).map { ($0.allergenID, $0) }
+        )
+        var itemsByAllergenID: [String: [SolidFoodEventItem]] = [:]
+        for item in items {
+            for allergenID in item.allergenIDs where recognizedIDs.contains(allergenID) {
+                itemsByAllergenID[allergenID, default: []].append(item)
+            }
+        }
+
+        var reminderSnapshots: [SolidAllergenReminderSnapshot] = []
+        for allergen in SolidsAllergen.allCases where targetIDs.contains(allergen.rawValue) {
+            let matching = itemsByAllergenID[allergen.rawValue] ?? []
+            guard !matching.isEmpty || existingByID[allergen.rawValue] != nil else { continue }
+            let record = existingByID[allergen.rawValue]
+                ?? SolidAllergenProgress(profileID: profileID, allergenID: allergen.rawValue)
+            if record.modelContext == nil { modelContext.insert(record) }
+            existingByID[allergen.rawValue] = record
+
+            var exposureByEventID: [UUID: Date] = [:]
+            var confirmedByEventID: [UUID: Date] = [:]
+            var hasAvoidance = false
+            var hasReaction = false
+            for item in matching {
+                exposureByEventID[item.eventID] = max(
+                    exposureByEventID[item.eventID] ?? .distantPast,
+                    item.createdAt
+                )
+                if item.confirmsIntroductionPortion(for: allergen.rawValue) {
+                    confirmedByEventID[item.eventID] = max(
+                        confirmedByEventID[item.eventID] ?? .distantPast,
+                        item.createdAt
+                    )
+                }
+                hasAvoidance = hasAvoidance || item.followUp == .avoidPendingAdvice
+                hasReaction = hasReaction || item.suspectedReaction
+            }
+            let confirmedDates = confirmedByEventID.values
+            record.exposureMealCount = exposureByEventID.count
+            record.introductionStep = min(3, confirmedDates.count)
+            record.firstIntroducedAt = confirmedDates.min()
+            record.lastExposureAt = exposureByEventID.values.max()
+            if let override = record.statusOverride {
+                record.status = override
+            } else if hasAvoidance {
+                record.status = .avoidPendingAdvice
+            } else if hasReaction {
+                record.status = .suspectedReaction
+            } else if confirmedDates.count >= 3 {
+                record.status = .tolerated
+            } else if exposureByEventID.isEmpty {
+                record.status = .notStarted
+            } else {
+                record.status = .introducing
+            }
+            let rotationBase: Date?
+            switch record.status {
+            case .tolerated:
+                rotationBase = exposureByEventID.values.max()
+            case .introducing:
+                rotationBase = confirmedDates.max()
+            case .notStarted, .suspectedReaction, .avoidPendingAdvice:
+                rotationBase = nil
+            }
+            record.nextExposureDueAt = rotationBase.flatMap {
+                Calendar.current.date(byAdding: .day, value: 7, to: $0)
+            }
+            record.updatedAt = now
+            reminderSnapshots.append(SolidAllergenReminderSnapshot(
+                profileID: record.profileID,
+                allergenID: record.allergenID,
+                statusRawValue: record.statusRawValue,
+                nextExposureDueAt: record.nextExposureDueAt,
+                reminderEnabled: record.reminderEnabled
+            ))
+        }
+
+        if let error = save() { return error }
+        for snapshot in reminderSnapshots {
+            await NotificationManager.shared.scheduleSolidAllergenReminder(snapshot: snapshot)
+        }
+        return nil
+    }
+
     private func progress(profileID: UUID, allergenID: String) -> SolidAllergenProgress {
         let descriptor = FetchDescriptor<SolidAllergenProgress>(
             predicate: #Predicate { $0.profileID == profileID && $0.allergenID == allergenID }
@@ -1622,9 +2036,266 @@ enum SolidsAccessLevel: Equatable {
     case full
 }
 
+struct SolidRecipeNutritionSummary: Hashable {
+    var nutrients: SolidNutritionValues
+    var quantifiedIngredientCount: Int
+    var completeIngredientCount: Int
+    var ingredientCount: Int
+
+    var isComplete: Bool {
+        ingredientCount > 0 && completeIngredientCount == ingredientCount
+    }
+}
+
+/// Resolves current catalog values into immutable snapshots stored with a log.
+/// Historical totals therefore do not change when a manual label or reference
+/// entry is edited later.
+enum SolidsNutritionService {
+    static func reference(
+        foodID: String,
+        customFoods: [SolidFoodCatalogItem]
+    ) -> SolidNutritionReference? {
+        // Custom tracking identifiers have a reserved prefix. Avoid walking the
+        // custom catalog for every bundled food lookup (notably the 400+ rows in
+        // the recipe picker).
+        if foodID.hasPrefix("custom-"),
+           let item = customFoods.first(where: { $0.trackingID == foodID }),
+           var reference = item.nutritionLabel?.nutritionReference {
+            reference.sourceID = item.trackingID
+            return reference
+        }
+        if foodID.hasPrefix("custom-") { return nil }
+        return SolidsNutritionCatalog.reference(foodID: foodID)
+    }
+
+    static func supportedUnits(
+        foodID: String,
+        customFoods: [SolidFoodCatalogItem]
+    ) -> [SolidPortionUnit] {
+        guard let reference = reference(foodID: foodID, customFoods: customFoods) else {
+            return SolidPortionUnit.allCases
+        }
+        var units: [SolidPortionUnit] = [reference.basisUnit]
+        if reference.basisGrams != nil {
+            units.append(contentsOf: [.gram, .ounce])
+        }
+        units.append(contentsOf: reference.portions.map(\.unit))
+        return SolidPortionUnit.allCases.filter { units.contains($0) }
+    }
+
+    static func resolvedEatenAmount(
+        offered: Double?,
+        eaten: Double?,
+        estimate: SolidConsumptionEstimate?
+    ) -> Double? {
+        if let eaten, eaten.isFinite, eaten >= 0 { return eaten }
+        guard let offered, offered.isFinite, offered >= 0,
+              let fraction = estimate?.offeredFraction else { return nil }
+        return offered * fraction
+    }
+
+    static func grams(
+        amount: Double,
+        unit: SolidPortionUnit,
+        reference: SolidNutritionReference
+    ) -> Double? {
+        guard amount.isFinite, amount >= 0 else { return nil }
+        // A package label's stated serving weight is authoritative for its own
+        // serving unit. For example, a label may round 1 oz to 28 g; using the
+        // generic 28.3495 g conversion here would overstate the saved nutrients.
+        if unit == reference.basisUnit,
+           reference.basisQuantity > 0,
+           let basisGrams = reference.basisGrams {
+            let value = amount * basisGrams / reference.basisQuantity
+            return value.isFinite ? value : nil
+        }
+        if let factor = unit.gramsPerUnit {
+            let value = amount * factor
+            return value.isFinite ? value : nil
+        }
+        if let portion = reference.portions.first(where: { $0.unit == unit }) {
+            let value = amount * portion.gramsPerUnit
+            return value.isFinite ? value : nil
+        }
+        return nil
+    }
+
+    static func snapshot(
+        amount: Double,
+        unit: SolidPortionUnit,
+        reference: SolidNutritionReference,
+        capturedAt: Date = Date()
+    ) -> SolidNutritionSnapshot? {
+        guard amount.isFinite, amount >= 0 else { return nil }
+        let amountDescription = "\(amount.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName)"
+        let eatenGrams = grams(amount: amount, unit: unit, reference: reference)
+        let factor: Double?
+        if unit == reference.basisUnit, reference.basisQuantity > 0 {
+            factor = amount / reference.basisQuantity
+        } else if let eatenGrams, let basisGrams = reference.basisGrams, basisGrams > 0 {
+            factor = eatenGrams / basisGrams
+        } else {
+            factor = nil
+        }
+        guard let factor, factor.isFinite, factor >= 0 else { return nil }
+        let nutrients = reference.nutrients.scaled(by: factor)
+        guard nutrients.hasValues, !nutrients.hasNegativeValue else { return nil }
+        return SolidNutritionSnapshot(
+            sourceKind: reference.sourceKind,
+            sourceID: reference.sourceID,
+            sourceDescription: reference.sourceDescription,
+            sourceVersion: reference.sourceVersion,
+            amountDescription: amountDescription,
+            eatenAmount: amount,
+            portionUnit: unit,
+            estimatedEatenGrams: eatenGrams,
+            nutrients: nutrients,
+            isComplete: nutrients.isComplete,
+            capturedAt: capturedAt
+        )
+    }
+
+    static func applyingNutrition(
+        to details: [SolidFoodLogDetail],
+        customFoods: [SolidFoodCatalogItem],
+        capturedAt: Date = Date()
+    ) -> [SolidFoodLogDetail] {
+        details.map { detail in
+            var updated = detail
+            guard let unit = detail.portionUnit,
+                  let eaten = resolvedEatenAmount(
+                      offered: detail.amountOffered,
+                      eaten: detail.amountEaten,
+                      estimate: detail.consumptionEstimate
+                  ) else {
+                updated.nutritionSnapshot = nil
+                return updated
+            }
+            if let existing = detail.nutritionSnapshot,
+               snapshot(existing, matchesEatenAmount: eaten, unit: unit) {
+                return updated
+            }
+            guard let reference = reference(foodID: detail.foodID, customFoods: customFoods) else {
+                updated.nutritionSnapshot = nil
+                return updated
+            }
+            updated.nutritionSnapshot = snapshot(
+                amount: eaten,
+                unit: unit,
+                reference: reference,
+                capturedAt: capturedAt
+            )
+            return updated
+        }
+    }
+
+    static func recipeSummary(
+        recipe: CustomSolidRecipe,
+        customFoods: [SolidFoodCatalogItem]
+    ) -> SolidRecipeNutritionSummary {
+        recipeSummary(
+            ingredients: recipe.ingredients,
+            servings: recipe.servings,
+            capturedAt: recipe.updatedAt,
+            customFoods: customFoods
+        )
+    }
+
+    static func recipeSummary(
+        ingredients: [CustomSolidRecipeIngredient],
+        servings: Double,
+        capturedAt: Date,
+        customFoods: [SolidFoodCatalogItem]
+    ) -> SolidRecipeNutritionSummary {
+        let divisor = servings.isFinite && servings > 0 ? servings : 1
+        var nutrients = SolidNutritionValues()
+        var quantifiedCount = 0
+        var completeCount = 0
+        for ingredient in ingredients {
+            guard let reference = reference(foodID: ingredient.foodID, customFoods: customFoods),
+                  let ingredientSnapshot = snapshot(
+                    amount: ingredient.amount,
+                    unit: ingredient.unit,
+                    reference: reference,
+                    capturedAt: capturedAt
+                  ) else { continue }
+            nutrients = nutrients.adding(ingredientSnapshot.nutrients)
+            quantifiedCount += 1
+            if ingredientSnapshot.isComplete { completeCount += 1 }
+        }
+        return SolidRecipeNutritionSummary(
+            nutrients: nutrients.scaled(by: 1 / divisor),
+            quantifiedIngredientCount: quantifiedCount,
+            completeIngredientCount: completeCount,
+            ingredientCount: ingredients.count
+        )
+    }
+
+    static func preset(
+        recipe: CustomSolidRecipe,
+        customFoods: [SolidFoodCatalogItem]
+    ) -> SolidFeedEditorPreset {
+        preset(
+            recipeID: recipe.trackingID,
+            recipeName: recipe.name,
+            ingredients: recipe.ingredients,
+            servings: recipe.servings,
+            customFoods: customFoods
+        )
+    }
+
+    static func preset(
+        recipeID: String,
+        recipeName: String,
+        ingredients: [CustomSolidRecipeIngredient],
+        servings: Double,
+        customFoods: [SolidFoodCatalogItem]
+    ) -> SolidFeedEditorPreset {
+        let divisor = servings.isFinite && servings > 0 ? servings : 1
+        let details = ingredients.map { ingredient in
+            let allergenIDs = SolidsReferenceCatalog.foodSummary(id: ingredient.foodID)?.allergenIDs
+                ?? customFoods.first(where: { $0.trackingID == ingredient.foodID })?.allergenIDs
+                ?? []
+            return SolidFoodLogDetail(
+                foodID: ingredient.foodID,
+                foodName: ingredient.foodName,
+                allergenIDs: allergenIDs,
+                amountOffered: ingredient.amount / divisor,
+                amountEaten: ingredient.amount / divisor,
+                portionUnit: ingredient.unit,
+                consumptionEstimate: .all,
+                recipeID: recipeID,
+                recipeName: recipeName
+            )
+        }
+        let allergensByFoodID = details.reduce(into: [String: [String]]()) {
+            $0[$1.foodID] = $1.allergenIDs
+        }
+        return SolidFeedEditorPreset(
+            foodIDs: details.map(\.foodID),
+            foodNames: details.map(\.foodName),
+            allergenIDsByFoodID: allergensByFoodID,
+            recipeID: recipeID,
+            recipeName: recipeName,
+            foodDetails: applyingNutrition(to: details, customFoods: customFoods)
+        )
+    }
+
+    private static func snapshot(
+        _ snapshot: SolidNutritionSnapshot,
+        matchesEatenAmount amount: Double,
+        unit: SolidPortionUnit
+    ) -> Bool {
+        if let savedAmount = snapshot.eatenAmount, let savedUnit = snapshot.portionUnit {
+            return savedUnit == unit && savedAmount == amount
+        }
+        let expectedDescription = "\(amount.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName)"
+        return snapshot.amountDescription == expectedDescription
+    }
+}
+
 @MainActor
 enum SolidsTrackingService {
-    private static var pendingAllergenReconciliationTasks: [UUID: Task<Void, Never>] = [:]
     static func accessLevel(
         for profile: CareProfile?,
         events: [CareEvent],
@@ -1657,7 +2328,7 @@ enum SolidsTrackingService {
     }
 
     @discardableResult
-    static func activate(
+    nonisolated static func activate(
         profileID: UUID,
         existingState: SolidsProfileState?,
         context: ModelContext,
@@ -1912,11 +2583,26 @@ enum SolidsTrackingService {
         let toleratedAllergenIDs = Set(allergenProgress.lazy.filter {
             $0.profileID == profileID && $0.status == .tolerated
         }.map(\.allergenID))
+        var confirmedExposureCountByAllergen = allergenProgress.reduce(
+            into: [String: Int]()
+        ) { result, item in
+            guard item.profileID == profileID else { return }
+            result[item.allergenID] = max(
+                result[item.allergenID] ?? 0,
+                item.introductionStep
+            )
+        }
         var confirmedEventIDsByAllergen: [String: Set<UUID>] = [:]
         for item in scopedItems {
             for allergenID in item.allergenIDs where item.confirmsIntroductionPortion(for: allergenID) {
                 confirmedEventIDsByAllergen[allergenID, default: []].insert(item.eventID)
             }
+        }
+        for (allergenID, eventIDs) in confirmedEventIDsByAllergen {
+            confirmedExposureCountByAllergen[allergenID] = max(
+                confirmedExposureCountByAllergen[allergenID] ?? 0,
+                eventIDs.count
+            )
         }
         var plannedExposureStepByAllergen: [String: Int] = [:]
         for plan in plans where plan.profileID == profileID && !plan.isCompleted {
@@ -1934,7 +2620,7 @@ enum SolidsTrackingService {
             plannedFoodIDs: plannedFoodIDs,
             blockedAllergenIDs: blockedAllergenIDs,
             toleratedAllergenIDs: toleratedAllergenIDs,
-            confirmedExposureCountByAllergen: confirmedEventIDsByAllergen.mapValues(\.count),
+            confirmedExposureCountByAllergen: confirmedExposureCountByAllergen,
             plannedExposureStepByAllergen: plannedExposureStepByAllergen,
             completedSkillIDs: completedSkillIDs,
             startDate: startDate,
@@ -3157,9 +3843,26 @@ enum SolidsTrackingService {
         }
     }
 
-    static func preset(for plan: PlannedSolidMeal) -> SolidFeedEditorPreset {
+    static func preset(
+        for plan: PlannedSolidMeal,
+        customRecipes: [CustomSolidRecipe] = [],
+        customFoods: [SolidFoodCatalogItem] = []
+    ) -> SolidFeedEditorPreset {
+        if let recipeID = plan.recipeID,
+           let customRecipe = customRecipes.first(where: { $0.trackingID == recipeID }) {
+            var preset = SolidsNutritionService.preset(
+                recipe: customRecipe,
+                customFoods: customFoods
+            )
+            preset.plannedMealID = plan.id
+            preset.confirmedAllergenPortionIDs = plan.allergenIntroductionStep == nil
+                ? []
+                : [plan.allergenID].compactMap { $0 }
+            return preset
+        }
         let allergenEntries: [(String, [String])] = plan.foodIDs.compactMap { foodID in
-            guard let allergenIDs = SolidsReferenceCatalog.food(id: foodID)?.allergenIDs else { return nil }
+            guard let allergenIDs = SolidsReferenceCatalog.food(id: foodID)?.allergenIDs
+                ?? customFoods.first(where: { $0.trackingID == foodID })?.allergenIDs else { return nil }
             return (foodID, allergenIDs)
         }
         let allergenIDsByFoodID = Dictionary(uniqueKeysWithValues: allergenEntries)
@@ -3175,7 +3878,7 @@ enum SolidsTrackingService {
         )
     }
 
-    static func hasTrackedSolidFeedRecords(
+    nonisolated static func hasTrackedSolidFeedRecords(
         eventID: UUID,
         context: ModelContext
     ) -> Bool {
@@ -3186,7 +3889,7 @@ enum SolidsTrackingService {
         return ((try? context.fetchCount(descriptor)) ?? 0) > 0
     }
 
-    static func reconcileSolidFeed(
+    nonisolated static func reconcileSolidFeed(
         event: CareEvent,
         preset: SolidFeedEditorPreset? = nil,
         context: ModelContext,
@@ -3221,7 +3924,7 @@ enum SolidsTrackingService {
         )
     }
 
-    static func recordSolidFeed(
+    nonisolated static func recordSolidFeed(
         event: CareEvent,
         preset: SolidFeedEditorPreset?,
         eventItems: [SolidFoodEventItem],
@@ -3266,6 +3969,9 @@ enum SolidsTrackingService {
             foodByNormalizedName[SolidFoodSelection.normalizedName(foodName)] = (foodID, foodName)
         }
         var details = event.solidFoodDetails
+        if details.isEmpty, let presetDetails = preset?.foodDetails, !presetDetails.isEmpty {
+            details = presetDetails
+        }
         if details.isEmpty {
             var customFoodsByNormalizedName: [String: SolidFoodCatalogItem] = [:]
             for name in names {
@@ -3301,8 +4007,29 @@ enum SolidsTrackingService {
                     suspectedReaction: event.solidSensitivityObserved == true
                 )
             }
-            event.solidFoodDetails = details
         }
+        let customFoodIDs = Set(details.compactMap { detail -> UUID? in
+            let prefix = "custom-"
+            guard detail.foodID.hasPrefix(prefix) else { return nil }
+            return UUID(uuidString: String(detail.foodID.dropFirst(prefix.count)))
+        })
+        var customFoods: [SolidFoodCatalogItem] = []
+        customFoods.reserveCapacity(customFoodIDs.count)
+        for customFoodID in customFoodIDs {
+            var descriptor = FetchDescriptor<SolidFoodCatalogItem>(
+                predicate: #Predicate { $0.id == customFoodID }
+            )
+            descriptor.fetchLimit = 1
+            if let customFood = try? context.fetch(descriptor).first {
+                customFoods.append(customFood)
+            }
+        }
+        details = SolidsNutritionService.applyingNutrition(
+            to: details,
+            customFoods: customFoods,
+            capturedAt: now
+        )
+        event.solidFoodDetails = details
 
         var progressByFoodID = progress.reduce(into: [String: SolidFoodProgress]()) { result, item in
             guard item.profileID == profileID else { return }
@@ -3333,6 +4060,13 @@ enum SolidsTrackingService {
                 confirmedAllergenPortionIDs: detail.confirmedAllergenPortionIDs,
                 reactionRawValue: detail.preference.rawValue,
                 servingAmount: detail.servingAmount ?? "",
+                amountOffered: detail.amountOffered,
+                amountEaten: detail.amountEaten,
+                portionUnit: detail.portionUnit,
+                consumptionEstimate: detail.consumptionEstimate,
+                nutritionSnapshot: detail.nutritionSnapshot,
+                recipeID: detail.recipeID,
+                recipeNameSnapshot: detail.recipeName,
                 notes: detail.notes ?? "",
                 suspectedReaction: detail.suspectedReaction,
                 symptoms: detail.symptoms,
@@ -3466,7 +4200,7 @@ enum SolidsTrackingService {
         reconcileAllergenProgress(profileID: profileID, context: context, now: completedAt)
     }
 
-    static func removeSolidFeedRecords(
+    nonisolated static func removeSolidFeedRecords(
         eventID: UUID,
         context: ModelContext,
         now: Date = Date(),
@@ -3478,35 +4212,53 @@ enum SolidsTrackingService {
         )
         let removedItems = (try? context.fetch(itemDescriptor)) ?? []
         let affectedProfileIDs = Set(removedItems.map(\.profileID))
-        var remainingByProfileAndFood: [UUID: [String: [SolidFoodEventItem]]] = [:]
-        for profileID in affectedProfileIDs {
-            let remainingDescriptor = FetchDescriptor<SolidFoodEventItem>(
-                predicate: #Predicate {
-                    $0.profileID == profileID && $0.eventID != eventID
-                },
-                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
-            )
-            let remaining = (try? context.fetch(remainingDescriptor)) ?? []
-            remainingByProfileAndFood[profileID] = Dictionary(grouping: remaining, by: \.foodID)
-        }
+        var affectedFoodIDsByProfile: [UUID: Set<String>] = [:]
         for removed in removedItems {
-            let profileID = removed.profileID
-            let foodID = removed.foodID
+            affectedFoodIDsByProfile[removed.profileID, default: []].insert(removed.foodID)
             context.delete(removed)
+        }
 
-            let remaining = remainingByProfileAndFood[profileID]?[foodID] ?? []
-            let progressDescriptor = FetchDescriptor<SolidFoodProgress>(
-                predicate: #Predicate { $0.profileID == profileID && $0.foodID == foodID }
-            )
-            if let record = try? context.fetch(progressDescriptor).first {
-                record.exposureCount = remaining.count
-                record.firstTriedAt = remaining.map(\.createdAt).min()
-                record.lastTriedAt = remaining.first?.createdAt
-                record.lastReactionRawValue = remaining.first?.reactionRawValue
-                if remaining.isEmpty, record.status == .tried {
-                    record.status = .notTried
+        // Recompute only the foods that belonged to this event. The previous
+        // implementation loaded every solids row for the profile, so editing a
+        // single amount became progressively slower as intake history grew.
+        for (profileID, foodIDs) in affectedFoodIDsByProfile {
+            for foodID in foodIDs {
+                let remainingPredicate = #Predicate<SolidFoodEventItem> {
+                    $0.profileID == profileID
+                        && $0.foodID == foodID
+                        && $0.eventID != eventID
                 }
-                record.updatedAt = now
+                let remainingCount = (try? context.fetchCount(FetchDescriptor(
+                    predicate: remainingPredicate
+                ))) ?? 0
+                var firstDescriptor = FetchDescriptor<SolidFoodEventItem>(
+                    predicate: remainingPredicate,
+                    sortBy: [SortDescriptor(\.createdAt)]
+                )
+                firstDescriptor.fetchLimit = 1
+                var latestDescriptor = FetchDescriptor<SolidFoodEventItem>(
+                    predicate: remainingPredicate,
+                    sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+                )
+                latestDescriptor.fetchLimit = 1
+                let first = try? context.fetch(firstDescriptor).first
+                let latest = try? context.fetch(latestDescriptor).first
+
+                let progressDescriptor = FetchDescriptor<SolidFoodProgress>(
+                    predicate: #Predicate {
+                        $0.profileID == profileID && $0.foodID == foodID
+                    }
+                )
+                if let record = try? context.fetch(progressDescriptor).first {
+                    record.exposureCount = remainingCount
+                    record.firstTriedAt = first?.createdAt
+                    record.lastTriedAt = latest?.createdAt
+                    record.lastReactionRawValue = latest?.reactionRawValue
+                    if remainingCount == 0, record.status == .tried {
+                        record.status = .notTried
+                    }
+                    record.updatedAt = now
+                }
             }
         }
 
@@ -3609,7 +4361,7 @@ enum SolidsTrackingService {
         reconcileAllergenProgress(profileID: profileID, context: context, now: now)
     }
 
-    static func reconcileAllergenProgress(
+    nonisolated static func reconcileAllergenProgress(
         profileID: UUID,
         context: ModelContext,
         now: Date = Date(),
@@ -3635,7 +4387,7 @@ enum SolidsTrackingService {
         }
     }
 
-    private static func applyAllergenProgress(
+    nonisolated private static func applyAllergenProgress(
         profileID: UUID,
         items: [SolidFoodEventItem],
         existing: [SolidAllergenProgress],
@@ -3710,67 +4462,7 @@ enum SolidsTrackingService {
         }
     }
 
-    static func scheduleAllergenReconciliation(
-        profileID: UUID,
-        context: ModelContext,
-        now: Date
-    ) {
-        pendingAllergenReconciliationTasks[profileID]?.cancel()
-        pendingAllergenReconciliationTasks[profileID] = Task { @MainActor in
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-            } catch {
-                return
-            }
-            await AppInteractionMonitor.waitUntilIdle()
-            guard !Task.isCancelled else { return }
-            await reconcileAllergenProgressWhenIdle(
-                profileID: profileID,
-                context: context,
-                now: now
-            )
-        }
-    }
-
-    private static func reconcileAllergenProgressWhenIdle(
-        profileID: UUID,
-        context: ModelContext,
-        now: Date
-    ) async {
-        var items: [SolidFoodEventItem] = []
-        var offset = 0
-        let pageSize = 200
-        while !Task.isCancelled {
-            await AppInteractionMonitor.waitUntilIdle()
-            guard !Task.isCancelled else { return }
-            var descriptor = FetchDescriptor<SolidFoodEventItem>(
-                predicate: #Predicate { $0.profileID == profileID },
-                sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt)]
-            )
-            descriptor.fetchLimit = pageSize
-            descriptor.fetchOffset = offset
-            let page = (try? context.fetch(descriptor)) ?? []
-            items.append(contentsOf: page)
-            guard page.count == pageSize else { break }
-            offset += page.count
-            await Task.yield()
-        }
-        guard !Task.isCancelled else { return }
-        let progressDescriptor = FetchDescriptor<SolidAllergenProgress>(
-            predicate: #Predicate { $0.profileID == profileID }
-        )
-        let existing = (try? context.fetch(progressDescriptor)) ?? []
-        applyAllergenProgress(
-            profileID: profileID,
-            items: items,
-            existing: existing,
-            context: context,
-            now: now
-        )
-        _ = PersistenceService.save(context: context)
-    }
-
-    private static func slug(_ value: String) -> String {
+    nonisolated private static func slug(_ value: String) -> String {
         value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))

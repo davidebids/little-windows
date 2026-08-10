@@ -154,7 +154,6 @@ struct EventEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query(sort: \CareEvent.startDate, order: .reverse) private var allEvents: [CareEvent]
-    @Query(sort: \MedicationDoseRecord.loggedAt, order: .reverse) private var medicationDoseRecords: [MedicationDoseRecord]
     @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
     @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
     @StateObject private var profileService = ProfileService.shared
@@ -505,6 +504,7 @@ struct EventEditorView: View {
         preset: SolidFeedEditorPreset?
     ) -> [SolidFoodLogDetail] {
         if let event, !event.solidFoodDetails.isEmpty { return event.solidFoodDetails }
+        if let preset, !preset.foodDetails.isEmpty { return preset.foodDetails }
         let names = SolidFoodSelection.names(
             from: event?.foodDescription ?? SolidFoodSelection.description(from: preset?.foodNames ?? [])
         )
@@ -636,7 +636,11 @@ struct EventEditorView: View {
 
     private var isManagedMedicationEvent: Bool {
         guard let eventID = existingEvent?.id else { return false }
-        return medicationDoseRecords.contains { $0.careEventID == eventID }
+        var descriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.careEventID == eventID }
+        )
+        descriptor.fetchLimit = 1
+        return ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
     }
 
     private var managedMedicationEventView: some View {
@@ -776,7 +780,15 @@ struct EventEditorView: View {
                 if let editingSolidFoodID,
                    let index = solidFoodDetails.firstIndex(where: { $0.foodID == editingSolidFoodID }) {
                     NavigationStack {
-                        SolidFoodLogDetailEditor(detail: $solidFoodDetails[index])
+                        SolidFoodLogDetailEditor(
+                            detail: solidFoodDetails[index],
+                            customFoods: customSolidFoods
+                        ) { updatedDetail in
+                            guard let currentIndex = solidFoodDetails.firstIndex(where: {
+                                $0.id == updatedDetail.id
+                            }) else { return }
+                            solidFoodDetails[currentIndex] = updatedDetail
+                        }
                     }
                 }
             }
@@ -1561,6 +1573,19 @@ struct EventEditorView: View {
             validationMessage = "Choose at least one food for this solids meal."
             return
         }
+        if type == .feed, feedKind == .solid,
+           solidFoodDetails.contains(where: { detail in
+               let values = [detail.amountOffered, detail.amountEaten].compactMap { $0 }
+               return values.contains { !$0.isFinite || $0 < 0 }
+                   || (!values.isEmpty && detail.portionUnit == nil)
+                   || (detail.consumptionEstimate?.offeredFraction != nil && detail.amountEaten == nil && detail.amountOffered == nil)
+                   || (detail.amountOffered.map { offered in
+                       detail.amountEaten.map { $0 > offered } ?? false
+                   } ?? false)
+           }) {
+            validationMessage = "Check each food amount. Amounts must be zero or greater, eaten cannot exceed offered, each amount needs a unit, and estimates need an offered amount."
+            return
+        }
         if activeProfileType == .dog, type == .glucose, dogGlucoseValue <= 0 {
             validationMessage = "Enter a glucose value."
             return
@@ -1601,7 +1626,11 @@ struct EventEditorView: View {
         }
 
         let wasActiveTimer = existingEvent?.isTimerDraft == true
-        let event = existingEvent ?? CareEvent(type: type)
+        // Build an unregistered draft so editing a large SwiftUI-owned context
+        // never dirties it or triggers an autosave on the gesture thread. The
+        // mutation service upserts this immutable snapshot on its model actor.
+        let event = existingEvent.map(EventMutationService.detachedEventCopy)
+            ?? CareEvent(type: type)
         event.type = type
         event.profileTypeSnapshot = activeProfileType
         event.title = title.nilIfBlank
@@ -1716,7 +1745,6 @@ struct EventEditorView: View {
             event.healthObservationDetailsData = nil
         }
         event.updatedAt = Date()
-        if existingEvent == nil { modelContext.insert(event) }
         onSave(event)
         dismiss()
     }
@@ -2590,6 +2618,7 @@ private struct SolidFoodDetailSummary: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(detail.foodName).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                             HStack(spacing: 5) {
+                                if let amountText = amountText(detail) { Text(amountText) }
                                 if detail.preference != .unknown { Text(detail.preference.displayName) }
                                 if !detail.allergenIDs.isEmpty {
                                     Text("• \(detail.allergenIDs.count) allergen\(detail.allergenIDs.count == 1 ? "" : "s")")
@@ -2610,16 +2639,68 @@ private struct SolidFoodDetailSummary: View {
         }
         .padding(.vertical, 4)
     }
+
+    private func amountText(_ detail: SolidFoodLogDetail) -> String? {
+        guard let unit = detail.portionUnit else { return nil }
+        if let eaten = detail.amountEaten {
+            return "\(eaten.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName) eaten"
+        }
+        if let offered = detail.amountOffered, let estimate = detail.consumptionEstimate {
+            return "\(estimate.displayName) of \(offered.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName)"
+        }
+        if let offered = detail.amountOffered {
+            return "\(offered.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName) offered"
+        }
+        return nil
+    }
 }
 
 private struct SolidFoodLogDetailEditor: View {
     @Environment(\.dismiss) private var dismiss
-    @Binding var detail: SolidFoodLogDetail
+    @State private var detail: SolidFoodLogDetail
+    private let nutritionReference: SolidNutritionReference?
+    private let supportedUnits: [SolidPortionUnit]
+    private let onCommit: (SolidFoodLogDetail) -> Void
     @State private var showingPreferenceOptions = false
     @State private var showingSeverityOptions = false
     @State private var showingFollowUpOptions = false
+    @State private var didCommit = false
 
     private let preferences: [SolidReaction] = [.loved, .liked, .neutral, .disliked, .unknown]
+
+    init(
+        detail: SolidFoodLogDetail,
+        customFoods: [SolidFoodCatalogItem],
+        onCommit: @escaping (SolidFoodLogDetail) -> Void
+    ) {
+        _detail = State(initialValue: detail)
+        self.onCommit = onCommit
+        nutritionReference = SolidsNutritionService.reference(
+            foodID: detail.foodID,
+            customFoods: customFoods
+        )
+        var units = SolidsNutritionService.supportedUnits(
+            foodID: detail.foodID,
+            customFoods: customFoods
+        )
+        if let current = detail.portionUnit, !units.contains(current) {
+            units.append(current)
+        }
+        supportedUnits = SolidPortionUnit.allCases.filter(units.contains)
+    }
+
+    private var nutritionHelpText: String {
+        guard let nutritionReference else {
+            return "Custom foods need a manual nutrition label before the app can calculate nutrients. The amount is still saved."
+        }
+        if nutritionReference.sourceKind == .manualLabel {
+            if nutritionReference.nutrients.isComplete {
+                return "Nutrition uses this custom food’s manual label, including all eight tracked nutrients."
+            }
+            return "Nutrition uses this custom food’s manual label. Any nutrients left blank on that label are not included."
+        }
+        return "Built-in foods include estimates for all eight tracked nutrients. Enter an eaten amount to calculate totals, or leave it blank for a simple food log."
+    }
 
     var body: some View {
         Form {
@@ -2634,9 +2715,53 @@ private struct SolidFoodLogDetailEditor: View {
                 .accessibilityIdentifier("solid-reaction.preference")
             }
 
-            Section("Serving") {
+            Section("Amount (optional)") {
+                LabeledContent("Offered") {
+                    TextField("Optional", value: $detail.amountOffered, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("solid-food.amount-offered")
+                }
+                LabeledContent("Eaten") {
+                    TextField("Optional", value: $detail.amountEaten, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("solid-food.amount-eaten")
+                }
+                Picker(
+                    "Unit",
+                    selection: Binding(
+                        get: { detail.portionUnit ?? .gram },
+                        set: { detail.portionUnit = $0 }
+                    )
+                ) {
+                    ForEach(supportedUnits) { unit in
+                        Text(unit.displayName).tag(unit)
+                    }
+                }
+
+                Text("Or estimate how much of the offered amount was eaten")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(SolidConsumptionEstimate.allCases.filter { $0 != .exact }) { estimate in
+                            Button(estimate.displayName) {
+                                detail.consumptionEstimate = estimate
+                                detail.amountEaten = nil
+                                if detail.portionUnit == nil { detail.portionUnit = .gram }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(detail.consumptionEstimate == estimate ? .orange : .secondary)
+                        }
+                    }
+                }
+                Text(nutritionHelpText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 TextField(
-                    "Amount offered or eaten",
+                    "Serving note",
                     text: Binding(
                         get: { detail.servingAmount ?? "" },
                         set: {
@@ -2645,7 +2770,7 @@ private struct SolidFoodLogDetailEditor: View {
                         }
                     )
                 )
-                Text("Examples: 2 teaspoons thinned peanut butter, half an egg, or a few soft pieces.")
+                Text("Use a note for descriptions such as a few soft pieces when a number is not useful.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2802,9 +2927,14 @@ private struct SolidFoodLogDetailEditor: View {
         )
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }.fontWeight(.semibold)
+                Button("Done") {
+                    commit()
+                    dismiss()
+                }
+                .fontWeight(.semibold)
             }
         }
+        .onDisappear(perform: commit)
         .onChange(of: detail.suspectedReaction) { _, isOn in
             if !isOn {
                 detail.symptoms = []
@@ -2815,6 +2945,23 @@ private struct SolidFoodLogDetailEditor: View {
                 detail.followUp = .none
             }
         }
+        .onChange(of: detail.amountOffered) { _, value in
+            if value != nil, detail.portionUnit == nil { detail.portionUnit = .gram }
+        }
+        .onChange(of: detail.amountEaten) { _, value in
+            if value != nil {
+                detail.portionUnit = detail.portionUnit ?? .gram
+                detail.consumptionEstimate = .exact
+            } else if detail.consumptionEstimate == .exact {
+                detail.consumptionEstimate = nil
+            }
+        }
+    }
+
+    private func commit() {
+        guard !didCommit else { return }
+        didCommit = true
+        onCommit(detail)
     }
 
     private func toggleAllergen(_ id: String) {
@@ -2900,10 +3047,14 @@ private struct SolidFoodLogDetailEditor: View {
 }
 
 private struct SolidFoodPickerView: View {
+    private enum ManagementDestination {
+        case edit(SolidFoodCatalogItem)
+        case delete(SolidFoodCatalogItem)
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \SolidFoodCatalogItem.name) private var customFoods: [SolidFoodCatalogItem]
-    @Query(sort: \PhotoAttachment.createdAt, order: .reverse) private var photoAttachments: [PhotoAttachment]
 
     let recentFoodNames: [String]
     let onDone: ([String]) -> Void
@@ -2912,6 +3063,7 @@ private struct SolidFoodPickerView: View {
     @State private var effectiveSearchText = ""
     @State private var editorRoute: SolidFoodEditorRoute?
     @State private var foodPendingManagement: SolidFoodCatalogItem?
+    @State private var pendingManagementDestination: ManagementDestination?
     @State private var foodPendingDeletion: SolidFoodCatalogItem?
     @State private var catalogWriter: SolidsCustomFoodWriter?
     @State private var deletionError: String?
@@ -2923,11 +3075,6 @@ private struct SolidFoodPickerView: View {
     ) {
         self.recentFoodNames = recentFoodNames
         self.onDone = onDone
-        let solidFoodPhotoKind = PhotoAttachmentOwnerKind.solidFood.rawValue
-        _photoAttachments = Query(FetchDescriptor<PhotoAttachment>(
-            predicate: #Predicate { $0.ownerKindRawValue == solidFoodPhotoKind },
-            sortBy: [SortDescriptor(\PhotoAttachment.createdAt, order: .reverse)]
-        ))
         _selection = State(initialValue: SolidFoodPickerSelection(initialSelection))
     }
 
@@ -2940,9 +3087,6 @@ private struct SolidFoodPickerView: View {
             into: [String: SolidFoodCatalogItem]()
         ) { result, food in
             result[food.normalizedName] = food
-        }
-        let photoDataByID = photoAttachments.reduce(into: [UUID: Data]()) { result, attachment in
-            if let data = attachment.previewData { result[attachment.id] = data }
         }
         NavigationStack {
             ScrollView {
@@ -2970,8 +3114,7 @@ private struct SolidFoodPickerView: View {
                                         for: name,
                                         emoji: visualEmoji(for: name),
                                         normalizedName: normalizedName,
-                                        photoAttachmentID: customFood.photoAttachmentID,
-                                        photoData: customFood.photoAttachmentID.flatMap { photoDataByID[$0] }
+                                        photoAttachmentID: customFood.photoAttachmentID
                                     )
                                 } else {
                                     foodTile(
@@ -2992,7 +3135,6 @@ private struct SolidFoodPickerView: View {
                                 emoji: visualEmoji(for: food.name),
                                 normalizedName: food.normalizedName,
                                 photoAttachmentID: food.photoAttachmentID,
-                                photoData: food.photoAttachmentID.flatMap { photoDataByID[$0] },
                                 managementAction: { foodPendingManagement = food }
                             )
                         }
@@ -3026,10 +3168,9 @@ private struct SolidFoodPickerView: View {
             }
             .sheet(item: $editorRoute) { route in
                 NavigationStack {
-                    CustomSolidFoodEditorView(
+                    CustomSolidFoodEditorDataView(
                         item: route.item,
-                        existingItems: customFoods,
-                        existingPhoto: route.item.flatMap(photoAttachment(for:))
+                        existingItems: customFoods
                     ) { oldName, newName in
                         replaceSelection(oldName: oldName, newName: newName)
                     }
@@ -3050,28 +3191,23 @@ private struct SolidFoodPickerView: View {
                             subtitle: "Update its name, serving guidance, allergens, or photo.",
                             systemImage: "pencil"
                         ) {
+                            pendingManagementDestination = .edit(food)
                             foodPendingManagement = nil
-                            Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(250))
-                                editorRoute = SolidFoodEditorRoute(item: food)
-                            }
                         },
                         AppActionSheetOption(
                             title: "Delete food",
-                            subtitle: "Past feeding entries will keep the food name.",
+                            subtitle: "Past feeding entries keep the food name. Foods used by a recipe or unlogged meal plan must be removed there first.",
                             systemImage: "trash.fill",
                             tint: .red,
                             role: .destructive
                         ) {
+                            pendingManagementDestination = .delete(food)
                             foodPendingManagement = nil
-                            Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(250))
-                                foodPendingDeletion = food
-                            }
                         }
                     ]
                 } ?? [],
-                cancelAction: { foodPendingManagement = nil }
+                cancelAction: { foodPendingManagement = nil },
+                onDismiss: applyPendingManagementDestination
             )
             .appActionSheet(
                 isPresented: Binding(
@@ -3079,7 +3215,7 @@ private struct SolidFoodPickerView: View {
                     set: { if !$0 { foodPendingDeletion = nil } }
                 ),
                 title: "Delete custom food?",
-                message: "Past feeding entries keep the food name. The custom photo will also be removed.",
+                message: "Past feeding entries keep the food name. Foods used by a recipe or unlogged meal plan must be removed there first. The custom photo will also be removed.",
                 systemImage: "trash",
                 tint: .red,
                 options: foodPendingDeletion.map { food in
@@ -3115,6 +3251,17 @@ private struct SolidFoodPickerView: View {
                 Text(deletionError ?? "")
             }
             .task { _ = await resolvedCatalogWriter() }
+        }
+    }
+
+    private func applyPendingManagementDestination() {
+        guard let destination = pendingManagementDestination else { return }
+        pendingManagementDestination = nil
+        switch destination {
+        case .edit(let food):
+            editorRoute = SolidFoodEditorRoute(item: food)
+        case .delete(let food):
+            foodPendingDeletion = food
         }
     }
 
@@ -3207,7 +3354,6 @@ private struct SolidFoodPickerView: View {
         emoji: String? = nil,
         normalizedName: String? = nil,
         photoAttachmentID: UUID? = nil,
-        photoData: Data? = nil,
         managementAction: (() -> Void)? = nil
     ) -> some View {
         let normalizedName = normalizedName ?? SolidFoodSelection.normalizedName(name)
@@ -3216,7 +3362,6 @@ private struct SolidFoodPickerView: View {
             emoji: emoji,
             normalizedName: normalizedName,
             photoAttachmentID: photoAttachmentID,
-            photoData: photoData,
             selection: selection,
             managementAction: managementAction
         )
@@ -3247,11 +3392,6 @@ private struct SolidFoodPickerView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Creates a reusable food with an optional photo")
-    }
-
-    private func photoAttachment(for food: SolidFoodCatalogItem) -> PhotoAttachment? {
-        guard let photoAttachmentID = food.photoAttachmentID else { return nil }
-        return photoAttachments.first { $0.id == photoAttachmentID }
     }
 
     private func visualEmoji(for name: String) -> String {
@@ -3379,7 +3519,6 @@ private struct SolidFoodPickerTile: View {
     let emoji: String?
     let normalizedName: String
     let photoAttachmentID: UUID?
-    let photoData: Data?
     let selection: SolidFoodPickerSelection
     let managementAction: (() -> Void)?
 
@@ -3390,7 +3529,6 @@ private struct SolidFoodPickerTile: View {
         emoji: String?,
         normalizedName: String,
         photoAttachmentID: UUID?,
-        photoData: Data?,
         selection: SolidFoodPickerSelection,
         managementAction: (() -> Void)?
     ) {
@@ -3398,7 +3536,6 @@ private struct SolidFoodPickerTile: View {
         self.emoji = emoji
         self.normalizedName = normalizedName
         self.photoAttachmentID = photoAttachmentID
-        self.photoData = photoData
         self.selection = selection
         self.managementAction = managementAction
         _isSelected = State(initialValue: selection.contains(normalizedName))
@@ -3465,16 +3602,11 @@ private struct SolidFoodPickerTile: View {
 
     @ViewBuilder
     private var visual: some View {
-        if let photoAttachmentID,
-           let photoData,
-           let image = ThumbnailImageCache.image(
-               attachmentID: photoAttachmentID,
-               data: photoData
-           ) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+        if let photoAttachmentID {
+            SolidFoodPickerPhotoView(
+                attachmentID: photoAttachmentID,
+                fallbackEmoji: emoji
+            )
         } else if let emoji {
             Text(emoji).font(.system(size: 43))
         } else {
@@ -3492,6 +3624,77 @@ private struct SolidFoodEditorRoute: Identifiable {
     init(item: SolidFoodCatalogItem?) {
         id = item?.id ?? UUID()
         self.item = item
+    }
+}
+
+private struct SolidFoodPickerPhotoView: View {
+    @Query private var attachments: [PhotoAttachment]
+
+    let attachmentID: UUID
+    let fallbackEmoji: String?
+
+    init(attachmentID: UUID, fallbackEmoji: String?) {
+        self.attachmentID = attachmentID
+        self.fallbackEmoji = fallbackEmoji
+        var descriptor = FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { $0.id == attachmentID }
+        )
+        descriptor.fetchLimit = 1
+        _attachments = Query(descriptor)
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if let data = attachments.first?.previewData,
+           let image = ThumbnailImageCache.image(
+               attachmentID: attachmentID,
+               data: data
+           ) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+        } else if let fallbackEmoji {
+            Text(fallbackEmoji).font(.system(size: 43))
+        } else {
+            Image(systemName: "fork.knife")
+                .font(.title)
+                .foregroundStyle(Color.accentColor)
+        }
+    }
+}
+
+private struct CustomSolidFoodEditorDataView: View {
+    @Query private var attachments: [PhotoAttachment]
+
+    let item: SolidFoodCatalogItem?
+    let existingItems: [SolidFoodCatalogItem]
+    let onSave: (String?, String) -> Void
+
+    init(
+        item: SolidFoodCatalogItem?,
+        existingItems: [SolidFoodCatalogItem],
+        onSave: @escaping (String?, String) -> Void
+    ) {
+        self.item = item
+        self.existingItems = existingItems
+        self.onSave = onSave
+        let attachmentID = item?.photoAttachmentID
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        var descriptor = FetchDescriptor<PhotoAttachment>(
+            predicate: #Predicate { $0.id == attachmentID }
+        )
+        descriptor.fetchLimit = 1
+        _attachments = Query(descriptor)
+    }
+
+    var body: some View {
+        CustomSolidFoodEditorView(
+            item: item,
+            existingItems: existingItems,
+            existingPhoto: attachments.first,
+            onSave: onSave
+        )
     }
 }
 
@@ -3513,6 +3716,19 @@ struct CustomSolidFoodEditorView: View {
     @State private var minimumAgeMonths: Int
     @State private var preparationNotes: String
     @State private var safetyNotes: String
+    @State private var nutritionLabelEnabled: Bool
+    @State private var labelServingQuantity: Double?
+    @State private var labelServingUnit: SolidPortionUnit
+    @State private var labelServingGrams: Double?
+    @State private var labelSourceDescription: String
+    @State private var labelEnergy: Double?
+    @State private var labelProtein: Double?
+    @State private var labelFat: Double?
+    @State private var labelFiber: Double?
+    @State private var labelIron: Double?
+    @State private var labelZinc: Double?
+    @State private var labelCalcium: Double?
+    @State private var labelVitaminC: Double?
     @State private var isMinimumAgeDrawerPresented = false
     @State private var isSaving = false
     @State private var saveError: String?
@@ -3533,6 +3749,20 @@ struct CustomSolidFoodEditorView: View {
         _minimumAgeMonths = State(initialValue: item?.minimumAgeMonths ?? 6)
         _preparationNotes = State(initialValue: item?.preparationNotes ?? "")
         _safetyNotes = State(initialValue: item?.safetyNotes ?? "")
+        let label = item?.nutritionLabel
+        _nutritionLabelEnabled = State(initialValue: label != nil)
+        _labelServingQuantity = State(initialValue: label?.servingQuantity)
+        _labelServingUnit = State(initialValue: label?.servingUnit ?? .gram)
+        _labelServingGrams = State(initialValue: label?.servingGrams)
+        _labelSourceDescription = State(initialValue: label?.sourceDescription ?? "Package label")
+        _labelEnergy = State(initialValue: label?.nutrients.energyKilocalories)
+        _labelProtein = State(initialValue: label?.nutrients.proteinGrams)
+        _labelFat = State(initialValue: label?.nutrients.fatGrams)
+        _labelFiber = State(initialValue: label?.nutrients.fiberGrams)
+        _labelIron = State(initialValue: label?.nutrients.ironMilligrams)
+        _labelZinc = State(initialValue: label?.nutrients.zincMilligrams)
+        _labelCalcium = State(initialValue: label?.nutrients.calciumMilligrams)
+        _labelVitaminC = State(initialValue: label?.nutrients.vitaminCMilligrams)
     }
 
     var body: some View {
@@ -3586,6 +3816,54 @@ struct CustomSolidFoodEditorView: View {
                         }
                     }
                 }
+            }
+
+            Section {
+                Toggle("Add nutrition label", isOn: $nutritionLabelEnabled)
+                if nutritionLabelEnabled {
+                    LabeledContent("Serving amount") {
+                        TextField("Required", value: $labelServingQuantity, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Picker("Serving unit", selection: $labelServingUnit) {
+                        ForEach(SolidPortionUnit.allCases) { unit in
+                            Text(unit.displayName).tag(unit)
+                        }
+                    }
+                    LabeledContent("Serving weight") {
+                        HStack(spacing: 4) {
+                            TextField("Optional", value: $labelServingGrams, format: .number)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Text("g").foregroundStyle(.secondary)
+                        }
+                    }
+                    LabeledContent("Label source") {
+                        TextField("Package label", text: $labelSourceDescription)
+                            .multilineTextAlignment(.trailing)
+                            .accessibilityIdentifier("custom-food.label-source")
+                    }
+
+                    nutrientField("Calories", value: $labelEnergy, unit: "kcal")
+                    nutrientField("Protein", value: $labelProtein, unit: "g")
+                    nutrientField("Fat", value: $labelFat, unit: "g")
+                    nutrientField("Fiber", value: $labelFiber, unit: "g")
+                    nutrientField("Iron", value: $labelIron, unit: "mg")
+                    nutrientField("Zinc", value: $labelZinc, unit: "mg")
+                    nutrientField("Calcium", value: $labelCalcium, unit: "mg")
+                    nutrientField("Vitamin C", value: $labelVitaminC, unit: "mg")
+
+                    if manualNutritionLabel == nil {
+                        Label("Enter a serving amount and at least one non-negative nutrient value.", systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Nutrition label")
+            } footer: {
+                Text("Optional. Copy the amounts per serving from the package or recipe—not the % Daily Value. Values are estimates and no daily target is applied.")
             }
 
             Section {
@@ -3690,7 +3968,48 @@ struct CustomSolidFoodEditorView: View {
     }
 
     private var canSave: Bool {
-        !cleanedName.isEmpty && !hasDuplicateName && !isImportingPhoto && !isSaving
+        !cleanedName.isEmpty
+            && !hasDuplicateName
+            && !isImportingPhoto
+            && !isSaving
+            && (!nutritionLabelEnabled || manualNutritionLabel != nil)
+    }
+
+    private var manualNutritionLabel: SolidManualNutritionLabel? {
+        guard nutritionLabelEnabled, let servingQuantity = labelServingQuantity else { return nil }
+        let label = SolidManualNutritionLabel(
+            servingQuantity: servingQuantity,
+            servingUnit: labelServingUnit,
+            servingGrams: labelServingGrams,
+            sourceDescription: labelSourceDescription,
+            nutrients: SolidNutritionValues(
+                energyKilocalories: labelEnergy,
+                proteinGrams: labelProtein,
+                fatGrams: labelFat,
+                fiberGrams: labelFiber,
+                ironMilligrams: labelIron,
+                zincMilligrams: labelZinc,
+                calciumMilligrams: labelCalcium,
+                vitaminCMilligrams: labelVitaminC
+            )
+        )
+        return label.isValid ? label : nil
+    }
+
+    @ViewBuilder
+    private func nutrientField(
+        _ title: String,
+        value: Binding<Double?>,
+        unit: String
+    ) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 4) {
+                TextField("Optional", value: value, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                Text(unit).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var previewData: Data? {
@@ -3737,7 +4056,8 @@ struct CustomSolidFoodEditorView: View {
             allergenIDs: selectedAllergenIDs.sorted(),
             minimumAgeMonths: minimumAgeMonths,
             preparationNotes: preparationNotes,
-            safetyNotes: safetyNotes
+            safetyNotes: safetyNotes,
+            nutritionLabel: manualNutritionLabel
         ))
         if let error = result.error {
             saveError = error

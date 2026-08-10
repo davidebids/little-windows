@@ -171,41 +171,48 @@ enum IntegrationCommandStore {
             return
         }
 
-        let snapshotURL = SystemIntegrationConstants.sharedFileURL(
-            SystemIntegrationConstants.widgetSnapshotFilename
-        )
-        guard let data = try? Data(contentsOf: snapshotURL),
-              var snapshot = try? JSONDecoder().decode(WidgetSnapshot.self, from: data),
-              var timer = snapshot.activeTimer,
-              timer.resolvedIsRunning,
-              targetID.map({ $0 == timer.id }) ?? true else {
-            return
-        }
-
-        timer.elapsedSeconds = max(
-            timer.resolvedElapsedSeconds,
-            requestedAt.timeIntervalSince(timer.startDate)
-        )
-        if let sideStart = timer.activeNursingSideTimerStartDate {
-            let sideElapsed = max(0, requestedAt.timeIntervalSince(sideStart))
-            switch timer.activeNursingSide {
-            case .left:
-                timer.leftDurationSeconds = max(timer.leftDurationSeconds, sideElapsed)
-            case .right:
-                timer.rightDurationSeconds = max(timer.rightDurationSeconds, sideElapsed)
-            case .none:
-                break
+        // Use the same queue as the app's full snapshot publisher so a write
+        // already in flight cannot restore the timer after this optimistic
+        // stop. Enqueueing remains immediate for the App Intent.
+        SystemIntegrationStorage.widgetSnapshotQueue.async {
+            let snapshotURL = SystemIntegrationConstants.sharedFileURL(
+                SystemIntegrationConstants.widgetSnapshotFilename
+            )
+            guard let data = try? Data(contentsOf: snapshotURL),
+                  var snapshot = try? JSONDecoder().decode(WidgetSnapshot.self, from: data),
+                  var timer = snapshot.activeTimer,
+                  timer.resolvedIsRunning,
+                  targetID.map({ $0 == timer.id }) ?? true else {
+                return
             }
+
+            timer.elapsedSeconds = max(
+                timer.resolvedElapsedSeconds,
+                requestedAt.timeIntervalSince(timer.startDate)
+            )
+            if let sideStart = timer.activeNursingSideTimerStartDate {
+                let sideElapsed = max(0, requestedAt.timeIntervalSince(sideStart))
+                switch timer.activeNursingSide {
+                case .left:
+                    timer.leftDurationSeconds = max(timer.leftDurationSeconds, sideElapsed)
+                case .right:
+                    timer.rightDurationSeconds = max(timer.rightDurationSeconds, sideElapsed)
+                case .none:
+                    break
+                }
+            }
+            timer.isRunning = false
+            timer.activeNursingSideTimerStartDate = nil
+            snapshot.generatedAt = requestedAt
+            snapshot.activeTimer = timer
+            guard let updatedData = try? JSONEncoder().encode(snapshot),
+                  (try? updatedData.write(to: snapshotURL, options: .atomic)) != nil else {
+                return
+            }
+            WidgetCenter.shared.reloadTimelines(
+                ofKind: SystemIntegrationConstants.activeTimerWidgetKind
+            )
         }
-        timer.isRunning = false
-        timer.activeNursingSideTimerStartDate = nil
-        snapshot.generatedAt = requestedAt
-        snapshot.activeTimer = timer
-        guard let updatedData = try? JSONEncoder().encode(snapshot),
-              (try? updatedData.write(to: snapshotURL, options: .atomic)) != nil else {
-            return
-        }
-        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private static func timerMutationPath(_ url: URL) -> [String] {

@@ -326,57 +326,76 @@ struct FamilySyncSettingsView: View {
                 CloudSharingControllerView(share: share)
             }
         }
-        .confirmationDialog(
-            leaveConfirmationTitle,
+        .appActionSheet(
             isPresented: $confirmLeave,
-            titleVisibility: .visible
-        ) {
-            Button(leaveButtonTitle, role: .destructive) {
-                isConfirmingLeave = true
-                confirmLeave = false
-                Task {
-                    await viewModel.leaveShare(
-                        context: modelContext,
-                        deleteLocalData: deleteLocalDataOnLeave
-                    )
-                    isConfirmingLeave = false
+            title: leaveConfirmationTitle,
+            message: leaveConfirmationMessage,
+            systemImage: "person.crop.circle.badge.minus",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: leaveButtonTitle,
+                    subtitle: deleteLocalDataOnLeave
+                        ? "Leave the share and permanently delete its downloaded data from this device."
+                        : "Leave the share and keep the already-downloaded data on this device.",
+                    systemImage: "person.crop.circle.badge.minus",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    isConfirmingLeave = true
+                    confirmLeave = false
+                    Task {
+                        await viewModel.leaveShare(
+                            context: modelContext,
+                            deleteLocalData: deleteLocalDataOnLeave
+                        )
+                        isConfirmingLeave = false
+                    }
                 }
-            }
-            Button("Cancel", role: .cancel) {
-                isConfirmingLeave = false
-            }
-        } message: {
-            Text(leaveConfirmationMessage)
-        }
-        .confirmationDialog(
-            "Stop sharing for everyone?",
+            ],
+            cancelAction: { isConfirmingLeave = false }
+        )
+        .appActionSheet(
             isPresented: $confirmStopSharing,
-            titleVisibility: .visible
-        ) {
-            Button("Stop Sharing for Everyone", role: .destructive) {
-                Task { await viewModel.stopSharingForEveryone() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Every caregiver will lose access to this family share. Their already-downloaded data will remain on their devices until they choose to delete it.")
-        }
-        .confirmationDialog(
-            "Delete this device's shared data?",
-            isPresented: $confirmDeleteInactiveData,
-            titleVisibility: .visible
-        ) {
-            Button("Delete from This Device", role: .destructive) {
-                Task {
-                    await viewModel.resolveInactiveShare(
-                        context: modelContext,
-                        deleteLocalData: true
-                    )
+            title: "Stop sharing for everyone?",
+            message: "Every caregiver will lose access to this family share. Their already-downloaded data will remain on their devices until they choose to delete it.",
+            systemImage: "person.3.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Stop Sharing for Everyone",
+                    subtitle: "End access to this family share for every caregiver.",
+                    systemImage: "person.3.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    Task { await viewModel.stopSharingForEveryone() }
                 }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This permanently deletes the downloaded Little Windows data from this device. It does not affect the former owner's data or other caregivers' local copies.")
-        }
+            ]
+        )
+        .appActionSheet(
+            isPresented: $confirmDeleteInactiveData,
+            title: "Delete this device's shared data?",
+            message: "This permanently deletes the downloaded Little Windows data from this device. It does not affect the former owner's data or other caregivers' local copies.",
+            systemImage: "iphone.slash",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete from This Device",
+                    subtitle: "Permanently delete this downloaded copy only.",
+                    systemImage: "iphone.slash",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    Task {
+                        await viewModel.resolveInactiveShare(
+                            context: modelContext,
+                            deleteLocalData: true
+                        )
+                    }
+                }
+            ]
+        )
     }
 
     private var lastSyncText: String {

@@ -233,8 +233,6 @@ struct FoodHomeView: View {
                 SolidsHomeView(
                     profile: selectedProfile,
                     accessLevel: solidsAccessLevel,
-                    events: careEvents,
-                    eventItems: solidFoodEventItems,
                     progress: solidFoodProgress,
                     plans: plannedSolidMeals,
                     profileState: selectedSolidsState,
@@ -248,7 +246,6 @@ struct FoodHomeView: View {
                 SolidsGuidedPathView(
                     profile: selectedProfile,
                     progress: solidFoodProgress,
-                    eventItems: solidFoodEventItems,
                     allergenProgress: solidAllergenProgress,
                     plans: plannedSolidMeals,
                     profileState: selectedSolidsState,
@@ -265,7 +262,6 @@ struct FoodHomeView: View {
                     profile: selectedProfile,
                     progress: solidFoodProgress,
                     customFoods: customSolidFoods,
-                    photoAttachments: solidFoodPhotos,
                     openFood: { path.append(.solidFood($0)) },
                     openCustomFood: { path.append(.customSolidFood($0)) }
                 )
@@ -375,7 +371,6 @@ struct FoodHomeView: View {
                     profile: selectedProfile,
                     foodID: foodID,
                     foodName: foodName,
-                    events: careEvents,
                     eventItems: solidFoodEventItems,
                     openMeal: { path.append(.solidMeal($0)) }
                 )
@@ -404,7 +399,6 @@ struct FoodHomeView: View {
             if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
                 SolidsAllergensView(
                     profile: selectedProfile,
-                    eventItems: solidFoodEventItems,
                     progress: solidAllergenProgress,
                     openAllergen: { path.append(.solidAllergen($0)) }
                 )
@@ -2227,23 +2221,26 @@ private struct ShoppingListsView: View {
         .sheet(isPresented: $showingNewList) {
             ShoppingListCreateView(household: household, stores: stores)
         }
-        .confirmationDialog(
-            "Delete shopping list?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete List", role: .destructive) {
-                if let listPendingDelete {
-                    ShoppingListService.archiveList(listPendingDelete, context: modelContext)
-                }
-                listPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                listPendingDelete = nil
-            }
-        } message: {
-            Text("This removes the list from active shopping lists.")
-        }
+            title: "Delete shopping list?",
+            message: "This removes the list from active shopping lists.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: listPendingDelete.map { list in
+                [AppActionSheetOption(
+                    title: "Delete List",
+                    subtitle: "Remove this reusable list from active shopping lists.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    ShoppingListService.archiveList(list, context: modelContext)
+                    listPendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { listPendingDelete = nil }
+        )
     }
 
     private func duplicate(_ list: ShoppingList) {
@@ -2610,36 +2607,45 @@ private struct ShoppingListDetailView: View {
                 initialSectionID: selectedSectionID
             )
         }
-        .confirmationDialog(
-            "Delete \(list.name)?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete List", role: .destructive) {
-                ShoppingListService.archiveList(list, context: modelContext)
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the list from active shopping lists.")
-        }
-        .confirmationDialog(
-            "Delete item?",
-            isPresented: $showingDeleteItemConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Item", role: .destructive) {
-                if let itemPendingDelete {
-                    ShoppingListService.deleteItem(itemPendingDelete, context: modelContext)
+            title: "Delete \(list.name)?",
+            message: "This removes the list from active shopping lists.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete List",
+                    subtitle: "Remove this reusable list from active shopping lists.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    ShoppingListService.archiveList(list, context: modelContext)
+                    dismiss()
                 }
-                itemPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                itemPendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the item from this shopping list.")
-        }
+            ]
+        )
+        .appActionSheet(
+            isPresented: $showingDeleteItemConfirmation,
+            title: "Delete item?",
+            message: "This permanently removes the item from this shopping list.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: itemPendingDelete.map { item in
+                [AppActionSheetOption(
+                    title: "Delete Item",
+                    subtitle: "Permanently remove this item from the shopping list.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    ShoppingListService.deleteItem(item, context: modelContext)
+                    itemPendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { itemPendingDelete = nil }
+        )
         .alert("List duplicated", isPresented: $showingDuplicatedConfirmation) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -2982,17 +2988,31 @@ private struct ShoppingModeView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
         }
-        .confirmationDialog("Add purchased items to inventory?", isPresented: $showingInventoryPrompt) {
-            Button("Add Purchased Items") {
-                finish(addToInventory: true)
-            }
-            Button("Skip Inventory") {
-                finish(addToInventory: false)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Purchased items can be added to Pantry by default. You can edit locations later.")
-        }
+        .appActionSheet(
+            isPresented: $showingInventoryPrompt,
+            title: "Add purchased items to inventory?",
+            message: "Purchased items can be added to Pantry by default. You can edit locations later.",
+            systemImage: "shippingbox.fill",
+            tint: .orange,
+            options: [
+                AppActionSheetOption(
+                    title: "Add Purchased Items",
+                    subtitle: "Add checked purchases to Pantry, then finish the trip.",
+                    systemImage: "shippingbox.fill",
+                    tint: .orange
+                ) {
+                    finish(addToInventory: true)
+                },
+                AppActionSheetOption(
+                    title: "Skip Inventory",
+                    subtitle: "Finish the shopping trip without changing inventory.",
+                    systemImage: "arrow.right.circle.fill",
+                    tint: .secondary
+                ) {
+                    finish(addToInventory: false)
+                }
+            ]
+        )
     }
 
     private func finish(addToInventory: Bool) {
@@ -3338,23 +3358,26 @@ private struct InventoryHomeView: View {
                 mealPrepItems: mealPrepItems
             )
         }
-        .confirmationDialog(
-            "Delete inventory item?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Item", role: .destructive) {
-                if let itemPendingDelete {
-                    FoodInventoryService.deleteInventoryItem(itemPendingDelete, context: modelContext)
-                }
-                itemPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                itemPendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the item from inventory.")
-        }
+            title: "Delete inventory item?",
+            message: "This permanently removes the item from inventory.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: itemPendingDelete.map { item in
+                [AppActionSheetOption(
+                    title: "Delete Item",
+                    subtitle: "Permanently remove this item from inventory.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    FoodInventoryService.deleteInventoryItem(item, context: modelContext)
+                    itemPendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { itemPendingDelete = nil }
+        )
     }
 
     @ViewBuilder
@@ -3518,23 +3541,26 @@ private struct InventoryLocationManagerView: View {
             } message: {
                 Text("Move or remove items from this location before archiving it.")
             }
-            .confirmationDialog(
-                "Archive location?",
+            .appActionSheet(
                 isPresented: $showingArchiveConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Archive Location", role: .destructive) {
-                    if let locationPendingArchive {
-                        archive(locationPendingArchive)
-                    }
-                    locationPendingArchive = nil
-                }
-                Button("Cancel", role: .cancel) {
-                    locationPendingArchive = nil
-                }
-            } message: {
-                Text("Archived locations are removed from active inventory pickers.")
-            }
+                title: "Archive location?",
+                message: "Archived locations are removed from active inventory pickers.",
+                systemImage: "archivebox.fill",
+                tint: .red,
+                options: locationPendingArchive.map { location in
+                    [AppActionSheetOption(
+                        title: "Archive Location",
+                        subtitle: "Remove this location from active inventory pickers.",
+                        systemImage: "archivebox.fill",
+                        tint: .red,
+                        role: .destructive
+                    ) {
+                        archive(location)
+                        locationPendingArchive = nil
+                    }]
+                } ?? [],
+                cancelAction: { locationPendingArchive = nil }
+            )
         }
     }
 
@@ -3727,19 +3753,25 @@ private struct InventoryItemDetailView: View {
                 locations: locations
             )
         }
-        .confirmationDialog(
-            "Delete \(item.name)?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Item", role: .destructive) {
-                FoodInventoryService.deleteInventoryItem(item, context: modelContext)
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This permanently removes the item from inventory.")
-        }
+            title: "Delete \(item.name)?",
+            message: "This permanently removes the item from inventory.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete Item",
+                    subtitle: "Permanently remove this item from inventory.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    FoodInventoryService.deleteInventoryItem(item, context: modelContext)
+                    dismiss()
+                }
+            ]
+        )
     }
 }
 
@@ -3944,23 +3976,26 @@ private struct MealPrepView: View {
                 locations: locations
             )
         }
-        .confirmationDialog(
-            "Archive meal prep?",
+        .appActionSheet(
             isPresented: $showingArchiveConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Archive Item", role: .destructive) {
-                if let itemPendingArchive {
-                    MealPrepService.archive(itemPendingArchive, context: modelContext)
-                }
-                itemPendingArchive = nil
-            }
-            Button("Cancel", role: .cancel) {
-                itemPendingArchive = nil
-            }
-        } message: {
-            Text("Archived meal prep is hidden from active food planning.")
-        }
+            title: "Archive meal prep?",
+            message: "Archived meal prep is hidden from active food planning.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: itemPendingArchive.map { item in
+                [AppActionSheetOption(
+                    title: "Archive Item",
+                    subtitle: "Hide this item from active food planning.",
+                    systemImage: "archivebox.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    MealPrepService.archive(item, context: modelContext)
+                    itemPendingArchive = nil
+                }]
+            } ?? [],
+            cancelAction: { itemPendingArchive = nil }
+        )
     }
 
     private var groupedLocations: [InventoryLocation] {
@@ -4076,26 +4111,44 @@ private struct MealPrepDetailView: View {
                 use(servings: servings, notes: notes)
             }
         }
-        .confirmationDialog("Mark finished?", isPresented: $showingFinishPrompt) {
-            Button("Archive Finished Item") {
-                MealPrepService.archiveIfFinished(item, context: modelContext)
-                dismiss()
-            }
-            Button("Keep Visible", role: .cancel) {}
-        }
-        .confirmationDialog(
-            "Archive \(item.name)?",
+        .appActionSheet(
+            isPresented: $showingFinishPrompt,
+            title: "Mark finished?",
+            message: "This meal prep has no servings remaining.",
+            systemImage: "checkmark.circle.fill",
+            tint: .green,
+            options: [
+                AppActionSheetOption(
+                    title: "Archive Finished Item",
+                    subtitle: "Hide this finished item from active food planning.",
+                    systemImage: "archivebox.fill",
+                    tint: .green
+                ) {
+                    MealPrepService.archiveIfFinished(item, context: modelContext)
+                    dismiss()
+                }
+            ],
+            cancelTitle: "Keep Visible"
+        )
+        .appActionSheet(
             isPresented: $showingArchiveConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Archive Item", role: .destructive) {
-                MealPrepService.archive(item, context: modelContext)
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Archived meal prep is hidden from active food planning.")
-        }
+            title: "Archive \(item.name)?",
+            message: "Archived meal prep is hidden from active food planning.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Archive Item",
+                    subtitle: "Hide this item from active food planning.",
+                    systemImage: "archivebox.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    MealPrepService.archive(item, context: modelContext)
+                    dismiss()
+                }
+            ]
+        )
     }
 
     private func use(servings: Double, notes: String) {
@@ -4334,23 +4387,26 @@ private struct StoresView: View {
         .sheet(isPresented: $showingNewStore) {
             StoreCreateView(household: household) { _ in }
         }
-        .confirmationDialog(
-            "Archive store?",
+        .appActionSheet(
             isPresented: $showingArchiveConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Archive Store", role: .destructive) {
-                if let storePendingArchive {
-                    StoreLayoutService.archiveStore(storePendingArchive, context: modelContext)
-                }
-                storePendingArchive = nil
-            }
-            Button("Cancel", role: .cancel) {
-                storePendingArchive = nil
-            }
-        } message: {
-            Text("Archived stores are removed from active store lists and section pickers.")
-        }
+            title: "Archive store?",
+            message: "Archived stores are removed from active store lists and section pickers.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: storePendingArchive.map { store in
+                [AppActionSheetOption(
+                    title: "Archive Store",
+                    subtitle: "Remove this store from active lists and section pickers.",
+                    systemImage: "archivebox.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    StoreLayoutService.archiveStore(store, context: modelContext)
+                    storePendingArchive = nil
+                }]
+            } ?? [],
+            cancelAction: { storePendingArchive = nil }
+        )
     }
 }
 
@@ -4496,44 +4552,54 @@ private struct StoreEditorView: View {
         }
         .onDisappear(perform: saveNow)
         .onChange(of: store.id) { _, _ in syncDraftsFromStore() }
-        .alert(
-            sectionPendingRemoval.map { "Remove \($0.name)?" } ?? "Remove section?",
+        .appActionSheet(
             isPresented: Binding(
                 get: { sectionPendingRemoval != nil },
                 set: { if !$0 { sectionPendingRemoval = nil } }
-            )
-        ) {
-            Button("Remove Section", role: .destructive) {
-                if let sectionPendingRemoval {
+            ),
+            title: sectionPendingRemoval.map { "Remove \($0.name)?" } ?? "Remove section?",
+            message: sectionRemovalMessage,
+            systemImage: "rectangle.stack.badge.minus",
+            tint: .red,
+            options: sectionPendingRemoval.map { section in
+                [AppActionSheetOption(
+                    title: "Remove Section",
+                    subtitle: "Items in this section will move to Other.",
+                    systemImage: "rectangle.stack.badge.minus",
+                    tint: .red,
+                    role: .destructive
+                ) {
                     StoreLayoutService.deleteSection(
-                        sectionPendingRemoval,
+                        section,
                         from: store,
                         shoppingItems: shoppingItems,
                         remainingSections: sections,
                         context: modelContext
                     )
-                }
-                sectionPendingRemoval = nil
-            }
-            Button("Cancel", role: .cancel) {
-                sectionPendingRemoval = nil
-            }
-        } message: {
-            Text(sectionRemovalMessage)
-        }
-        .confirmationDialog(
-            "Archive \(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? store.name : nameDraft)?",
+                    sectionPendingRemoval = nil
+                }]
+            } ?? [],
+            cancelAction: { sectionPendingRemoval = nil }
+        )
+        .appActionSheet(
             isPresented: $showingArchiveConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Archive Store", role: .destructive) {
-                StoreLayoutService.archiveStore(store, context: modelContext)
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Archived stores are removed from active store lists and section pickers.")
-        }
+            title: "Archive \(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? store.name : nameDraft)?",
+            message: "Archived stores are removed from active store lists and section pickers.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Archive Store",
+                    subtitle: "Remove this store from active lists and section pickers.",
+                    systemImage: "archivebox.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    StoreLayoutService.archiveStore(store, context: modelContext)
+                    dismiss()
+                }
+            ]
+        )
     }
 
     private var orderedSections: [FoodStoreSection] {
@@ -5412,55 +5478,61 @@ private struct ReturnDetailView: View {
             tint: .red,
             options: removeReturnOptions
         )
-        .confirmationDialog(
-            "Delete return item?",
+        .appActionSheet(
             isPresented: $showingDeleteItemConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Item", role: .destructive) {
-                if let itemPendingDelete {
+            title: "Delete return item?",
+            message: "This removes the item from this return.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: itemPendingDelete.map { item in
+                [AppActionSheetOption(
+                    title: "Delete Item",
+                    subtitle: "Permanently remove this item from the return.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
                     ReturnTrackingService.deleteItem(
-                        itemPendingDelete,
+                        item,
                         from: request,
                         items: items,
                         packages: packages,
                         attachments: photoAttachments,
                         context: modelContext
                     )
-                    if items.filter({ $0.returnRequestID == request.id && $0.id != itemPendingDelete.id }).isEmpty {
+                    if items.filter({ $0.returnRequestID == request.id && $0.id != item.id }).isEmpty {
                         dismiss()
                     }
-                }
-                itemPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                itemPendingDelete = nil
-            }
-        } message: {
-            Text("This removes the item from this return.")
-        }
-        .confirmationDialog(
-            "Delete send-back details?",
+                    itemPendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { itemPendingDelete = nil }
+        )
+        .appActionSheet(
             isPresented: $showingDeletePackageConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Details", role: .destructive) {
-                if let packagePendingDelete {
+            title: "Delete send-back details?",
+            message: "Items assigned to these send-back details will become unassigned, and attached photos will be removed.",
+            systemImage: "shippingbox.fill",
+            tint: .red,
+            options: packagePendingDelete.map { package in
+                [AppActionSheetOption(
+                    title: "Delete Details",
+                    subtitle: "Unassign its items and remove the attached photos.",
+                    systemImage: "shippingbox.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
                     ReturnTrackingService.deletePackage(
-                        packagePendingDelete,
+                        package,
                         items: items,
                         attachments: photoAttachments,
                         context: modelContext
                     )
-                }
-                packagePendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                packagePendingDelete = nil
-            }
-        } message: {
-            Text("Items assigned to these send-back details will become unassigned, and attached photos will be removed.")
-        }
+                    packagePendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { packagePendingDelete = nil }
+        )
     }
 
     private var removeReturnOptions: [AppActionSheetOption] {
@@ -6182,6 +6254,7 @@ struct FoodReminderSettingsView: View {
     @State private var selectedListID: UUID?
     @State private var selectedMealPrepID: UUID?
     @State private var selectedReturnRequestID: UUID?
+    @State private var reminderPendingCancel: FoodReminder?
 
     var body: some View {
         Form {
@@ -6278,9 +6351,7 @@ struct FoodReminderSettingsView: View {
                     }
                     .swipeActions {
                         Button("Cancel", role: .destructive) {
-                            Task {
-                                await FoodReminderService.cancel(reminder, context: modelContext)
-                            }
+                            reminderPendingCancel = reminder
                         }
                     }
                 }
@@ -6294,6 +6365,31 @@ struct FoodReminderSettingsView: View {
             if newType != .mealPrep { selectedMealPrepID = nil }
             if newType != .returns { selectedReturnRequestID = nil }
         }
+        .appActionSheet(
+            isPresented: Binding(
+                get: { reminderPendingCancel != nil },
+                set: { if !$0 { reminderPendingCancel = nil } }
+            ),
+            title: "Cancel Reminder?",
+            message: reminderPendingCancel.map { "This cancels the scheduled reminder for \($0.title)." },
+            systemImage: "bell.slash.fill",
+            tint: .red,
+            options: reminderPendingCancel.map { reminder in
+                [AppActionSheetOption(
+                    title: "Cancel Reminder",
+                    subtitle: reminder.title,
+                    systemImage: "bell.slash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    Task {
+                        await FoodReminderService.cancel(reminder, context: modelContext)
+                    }
+                    reminderPendingCancel = nil
+                }]
+            } ?? [],
+            cancelAction: { reminderPendingCancel = nil }
+        )
     }
 
     private var activeReminders: [FoodReminder] {

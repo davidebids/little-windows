@@ -2,7 +2,7 @@ import Charts
 import SwiftData
 import SwiftUI
 
-private enum AdultHealthMetric: String, CaseIterable, Identifiable {
+private enum AdultHealthMetric: String, CaseIterable, Identifiable, Sendable {
     case bloodPressure
     case heartRate
     case oxygenSaturation
@@ -39,78 +39,260 @@ private enum AdultHealthMetric: String, CaseIterable, Identifiable {
         case .pain: "/10"
         }
     }
+
+    var eventType: EventType {
+        switch self {
+        case .bloodPressure: .bloodPressure
+        case .heartRate: .heartRate
+        case .oxygenSaturation: .oxygenSaturation
+        case .respiratoryRate: .respiratoryRate
+        case .bloodGlucose: .glucose
+        case .temperature: .temperature
+        case .weight: .growth
+        case .pain: .pain
+        }
+    }
 }
 
-private struct AdultHealthChartPoint: Identifiable {
+private struct AdultHealthChartPoint: Identifiable, Sendable {
     var eventID: UUID
     var date: Date
     var value: Double
     var series: String
     var id: String { "\(eventID.uuidString)-\(series)" }
+
+    static func make(from event: CareEvent, metric: AdultHealthMetric) -> [AdultHealthChartPoint] {
+        switch metric {
+        case .bloodPressure:
+            let details = event.healthObservationDetails
+            guard let systolic = details.systolicBloodPressure,
+                  let diastolic = details.diastolicBloodPressure else { return [] }
+            return [
+                AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(systolic), series: "Systolic"),
+                AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(diastolic), series: "Diastolic")
+            ]
+        case .heartRate:
+            guard let value = event.healthObservationDetails.heartRateBPM else { return [] }
+            return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(value), series: "Heart rate")]
+        case .oxygenSaturation:
+            guard let value = event.healthObservationDetails.oxygenSaturationPercent else { return [] }
+            return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: value, series: "Oxygen")]
+        case .respiratoryRate:
+            guard let value = event.healthObservationDetails.respiratoryRatePerMinute else { return [] }
+            return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(value), series: "Respiratory rate")]
+        case .bloodGlucose:
+            let details = event.healthObservationDetails
+            guard let value = details.bloodGlucoseValue else { return [] }
+            let normalized = (details.bloodGlucoseUnit ?? .milligramsPerDeciliter)
+                .milligramsPerDeciliter(from: value)
+            return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: normalized, series: "Blood glucose")]
+        case .temperature:
+            guard let value = event.temperatureCelsius else { return [] }
+            return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: value * 9 / 5 + 32, series: "Temperature")]
+        case .weight:
+            guard let value = event.canonicalWeightKilograms else { return [] }
+            return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: value / 0.45359237, series: "Weight")]
+        case .pain:
+            guard let value = event.healthObservationDetails.painScore else { return [] }
+            return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(value), series: "Pain")]
+        }
+    }
+}
+
+private struct AdultHealthLatestValue: Identifiable, Sendable {
+    var title: String
+    var value: String
+    var date: Date
+    var id: String { title }
+
+    static func make(from event: CareEvent) -> AdultHealthLatestValue? {
+        let metric: AdultHealthMetric
+        let value: String?
+        switch event.type {
+        case .bloodPressure:
+            metric = .bloodPressure
+            let details = event.healthObservationDetails
+            value = if let systolic = details.systolicBloodPressure,
+                       let diastolic = details.diastolicBloodPressure {
+                "\(systolic)/\(diastolic) mmHg"
+            } else { nil }
+        case .heartRate:
+            metric = .heartRate
+            value = event.healthObservationDetails.heartRateBPM.map { "\($0) bpm" }
+        case .oxygenSaturation:
+            metric = .oxygenSaturation
+            value = event.healthObservationDetails.oxygenSaturationPercent.map {
+                "\($0.formatted(.number.precision(.fractionLength(0...1))))%"
+            }
+        case .respiratoryRate:
+            metric = .respiratoryRate
+            value = event.healthObservationDetails.respiratoryRatePerMinute.map { "\($0)/min" }
+        case .glucose:
+            metric = .bloodGlucose
+            let details = event.healthObservationDetails
+            value = details.bloodGlucoseValue.map {
+                let unit = details.bloodGlucoseUnit ?? .milligramsPerDeciliter
+                return "\($0.formatted(.number.precision(.fractionLength(0...1)))) \(unit.displayName)"
+            }
+        case .temperature:
+            metric = .temperature
+            value = event.temperatureCelsius.map {
+                "\(($0 * 9 / 5 + 32).formatted(.number.precision(.fractionLength(1)))) °F"
+            }
+        case .growth:
+            metric = .weight
+            value = event.canonicalWeightKilograms.map {
+                "\(($0 / 0.45359237).formatted(.number.precision(.fractionLength(0...1)))) lb"
+            }
+        case .pain:
+            metric = .pain
+            value = event.healthObservationDetails.painScore.map { "\($0)/10" }
+        default:
+            return nil
+        }
+        guard let value else { return nil }
+        return AdultHealthLatestValue(
+            title: metric.displayName,
+            value: value,
+            date: event.startDate
+        )
+    }
+}
+
+@ModelActor
+private actor AdultHealthSummaryWorker {
+    func latestValues(profileID: UUID) -> [AdultHealthLatestValue] {
+        AdultHealthMetric.allCases.compactMap { metric in
+            let rawValue = metric.eventType.rawValue
+            var descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate {
+                    $0.profileID == profileID && $0.typeRawValue == rawValue
+                },
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+            )
+            descriptor.fetchLimit = 1
+            guard let event = try? modelContext.fetch(descriptor).first else { return nil }
+            return AdultHealthLatestValue.make(from: event)
+        }
+    }
+}
+
+@ModelActor
+private actor AdultHealthTrendWorker {
+    func points(profileID: UUID, metric: AdultHealthMetric) -> [AdultHealthChartPoint] {
+        let typeRawValue = metric.eventType.rawValue
+        var descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.typeRawValue == typeRawValue
+            },
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+        )
+        descriptor.fetchLimit = 365
+        let events = (try? modelContext.fetch(descriptor)) ?? []
+        return events
+            .flatMap { AdultHealthChartPoint.make(from: $0, metric: metric) }
+            .sorted { $0.date < $1.date }
+    }
+}
+
+private struct AdultHealthTrendSection: View {
+    @Environment(\.modelContext) private var modelContext
+    let profileID: UUID
+    let metric: AdultHealthMetric
+    @State private var points: [AdultHealthChartPoint] = []
+    @State private var isLoading = true
+
+    init(profileID: UUID, metric: AdultHealthMetric) {
+        self.profileID = profileID
+        self.metric = metric
+    }
+
+    var body: some View {
+        let visiblePoints = points
+        Group {
+            if isLoading {
+                ProgressView("Loading trend…")
+                    .frame(maxWidth: .infinity, minHeight: 210)
+            } else if visiblePoints.isEmpty {
+                ContentUnavailableView(
+                    "No \(metric.displayName.lowercased()) entries",
+                    systemImage: "chart.xyaxis.line",
+                    description: Text("Log a value to start this chart.")
+                )
+            } else {
+                Chart(visiblePoints) { point in
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value(metric.unit, point.value)
+                    )
+                    .foregroundStyle(by: .value("Series", point.series))
+                    if visiblePoints.count <= 120 {
+                        PointMark(
+                            x: .value("Date", point.date),
+                            y: .value(metric.unit, point.value)
+                        )
+                        .foregroundStyle(by: .value("Series", point.series))
+                    }
+                }
+                .frame(height: 210)
+                .chartLegend(position: .bottom)
+                .accessibilityIdentifier("adult-health.trend-loaded.\(metric.rawValue)")
+            }
+        }
+        .task(id: metric) {
+            isLoading = true
+            let worker = AdultHealthTrendWorker(modelContainer: modelContext.container)
+            let loadedPoints = await worker.points(profileID: profileID, metric: metric)
+            guard !Task.isCancelled else { return }
+            points = loadedPoints
+            isLoading = false
+        }
+    }
 }
 
 struct AdultHealthOverviewView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var events: [CareEvent]
+    @Query private var symptomEvents: [CareEvent]
     let profile: CareProfile
     @State private var selectedMetric: AdultHealthMetric = .bloodPressure
     @State private var eventTypeToLog: EventType?
+    @State private var latestValues: [AdultHealthLatestValue] = []
 
     init(profile: CareProfile) {
         self.profile = profile
         let profileID = profile.id
-        _events = Query(FetchDescriptor<CareEvent>(
-            predicate: #Predicate { $0.profileID == profileID },
+        let healthTypes = [
+            EventType.symptom.rawValue,
+            EventType.bloodPressure.rawValue,
+            EventType.heartRate.rawValue,
+            EventType.oxygenSaturation.rawValue,
+            EventType.respiratoryRate.rawValue,
+            EventType.glucose.rawValue,
+            EventType.temperature.rawValue,
+            EventType.growth.rawValue,
+            EventType.pain.rawValue
+        ]
+        var descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate {
+                $0.profileID == profileID && healthTypes.contains($0.typeRawValue)
+            },
             sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
-        ))
-    }
-
-    private var healthEvents: [CareEvent] {
-        events.filter {
-            [.symptom, .bloodPressure, .heartRate, .oxygenSaturation,
-             .respiratoryRate, .glucose, .temperature, .growth, .pain].contains($0.type)
-        }
-    }
-
-    private var chartPoints: [AdultHealthChartPoint] {
-        events.compactMap { event -> [AdultHealthChartPoint]? in
-            let details = event.healthObservationDetails
-            switch selectedMetric {
-            case .bloodPressure:
-                guard event.type == .bloodPressure,
-                      let systolic = details.systolicBloodPressure,
-                      let diastolic = details.diastolicBloodPressure else { return nil }
-                return [
-                    AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(systolic), series: "Systolic"),
-                    AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(diastolic), series: "Diastolic")
-                ]
-            case .heartRate:
-                guard event.type == .heartRate, let value = details.heartRateBPM else { return nil }
-                return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(value), series: "Heart rate")]
-            case .oxygenSaturation:
-                guard event.type == .oxygenSaturation, let value = details.oxygenSaturationPercent else { return nil }
-                return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: value, series: "Oxygen")]
-            case .respiratoryRate:
-                guard event.type == .respiratoryRate, let value = details.respiratoryRatePerMinute else { return nil }
-                return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(value), series: "Respiratory rate")]
-            case .bloodGlucose:
-                guard event.type == .glucose, let value = details.bloodGlucoseValue else { return nil }
-                let normalizedValue = (details.bloodGlucoseUnit ?? .milligramsPerDeciliter)
-                    .milligramsPerDeciliter(from: value)
-                return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: normalizedValue, series: "Blood glucose")]
-            case .temperature:
-                guard event.type == .temperature, let value = event.temperatureCelsius else { return nil }
-                return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: value * 9 / 5 + 32, series: "Temperature")]
-            case .weight:
-                guard event.type == .growth, let value = event.canonicalWeightKilograms else { return nil }
-                return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: value / 0.45359237, series: "Weight")]
-            case .pain:
-                guard event.type == .pain, let value = details.painScore else { return nil }
-                return [AdultHealthChartPoint(eventID: event.id, date: event.startDate, value: Double(value), series: "Pain")]
-            }
-        }
-        .flatMap { $0 }
-        .sorted { $0.date < $1.date }
+        )
+        // The overview only renders 25 recent rows. Metric trends and exact
+        // lifetime latest values are fetched independently below, so opening
+        // Adult Care never materializes thousands of unrelated observations.
+        descriptor.fetchLimit = 25
+        _events = Query(descriptor)
+        let symptomRawValue = EventType.symptom.rawValue
+        var symptomDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.typeRawValue == symptomRawValue
+            },
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+        )
+        symptomDescriptor.fetchLimit = 10
+        _symptomEvents = Query(symptomDescriptor)
     }
 
     var body: some View {
@@ -125,6 +307,7 @@ struct AdultHealthOverviewView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .accessibilityIdentifier("adult-health.overview")
         .navigationTitle("Health Log")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -140,12 +323,17 @@ struct AdultHealthOverviewView: View {
         .sheet(item: $eventTypeToLog) { type in
             NavigationStack {
                 EventEditorView(type: type) { event in
-                    event.profileID = profile.id
-                    event.profileTypeSnapshot = .adult
-                    _ = PersistenceService.save(context: modelContext)
-                    SystemIntegrationReconciler.requestReconciliation()
+                    persistHealthEvent(event)
                 }
             }
+        }
+        .task(id: events.first?.updatedAt) {
+            let container = modelContext.container
+            let profileID = profile.id
+            latestValues = await Task.detached(priority: .userInitiated) {
+                let worker = AdultHealthSummaryWorker(modelContainer: container)
+                return await worker.latestValues(profileID: profileID)
+            }.value
         }
     }
 
@@ -156,14 +344,10 @@ struct AdultHealthOverviewView: View {
 
     @ViewBuilder
     private var latestSection: some View {
-        let latest = [
-            latestValue(.bloodPressure), latestValue(.heartRate), latestValue(.oxygenSaturation),
-            latestValue(.respiratoryRate), latestValue(.bloodGlucose), latestValue(.temperature),
-            latestValue(.weight), latestValue(.pain)
-        ].compactMap { $0 }
+        let latest = latestValues
         if !latest.isEmpty {
             Section("Latest") {
-                ForEach(latest, id: \.title) { item in
+                ForEach(latest) { item in
                     LabeledContent(item.title) {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(item.value).fontWeight(.semibold)
@@ -178,43 +362,23 @@ struct AdultHealthOverviewView: View {
     }
 
     private var trendSection: some View {
-        Section {
+        return Section {
             Picker("Metric", selection: $selectedMetric) {
                 ForEach(AdultHealthMetric.allCases) { Text($0.displayName).tag($0) }
             }
-            if chartPoints.isEmpty {
-                ContentUnavailableView(
-                    "No \(selectedMetric.displayName.lowercased()) entries",
-                    systemImage: "chart.xyaxis.line",
-                    description: Text("Log a value to start this chart.")
-                )
-            } else {
-                Chart(chartPoints) { point in
-                    LineMark(
-                        x: .value("Date", point.date),
-                        y: .value(selectedMetric.unit, point.value)
-                    )
-                    .foregroundStyle(by: .value("Series", point.series))
-                    PointMark(
-                        x: .value("Date", point.date),
-                        y: .value(selectedMetric.unit, point.value)
-                    )
-                    .foregroundStyle(by: .value("Series", point.series))
-                }
-                .frame(height: 210)
-                .chartLegend(position: .bottom)
-            }
+            .accessibilityIdentifier("adult-health.metric-picker")
+            AdultHealthTrendSection(profileID: profile.id, metric: selectedMetric)
+                .id(selectedMetric)
         } header: {
-            AppSectionHeader(title: "Trends", subtitle: "Recorded values")
+            AppSectionHeader(title: "Trends", subtitle: "Up to 365 recent entries")
         }
     }
 
     @ViewBuilder
     private var symptomsSection: some View {
-        let symptoms = events.filter { $0.type == .symptom }.prefix(10)
-        if !symptoms.isEmpty {
+        if !symptomEvents.isEmpty {
             Section("Symptoms") {
-                ForEach(symptoms) { event in
+                ForEach(symptomEvents) { event in
                     NavigationLink {
                         healthEventEditor(event)
                     } label: {
@@ -244,9 +408,9 @@ struct AdultHealthOverviewView: View {
 
     @ViewBuilder
     private var recentSection: some View {
-        if !healthEvents.isEmpty {
+        if !events.isEmpty {
             Section("Recent health logs") {
-                ForEach(healthEvents.prefix(25)) { event in
+                ForEach(events.prefix(25)) { event in
                     NavigationLink {
                         healthEventEditor(event)
                     } label: {
@@ -268,50 +432,26 @@ struct AdultHealthOverviewView: View {
         }
     }
 
-    private func latestValue(_ metric: AdultHealthMetric) -> (title: String, value: String, date: Date)? {
-        // Build the latest display directly so selecting a chart metric does not
-        // alter the summary cards.
-        for event in events {
-            let details = event.healthObservationDetails
-            switch metric {
-            case .bloodPressure where event.type == .bloodPressure:
-                if let systolic = details.systolicBloodPressure, let diastolic = details.diastolicBloodPressure {
-                    return (metric.displayName, "\(systolic)/\(diastolic) mmHg", event.startDate)
-                }
-            case .heartRate where event.type == .heartRate:
-                if let value = details.heartRateBPM { return (metric.displayName, "\(value) bpm", event.startDate) }
-            case .oxygenSaturation where event.type == .oxygenSaturation:
-                if let value = details.oxygenSaturationPercent { return (metric.displayName, "\(value.formatted(.number.precision(.fractionLength(0...1))))%", event.startDate) }
-            case .respiratoryRate where event.type == .respiratoryRate:
-                if let value = details.respiratoryRatePerMinute { return (metric.displayName, "\(value)/min", event.startDate) }
-            case .bloodGlucose where event.type == .glucose:
-                if let value = details.bloodGlucoseValue {
-                    let unit = details.bloodGlucoseUnit ?? .milligramsPerDeciliter
-                    return (metric.displayName, "\(value.formatted(.number.precision(.fractionLength(0...1)))) \(unit.displayName)", event.startDate)
-                }
-            case .temperature where event.type == .temperature:
-                if let value = event.temperatureCelsius { return (metric.displayName, "\((value * 9 / 5 + 32).formatted(.number.precision(.fractionLength(1)))) °F", event.startDate) }
-            case .weight where event.type == .growth:
-                if let value = event.canonicalWeightKilograms {
-                    return (metric.displayName, "\((value / 0.45359237).formatted(.number.precision(.fractionLength(0...1)))) lb", event.startDate)
-                }
-            case .pain where event.type == .pain:
-                if let value = details.painScore {
-                    return (metric.displayName, "\(value)/10", event.startDate)
-                }
-            default:
-                continue
-            }
-        }
-        return nil
-    }
-
     private func healthEventEditor(_ event: CareEvent) -> some View {
         EventEditorView(type: event.type, event: event) { savedEvent in
-            savedEvent.profileID = profile.id
-            savedEvent.profileTypeSnapshot = .adult
-            _ = PersistenceService.save(context: modelContext)
-            SystemIntegrationReconciler.requestReconciliation()
+            persistHealthEvent(savedEvent)
+        }
+    }
+
+    private func persistHealthEvent(_ event: CareEvent) {
+        event.profileID = profile.id
+        event.profileTypeSnapshot = .adult
+        let container = modelContext.container
+        Task {
+            guard await EventMutationService.persistStandaloneEvent(
+                event,
+                container: container
+            ) else { return }
+
+            // Adult observations do not affect sleep predictions, reminders,
+            // widgets, or Live Activities. The watch summary is the only
+            // derived surface that needs an update.
+            WatchConnectivityService.shared.scheduleCurrentStatePublish()
         }
     }
 }

@@ -322,32 +322,50 @@ struct SettingsView: View {
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
             importBackup(result)
         }
-        .alert(
-            pendingDestructiveOperation?.title ?? "Confirm Data Change",
+        .appActionSheet(
             isPresented: Binding(
                 get: { pendingDestructiveOperation != nil },
                 set: { if !$0 { pendingDestructiveOperation = nil } }
             ),
-            presenting: pendingDestructiveOperation
-        ) { operation in
-            Button(operation.buttonTitle, role: .destructive) {
-                pendingDestructiveOperation = nil
+            title: pendingDestructiveOperation?.title ?? "Confirm Data Change",
+            message: pendingDestructiveOperation?.message,
+            systemImage: "exclamationmark.triangle.fill",
+            tint: .red,
+            options: pendingDestructiveOperation.map { operation in
+                let subtitle: String
+                let systemImage: String
                 switch operation.action {
                 case .importBackup:
-                    performPendingImport(scope: operation.scope)
+                    subtitle = "Replace the current local data with the selected backup."
+                    systemImage = "square.and.arrow.down.fill"
                 case .deleteAll:
-                    deleteAll(scope: operation.scope)
+                    subtitle = "Permanently remove the data covered by this action."
+                    systemImage = "trash.fill"
                 }
-            }
-            Button("Cancel", role: .cancel) {
-                pendingDestructiveOperation = nil
-                if case .importBackup = operation.action {
+                return [AppActionSheetOption(
+                    title: operation.buttonTitle,
+                    subtitle: subtitle,
+                    systemImage: systemImage,
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    pendingDestructiveOperation = nil
+                    switch operation.action {
+                    case .importBackup:
+                        performPendingImport(scope: operation.scope)
+                    case .deleteAll:
+                        deleteAll(scope: operation.scope)
+                    }
+                }]
+            } ?? [],
+            cancelAction: {
+                if let operation = pendingDestructiveOperation,
+                   case .importBackup = operation.action {
                     pendingImportData = nil
                 }
+                pendingDestructiveOperation = nil
             }
-        } message: { operation in
-            Text(operation.message)
-        }
+        )
         .alert("Little Windows", isPresented: Binding(
             get: { statusMessage != nil },
             set: { if !$0 { statusMessage = nil } }
@@ -885,18 +903,24 @@ private struct ChildSleepSettingsSections: View {
                 Text("These are separate from Little Window Alerts. They use the current pressure band and are hidden for babies under 4 months while Little Windows is learning rhythm.")
             }
         }
-        .confirmationDialog(
-            "Turn on Little Window Alerts?",
+        .appActionSheet(
             isPresented: $showingAlertPermissionPrompt,
-            titleVisibility: .visible
-        ) {
-            Button("Allow Notifications") {
-                Task { await enableLittleWindowAlerts() }
-            }
-            Button("Not Now", role: .cancel) {}
-        } message: {
-            Text("Little Windows can remind you before the next likely nap or bedtime window.")
-        }
+            title: "Turn on Little Window Alerts?",
+            message: "Little Windows can remind you before the next likely nap or bedtime window.",
+            systemImage: "bell.badge.fill",
+            tint: .purple,
+            options: [
+                AppActionSheetOption(
+                    title: "Allow Notifications",
+                    subtitle: "Continue to the iOS notification permission prompt.",
+                    systemImage: "bell.badge.fill",
+                    tint: .purple
+                ) {
+                    Task { await enableLittleWindowAlerts() }
+                }
+            ],
+            cancelTitle: "Not Now"
+        )
         .alert("Notifications are turned off", isPresented: $showingPermissionDenied) {
             Button("Open Settings") {
                 openNotificationSettings()
@@ -1805,6 +1829,7 @@ private struct WatchFavoritesSettingsView: View {
 
     @State private var usesSmartFavorites: Bool
     @State private var selectedActionIDs: [String]
+    @State private var smartQuickActions: [QuickLogActionSnapshot] = []
 
     init(profile: CareProfile) {
         self.profile = profile
@@ -1884,6 +1909,11 @@ private struct WatchFavoritesSettingsView: View {
         .navigationTitle("Watch Favorites")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: reconcileSelection)
+        .task {
+            smartQuickActions = await Task.detached(priority: .utility) {
+                WidgetSnapshotService.read().resolvedQuickActions
+            }.value
+        }
     }
 
     private var availableActions: [WatchActionSnapshot] {
@@ -1909,7 +1939,7 @@ private struct WatchFavoritesSettingsView: View {
 
     private var smartActions: [WatchActionSnapshot] {
         WatchStateFactory.smartFavorites(
-            from: WidgetSnapshotService.read().resolvedQuickActions,
+            from: smartQuickActions,
             allActions: availableActions
         )
     }

@@ -126,7 +126,7 @@ struct MilestoneTemplate: Identifiable, Hashable {
     ]
 }
 
-struct AutomaticMilestoneActivitySummary: Identifiable, Hashable {
+struct AutomaticMilestoneActivitySummary: Identifiable, Hashable, @unchecked Sendable {
     let activityType: ActivityType
     let count: Int
     let durationSeconds: TimeInterval
@@ -134,8 +134,8 @@ struct AutomaticMilestoneActivitySummary: Identifiable, Hashable {
     var id: String { activityType.rawValue }
 }
 
-struct AutomaticMilestoneSummary: Identifiable, Hashable {
-    enum Kind: Hashable {
+struct AutomaticMilestoneSummary: Identifiable, Hashable, @unchecked Sendable {
+    enum Kind: Hashable, Sendable {
         case days(Int)
         case birthday(Int)
     }

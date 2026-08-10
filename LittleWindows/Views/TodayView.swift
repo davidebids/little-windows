@@ -1,3 +1,4 @@
+import Combine
 import SwiftData
 import SwiftUI
 import UIKit
@@ -209,6 +210,11 @@ struct TodayView: View {
     @State private var cachedRenderState = TodayRenderState.empty
     @State private var hasCompletedInitialSetup = false
     @State private var renderStateRefreshTask: Task<Void, Never>?
+    @State private var integrationAnalysisTask: Task<Void, Never>?
+    @State private var integrationAnalysisRevision = UUID()
+    @State private var timerMutationRenderDeferralActive = false
+    @State private var timerSystemRefreshTask: Task<Void, Never>?
+    @State private var localEventMutationCount = 0
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
 
@@ -353,6 +359,45 @@ struct TodayView: View {
 
     private func refreshCachedRenderState() {
         cachedRenderState = makeRenderState()
+        scheduleIntegrationAnalysisRefresh()
+    }
+
+    private func scheduleIntegrationAnalysisRefresh() {
+        integrationAnalysisTask?.cancel()
+        guard let profile = cachedRenderState.profile,
+              profile.profileType == .child else {
+            cachedRenderState.sleepPressure = nil
+            cachedRenderState.sleepMiniPlan = nil
+            return
+        }
+        let profileID = profile.id
+        let settings = predictionSettings
+        let revision = UUID()
+        integrationAnalysisRevision = revision
+        integrationAnalysisTask = Task { @MainActor in
+            let analysis = await EventMutationService.integrationAnalysis(
+                profileID: profileID,
+                context: modelContext,
+                settings: settings
+            )
+            guard analysis.isAuthoritative,
+                  !Task.isCancelled,
+                  integrationAnalysisRevision == revision,
+                  cachedRenderState.profileID == profileID,
+                  cachedRenderState.isSleeping == analysis.isSleeping else { return }
+            var state = cachedRenderState
+            state.prediction = analysis.prediction
+            state.sleepPressure = state.isSleeping ? nil : analysis.pressure
+            state.sleepMiniPlan = analysis.miniPlan
+            cachedRenderState = state
+            integrationAnalysisTask = nil
+        }
+    }
+
+    private func invalidateIntegrationAnalysis() {
+        integrationAnalysisRevision = UUID()
+        integrationAnalysisTask?.cancel()
+        integrationAnalysisTask = nil
     }
 
     private func makeRenderState() -> TodayRenderState {
@@ -363,7 +408,7 @@ struct TodayView: View {
         let todayStart = calendar.startOfDay(for: now)
         // Every query owned by TodayView is already scoped to the selected profile.
         // Do not re-read every SwiftData property just to apply the same filter.
-        let scopedEvents = allEvents
+        let scopedEvents = EventVisibilityStore.visibleEvents(in: allEvents)
         let scopedRecords = records
         let scopedAppointments = appointments
         let scopedAgeGuideReadStates = ageGuideReadStates
@@ -411,7 +456,6 @@ struct TodayView: View {
         }
         var todayEvents: [CareEvent] = []
         var activeEvents: [CareEvent] = []
-        var sleepPressureEvents: [CareEvent] = []
         var latestCompletedSleepEnd: Date?
         var latestStoppedDraftSleepEnd: Date?
         var dogLatestEvents: [EventType: CareEvent] = [:]
@@ -425,9 +469,6 @@ struct TodayView: View {
         for event in scopedEvents {
             if event.isTimerDraft {
                 activeEvents.append(event)
-                if event.isSleepBlock {
-                    sleepPressureEvents.append(event)
-                }
                 if !event.isTimerRunning, event.updatedAt <= now, latestStoppedDraftSleepEnd.map({ event.updatedAt > $0 }) ?? true {
                     latestStoppedDraftSleepEnd = event.updatedAt
                 }
@@ -455,10 +496,6 @@ struct TodayView: View {
                latestCompletedSleepEnd.map({ endDate > $0 }) ?? true {
                 latestCompletedSleepEnd = endDate
             }
-            if event.isSleepBlock, event.endDate != nil {
-                sleepPressureEvents.append(event)
-            }
-
             if profile?.profileType == .dog {
                 switch event.type {
                 case .food, .water, .walk, .medicine:
@@ -511,20 +548,14 @@ struct TodayView: View {
             }
         }
         activeEvents.sort { $0.startDate < $1.startDate }
-        sleepPressureEvents.sort { $0.startDate < $1.startDate }
-        let prediction = PredictionTuningService.currentPrediction(
-            profile: profile,
-            events: scopedEvents,
-            records: scopedRecords,
-            settings: predictionSettings
-        )
-        let sleepPressure = SleepPredictionEngine.sleepPressure(
-            profile: profile,
-            events: sleepPressureEvents,
-            records: scopedRecords,
-            now: now,
-            settings: predictionSettings
-        )
+        // Prediction, pressure, and the day-ahead plan are carried forward
+        // until the isolated analysis worker publishes a fresh result.
+        let prediction = cachedRenderState.profileID == profileID
+            ? cachedRenderState.prediction
+            : nil
+        let sleepPressure = cachedRenderState.profileID == profileID
+            ? cachedRenderState.sleepPressure
+            : nil
         let soon = now.addingTimeInterval(3 * 24 * 60 * 60)
         let relevantAppointments = scopedAppointments
             .filter { !$0.isCompleted && $0.startDate >= todayStart && $0.startDate <= soon }
@@ -535,16 +566,9 @@ struct TodayView: View {
         let awakeSinceDate = runningSleepTimer == nil
             ? [latestCompletedSleepEnd, latestStoppedDraftSleepEnd].compactMap { $0 }.max()
             : nil
-        let sleepMiniPlan = profile.flatMap {
-            SleepMiniPlanService.plan(
-                profile: $0,
-                events: scopedEvents,
-                records: scopedRecords,
-                prediction: prediction,
-                now: now,
-                calendar: calendar
-            )
-        }
+        let sleepMiniPlan = cachedRenderState.profileID == profileID
+            ? cachedRenderState.sleepMiniPlan
+            : nil
         var dogLastEventTitles: [EventType: String] = [:]
         var dogPottyTitles: [DogPottyType: String] = [:]
         if profile?.profileType == .dog {
@@ -716,7 +740,7 @@ struct TodayView: View {
                         puppyStageGuideSection(state)
                     }
 
-                    if profile?.profileType == .child {
+                    if profile?.profileType == .child, !state.isSleeping {
                         Section {
                             PredictionCard(
                                 prediction: prediction,
@@ -762,7 +786,7 @@ struct TodayView: View {
                             ForEach(todayEvents) { event in
                                 Button {
                                     if event.isTimerDraft {
-                                        activeTimerToEdit = event
+                                        activeTimerToEdit = editableTimer(event)
                                     } else {
                                         editorRoute = EventEditorRoute(type: event.type, event: event)
                                     }
@@ -770,6 +794,10 @@ struct TodayView: View {
                                     EventRow(event: event)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier(
+                                    "today-timeline.event.\(event.type.rawValue)"
+                                )
+                                .accessibilityValue(event.id.uuidString)
                                 .swipeActions {
                                     Button(role: .destructive) {
                                         eventPendingDelete = event
@@ -1044,18 +1072,24 @@ struct TodayView: View {
             tint: .green,
             options: showingActivityChooser ? activityOptions(state: state) : []
         )
-        .confirmationDialog(
-            "Turn on Little Window Alerts?",
+        .appActionSheet(
             isPresented: $showingAlertPermissionPrompt,
-            titleVisibility: .visible
-        ) {
-            Button("Allow Notifications") {
-                Task { await enableLittleWindowAlerts() }
-            }
-            Button("Not Now", role: .cancel) {}
-        } message: {
-            Text("Little Windows can remind you before \(profile?.name ?? "your baby")'s next likely nap or bedtime window.")
-        }
+            title: "Turn on Little Window Alerts?",
+            message: "Little Windows can remind you before \(profile?.name ?? "your baby")'s next likely nap or bedtime window.",
+            systemImage: "bell.badge.fill",
+            tint: .purple,
+            options: [
+                AppActionSheetOption(
+                    title: "Allow Notifications",
+                    subtitle: "Continue to the iOS notification permission prompt.",
+                    systemImage: "bell.badge.fill",
+                    tint: .purple
+                ) {
+                    Task { await enableLittleWindowAlerts() }
+                }
+            ],
+            cancelTitle: "Not Now"
+        )
         .alert("Notifications are turned off", isPresented: $showingPermissionDenied) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
@@ -1080,7 +1114,15 @@ struct TodayView: View {
         .onChange(of: preferenceRevision) { _, _ in
             scheduleRenderStateRefresh()
         }
-        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
+        .onReceive(
+            NotificationCenter.default.publisher(for: ModelContext.didSave)
+                .receive(on: RunLoop.main)
+        ) { _ in
+            // Event and timer workflows publish optimistic render state before
+            // their isolated transactions begin. Ignore every intermediate
+            // SwiftData merge and rebuild once when the workflow completes.
+            guard localEventMutationCount == 0,
+                  !timerMutationRenderDeferralActive else { return }
             scheduleRenderStateRefresh()
         }
         .onChange(of: deepLinkRouter.pendingProfileID) { _, _ in
@@ -1117,11 +1159,7 @@ struct TodayView: View {
             handlePendingAppointmentDeepLink()
             handlePendingPuppyGuideDeepLink()
             handlePendingRoutineDeepLink()
-            await AppInteractionMonitor.waitUntilIdle()
-            guard !Task.isCancelled else {
-                hasCompletedInitialSetup = false
-                return
-            }
+            guard !Task.isCancelled else { return }
             await syncActiveSleepPlanWakeAlert()
         }
         .task(id: state.profileID) {
@@ -1131,7 +1169,6 @@ struct TodayView: View {
                 } catch {
                     return
                 }
-                await AppInteractionMonitor.waitUntilIdle()
                 guard !Task.isCancelled else { return }
                 refreshCachedRenderState()
             }
@@ -1415,8 +1452,6 @@ struct TodayView: View {
                 SolidsHomeView(
                     profile: profile,
                     accessLevel: accessLevel,
-                    events: state.scopedEvents,
-                    eventItems: [],
                     progress: [],
                     plans: plannedSolidMeals,
                     profileState: profileState,
@@ -1477,7 +1512,7 @@ struct TodayView: View {
                 if state.shows(.sleep) {
                     Button {
                         if let activeSleep = state.activeTimer(of: .sleep) {
-                            activeTimerToEdit = activeSleep
+                            activeTimerToEdit = editableTimer(activeSleep)
                         } else {
                             showingSleepChooser = true
                         }
@@ -1696,7 +1731,7 @@ struct TodayView: View {
                             color: .indigo
                         ) {
                             if let activeSleep = state.activeTimer(of: .sleep) {
-                                activeTimerToEdit = activeSleep
+                                activeTimerToEdit = editableTimer(activeSleep)
                             } else {
                                 showingSleepChooser = true
                             }
@@ -2037,7 +2072,7 @@ struct TodayView: View {
         ActiveTimerCard(
             event: event,
             planWakeAlert: wakeAlert(for: event),
-            edit: { activeTimerToEdit = event },
+            edit: { activeTimerToEdit = editableTimer(event) },
             toggleRunning: {
                 event.isTimerRunning ? stop(event) : resume(event)
             },
@@ -2058,12 +2093,26 @@ struct TodayView: View {
             resume: { resume(event) },
             reset: { reset(event) },
             save: { endDate in save(event, endDate: endDate) },
-            discard: { delete(event) },
+            discard: { discardTimer(event) },
             setStartTimeZone: { setStartTimeZone($0, for: event) },
             setEndTimeZone: { setEndTimeZone($0, for: event) },
             switchNursingSide: nursingSideSwitcher(for: event),
             setNursingSide: nursingSideSetter(for: event)
         )
+    }
+
+    private func editableTimer(_ event: CareEvent) -> CareEvent {
+        event.modelContext == nil
+            ? event
+            : EventMutationService.detachedTimerCopy(event)
+    }
+
+    private func timerDraftForMutation(_ event: CareEvent) -> CareEvent {
+        let draft = editableTimer(event)
+        if activeTimerToEdit?.id == event.id, activeTimerToEdit !== draft {
+            activeTimerToEdit = draft
+        }
+        return draft
     }
 
     private func nursingSideSwitcher(for event: CareEvent) -> (() -> Void)? {
@@ -2086,7 +2135,7 @@ struct TodayView: View {
     ) -> CareEvent? {
         if let existingTimer = activeTimer(of: type) {
             if presentsEditor {
-                activeTimerToEdit = existingTimer
+                activeTimerToEdit = editableTimer(existingTimer)
             }
             return nil
         }
@@ -2099,22 +2148,24 @@ struct TodayView: View {
             events: scopedEvents,
             profileID: selectedProfileID,
             profileType: profile?.profileType,
-            context: modelContext
+            context: modelContext,
+            insertIntoContext: false
         )
         if let created {
             if presentsEditor {
                 activeTimerToEdit = created
             }
-            Task {
-                await eventChanged(
-                    created,
-                    refreshPrediction: false,
-                    waitForSystemIntegrations: true
-                )
-                await syncActiveSleepPlanWakeAlert(
-                    for: created.isSleepBlock ? created : nil
-                )
-            }
+            timerMutationRenderDeferralActive = true
+            applyActiveTimerMutationToCachedRenderState(created)
+            scheduleTimerSystemRefresh(
+                events: scopedEvents,
+                activeTimers: activeEvents,
+                scheduleNotification: EventMutationService.shouldRefreshLittleWindowAlert(
+                    after: created
+                ),
+                persistenceRequest: EventMutationService.timerPersistenceRequest(for: created),
+                syncWakeAlert: created.isSleepBlock
+            )
             return created
         } else {
             duplicateTimerMessage = "A \(type.displayName.lowercased()) timer is already running."
@@ -2144,7 +2195,6 @@ struct TodayView: View {
         )
         event.profileTypeSnapshot = .dog
         event.dogDetails = details
-        modelContext.insert(event)
         Task {
             await eventChanged(event, refreshPrediction: false, waitForSystemIntegrations: true)
         }
@@ -2506,15 +2556,18 @@ struct TodayView: View {
             prediction: prediction,
             solidsState: solidsProfileStates.first { $0.profileID == profile?.id }
         )
-        WatchConnectivityService.shared.publishCurrentState()
+        WatchConnectivityService.shared.scheduleCurrentStatePublish()
     }
 
     private func scheduleRenderStateRefresh() {
         renderStateRefreshTask?.cancel()
         renderStateRefreshTask = Task { @MainActor in
-            await AppInteractionMonitor.waitUntilIdle(for: 0.35)
+            // Coalesce changes delivered in the same SwiftUI update cycle. This
+            // is a yield, not a time-based attempt to hide main-actor work.
+            await Task.yield()
             guard !Task.isCancelled else { return }
             refreshCachedRenderState()
+            timerMutationRenderDeferralActive = false
         }
     }
 
@@ -2537,7 +2590,8 @@ struct TodayView: View {
                 caregiverName: activeCaregiverName,
                 profileID: selectedProfileID,
                 profileType: profile?.profileType,
-                context: modelContext
+                context: modelContext,
+                insertIntoContext: false
               ) else {
             return
         }
@@ -2612,96 +2666,225 @@ struct TodayView: View {
     }
 
     private func stop(_ event: CareEvent) {
-        EventMutationService.stopTimer(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-            await syncActiveSleepPlanWakeAlert()
-        }
+        let draft = timerDraftForMutation(event)
+        EventMutationService.stopTimer(draft, context: modelContext)
+        persistTimerMutation(draft, syncWakeAlert: true)
     }
 
     private func resume(_ event: CareEvent) {
-        EventMutationService.resumeTimer(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-            await syncActiveSleepPlanWakeAlert(for: event)
-        }
+        let draft = timerDraftForMutation(event)
+        EventMutationService.resumeTimer(draft, context: modelContext)
+        persistTimerMutation(draft, syncWakeAlert: true)
     }
 
     private func reset(_ event: CareEvent) {
-        EventMutationService.resetTimer(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-            await syncActiveSleepPlanWakeAlert(for: event)
-        }
+        let draft = timerDraftForMutation(event)
+        EventMutationService.resetTimer(draft, context: modelContext)
+        persistTimerMutation(draft, syncWakeAlert: true)
     }
 
     private func setStartTimeZone(_ identifier: String, for event: CareEvent) {
-        event.startTimeZoneIdentifier = identifier
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        draft.startTimeZoneIdentifier = identifier
+        persistTimerMutation(draft)
     }
 
     private func setEndTimeZone(_ identifier: String, for event: CareEvent) {
-        event.endTimeZoneIdentifier = identifier
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        draft.endTimeZoneIdentifier = identifier
+        persistTimerMutation(draft)
     }
 
-    private func save(_ event: CareEvent, endDate: Date? = nil) {
-        EventMutationService.saveTimer(event, context: modelContext, endDate: endDate)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: true,
-                waitForSystemIntegrations: true
+    @discardableResult
+    private func save(_ event: CareEvent, endDate: Date? = nil) -> Bool {
+        let draft = timerDraftForMutation(event)
+        let didFinish = EventMutationService.saveTimer(
+            draft,
+            context: modelContext,
+            endDate: endDate
+        )
+        guard didFinish else {
+            return !draft.isTimerDraft && draft.endDate != nil
+        }
+        timerMutationRenderDeferralActive = true
+        applyCommittedTimerToCachedRenderState(draft)
+        scheduleTimerSystemRefresh(
+            events: scopedEvents,
+            activeTimers: activeEvents,
+            scheduleNotification: true,
+            refreshPredictionFor: draft,
+            persistenceRequest: EventMutationService.timerPersistenceRequest(for: draft),
+            syncWakeAlert: true
+        )
+        return true
+    }
+
+    private func applyCommittedTimerToCachedRenderState(_ event: CareEvent) {
+        invalidateIntegrationAnalysis()
+        var state = cachedRenderState
+        state.activeEvents.removeAll { $0.id == event.id }
+
+        let now = Date()
+        let logDate = event.endDate ?? event.startDate
+        if event.occursOnLocalDay(now),
+           !state.todayEvents.contains(where: { $0.id == event.id }) {
+            state.todayEvents.append(event)
+            state.todayEvents.sort { $0.startDate > $1.startDate }
+        }
+        if logDate <= now,
+           state.lastLoggedDates[event.type].map({ logDate > $0 }) ?? true {
+            state.lastLoggedDates[event.type] = logDate
+        }
+
+        if event.isSleepBlock {
+            state.runningSleepTimer = nil
+            state.isSleeping = false
+            state.awakeSinceDate = event.endDate
+            state.prediction = nil
+            state.sleepPressure = nil
+            state.sleepMiniPlan = nil
+        }
+        cachedRenderState = state
+    }
+
+    private func persistTimerMutation(
+        _ event: CareEvent,
+        syncWakeAlert: Bool = false
+    ) {
+        timerMutationRenderDeferralActive = true
+        applyActiveTimerMutationToCachedRenderState(event)
+        scheduleTimerSystemRefresh(
+            events: scopedEvents,
+            activeTimers: activeEvents,
+            scheduleNotification: EventMutationService.shouldRefreshLittleWindowAlert(
+                after: event
+            ),
+            persistenceRequest: EventMutationService.timerPersistenceRequest(for: event),
+            syncWakeAlert: syncWakeAlert
+        )
+    }
+
+    private func applyActiveTimerMutationToCachedRenderState(_ event: CareEvent) {
+        invalidateIntegrationAnalysis()
+        var state = cachedRenderState
+        if let index = state.scopedEvents.firstIndex(where: { $0.id == event.id }) {
+            state.scopedEvents[index] = event
+        } else {
+            state.scopedEvents.append(event)
+            state.scopedEvents.sort { $0.startDate > $1.startDate }
+        }
+        if let index = state.activeEvents.firstIndex(where: { $0.id == event.id }) {
+            state.activeEvents[index] = event
+        } else {
+            state.activeEvents.append(event)
+            state.activeEvents.sort { $0.startDate < $1.startDate }
+        }
+        if event.isSleepBlock {
+            state.runningSleepTimer = event.isTimerRunning ? event : nil
+            state.isSleeping = event.isTimerRunning
+            state.awakeSinceDate = event.isTimerRunning ? nil : event.updatedAt
+            state.sleepPressure = nil
+            state.sleepMiniPlan = nil
+        }
+        cachedRenderState = state
+    }
+
+    private func scheduleTimerSystemRefresh(
+        events: [CareEvent],
+        activeTimers: [CareEvent],
+        scheduleNotification: Bool,
+        refreshPredictionFor event: CareEvent? = nil,
+        persistenceRequest: TimerPersistenceRequest? = nil,
+        syncWakeAlert: Bool,
+        discardedTimerID: UUID? = nil
+    ) {
+        timerSystemRefreshTask?.cancel()
+        let currentProfile = profile
+        let currentRecords = scopedRecords
+        let currentSettings = predictionSettings
+        let alertsEnabled = notificationsEnabled
+        let leadMinutes = notificationLeadMinutes
+        let surfaceRevision = Date()
+        timerSystemRefreshTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            WidgetSnapshotService.refreshActiveTimerState(
+                profile: currentProfile,
+                events: activeTimers,
+                now: surfaceRevision
             )
-            await syncActiveSleepPlanWakeAlert()
+            await LiveActivityManager.shared.synchronize(
+                profile: currentProfile,
+                events: activeTimers,
+                revision: surfaceRevision
+            )
+
+            if let persistenceRequest,
+               !(await EventMutationService.persistTimerMutation(
+                    persistenceRequest,
+                    container: modelContext.container
+               )) {
+                if let discardedTimerID {
+                    EventVisibilityStore.restore(discardedTimerID)
+                }
+                timerMutationRenderDeferralActive = false
+                refreshCachedRenderState()
+                timerSystemRefreshTask = nil
+                return
+            }
+            guard !Task.isCancelled else { return }
+            if let event {
+                await EventMutationService.eventDidChange(
+                    event,
+                    profile: currentProfile,
+                    events: events,
+                    records: currentRecords,
+                    context: modelContext,
+                    settings: currentSettings,
+                    notificationsEnabled: alertsEnabled,
+                    notificationLeadMinutes: leadMinutes,
+                    refreshPrediction: true,
+                    waitForSystemIntegrations: true,
+                    eventAlreadyPersisted: persistenceRequest != nil
+                )
+            } else {
+                await EventMutationService.refreshTimerSystemIntegrations(
+                    profile: currentProfile,
+                    events: events,
+                    records: currentRecords,
+                    context: modelContext,
+                    settings: currentSettings,
+                    notificationsEnabled: alertsEnabled,
+                    notificationLeadMinutes: leadMinutes,
+                    scheduleNotification: scheduleNotification
+                )
+            }
+            guard !Task.isCancelled else { return }
+            if syncWakeAlert {
+                await syncActiveSleepPlanWakeAlert()
+            }
+            // The optimistic timer state already contains the exact mutation
+            // that the isolated writer committed. Rebuilding every Today
+            // section here needlessly competes with a gesture if persistence
+            // finishes while the user is scrolling. Clear the merge guard and
+            // refresh only the derived sleep analysis; a persistence failure
+            // above still performs the full corrective render-state rebuild.
+            timerMutationRenderDeferralActive = false
+            scheduleIntegrationAnalysisRefresh()
+            timerSystemRefreshTask = nil
         }
     }
 
     private func switchNursingSide(_ event: CareEvent) {
-        EventTimerService.switchNursingSide(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-            await syncActiveSleepPlanWakeAlert(for: event)
-        }
+        let draft = timerDraftForMutation(event)
+        EventTimerService.switchNursingSide(draft, context: modelContext)
+        persistTimerMutation(draft, syncWakeAlert: true)
     }
 
     private func setNursingSide(_ side: NursingSide, for event: CareEvent) {
-        EventTimerService.setNursingSide(event, to: side, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        EventTimerService.setNursingSide(draft, to: side, context: modelContext)
+        persistTimerMutation(draft)
     }
 
     private func markCompleted(_ appointment: DoctorAppointment) {
@@ -2725,10 +2908,11 @@ struct TodayView: View {
         switch action {
         case .showActiveTimer:
             activeTimerToEdit = EventTimerService.primaryActiveEvent(in: scopedEvents)
+                .map(editableTimer)
         case .showEvent(let id):
             if let event = scopedEvents.first(where: { $0.id == id }) {
                 if event.isTimerDraft {
-                    activeTimerToEdit = event
+                    activeTimerToEdit = editableTimer(event)
                 } else {
                     editorRoute = EventEditorRoute(type: event.type, event: event)
                 }
@@ -2754,7 +2938,7 @@ struct TodayView: View {
         case .startTimer(let type, let side):
             if type == .sleep {
                 if let existingTimer = activeTimer(of: .sleep) {
-                    activeTimerToEdit = existingTimer
+                    activeTimerToEdit = editableTimer(existingTimer)
                 } else {
                     showingSleepChooser = true
                 }
@@ -2785,7 +2969,7 @@ struct TodayView: View {
                 guard let plan = plannedSolidMeals.first(where: {
                     $0.id == plannedMealID && $0.profileID == profile.id && !$0.isCompleted
                 }) else { return }
-                resolvedPreset = SolidsTrackingService.preset(for: plan)
+                resolvedPreset = plannedSolidMealPreset(for: plan)
             } else {
                 resolvedPreset = preset
             }
@@ -2803,6 +2987,46 @@ struct TodayView: View {
         profileService.switchProfile(id: id, profiles: profiles)
         deepLinkRouter.pendingProfileID = nil
         refreshActiveSleepPlan()
+    }
+
+    private func plannedSolidMealPreset(for plan: PlannedSolidMeal) -> SolidFeedEditorPreset {
+        var recipes: [CustomSolidRecipe] = []
+        if let trackingID = plan.recipeID {
+            let prefix = "custom-recipe-"
+            if trackingID.hasPrefix(prefix),
+               let recipeID = UUID(uuidString: String(trackingID.dropFirst(prefix.count))) {
+                var descriptor = FetchDescriptor<CustomSolidRecipe>(
+                    predicate: #Predicate { $0.id == recipeID }
+                )
+                descriptor.fetchLimit = 1
+                if let recipe = try? modelContext.fetch(descriptor).first {
+                    recipes.append(recipe)
+                }
+            }
+        }
+
+        let customFoodIDs = Set((plan.foodIDs + recipes.flatMap { $0.ingredients.map(\.foodID) })
+            .compactMap { trackingID -> UUID? in
+                let prefix = "custom-"
+                guard trackingID.hasPrefix(prefix) else { return nil }
+                return UUID(uuidString: String(trackingID.dropFirst(prefix.count)))
+            })
+        var customFoods: [SolidFoodCatalogItem] = []
+        customFoods.reserveCapacity(customFoodIDs.count)
+        for foodID in customFoodIDs {
+            var descriptor = FetchDescriptor<SolidFoodCatalogItem>(
+                predicate: #Predicate { $0.id == foodID }
+            )
+            descriptor.fetchLimit = 1
+            if let food = try? modelContext.fetch(descriptor).first {
+                customFoods.append(food)
+            }
+        }
+        return SolidsTrackingService.preset(
+            for: plan,
+            customRecipes: recipes,
+            customFoods: customFoods
+        )
     }
 
     private func handlePendingAppointmentDeepLink() {
@@ -2860,6 +3084,14 @@ struct TodayView: View {
         waitForSystemIntegrations: Bool = false,
         solidPreset: SolidFeedEditorPreset? = nil
     ) async {
+        localEventMutationCount += 1
+        applyChangedEventToCachedRenderState(event)
+        defer {
+            localEventMutationCount = max(0, localEventMutationCount - 1)
+            if localEventMutationCount == 0 {
+                scheduleRenderStateRefresh()
+            }
+        }
         event.profileID = event.profileID ?? selectedProfileID
         let currentEvents = scopedEvents.contains(where: { $0.id == event.id })
             ? scopedEvents
@@ -2879,31 +3111,169 @@ struct TodayView: View {
         )
     }
 
-    private func adjustStart(of event: CareEvent, to date: Date) {
-        EventTimerService.adjustStartDate(event, to: date)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-            await syncActiveSleepPlanWakeAlert(for: event)
+    private func applyChangedEventToCachedRenderState(_ event: CareEvent) {
+        var state = cachedRenderState
+        state.scopedEvents.removeAll { $0.id == event.id }
+        state.scopedEvents.append(event)
+        state.scopedEvents.sort { $0.startDate > $1.startDate }
+        state.todayEvents.removeAll { $0.id == event.id }
+        if !event.isTimerDraft && event.occursOnLocalDay(Date()) {
+            state.todayEvents.append(event)
+            state.todayEvents.sort { $0.startDate > $1.startDate }
         }
+        let logDate = event.endDate ?? event.startDate
+        if !event.isTimerDraft, logDate <= Date() {
+            state.lastLoggedDates[event.type] = logDate
+            if event.type == .feed, event.feedKind == .solid {
+                state.latestSolidFoodSummary = TodayFeedQuickActionDetail.solidFoodSummary(for: event)
+                state.hasSolidHistory = true
+            }
+        }
+        cachedRenderState = state
+    }
+
+    private func adjustStart(of event: CareEvent, to date: Date) {
+        let draft = timerDraftForMutation(event)
+        EventTimerService.adjustStartDate(draft, to: date)
+        persistTimerMutation(draft, syncWakeAlert: true)
+    }
+
+    private func discardTimer(_ event: CareEvent) {
+        guard event.isTimerDraft else { return }
+        let eventID = event.id
+        let wasSleepTimer = event.isSleepBlock
+        let shouldScheduleNotification = EventMutationService.shouldRefreshLittleWindowAlert(
+            after: event
+        )
+        let remainingEvents = scopedEvents.filter { $0.id != eventID }
+
+        timerMutationRenderDeferralActive = true
+        guard EventMutationService.discardTimer(
+            event,
+            context: modelContext,
+            deleteFromContext: false
+        ) else {
+            timerMutationRenderDeferralActive = false
+            return
+        }
+        applyDiscardedTimerToCachedRenderState(
+            eventID: eventID,
+            wasSleepTimer: wasSleepTimer,
+            remainingEvents: remainingEvents
+        )
+        scheduleTimerSystemRefresh(
+            events: remainingEvents,
+            activeTimers: activeEvents,
+            scheduleNotification: shouldScheduleNotification,
+            persistenceRequest: EventMutationService.timerPersistenceRequest(
+                for: event,
+                deleting: true
+            ),
+            syncWakeAlert: wasSleepTimer,
+            discardedTimerID: eventID
+        )
+    }
+
+    private func applyDiscardedTimerToCachedRenderState(
+        eventID: UUID,
+        wasSleepTimer: Bool,
+        remainingEvents: [CareEvent]
+    ) {
+        invalidateIntegrationAnalysis()
+        var state = cachedRenderState
+        state.scopedEvents = remainingEvents
+        state.activeEvents.removeAll { $0.id == eventID }
+        guard wasSleepTimer else {
+            cachedRenderState = state
+            return
+        }
+
+        state.runningSleepTimer = state.activeEvents.first {
+            $0.isSleepBlock && $0.isTimerRunning
+        }
+        state.isSleeping = state.runningSleepTimer != nil
+        if state.runningSleepTimer == nil {
+            state.awakeSinceDate = remainingEvents.lazy
+                .filter(\.isSleepBlock)
+                .compactMap { sleep in
+                    if sleep.isTimerDraft {
+                        return sleep.isTimerRunning ? nil : sleep.updatedAt
+                    }
+                    return sleep.endDate
+                }
+                .max()
+        }
+        state.sleepPressure = nil
+        state.sleepMiniPlan = nil
+        cachedRenderState = state
     }
 
     private func delete(_ event: CareEvent) {
-        Task {
-            await EventMutationService.delete(
+        let eventID = event.id
+        let currentProfile = profile
+        let currentEvents = scopedEvents
+        let currentRecords = scopedRecords
+        let currentSettings = predictionSettings
+        let alertsEnabled = notificationsEnabled
+        let leadMinutes = notificationLeadMinutes
+
+        EventVisibilityStore.markPendingDeletion(eventID)
+        applyPendingEventDeletionToCachedRenderState(event)
+        localEventMutationCount += 1
+
+        Task { @MainActor in
+            defer {
+                localEventMutationCount = max(0, localEventMutationCount - 1)
+                if localEventMutationCount == 0 {
+                    scheduleRenderStateRefresh()
+                }
+            }
+            // Finish the confirmation action's update cycle, then let the
+            // isolated SwiftData worker perform the actual deletion.
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            let didDelete = await EventMutationService.delete(
                 event,
-                profile: profile,
-                events: scopedEvents,
-                records: scopedRecords,
+                profile: currentProfile,
+                events: currentEvents,
+                records: currentRecords,
                 context: modelContext,
-                settings: predictionSettings,
-                notificationsEnabled: notificationsEnabled,
-                notificationLeadMinutes: notificationLeadMinutes
+                settings: currentSettings,
+                notificationsEnabled: alertsEnabled,
+                notificationLeadMinutes: leadMinutes
             )
+            if !didDelete {
+                EventVisibilityStore.restore(eventID)
+            }
         }
+    }
+
+    private func applyPendingEventDeletionToCachedRenderState(_ event: CareEvent) {
+        invalidateIntegrationAnalysis()
+        var state = cachedRenderState
+        state.scopedEvents.removeAll { $0.id == event.id }
+        state.todayEvents.removeAll { $0.id == event.id }
+        state.activeEvents.removeAll { $0.id == event.id }
+
+        let now = Date()
+        state.lastLoggedDates[event.type] = state.scopedEvents.lazy
+            .filter { $0.type == event.type && !$0.isTimerDraft }
+            .compactMap { candidate -> Date? in
+                let logDate = candidate.endDate ?? candidate.startDate
+                return logDate <= now ? logDate : nil
+            }
+            .max()
+        if event.isSleepBlock {
+            state.prediction = nil
+            state.sleepPressure = nil
+            state.sleepMiniPlan = nil
+            state.awakeSinceDate = state.scopedEvents.lazy
+                .filter { $0.isSleepBlock && !$0.isTimerDraft }
+                .compactMap(\.endDate)
+                .filter { $0 <= now }
+                .max()
+        }
+        cachedRenderState = state
     }
 
     private var deleteEventOptions: [AppActionSheetOption] {
@@ -3219,6 +3589,8 @@ private struct SleepMiniPlanCard: View {
             Button(action: openPlanner) {
                 Label("Open Plan", systemImage: "calendar.badge.clock")
                     .font(.subheadline.weight(.semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)

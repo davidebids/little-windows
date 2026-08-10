@@ -61,11 +61,39 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
     @MainActor
     @discardableResult
     func publishCurrentState(force: Bool = false) -> Bool {
-        guard let container = installedContainer() else { return false }
+        guard let container = installedContainer(), canPublishState else {
+            notifyStatusDidChange()
+            return false
+        }
         return publish(
             WatchStateFactory.make(context: container.mainContext),
             force: force
         )
+    }
+
+    /// Builds the Watch payload in its own SwiftData context. Automatic
+    /// system-surface refreshes use this path so a paired Watch can never turn
+    /// an event save, timer control, or Today scroll into a main-thread query.
+    func scheduleCurrentStatePublish(force: Bool = false) {
+        guard let container = installedContainer(), canPublishState else {
+            notifyStatusDidChange()
+            return
+        }
+        Task.detached(priority: .utility) { [weak self, container] in
+            guard let self else { return }
+            let state = WatchStateFactory.make(context: ModelContext(container))
+            _ = self.publish(state, force: force)
+        }
+    }
+
+    /// Avoid fetching and summarizing hundreds of records when there is no
+    /// installed Watch app that can receive the result.
+    private var canPublishState: Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        return session.activationState == .activated
+            && session.isPaired
+            && session.isWatchAppInstalled
     }
 
     @discardableResult
@@ -129,9 +157,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
     ) {
         notifyStatusDidChange()
         guard activationState == .activated, error == nil else { return }
-        Task { @MainActor in
-            publishCurrentState()
-        }
+        scheduleCurrentStatePublish()
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
@@ -143,9 +169,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
 
     func sessionWatchStateDidChange(_ session: WCSession) {
         notifyStatusDidChange()
-        Task { @MainActor in
-            publishCurrentState(force: true)
-        }
+        scheduleCurrentStatePublish(force: true)
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
@@ -159,12 +183,16 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
     ) {
         if message[WatchCompanionProtocol.stateRequestMessageKey] as? Bool == true {
             recordWatchContact()
-            Task { @MainActor in
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else {
+                    replyHandler([:])
+                    return
+                }
                 guard let container = installedContainer() else {
                     replyHandler([:])
                     return
                 }
-                let state = WatchStateFactory.make(context: container.mainContext)
+                let state = WatchStateFactory.make(context: ModelContext(container))
                 publish(state, force: true)
                 let data = try? JSONEncoder().encode(state)
                 replyHandler(data.map {

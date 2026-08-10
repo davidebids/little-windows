@@ -3,7 +3,7 @@ import SwiftData
 
 @MainActor
 enum EventTimerService {
-    static let priority: [EventType] = [
+    nonisolated static let priority: [EventType] = [
         .sleep,
         .nursing,
         .pumping,
@@ -25,7 +25,8 @@ enum EventTimerService {
         context: ModelContext,
         profileID: UUID? = nil,
         profileType: CareProfileType? = nil,
-        at date: Date = Date()
+        at date: Date = Date(),
+        insertIntoContext: Bool = true
     ) -> CareEvent? {
         guard type.supportsTimer else { return nil }
         if let profileType {
@@ -53,7 +54,9 @@ enum EventTimerService {
         event.timerAccumulatedSeconds = 0
         event.activeTimerSegmentStartDate = date
         event.activityType = type == .activity ? activityType : nil
-        context.insert(event)
+        if insertIntoContext {
+            context.insert(event)
+        }
         return event
     }
 
@@ -98,13 +101,14 @@ enum EventTimerService {
         event.updatedAt = date
     }
 
+    @discardableResult
     static func save(
         _ event: CareEvent,
         context: ModelContext,
         at date: Date = Date(),
         endDate: Date? = nil
-    ) {
-        guard event.isTimerDraft else { return }
+    ) -> Bool {
+        guard event.isTimerDraft else { return false }
         if event.isTimerRunning {
             accrueCurrentSegment(event, until: date)
         }
@@ -122,6 +126,7 @@ enum EventTimerService {
         event.activeTimerSegmentStartDate = nil
         event.activeNursingSide = nil
         event.updatedAt = date
+        return true
     }
 
     static func switchNursingSide(
@@ -194,7 +199,8 @@ enum EventTimerService {
     static func primaryActiveEvent(in events: [CareEvent]) -> CareEvent? {
         var bestEvent: CareEvent?
         var bestPriority = priority.count
-        for event in events where event.isTimerRunning {
+        for event in events where event.isTimerRunning
+            && EventVisibilityStore.isVisible(event) {
             guard let eventPriority = priority.firstIndex(of: event.type) else { continue }
             if eventPriority < bestPriority ||
                 (eventPriority == bestPriority && bestEvent.map({ event.startDate < $0.startDate }) ?? true) {

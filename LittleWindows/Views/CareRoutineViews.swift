@@ -1044,6 +1044,8 @@ struct CareRoutineRunView: View {
     var cancel: () -> Void
     var canPerform: (CareRoutineStep) -> Bool = { _ in true }
 
+    @State private var showingCancelConfirmation = false
+
     private var completedCount: Int {
         steps.filter { run.isCompleted(stepID: $0.id) }.count
     }
@@ -1108,13 +1110,32 @@ struct CareRoutineRunView: View {
         .navigationTitle("Routine")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button("Cancel", role: .destructive, action: cancel)
+                Button("Cancel", role: .destructive) {
+                    showingCancelConfirmation = true
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Finish", action: finish)
                     .fontWeight(.semibold)
             }
         }
+        .appActionSheet(
+            isPresented: $showingCancelConfirmation,
+            title: "Cancel Routine?",
+            message: "This discards the current \(routine.title) run and its step progress.",
+            systemImage: "xmark.circle.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Cancel Routine",
+                    subtitle: routine.title,
+                    systemImage: "xmark.circle.fill",
+                    tint: .red,
+                    role: .destructive,
+                    action: cancel
+                )
+            ]
+        )
     }
 }
 

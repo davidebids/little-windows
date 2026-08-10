@@ -1,8 +1,8 @@
 import ActivityKit
 import Foundation
 
-struct LittleWindowsActivityAttributes: ActivityAttributes {
-    struct ContentState: Codable, Hashable {
+struct LittleWindowsActivityAttributes: ActivityAttributes, Sendable {
+    struct ContentState: Codable, Hashable, Sendable {
         var timer: ActiveTimerSnapshot
     }
 

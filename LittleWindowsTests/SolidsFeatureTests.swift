@@ -39,6 +39,117 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertTrue(foods.allSatisfy { !$0.name.isEmpty })
     }
 
+    @MainActor
+    func testEveryBuiltInFoodHasCompleteQuantitativeNutritionCoverage() throws {
+        let foods = SolidsReferenceCatalog.foodSummaries
+        let foodIDs = Set(foods.map(\.id))
+
+        XCTAssertEqual(foods.count, 535)
+        XCTAssertEqual(SolidsNutritionCatalog.supportedFoodIDs, foodIDs)
+
+        for food in foods {
+            let reference = try XCTUnwrap(
+                SolidsNutritionCatalog.reference(foodID: food.id),
+                "Missing nutrition reference for \(food.name)"
+            )
+            XCTAssertEqual(reference.sourceKind, .usdaFoodDataCentral, food.name)
+            XCTAssertFalse(reference.sourceID.isEmpty, food.name)
+            XCTAssertFalse(reference.sourceDescription.isEmpty, food.name)
+            XCTAssertEqual(reference.sourceVersion, SolidsNutritionCatalog.version, food.name)
+            XCTAssertEqual(reference.basisUnit, .gram, food.name)
+            XCTAssertEqual(reference.basisQuantity, 100, food.name)
+            XCTAssertEqual(reference.basisGrams, 100, food.name)
+            XCTAssertTrue(reference.basisQuantity.isFinite, food.name)
+            XCTAssertGreaterThan(reference.basisQuantity, 0, food.name)
+            XCTAssertTrue(reference.nutrients.isComplete, food.name)
+            XCTAssertFalse(reference.nutrients.hasNegativeValue, food.name)
+            XCTAssertEqual(Set(reference.portions.map(\.unit)).count, reference.portions.count, food.name)
+            for portion in reference.portions {
+                XCTAssertTrue(portion.gramsPerUnit.isFinite, "\(food.name): \(portion.unit)")
+                XCTAssertGreaterThan(portion.gramsPerUnit, 0, "\(food.name): \(portion.unit)")
+                XCTAssertFalse(
+                    portion.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    "\(food.name): \(portion.unit)"
+                )
+                let portionSnapshot = try XCTUnwrap(
+                    SolidsNutritionService.snapshot(amount: 1, unit: portion.unit, reference: reference),
+                    "Could not calculate \(food.name) using \(portion.unit.displayName)"
+                )
+                XCTAssertTrue(portionSnapshot.isComplete, "\(food.name): \(portion.unit)")
+            }
+
+            let units = SolidsNutritionService.supportedUnits(foodID: food.id, customFoods: [])
+            XCTAssertTrue(units.contains(.gram), food.name)
+            XCTAssertTrue(units.contains(.ounce), food.name)
+
+            let snapshot = try XCTUnwrap(
+                SolidsNutritionService.snapshot(amount: 37, unit: .gram, reference: reference),
+                "Could not calculate a quantitative nutrition snapshot for \(food.name)"
+            )
+            XCTAssertTrue(snapshot.isComplete, food.name)
+            XCTAssertTrue(snapshot.nutrients.isComplete, food.name)
+            XCTAssertFalse(snapshot.nutrients.hasNegativeValue, food.name)
+        }
+    }
+
+    func testCompleteNutritionCatalogLookupPerformance() {
+        let foodIDs = SolidsReferenceCatalog.foodSummaries.map(\.id)
+        var resolvedCount = 0
+
+        measure(metrics: [XCTClockMetric()]) {
+            resolvedCount = 0
+            for _ in 0..<10 {
+                for foodID in foodIDs where SolidsNutritionCatalog.reference(foodID: foodID) != nil {
+                    resolvedCount += 1
+                }
+            }
+        }
+
+        XCTAssertEqual(resolvedCount, foodIDs.count * 10)
+    }
+
+    @MainActor
+    func testRepresentativeEstimatesAreExplicitAndCustomFoodsRemainManual() throws {
+        for foodID in ["acai", "black-rice", "seitan", "za-atar-herb-blend"] {
+            let reference = try XCTUnwrap(
+                SolidsNutritionCatalog.reference(foodID: foodID),
+                foodID
+            )
+            XCTAssertTrue(
+                reference.sourceDescription.hasPrefix("Representative USDA estimate for "),
+                foodID
+            )
+            XCTAssertTrue(reference.nutrients.isComplete, foodID)
+        }
+
+        let customFood = SolidFoodCatalogItem(name: "Test custom food")
+        XCTAssertNil(
+            SolidsNutritionService.reference(
+                foodID: customFood.trackingID,
+                customFoods: [customFood]
+            )
+        )
+    }
+
+    func testNutritionCatalogPinsKnownAmbiguousFoodsToCorrectRecords() throws {
+        let expected: [String: (sourceID: String, requiredDescription: String)] = [
+            "brown-rice": ("169704", "rice, brown"),
+            "buttermilk-in-food": ("172225", "milk, buttermilk"),
+            "ground-beef": ("171794", "beef, ground"),
+            "oyster": ("171980", "mollusks, oyster"),
+            "whole-wheat-bread": ("2707709", "bread, whole wheat")
+        ]
+
+        for (foodID, expectation) in expected {
+            let reference = try XCTUnwrap(SolidsNutritionCatalog.reference(foodID: foodID))
+            XCTAssertEqual(reference.sourceID, expectation.sourceID, foodID)
+            XCTAssertTrue(
+                reference.sourceDescription.localizedCaseInsensitiveContains(expectation.requiredDescription),
+                foodID
+            )
+        }
+    }
+
     func testEveryCatalogFoodHasPreparationAndSourceMetadata() {
         for food in SolidsReferenceCatalog.foods {
             XCTAssertFalse(food.preparations.isEmpty, food.name)
@@ -949,6 +1060,19 @@ final class SolidsFeatureTests: XCTestCase {
                 foodID: "egg",
                 foodNameSnapshot: "Egg",
                 allergenIDs: ["egg"],
+                nutritionSnapshot: SolidNutritionSnapshot(
+                    sourceKind: .usdaFoodDataCentral,
+                    sourceID: "test-egg",
+                    sourceDescription: "Test egg",
+                    sourceVersion: "test",
+                    amountDescription: "1 piece",
+                    eatenAmount: 1,
+                    portionUnit: .piece,
+                    estimatedEatenGrams: 50,
+                    nutrients: SolidNutritionValues(energyKilocalories: 50, proteinGrams: 3),
+                    isComplete: false,
+                    capturedAt: firstDay
+                ),
                 suspectedReaction: true,
                 createdAt: firstDay
             ),
@@ -965,6 +1089,19 @@ final class SolidsFeatureTests: XCTestCase {
                 profileID: profileID,
                 foodID: "avocado",
                 foodNameSnapshot: "Avocado",
+                nutritionSnapshot: SolidNutritionSnapshot(
+                    sourceKind: .usdaFoodDataCentral,
+                    sourceID: "test-avocado",
+                    sourceDescription: "Test avocado",
+                    sourceVersion: "test",
+                    amountDescription: "1 piece",
+                    eatenAmount: 1,
+                    portionUnit: .piece,
+                    estimatedEatenGrams: 100,
+                    nutrients: SolidNutritionValues(energyKilocalories: 100, proteinGrams: 2),
+                    isComplete: false,
+                    capturedAt: secondDay
+                ),
                 createdAt: secondDay
             )
         ]
@@ -1001,6 +1138,13 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(report.reactionObservationCount, 1)
         XCTAssertEqual(report.daily.map(\.meals), [1, 1])
         XCTAssertEqual(report.daily.map(\.newFoods), [1, 1])
+        XCTAssertEqual(report.quantifiedFoodCount, 2)
+        XCTAssertEqual(report.completeNutritionFoodCount, 0)
+        XCTAssertEqual(report.foodCount, 3)
+        XCTAssertEqual(report.daily.map(\.completeNutritionFoodCount), [0, 0])
+        XCTAssertEqual(report.nutrients.energyKilocalories, 150)
+        XCTAssertEqual(report.nutrients.proteinGrams, 5)
+        XCTAssertEqual(report.daily.map(\.nutrients.energyKilocalories), [50, 100])
     }
 
     @MainActor
@@ -1703,6 +1847,95 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(egg.introductionStep, 3)
         XCTAssertEqual(egg.status, .tolerated)
         XCTAssertNotNil(egg.nextExposureDueAt)
+    }
+
+    @MainActor
+    func testTargetedAllergenReconciliationDoesNotRewriteUnrelatedProgress() async throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profileID = UUID()
+        let originalUpdate = Date(timeIntervalSince1970: 2_000_000_000)
+        let reconciliationDate = originalUpdate.addingTimeInterval(3_600)
+        context.insert(SolidAllergenProgress(
+            profileID: profileID,
+            allergenID: SolidsAllergen.egg.rawValue,
+            updatedAt: originalUpdate
+        ))
+        context.insert(SolidAllergenProgress(
+            profileID: profileID,
+            allergenID: SolidsAllergen.milk.rawValue,
+            status: .tolerated,
+            updatedAt: originalUpdate
+        ))
+        context.insert(SolidFoodEventItem(
+            eventID: UUID(),
+            profileID: profileID,
+            foodID: "egg",
+            foodNameSnapshot: "Egg",
+            allergenIDs: [SolidsAllergen.egg.rawValue],
+            createdAt: originalUpdate,
+            updatedAt: originalUpdate
+        ))
+        try context.save()
+
+        let writer = SolidsAllergenProgressWriter(modelContainer: container)
+        let error = await writer.reconcileDerivedProgress(
+            profileID: profileID,
+            allergenIDs: [SolidsAllergen.egg.rawValue],
+            now: reconciliationDate
+        )
+        XCTAssertNil(error)
+
+        let verificationContext = ModelContext(container)
+        let progress = try verificationContext.fetch(FetchDescriptor<SolidAllergenProgress>())
+        let egg = try XCTUnwrap(progress.first { $0.allergenID == SolidsAllergen.egg.rawValue })
+        let milk = try XCTUnwrap(progress.first { $0.allergenID == SolidsAllergen.milk.rawValue })
+        XCTAssertEqual(egg.exposureMealCount, 1)
+        XCTAssertEqual(egg.updatedAt, reconciliationDate)
+        XCTAssertEqual(milk.status, .tolerated)
+        XCTAssertEqual(milk.updatedAt, originalUpdate)
+    }
+
+    @MainActor
+    func testNutritionOnlyEventWriteSkipsUnrelatedAllergenHistoryPass() async throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profileID = UUID()
+        let event = CareEvent(profileID: profileID, type: .feed)
+        event.feedKind = .solid
+        event.foodDescription = "Spinach"
+        event.solidFoodDetails = [
+            SolidFoodLogDetail(
+                foodID: "spinach",
+                foodName: "Spinach",
+                amountOffered: 12,
+                amountEaten: 8,
+                portionUnit: .gram,
+                consumptionEstimate: .exact
+            )
+        ]
+        context.insert(event)
+        try context.save()
+
+        let writer = SolidsEventWriter(modelContainer: container)
+        let result = await writer.reconcile(eventID: event.id, preset: nil)
+        XCTAssertNil(result.error)
+        XCTAssertTrue(result.changedLinkedRecords)
+        XCTAssertTrue(result.allergenIDsToReconcile.isEmpty)
+
+        let verificationContext = ModelContext(container)
+        let item = try XCTUnwrap(
+            verificationContext.fetch(FetchDescriptor<SolidFoodEventItem>()).first
+        )
+        XCTAssertEqual(item.amountOffered, 12)
+        XCTAssertEqual(item.amountEaten, 8)
+        XCTAssertNotNil(item.nutritionSnapshot)
     }
 
     @MainActor
@@ -3132,5 +3365,640 @@ final class SolidsFeatureTests: XCTestCase {
         let allergen = try XCTUnwrap(verificationContext.fetch(FetchDescriptor<SolidAllergenProgress>()).first)
         XCTAssertEqual(allergen.status, .introducing)
         XCTAssertEqual(allergen.introductionStep, 1)
+    }
+
+    @MainActor
+    func testNutritionSnapshotsUseExactAndEstimatedEatenAmounts() throws {
+        let bananaReference = try XCTUnwrap(
+            SolidsNutritionService.reference(foodID: "banana", customFoods: [])
+        )
+        let exact = try XCTUnwrap(SolidsNutritionService.snapshot(
+            amount: 50,
+            unit: .gram,
+            reference: bananaReference
+        ))
+        XCTAssertEqual(try XCTUnwrap(exact.estimatedEatenGrams), 50, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(exact.nutrients.energyKilocalories), 44.5, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(exact.nutrients.vitaminCMilligrams), 4.35, accuracy: 0.001)
+
+        let details = SolidsNutritionService.applyingNutrition(
+            to: [SolidFoodLogDetail(
+                foodID: "peanut-butter",
+                foodName: "Peanut butter",
+                amountOffered: 2,
+                portionUnit: .tablespoon,
+                consumptionEstimate: .quarter
+            )],
+            customFoods: []
+        )
+        let estimated = try XCTUnwrap(details.first?.nutritionSnapshot)
+        XCTAssertEqual(estimated.estimatedEatenGrams ?? -1, 8, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(estimated.nutrients.energyKilocalories), 47.84, accuracy: 0.01)
+    }
+
+    @MainActor
+    func testPreparedNutritionReferencesUseMatchingUSDARecords() throws {
+        let expectedSourceIDs = [
+            "broccoli": "169967",
+            "carrot": "170394",
+            "lentil": "172421",
+            "sweet-potato": "168483"
+        ]
+        for (foodID, sourceID) in expectedSourceIDs {
+            let reference = try XCTUnwrap(
+                SolidsNutritionService.reference(foodID: foodID, customFoods: [])
+            )
+            XCTAssertEqual(reference.sourceID, sourceID, foodID)
+            XCTAssertTrue(reference.sourceDescription.localizedCaseInsensitiveContains("cook"), foodID)
+        }
+        XCTAssertEqual(
+            SolidsNutritionService.reference(foodID: "carrot", customFoods: [])?
+                .portions.first { $0.unit == .tablespoon }?.gramsPerUnit,
+            9.7
+        )
+        XCTAssertEqual(
+            SolidsNutritionService.reference(foodID: "tofu", customFoods: [])?
+                .portions.first { $0.unit == .cup }?.gramsPerUnit,
+            248
+        )
+        XCTAssertEqual(
+            SolidsNutritionService.reference(foodID: "lentil", customFoods: [])?
+                .portions.first { $0.unit == .tablespoon }?.gramsPerUnit,
+            12.3
+        )
+        XCTAssertEqual(
+            SolidsNutritionService.reference(foodID: "oatmeal", customFoods: [])?
+                .nutrients.zincMilligrams,
+            1
+        )
+    }
+
+    @MainActor
+    func testManualLabelWithoutServingWeightOnlyOffersConvertibleUnit() throws {
+        let customFood = SolidFoodCatalogItem(
+            name: "Test pouch",
+            nutritionLabel: SolidManualNutritionLabel(
+                servingQuantity: 1,
+                servingUnit: .serving,
+                servingGrams: nil,
+                sourceDescription: "Test label",
+                nutrients: SolidNutritionValues(energyKilocalories: 90)
+            )
+        )
+
+        XCTAssertEqual(
+            SolidsNutritionService.supportedUnits(
+                foodID: customFood.trackingID,
+                customFoods: [customFood]
+            ),
+            [.serving]
+        )
+        let reference = try XCTUnwrap(
+            SolidsNutritionService.reference(foodID: customFood.trackingID, customFoods: [customFood])
+        )
+        let snapshot = try XCTUnwrap(
+            SolidsNutritionService.snapshot(amount: 0.5, unit: .serving, reference: reference)
+        )
+        XCTAssertEqual(try XCTUnwrap(snapshot.nutrients.energyKilocalories), 45, accuracy: 0.001)
+        XCTAssertNil(SolidsNutritionService.snapshot(amount: 10, unit: .gram, reference: reference))
+    }
+
+    @MainActor
+    func testManualLabelUsesItsStatedWeightForMatchingRoundedUnit() throws {
+        let customFood = SolidFoodCatalogItem(
+            name: "Test rounded label",
+            nutritionLabel: SolidManualNutritionLabel(
+                servingQuantity: 1,
+                servingUnit: .ounce,
+                servingGrams: 28,
+                sourceDescription: "Test label",
+                nutrients: SolidNutritionValues(energyKilocalories: 100, proteinGrams: 4)
+            )
+        )
+        let reference = try XCTUnwrap(
+            SolidsNutritionService.reference(foodID: customFood.trackingID, customFoods: [customFood])
+        )
+
+        let matchingUnit = try XCTUnwrap(
+            SolidsNutritionService.snapshot(amount: 1, unit: .ounce, reference: reference)
+        )
+        XCTAssertEqual(try XCTUnwrap(matchingUnit.estimatedEatenGrams), 28, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(matchingUnit.nutrients.energyKilocalories), 100, accuracy: 0.001)
+
+        let grams = try XCTUnwrap(
+            SolidsNutritionService.snapshot(amount: 28, unit: .gram, reference: reference)
+        )
+        XCTAssertEqual(try XCTUnwrap(grams.nutrients.energyKilocalories), 100, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testEditingLogPreservesSnapshotUntilQuantitativeInputChanges() throws {
+        let originalLabel = SolidManualNutritionLabel(
+            servingQuantity: 1,
+            servingUnit: .serving,
+            servingGrams: 40,
+            sourceDescription: "Original test label",
+            nutrients: SolidNutritionValues(energyKilocalories: 100)
+        )
+        let customFood = SolidFoodCatalogItem(name: "Test mash", nutritionLabel: originalLabel)
+        var detail = try XCTUnwrap(SolidsNutritionService.applyingNutrition(
+            to: [SolidFoodLogDetail(
+                foodID: customFood.trackingID,
+                foodName: customFood.name,
+                amountEaten: 0.5,
+                portionUnit: .serving,
+                consumptionEstimate: .exact
+            )],
+            customFoods: [customFood]
+        ).first)
+        let originalSnapshot = try XCTUnwrap(detail.nutritionSnapshot)
+        XCTAssertEqual(try XCTUnwrap(originalSnapshot.nutrients.energyKilocalories), 50, accuracy: 0.001)
+
+        customFood.nutritionLabel = SolidManualNutritionLabel(
+            servingQuantity: 1,
+            servingUnit: .serving,
+            servingGrams: 40,
+            sourceDescription: "Updated test label",
+            nutrients: SolidNutritionValues(energyKilocalories: 200)
+        )
+        detail = try XCTUnwrap(SolidsNutritionService.applyingNutrition(
+            to: [detail],
+            customFoods: [customFood]
+        ).first)
+        XCTAssertEqual(detail.nutritionSnapshot, originalSnapshot)
+
+        detail.amountEaten = 0.75
+        detail = try XCTUnwrap(SolidsNutritionService.applyingNutrition(
+            to: [detail],
+            customFoods: [customFood]
+        ).first)
+        XCTAssertEqual(
+            try XCTUnwrap(detail.nutritionSnapshot?.nutrients.energyKilocalories),
+            150,
+            accuracy: 0.001
+        )
+
+        let updatedSnapshot = detail.nutritionSnapshot
+        customFood.nutritionLabel = nil
+        detail = try XCTUnwrap(SolidsNutritionService.applyingNutrition(
+            to: [detail],
+            customFoods: [customFood]
+        ).first)
+        XCTAssertEqual(detail.nutritionSnapshot, updatedSnapshot)
+        detail.amountEaten = 0.25
+        detail = try XCTUnwrap(SolidsNutritionService.applyingNutrition(
+            to: [detail],
+            customFoods: [customFood]
+        ).first)
+        XCTAssertNil(detail.nutritionSnapshot)
+    }
+
+    @MainActor
+    func testManualLabelAndRecipeBuilderCalculatePerServingNutrition() throws {
+        let customFood = SolidFoodCatalogItem(
+            name: "Test fortified mash",
+            nutritionLabel: SolidManualNutritionLabel(
+                servingQuantity: 2,
+                servingUnit: .tablespoon,
+                servingGrams: 30,
+                sourceDescription: "Test package label",
+                nutrients: SolidNutritionValues(
+                    energyKilocalories: 60,
+                    proteinGrams: 3,
+                    fatGrams: 1,
+                    fiberGrams: 2,
+                    ironMilligrams: 2,
+                    zincMilligrams: 0.5,
+                    calciumMilligrams: 20,
+                    vitaminCMilligrams: 1
+                )
+            )
+        )
+        let recipe = CustomSolidRecipe(
+            name: "Test fruit mash",
+            ingredients: [
+                CustomSolidRecipeIngredient(
+                    foodID: customFood.trackingID,
+                    foodName: customFood.name,
+                    amount: 2,
+                    unit: .tablespoon
+                ),
+                CustomSolidRecipeIngredient(
+                    foodID: "banana",
+                    foodName: "Banana",
+                    amount: 100,
+                    unit: .gram
+                )
+            ],
+            servings: 2
+        )
+
+        let summary = SolidsNutritionService.recipeSummary(
+            recipe: recipe,
+            customFoods: [customFood]
+        )
+        XCTAssertTrue(summary.isComplete)
+        XCTAssertEqual(summary.quantifiedIngredientCount, 2)
+        XCTAssertEqual(summary.completeIngredientCount, 2)
+        XCTAssertEqual(try XCTUnwrap(summary.nutrients.energyKilocalories), 74.5, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(summary.nutrients.ironMilligrams), 1.13, accuracy: 0.001)
+
+        let preset = SolidsNutritionService.preset(recipe: recipe, customFoods: [customFood])
+        XCTAssertEqual(preset.recipeID, recipe.trackingID)
+        XCTAssertEqual(preset.foodDetails.count, 2)
+        XCTAssertEqual(preset.foodDetails.first?.amountEaten, 1)
+        XCTAssertNotNil(preset.foodDetails.first?.nutritionSnapshot)
+
+        let plannedMeal = PlannedSolidMeal(
+            profileID: UUID(),
+            scheduledAt: Date(),
+            title: recipe.name,
+            foodIDs: recipe.ingredients.map(\.foodID),
+            foodNames: recipe.ingredients.map(\.foodName),
+            recipeID: recipe.trackingID
+        )
+        let plannedPreset = SolidsTrackingService.preset(
+            for: plannedMeal,
+            customRecipes: [recipe],
+            customFoods: [customFood]
+        )
+        XCTAssertEqual(plannedPreset.plannedMealID, plannedMeal.id)
+        XCTAssertEqual(plannedPreset.recipeID, recipe.trackingID)
+        XCTAssertEqual(plannedPreset.foodDetails.first?.amountEaten, 1)
+        XCTAssertNotNil(plannedPreset.foodDetails.first?.nutritionSnapshot)
+
+        customFood.nutritionLabel = SolidManualNutritionLabel(
+            servingQuantity: 2,
+            servingUnit: .tablespoon,
+            servingGrams: 30,
+            sourceDescription: "Partial test label",
+            nutrients: SolidNutritionValues(energyKilocalories: 60)
+        )
+        let partialSummary = SolidsNutritionService.recipeSummary(
+            recipe: recipe,
+            customFoods: [customFood]
+        )
+        XCTAssertEqual(partialSummary.quantifiedIngredientCount, 2)
+        XCTAssertEqual(partialSummary.completeIngredientCount, 1)
+        XCTAssertFalse(partialSummary.isComplete)
+
+        let halfServingYield = CustomSolidRecipe(
+            name: "Test half-serving yield",
+            ingredients: [CustomSolidRecipeIngredient(
+                foodID: "banana",
+                foodName: "Banana",
+                amount: 100,
+                unit: .gram
+            )],
+            servings: 0.5
+        )
+        let halfYieldSummary = SolidsNutritionService.recipeSummary(
+            recipe: halfServingYield,
+            customFoods: []
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(halfYieldSummary.nutrients.energyKilocalories),
+            178,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            SolidsNutritionService.preset(recipe: halfServingYield, customFoods: [])
+                .foodDetails.first?.amountEaten,
+            200
+        )
+    }
+
+    @MainActor
+    func testNutritionAndCustomRecipesRoundTripThroughBackup() throws {
+        let source = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profile = CareProfile(name: "Test Child", birthDate: Date())
+        let label = SolidManualNutritionLabel(
+            servingQuantity: 1,
+            servingUnit: .serving,
+            servingGrams: 40,
+            sourceDescription: "Test label",
+            nutrients: SolidNutritionValues(energyKilocalories: 80, ironMilligrams: 1.5)
+        )
+        let customFood = SolidFoodCatalogItem(name: "Test cereal", nutritionLabel: label)
+        let recipe = CustomSolidRecipe(
+            name: "Test cereal bowl",
+            ingredients: [CustomSolidRecipeIngredient(
+                foodID: customFood.trackingID,
+                foodName: customFood.name,
+                amount: 1,
+                unit: .serving
+            )]
+        )
+        let event = CareEvent(profileID: profile.id, type: .feed)
+        event.feedKind = .solid
+        event.foodDescription = customFood.name
+        event.solidFoodDetails = [SolidFoodLogDetail(
+            foodID: customFood.trackingID,
+            foodName: customFood.name,
+            amountOffered: 1,
+            amountEaten: 0.5,
+            portionUnit: .serving,
+            consumptionEstimate: .exact,
+            recipeID: recipe.trackingID,
+            recipeName: recipe.name
+        )]
+        source.mainContext.insert(profile)
+        source.mainContext.insert(customFood)
+        source.mainContext.insert(recipe)
+        source.mainContext.insert(event)
+        SolidsTrackingService.recordSolidFeed(
+            event: event,
+            preset: nil,
+            eventItems: [],
+            progress: [],
+            plans: [],
+            profileStates: [],
+            context: source.mainContext
+        )
+
+        let data = try DataExportImportService.exportData(context: source.mainContext)
+        var corruptedDetailsObject = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var corruptedEvents = try XCTUnwrap(corruptedDetailsObject["events"] as? [[String: Any]])
+        corruptedEvents[0]["solidFoodDetailsJSON"] = "{"
+        corruptedDetailsObject["events"] = corruptedEvents
+        let corruptedDetailsData = try JSONSerialization.data(withJSONObject: corruptedDetailsObject)
+        XCTAssertThrowsError(try DataExportImportService.validateBackupData(corruptedDetailsData))
+
+        var corruptedObject = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var corruptedItems = try XCTUnwrap(corruptedObject["solidFoodEventItems"] as? [[String: Any]])
+        corruptedItems[0]["amountOffered"] = 0.25
+        corruptedObject["solidFoodEventItems"] = corruptedItems
+        let corruptedData = try JSONSerialization.data(withJSONObject: corruptedObject)
+        XCTAssertThrowsError(try DataExportImportService.validateBackupData(corruptedData))
+
+        var missingSourceObject = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var missingSourceItems = try XCTUnwrap(missingSourceObject["solidFoodEventItems"] as? [[String: Any]])
+        let snapshotJSONString = try XCTUnwrap(missingSourceItems[0]["nutritionSnapshotJSON"] as? String)
+        let snapshotData = try XCTUnwrap(snapshotJSONString.data(using: .utf8))
+        var snapshotObject = try XCTUnwrap(JSONSerialization.jsonObject(with: snapshotData) as? [String: Any])
+        snapshotObject["sourceDescription"] = " "
+        let missingSourceSnapshotData = try JSONSerialization.data(withJSONObject: snapshotObject)
+        missingSourceItems[0]["nutritionSnapshotJSON"] = try XCTUnwrap(
+            String(data: missingSourceSnapshotData, encoding: .utf8)
+        )
+        missingSourceObject["solidFoodEventItems"] = missingSourceItems
+        let missingSourceData = try JSONSerialization.data(withJSONObject: missingSourceObject)
+        XCTAssertThrowsError(try DataExportImportService.validateBackupData(missingSourceData))
+
+        let destination = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        try DataExportImportService.importData(
+            data,
+            context: destination.mainContext,
+            createRecoveryBackup: false
+        )
+
+        let importedFood = try XCTUnwrap(
+            destination.mainContext.fetch(FetchDescriptor<SolidFoodCatalogItem>()).first
+        )
+        XCTAssertEqual(importedFood.nutritionLabel, label)
+        let importedRecipe = try XCTUnwrap(
+            destination.mainContext.fetch(FetchDescriptor<CustomSolidRecipe>()).first
+        )
+        XCTAssertEqual(importedRecipe.name, recipe.name)
+        XCTAssertEqual(importedRecipe.ingredients, recipe.ingredients)
+        let importedItem = try XCTUnwrap(
+            destination.mainContext.fetch(FetchDescriptor<SolidFoodEventItem>()).first
+        )
+        XCTAssertEqual(importedItem.amountEaten, 0.5)
+        XCTAssertEqual(importedItem.portionUnit, .serving)
+        XCTAssertEqual(importedItem.recipeNameSnapshot, recipe.name)
+        XCTAssertEqual(
+            try XCTUnwrap(importedItem.nutritionSnapshot?.nutrients.energyKilocalories),
+            40,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
+    func testCustomFoodRenameUpdatesRecipesAndUpcomingPlansAndDeleteProtectsReferences() async throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let customFood = SolidFoodCatalogItem(name: "Test original food")
+        let trackingID = customFood.trackingID
+        let recipe = CustomSolidRecipe(
+            name: "Test recipe",
+            ingredients: [CustomSolidRecipeIngredient(
+                foodID: trackingID,
+                foodName: customFood.name,
+                amount: 1,
+                unit: .serving
+            )]
+        )
+        let plan = PlannedSolidMeal(
+            profileID: UUID(),
+            scheduledAt: Date(),
+            foodIDs: [trackingID],
+            foodNames: [customFood.name]
+        )
+        container.mainContext.insert(customFood)
+        container.mainContext.insert(recipe)
+        container.mainContext.insert(plan)
+        try container.mainContext.save()
+
+        let writer = SolidsCustomFoodWriter(modelContainer: container)
+        let update = await writer.save(SolidsCustomFoodWrite(
+            itemID: customFood.id,
+            name: "Test renamed food",
+            photoDraft: nil,
+            removeExistingPhoto: false,
+            allergenIDs: [],
+            minimumAgeMonths: 6,
+            preparationNotes: "",
+            safetyNotes: ""
+        ))
+        XCTAssertNil(update.error)
+
+        var verificationContext = ModelContext(container)
+        XCTAssertEqual(
+            try XCTUnwrap(verificationContext.fetch(FetchDescriptor<CustomSolidRecipe>()).first)
+                .ingredients.first?.foodName,
+            "Test renamed food"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(verificationContext.fetch(FetchDescriptor<PlannedSolidMeal>()).first)
+                .foodNames,
+            ["Test renamed food"]
+        )
+        let deleteError = await writer.delete(itemID: customFood.id)
+        XCTAssertNotNil(deleteError)
+
+        verificationContext = ModelContext(container)
+        XCTAssertEqual(try verificationContext.fetchCount(FetchDescriptor<SolidFoodCatalogItem>()), 1)
+    }
+
+    @MainActor
+    func testCustomRecipeWriterKeepsUpcomingPlansInSyncAndProtectsDeletion() async throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let writer = SolidsCustomRecipeWriter(modelContainer: container)
+        let created = await writer.save(SolidsCustomRecipeWrite(
+            recipeID: nil,
+            name: "Test breakfast",
+            ingredients: [CustomSolidRecipeIngredient(
+                foodID: "banana",
+                foodName: "Banana",
+                amount: 100,
+                unit: .gram
+            )],
+            servings: 2,
+            minimumAgeMonths: 6,
+            instructions: "Mash.",
+            notes: ""
+        ))
+        XCTAssertNil(created.error)
+        let recipeID = try XCTUnwrap(created.recipeID)
+
+        var context = ModelContext(container)
+        let recipe = try XCTUnwrap(context.fetch(FetchDescriptor<CustomSolidRecipe>()).first)
+        let plan = PlannedSolidMeal(
+            profileID: UUID(),
+            scheduledAt: Date(),
+            title: recipe.name,
+            foodIDs: recipe.ingredients.map(\.foodID),
+            foodNames: recipe.ingredients.map(\.foodName),
+            recipeID: recipe.trackingID
+        )
+        context.insert(plan)
+        try context.save()
+
+        let updated = await writer.save(SolidsCustomRecipeWrite(
+            recipeID: recipeID,
+            name: "Test updated breakfast",
+            ingredients: [CustomSolidRecipeIngredient(
+                foodID: "avocado",
+                foodName: "Avocado",
+                amount: 1,
+                unit: .piece
+            )],
+            servings: 4,
+            minimumAgeMonths: 6,
+            instructions: "Mash until soft.",
+            notes: ""
+        ))
+        XCTAssertNil(updated.error)
+
+        context = ModelContext(container)
+        let updatedPlan = try XCTUnwrap(context.fetch(FetchDescriptor<PlannedSolidMeal>()).first)
+        XCTAssertEqual(updatedPlan.title, "Test updated breakfast")
+        XCTAssertEqual(updatedPlan.foodIDs, ["avocado"])
+        XCTAssertEqual(updatedPlan.foodNames, ["Avocado"])
+        let deleteError = await writer.delete(recipeID: recipeID)
+        XCTAssertNotNil(deleteError)
+
+        let duplicate = await writer.save(SolidsCustomRecipeWrite(
+            recipeID: nil,
+            name: "test updated breakfast",
+            ingredients: [CustomSolidRecipeIngredient(
+                foodID: "banana",
+                foodName: "Banana",
+                amount: 1,
+                unit: .piece
+            )],
+            servings: 1,
+            minimumAgeMonths: 6,
+            instructions: "",
+            notes: ""
+        ))
+        XCTAssertNotNil(duplicate.error)
+
+        let missingIngredient = await writer.save(SolidsCustomRecipeWrite(
+            recipeID: nil,
+            name: "Test missing ingredient",
+            ingredients: [CustomSolidRecipeIngredient(
+                foodID: "custom-missing",
+                foodName: "Missing food",
+                amount: 1,
+                unit: .serving
+            )],
+            servings: 1,
+            minimumAgeMonths: 6,
+            instructions: "",
+            notes: ""
+        ))
+        XCTAssertNotNil(missingIngredient.error)
+    }
+    @MainActor
+    func testSolidsReportingLargeHistoryPerformance() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let profileID = UUID()
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 8,
+            hour: 12
+        ))!
+        let nutrition = try XCTUnwrap(
+            SolidsNutritionService.snapshot(
+                amount: 100,
+                unit: .gram,
+                reference: try XCTUnwrap(
+                    SolidsNutritionService.reference(foodID: "banana", customFoods: [])
+                ),
+                capturedAt: now
+            )
+        )
+        var events = [CareEvent]()
+        var items = [SolidFoodEventItem]()
+        events.reserveCapacity(1_000)
+        items.reserveCapacity(3_000)
+        for mealIndex in 0..<1_000 {
+            let loggedAt = now.addingTimeInterval(TimeInterval(-mealIndex * 2 * 60 * 60))
+            let event = CareEvent(
+                profileID: profileID,
+                type: .feed,
+                startDate: loggedAt
+            )
+            event.feedKind = .solid
+            events.append(event)
+            for foodIndex in 0..<3 {
+                var itemNutrition = nutrition
+                itemNutrition.capturedAt = loggedAt
+                items.append(SolidFoodEventItem(
+                    eventID: event.id,
+                    profileID: profileID,
+                    foodID: "food-\(foodIndex)",
+                    foodNameSnapshot: "Test Food \(foodIndex)",
+                    allergenIDs: foodIndex == 0 ? ["egg"] : [],
+                    nutritionSnapshot: itemNutrition,
+                    suspectedReaction: foodIndex == 2 && mealIndex.isMultiple(of: 50),
+                    createdAt: loggedAt,
+                    updatedAt: loggedAt
+                ))
+            }
+        }
+        let periodStart = calendar.date(byAdding: .day, value: -90, to: now)!
+        var report: SolidsReportSnapshot?
+
+        measure(metrics: [XCTClockMetric()]) {
+            report = SolidsReportingService.snapshot(
+                profileID: profileID,
+                events: events,
+                eventItems: items,
+                progress: [],
+                period: periodStart...now,
+                calendar: calendar
+            )
+        }
+
+        XCTAssertEqual(report?.mealCount, 1_000)
+        XCTAssertEqual(report?.foodCount, 3_000)
+        XCTAssertEqual(report?.quantifiedFoodCount, 3_000)
+        XCTAssertEqual(report?.daily.count, 91)
     }
 }

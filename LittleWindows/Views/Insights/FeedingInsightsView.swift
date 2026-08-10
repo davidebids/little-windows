@@ -290,6 +290,41 @@ struct FeedingInsightsView: View {
 
         InsightMetricGrid(metrics: solidsMetrics(solids))
 
+        if solids.foodCount > 0 {
+            sectionHeader(
+                title: "Estimated nutrients",
+                subtitle: "Calculated from amounts eaten and saved nutrition snapshots. No daily target is applied.",
+                systemImage: "chart.bar.doc.horizontal.fill",
+                tint: .teal
+            )
+
+            if solids.quantifiedFoodCount > 0 {
+                InsightMetricGrid(metrics: nutrientMetrics(solids))
+
+                InsightChartCard(
+                    title: "Estimated iron by day",
+                    subtitle: "Milligrams from quantified solid-food logs",
+                    isEmpty: solids.daily.allSatisfy { ($0.nutrients.ironMilligrams ?? 0) == 0 }
+                ) {
+                    Chart(solids.daily) { point in
+                        BarMark(
+                            x: .value("Day", point.date, unit: .day),
+                            y: .value("Iron (mg)", point.nutrients.ironMilligrams ?? 0)
+                        )
+                        .foregroundStyle(.teal.gradient)
+                        .cornerRadius(4)
+                    }
+                }
+            }
+
+            Text(nutritionCoverageText(solids))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .appSurface()
+        }
+
         InsightChartCard(
             title: "Solids by day",
             subtitle: "Logged meals and foods first tried",
@@ -345,6 +380,22 @@ struct FeedingInsightsView: View {
         .appSurface()
     }
 
+    private func nutritionCoverageText(_ solids: SolidsReportSnapshot) -> String {
+        let partialCount = max(0, solids.quantifiedFoodCount - solids.completeNutritionFoodCount)
+        let unquantifiedCount = max(0, solids.foodCount - solids.quantifiedFoodCount)
+        var sentences = [
+            "Nutrition coverage: \(solids.completeNutritionFoodCount) of \(solids.foodCount) logged food entries included all eight tracked nutrients."
+        ]
+        if partialCount > 0 {
+            sentences.append("\(partialCount) included only the nutrient values available in its saved manual label.")
+        }
+        if unquantifiedCount > 0 {
+            sentences.append("\(unquantifiedCount) could not be quantified from the saved amount and nutrition data.")
+        }
+        sentences.append("Built-in foods include all eight nutrients once an eaten amount is recorded. Custom foods require a manual label, and blank label fields remain uncounted.")
+        return sentences.joined(separator: " ")
+    }
+
     private func solidsMetrics(_ solids: SolidsReportSnapshot) -> [InsightMetric] {
         [
             InsightMetric(
@@ -378,5 +429,33 @@ struct FeedingInsightsView: View {
                 systemImage: "exclamationmark.triangle.fill"
             )
         ]
+    }
+
+    private func nutrientMetrics(_ solids: SolidsReportSnapshot) -> [InsightMetric] {
+        let values = solids.nutrients
+        return [
+            nutrientMetric("Energy", values.energyKilocalories, "kcal", "flame.fill"),
+            nutrientMetric("Protein", values.proteinGrams, "g", "leaf.fill"),
+            nutrientMetric("Iron", values.ironMilligrams, "mg", "drop.fill"),
+            nutrientMetric("Zinc", values.zincMilligrams, "mg", "circle.hexagongrid.fill"),
+            nutrientMetric("Calcium", values.calciumMilligrams, "mg", "bone.fill"),
+            nutrientMetric("Vitamin C", values.vitaminCMilligrams, "mg", "sun.max.fill"),
+            nutrientMetric("Fiber", values.fiberGrams, "g", "leaf.circle.fill"),
+            nutrientMetric("Fat", values.fatGrams, "g", "circle.fill")
+        ]
+    }
+
+    private func nutrientMetric(
+        _ title: String,
+        _ value: Double?,
+        _ unit: String,
+        _ systemImage: String
+    ) -> InsightMetric {
+        InsightMetric(
+            title: title,
+            value: value.map { "\($0.formatted(.number.precision(.fractionLength(0...2)))) \(unit)" } ?? "–",
+            interpretation: "Estimated total from quantified solid-food logs in this period.",
+            systemImage: systemImage
+        )
     }
 }

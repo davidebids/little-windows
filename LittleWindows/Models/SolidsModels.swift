@@ -138,6 +138,315 @@ enum SolidsFeedingSkill: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum SolidPortionUnit: String, Codable, CaseIterable, Identifiable, Sendable {
+    case gram
+    case ounce
+    case teaspoon
+    case tablespoon
+    case cup
+    case piece
+    case serving
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .gram: "Grams"
+        case .ounce: "Ounces"
+        case .teaspoon: "Teaspoons"
+        case .tablespoon: "Tablespoons"
+        case .cup: "Cups"
+        case .piece: "Pieces"
+        case .serving: "Servings"
+        }
+    }
+
+    var abbreviatedName: String {
+        switch self {
+        case .gram: "g"
+        case .ounce: "oz"
+        case .teaspoon: "tsp"
+        case .tablespoon: "tbsp"
+        case .cup: "cup"
+        case .piece: "piece"
+        case .serving: "serving"
+        }
+    }
+
+    var gramsPerUnit: Double? {
+        switch self {
+        case .gram: 1
+        case .ounce: 28.349523125
+        case .teaspoon, .tablespoon, .cup, .piece, .serving: nil
+        }
+    }
+}
+
+enum SolidConsumptionEstimate: String, Codable, CaseIterable, Identifiable, Sendable {
+    case exact
+    case taste
+    case quarter
+    case half
+    case most
+    case all
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .exact: "Exact"
+        case .taste: "Taste"
+        case .quarter: "¼"
+        case .half: "½"
+        case .most: "Most"
+        case .all: "All"
+        }
+    }
+
+    var offeredFraction: Double? {
+        switch self {
+        case .exact: nil
+        case .taste: 0.05
+        case .quarter: 0.25
+        case .half: 0.5
+        case .most: 0.75
+        case .all: 1
+        }
+    }
+}
+
+enum SolidNutritionSourceKind: String, Codable, Sendable {
+    case usdaFoodDataCentral
+    case manualLabel
+    case customRecipe
+
+    var displayName: String {
+        switch self {
+        case .usdaFoodDataCentral: "USDA FoodData Central"
+        case .manualLabel: "Manual nutrition label"
+        case .customRecipe: "Custom recipe"
+        }
+    }
+}
+
+struct SolidNutritionValues: Codable, Hashable, Sendable {
+    var energyKilocalories: Double?
+    var proteinGrams: Double?
+    var fatGrams: Double?
+    var fiberGrams: Double?
+    var ironMilligrams: Double?
+    var zincMilligrams: Double?
+    var calciumMilligrams: Double?
+    var vitaminCMilligrams: Double?
+
+    init(
+        energyKilocalories: Double? = nil,
+        proteinGrams: Double? = nil,
+        fatGrams: Double? = nil,
+        fiberGrams: Double? = nil,
+        ironMilligrams: Double? = nil,
+        zincMilligrams: Double? = nil,
+        calciumMilligrams: Double? = nil,
+        vitaminCMilligrams: Double? = nil
+    ) {
+        self.energyKilocalories = energyKilocalories
+        self.proteinGrams = proteinGrams
+        self.fatGrams = fatGrams
+        self.fiberGrams = fiberGrams
+        self.ironMilligrams = ironMilligrams
+        self.zincMilligrams = zincMilligrams
+        self.calciumMilligrams = calciumMilligrams
+        self.vitaminCMilligrams = vitaminCMilligrams
+    }
+
+    var hasValues: Bool {
+        [
+            energyKilocalories,
+            proteinGrams,
+            fatGrams,
+            fiberGrams,
+            ironMilligrams,
+            zincMilligrams,
+            calciumMilligrams,
+            vitaminCMilligrams
+        ].contains { $0 != nil }
+    }
+
+    var hasNegativeValue: Bool {
+        [
+            energyKilocalories,
+            proteinGrams,
+            fatGrams,
+            fiberGrams,
+            ironMilligrams,
+            zincMilligrams,
+            calciumMilligrams,
+            vitaminCMilligrams
+        ].compactMap { $0 }.contains { $0 < 0 || !$0.isFinite }
+    }
+
+    var isComplete: Bool {
+        [
+            energyKilocalories,
+            proteinGrams,
+            fatGrams,
+            fiberGrams,
+            ironMilligrams,
+            zincMilligrams,
+            calciumMilligrams,
+            vitaminCMilligrams
+        ].allSatisfy { $0 != nil }
+    }
+
+    func scaled(by factor: Double) -> SolidNutritionValues {
+        guard factor.isFinite, factor >= 0 else { return SolidNutritionValues() }
+        func scaledValue(_ value: Double?) -> Double? {
+            guard let value else { return nil }
+            let result = value * factor
+            return result.isFinite ? result : nil
+        }
+        return SolidNutritionValues(
+            energyKilocalories: scaledValue(energyKilocalories),
+            proteinGrams: scaledValue(proteinGrams),
+            fatGrams: scaledValue(fatGrams),
+            fiberGrams: scaledValue(fiberGrams),
+            ironMilligrams: scaledValue(ironMilligrams),
+            zincMilligrams: scaledValue(zincMilligrams),
+            calciumMilligrams: scaledValue(calciumMilligrams),
+            vitaminCMilligrams: scaledValue(vitaminCMilligrams)
+        )
+    }
+
+    func adding(_ other: SolidNutritionValues) -> SolidNutritionValues {
+        func sum(_ lhs: Double?, _ rhs: Double?) -> Double? {
+            switch (lhs, rhs) {
+            case let (.some(left), .some(right)):
+                let result = left + right
+                return result.isFinite ? result : nil
+            case let (.some(left), .none): return left
+            case let (.none, .some(right)): return right
+            case (.none, .none): return nil
+            }
+        }
+        return SolidNutritionValues(
+            energyKilocalories: sum(energyKilocalories, other.energyKilocalories),
+            proteinGrams: sum(proteinGrams, other.proteinGrams),
+            fatGrams: sum(fatGrams, other.fatGrams),
+            fiberGrams: sum(fiberGrams, other.fiberGrams),
+            ironMilligrams: sum(ironMilligrams, other.ironMilligrams),
+            zincMilligrams: sum(zincMilligrams, other.zincMilligrams),
+            calciumMilligrams: sum(calciumMilligrams, other.calciumMilligrams),
+            vitaminCMilligrams: sum(vitaminCMilligrams, other.vitaminCMilligrams)
+        )
+    }
+
+    static let zero = SolidNutritionValues(
+        energyKilocalories: 0,
+        proteinGrams: 0,
+        fatGrams: 0,
+        fiberGrams: 0,
+        ironMilligrams: 0,
+        zincMilligrams: 0,
+        calciumMilligrams: 0,
+        vitaminCMilligrams: 0
+    )
+}
+
+struct SolidNutritionReference: Codable, Hashable, Sendable {
+    var sourceKind: SolidNutritionSourceKind
+    var sourceID: String
+    var sourceDescription: String
+    var sourceVersion: String
+    var basisQuantity: Double
+    var basisUnit: SolidPortionUnit
+    var basisGrams: Double?
+    var nutrients: SolidNutritionValues
+    var portions: [SolidNutritionPortion]
+}
+
+struct SolidNutritionPortion: Codable, Hashable, Identifiable, Sendable {
+    var unit: SolidPortionUnit
+    var gramsPerUnit: Double
+    var description: String
+
+    var id: SolidPortionUnit { unit }
+}
+
+struct SolidNutritionSnapshot: Codable, Hashable, Sendable {
+    var sourceKind: SolidNutritionSourceKind
+    var sourceID: String
+    var sourceDescription: String
+    var sourceVersion: String
+    var amountDescription: String
+    var eatenAmount: Double?
+    var portionUnit: SolidPortionUnit?
+    var estimatedEatenGrams: Double?
+    var nutrients: SolidNutritionValues
+    var isComplete: Bool
+    var capturedAt: Date
+}
+
+struct SolidManualNutritionLabel: Codable, Hashable, Sendable {
+    var servingQuantity: Double
+    var servingUnit: SolidPortionUnit
+    var servingGrams: Double?
+    var sourceDescription: String
+    var nutrients: SolidNutritionValues
+
+    var sourceDisplayName: String {
+        let cleaned = sourceDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "Manual nutrition label" : cleaned
+    }
+
+    var isValid: Bool {
+        servingQuantity.isFinite
+            && servingQuantity > 0
+            && (servingGrams.map { $0.isFinite && $0 > 0 } ?? true)
+            && nutrients.hasValues
+            && !nutrients.hasNegativeValue
+    }
+
+    var nutritionReference: SolidNutritionReference? {
+        guard isValid else { return nil }
+        let grams = servingGrams ?? servingUnit.gramsPerUnit.map { $0 * servingQuantity }
+        return SolidNutritionReference(
+            sourceKind: .manualLabel,
+            sourceID: "manual-label",
+            sourceDescription: sourceDisplayName,
+            sourceVersion: "1",
+            basisQuantity: servingQuantity,
+            basisUnit: servingUnit,
+            basisGrams: grams,
+            nutrients: nutrients,
+            portions: grams.map {
+                [SolidNutritionPortion(unit: servingUnit, gramsPerUnit: $0 / servingQuantity, description: "Label serving")]
+            } ?? []
+        )
+    }
+}
+
+struct CustomSolidRecipeIngredient: Codable, Hashable, Identifiable, Sendable {
+    var id: UUID
+    var foodID: String
+    var foodName: String
+    var amount: Double
+    var unit: SolidPortionUnit
+
+    init(
+        id: UUID = UUID(),
+        foodID: String,
+        foodName: String,
+        amount: Double,
+        unit: SolidPortionUnit
+    ) {
+        self.id = id
+        self.foodID = foodID
+        self.foodName = foodName
+        self.amount = amount
+        self.unit = unit
+    }
+}
+
 struct SolidFoodLogDetail: Codable, Hashable, Identifiable {
     var foodID: String
     var foodName: String
@@ -146,6 +455,13 @@ struct SolidFoodLogDetail: Codable, Hashable, Identifiable {
     var confirmedAllergenPortionIDs: [String]?
     var preference: SolidReaction = .unknown
     var servingAmount: String?
+    var amountOffered: Double?
+    var amountEaten: Double?
+    var portionUnit: SolidPortionUnit?
+    var consumptionEstimate: SolidConsumptionEstimate?
+    var nutritionSnapshot: SolidNutritionSnapshot?
+    var recipeID: String?
+    var recipeName: String?
     var notes: String?
     var suspectedReaction: Bool = false
     var symptoms: [SolidReactionSymptom] = []
@@ -180,15 +496,34 @@ struct SolidRecipeCollection: Codable, Hashable, Identifiable {
     }
 }
 
-struct SolidFeedEditorPreset: Equatable {
+struct SolidFeedEditorPreset: Equatable, @unchecked Sendable {
     var foodIDs: [String] = []
     var foodNames: [String] = []
     var allergenIDsByFoodID: [String: [String]] = [:]
     var confirmedAllergenPortionIDs: [String] = []
     var plannedMealID: UUID?
     var recipeID: String?
+    var recipeName: String?
+    var foodDetails: [SolidFoodLogDetail] = []
 
     static let empty = SolidFeedEditorPreset()
+}
+
+private final class SolidNutritionSnapshotCacheEntry {
+    let snapshot: SolidNutritionSnapshot
+
+    init(_ snapshot: SolidNutritionSnapshot) {
+        self.snapshot = snapshot
+    }
+}
+
+private enum SolidNutritionSnapshotDecodeCache {
+    static let shared: NSCache<NSString, SolidNutritionSnapshotCacheEntry> = {
+        let cache = NSCache<NSString, SolidNutritionSnapshotCacheEntry>()
+        cache.countLimit = 6_000
+        cache.totalCostLimit = 8 * 1_024 * 1_024
+        return cache
+    }()
 }
 
 @Model
@@ -341,6 +676,13 @@ final class SolidFoodEventItem {
     var confirmedAllergenPortionIDsJSON: String?
     var reactionRawValue: String?
     var servingAmount: String = ""
+    var amountOffered: Double?
+    var amountEaten: Double?
+    var portionUnitRawValue: String?
+    var consumptionEstimateRawValue: String?
+    var nutritionSnapshotJSON: String?
+    var recipeID: String?
+    var recipeNameSnapshot: String?
     var notes: String = ""
     var suspectedReaction: Bool = false
     var symptomIDsJSON: String = "[]"
@@ -362,6 +704,13 @@ final class SolidFoodEventItem {
         confirmedAllergenPortionIDs: [String]? = nil,
         reactionRawValue: String? = nil,
         servingAmount: String = "",
+        amountOffered: Double? = nil,
+        amountEaten: Double? = nil,
+        portionUnit: SolidPortionUnit? = nil,
+        consumptionEstimate: SolidConsumptionEstimate? = nil,
+        nutritionSnapshot: SolidNutritionSnapshot? = nil,
+        recipeID: String? = nil,
+        recipeNameSnapshot: String? = nil,
         notes: String = "",
         suspectedReaction: Bool = false,
         symptoms: [SolidReactionSymptom] = [],
@@ -382,6 +731,13 @@ final class SolidFoodEventItem {
         self.confirmedAllergenPortionIDsJSON = confirmedAllergenPortionIDs.map(Self.encode)
         self.reactionRawValue = reactionRawValue
         self.servingAmount = servingAmount.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.amountOffered = amountOffered
+        self.amountEaten = amountEaten
+        self.portionUnitRawValue = portionUnit?.rawValue
+        self.consumptionEstimateRawValue = consumptionEstimate?.rawValue
+        self.nutritionSnapshotJSON = Self.encode(nutritionSnapshot)
+        self.recipeID = recipeID
+        self.recipeNameSnapshot = recipeNameSnapshot
         self.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         self.suspectedReaction = suspectedReaction
         self.symptomIDsJSON = Self.encode(symptoms.map(\.rawValue))
@@ -415,6 +771,44 @@ final class SolidFoodEventItem {
         set { reactionRawValue = newValue.rawValue }
     }
 
+    var portionUnit: SolidPortionUnit? {
+        get { portionUnitRawValue.flatMap(SolidPortionUnit.init(rawValue:)) }
+        set { portionUnitRawValue = newValue?.rawValue }
+    }
+
+    var consumptionEstimate: SolidConsumptionEstimate? {
+        get { consumptionEstimateRawValue.flatMap(SolidConsumptionEstimate.init(rawValue:)) }
+        set { consumptionEstimateRawValue = newValue?.rawValue }
+    }
+
+    var nutritionSnapshot: SolidNutritionSnapshot? {
+        get {
+            guard let nutritionSnapshotJSON else { return nil }
+            let key = nutritionSnapshotJSON as NSString
+            if let cached = SolidNutritionSnapshotDecodeCache.shared.object(forKey: key) {
+                return cached.snapshot
+            }
+            guard let decoded: SolidNutritionSnapshot = Self.decode(nutritionSnapshotJSON) else {
+                return nil
+            }
+            SolidNutritionSnapshotDecodeCache.shared.setObject(
+                SolidNutritionSnapshotCacheEntry(decoded),
+                forKey: key,
+                cost: nutritionSnapshotJSON.utf8.count
+            )
+            return decoded
+        }
+        set {
+            nutritionSnapshotJSON = Self.encode(newValue)
+            guard let newValue, let nutritionSnapshotJSON else { return }
+            SolidNutritionSnapshotDecodeCache.shared.setObject(
+                SolidNutritionSnapshotCacheEntry(newValue),
+                forKey: nutritionSnapshotJSON as NSString,
+                cost: nutritionSnapshotJSON.utf8.count
+            )
+        }
+    }
+
     var symptoms: [SolidReactionSymptom] {
         get { Self.decode(symptomIDsJSON).compactMap(SolidReactionSymptom.init(rawValue:)) }
         set { symptomIDsJSON = Self.encode(newValue.map(\.rawValue)) }
@@ -439,6 +833,18 @@ final class SolidFoodEventItem {
     private static func decode(_ value: String) -> [String] {
         guard let data = value.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    private static func encode<T: Encodable>(_ value: T?) -> String? {
+        guard let value,
+              let data = try? JSONEncoder().encode(value),
+              let string = String(data: data, encoding: .utf8) else { return nil }
+        return string
+    }
+
+    private static func decode<T: Decodable>(_ value: String?) -> T? {
+        guard let value, let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
     }
 }
 
@@ -587,6 +993,59 @@ final class PlannedSolidMeal {
     private static func decode(_ value: String) -> [String] {
         guard let data = value.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+}
+
+@Model
+final class CustomSolidRecipe {
+    var id: UUID = UUID()
+    var name: String = ""
+    var ingredientsJSON: String = "[]"
+    var servings: Double = 1
+    var minimumAgeMonths: Int = 6
+    var instructions: String = ""
+    var notes: String = ""
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        ingredients: [CustomSolidRecipeIngredient],
+        servings: Double = 1,
+        minimumAgeMonths: Int = 6,
+        instructions: String = "",
+        notes: String = "",
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.ingredientsJSON = Self.encode(ingredients)
+        self.servings = servings
+        self.minimumAgeMonths = minimumAgeMonths
+        self.instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    var trackingID: String { "custom-recipe-\(id.uuidString.lowercased())" }
+
+    var ingredients: [CustomSolidRecipeIngredient] {
+        get { Self.decode(ingredientsJSON) }
+        set { ingredientsJSON = Self.encode(newValue) }
+    }
+
+    private static func encode(_ values: [CustomSolidRecipeIngredient]) -> String {
+        guard let data = try? JSONEncoder().encode(values),
+              let string = String(data: data, encoding: .utf8) else { return "[]" }
+        return string
+    }
+
+    private static func decode(_ value: String) -> [CustomSolidRecipeIngredient] {
+        guard let data = value.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([CustomSolidRecipeIngredient].self, from: data)) ?? []
     }
 }
 

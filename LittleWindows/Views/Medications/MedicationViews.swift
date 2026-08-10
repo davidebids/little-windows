@@ -1,67 +1,117 @@
 import SwiftData
 import SwiftUI
 
+private struct MedicationDashboard {
+    var medications: [Medication]
+    var archivedMedications: [Medication]
+    var activeRegimens: [MedicationRegimen]
+    var regimensByMedicationID: [UUID: [MedicationRegimen]]
+    var phasesByRegimenID: [UUID: [MedicationSchedulePhase]]
+    var medicationByID: [UUID: Medication]
+    var regimenByID: [UUID: MedicationRegimen]
+    var recordByOccurrenceKey: [String: MedicationDoseRecord]
+    var records: [MedicationDoseRecord]
+    var todayOccurrences: [MedicationOccurrence]
+    var futureOccurrences: [MedicationOccurrence]
+    var asNeededRegimens: [MedicationRegimen]
+}
+
 struct MedicationsView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Medication.name) private var allMedications: [Medication]
-    @Query(sort: \MedicationRegimen.createdAt) private var allRegimens: [MedicationRegimen]
-    @Query(sort: \MedicationSchedulePhase.sequence) private var allPhases: [MedicationSchedulePhase]
-    @Query(sort: \MedicationDoseRecord.loggedAt, order: .reverse) private var allDoseRecords: [MedicationDoseRecord]
+    @Query private var allMedications: [Medication]
+    @Query private var allRegimens: [MedicationRegimen]
+    @Query private var allPhases: [MedicationSchedulePhase]
+    @Query private var allDoseRecords: [MedicationDoseRecord]
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
 
     let profile: CareProfile
     @State private var showingEditor = false
     @State private var actionMessage: String?
 
-    private var medications: [Medication] {
-        allMedications.filter { $0.profileID == profile.id && !$0.isArchived }
-    }
-
-    private var archivedMedications: [Medication] {
-        allMedications.filter { $0.profileID == profile.id && $0.isArchived }
-    }
-
-    private var regimens: [MedicationRegimen] {
-        allRegimens.filter { $0.profileID == profile.id && $0.isActive }
-    }
-
-    private var records: [MedicationDoseRecord] {
-        allDoseRecords.filter { $0.profileID == profile.id }
+    init(profile: CareProfile) {
+        self.profile = profile
+        let profileID = profile.id
+        let calendar = MedicationScheduleDate.currentCalendar()
+        let currentDay = calendar.startOfDay(for: Date())
+        let relevantRecordStart = calendar.date(byAdding: .day, value: -2, to: currentDay) ?? currentDay
+        _allMedications = Query(FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\Medication.name)]
+        ))
+        _allRegimens = Query(FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationRegimen.createdAt)]
+        ))
+        _allPhases = Query(FetchDescriptor<MedicationSchedulePhase>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
+        ))
+        _allDoseRecords = Query(FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.loggedAt >= relevantRecordStart
+            },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        ))
     }
 
     private var scheduleCalendar: Calendar {
         MedicationScheduleDate.currentCalendar()
     }
 
-    private var upcomingOccurrences: [MedicationOccurrence] {
-        let now = Date()
+    private func makeDashboard(now: Date = Date()) -> MedicationDashboard {
+        let medications = allMedications.filter { !$0.isArchived }
+        let archivedMedications = allMedications.filter(\.isArchived)
+        let activeRegimens = allRegimens.filter(\.isActive)
+        let medicationByID = Dictionary(uniqueKeysWithValues: medications.map { ($0.id, $0) })
+        let regimenByID = Dictionary(uniqueKeysWithValues: activeRegimens.map { ($0.id, $0) })
+        let regimensByMedicationID = Dictionary(grouping: activeRegimens, by: \.medicationID)
+        let phasesByRegimenID = Dictionary(grouping: allPhases, by: \.regimenID)
+        let recordByOccurrenceKey = Dictionary(
+            allDoseRecords.compactMap { record in
+                record.occurrenceKey.map { ($0, record) }
+            },
+            uniquingKeysWith: { first, second in
+                first.loggedAt >= second.loggedAt ? first : second
+            }
+        )
         let start = scheduleCalendar.startOfDay(for: now)
         let end = scheduleCalendar.date(byAdding: .day, value: 7, to: now) ?? now
-        return regimens.flatMap { regimen in
+        let occurrences = activeRegimens.flatMap { regimen in
             MedicationScheduleEngine.occurrences(
                 regimen: regimen,
-                phases: allPhases.filter { $0.regimenID == regimen.id },
+                phases: phasesByRegimenID[regimen.id] ?? [],
                 from: start,
                 through: end
             )
         }.sorted { $0.scheduledAt < $1.scheduledAt }
-    }
-
-    private var todayOccurrences: [MedicationOccurrence] {
-        upcomingOccurrences.filter { scheduleCalendar.isDate($0.scheduledAt, inSameDayAs: Date()) }
-    }
-
-    private var asNeededRegimens: [MedicationRegimen] {
-        regimens.filter { $0.scheduleKind == .asNeeded }
+        return MedicationDashboard(
+            medications: medications,
+            archivedMedications: archivedMedications,
+            activeRegimens: activeRegimens,
+            regimensByMedicationID: regimensByMedicationID,
+            phasesByRegimenID: phasesByRegimenID,
+            medicationByID: medicationByID,
+            regimenByID: regimenByID,
+            recordByOccurrenceKey: recordByOccurrenceKey,
+            records: allDoseRecords,
+            todayOccurrences: occurrences.filter {
+                scheduleCalendar.isDate($0.scheduledAt, inSameDayAs: now)
+            },
+            futureOccurrences: occurrences.filter {
+                $0.scheduledAt > now && !scheduleCalendar.isDate($0.scheduledAt, inSameDayAs: now)
+            },
+            asNeededRegimens: activeRegimens.filter { $0.scheduleKind == .asNeeded }
+        )
     }
 
     var body: some View {
+        let dashboard = makeDashboard()
         List {
-            todaySection
-            asNeededSection
-            medicationSection
-            upcomingSection
-            archivedSection
+            todaySection(dashboard)
+            asNeededSection(dashboard)
+            medicationSection(dashboard)
+            upcomingSection(dashboard)
+            archivedSection(dashboard)
             safetySection
         }
         .navigationTitle("Medications")
@@ -91,17 +141,17 @@ struct MedicationsView: View {
     }
 
     @ViewBuilder
-    private var todaySection: some View {
+    private func todaySection(_ dashboard: MedicationDashboard) -> some View {
         Section {
-            if todayOccurrences.isEmpty {
+            if dashboard.todayOccurrences.isEmpty {
                 ContentUnavailableView(
                     "No scheduled doses today",
                     systemImage: "checkmark.circle",
                     description: Text("Scheduled doses will appear here.")
                 )
             } else {
-                ForEach(todayOccurrences) { occurrence in
-                    occurrenceRow(occurrence)
+                ForEach(dashboard.todayOccurrences) { occurrence in
+                    occurrenceRow(occurrence, dashboard: dashboard)
                 }
             }
         } header: {
@@ -110,11 +160,11 @@ struct MedicationsView: View {
     }
 
     @ViewBuilder
-    private var asNeededSection: some View {
-        if !asNeededRegimens.isEmpty {
+    private func asNeededSection(_ dashboard: MedicationDashboard) -> some View {
+        if !dashboard.asNeededRegimens.isEmpty {
             Section("As needed") {
-                ForEach(asNeededRegimens) { regimen in
-                    if let medication = medication(for: regimen) {
+                ForEach(dashboard.asNeededRegimens) { regimen in
+                    if let medication = dashboard.medicationByID[regimen.medicationID] {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(medication.name)
@@ -125,7 +175,11 @@ struct MedicationsView: View {
                             }
                             Spacer()
                             Button("Log dose") {
-                                logAsNeeded(medication: medication, regimen: regimen)
+                                logAsNeeded(
+                                    medication: medication,
+                                    regimen: regimen,
+                                    records: dashboard.records
+                                )
                             }
                             .buttonStyle(.bordered)
                         }
@@ -135,9 +189,9 @@ struct MedicationsView: View {
         }
     }
 
-    private var medicationSection: some View {
+    private func medicationSection(_ dashboard: MedicationDashboard) -> some View {
         Section {
-            if medications.isEmpty {
+            if dashboard.medications.isEmpty {
                 ContentUnavailableView {
                     Label("No medications", systemImage: "pills")
                 } description: {
@@ -147,43 +201,42 @@ struct MedicationsView: View {
                         .buttonStyle(.borderedProminent)
                 }
             } else {
-                ForEach(medications) { medication in
+                ForEach(dashboard.medications) { medication in
                     NavigationLink {
                         MedicationDetailView(
                             profile: profile,
                             medication: medication,
-                            regimens: regimens.filter { $0.medicationID == medication.id },
-                            phases: allPhases
+                            regimens: dashboard.regimensByMedicationID[medication.id] ?? [],
+                            phases: (dashboard.regimensByMedicationID[medication.id] ?? []).flatMap {
+                                dashboard.phasesByRegimenID[$0.id] ?? []
+                            }
                         )
                     } label: {
-                        medicationRow(medication)
+                        medicationRow(medication, dashboard: dashboard)
                     }
                 }
             }
         } header: {
-            AppSectionHeader(title: "Medication list", subtitle: medications.count.description)
+            AppSectionHeader(title: "Medication list", subtitle: dashboard.medications.count.description)
         }
     }
 
     @ViewBuilder
-    private var upcomingSection: some View {
-        let future = upcomingOccurrences.filter {
-            $0.scheduledAt > Date() && !scheduleCalendar.isDate($0.scheduledAt, inSameDayAs: Date())
-        }
-        if !future.isEmpty {
+    private func upcomingSection(_ dashboard: MedicationDashboard) -> some View {
+        if !dashboard.futureOccurrences.isEmpty {
             Section("Next 7 days") {
-                ForEach(future.prefix(12)) { occurrence in
-                    occurrenceRow(occurrence)
+                ForEach(dashboard.futureOccurrences.prefix(12)) { occurrence in
+                    occurrenceRow(occurrence, dashboard: dashboard)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private var archivedSection: some View {
-        if !archivedMedications.isEmpty {
+    private func archivedSection(_ dashboard: MedicationDashboard) -> some View {
+        if !dashboard.archivedMedications.isEmpty {
             Section("Archived") {
-                ForEach(archivedMedications) { medication in
+                ForEach(dashboard.archivedMedications) { medication in
                     HStack {
                         Label(medication.name, systemImage: "archivebox.fill")
                             .foregroundStyle(.secondary)
@@ -211,10 +264,13 @@ struct MedicationsView: View {
     }
 
     @ViewBuilder
-    private func occurrenceRow(_ occurrence: MedicationOccurrence) -> some View {
-        if let regimen = regimens.first(where: { $0.id == occurrence.regimenID }),
-           let medication = medication(for: regimen) {
-            let record = records.first { $0.occurrenceKey == occurrence.occurrenceKey }
+    private func occurrenceRow(
+        _ occurrence: MedicationOccurrence,
+        dashboard: MedicationDashboard
+    ) -> some View {
+        if let regimen = dashboard.regimenByID[occurrence.regimenID],
+           let medication = dashboard.medicationByID[regimen.medicationID] {
+            let record = dashboard.recordByOccurrenceKey[occurrence.occurrenceKey]
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -259,7 +315,7 @@ struct MedicationsView: View {
         }
     }
 
-    private func medicationRow(_ medication: Medication) -> some View {
+    private func medicationRow(_ medication: Medication, dashboard: MedicationDashboard) -> some View {
         HStack(spacing: 12) {
             Image(systemName: medication.needsRefill ? "pills.circle.fill" : "pills.fill")
                 .foregroundStyle(medication.needsRefill ? .orange : .red)
@@ -270,7 +326,7 @@ struct MedicationsView: View {
                     .font(.subheadline.weight(.semibold))
                 Text([
                     medication.strengthDescription,
-                    regimens.first(where: { $0.medicationID == medication.id })?.scheduleSummary
+                    dashboard.regimensByMedicationID[medication.id]?.first?.scheduleSummary
                 ].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -281,10 +337,6 @@ struct MedicationsView: View {
                 }
             }
         }
-    }
-
-    private func medication(for regimen: MedicationRegimen) -> Medication? {
-        medications.first { $0.id == regimen.medicationID }
     }
 
     private func doseText(_ value: Double) -> String {
@@ -306,7 +358,11 @@ struct MedicationsView: View {
         return parts.joined(separator: " · ")
     }
 
-    private func logAsNeeded(medication: Medication, regimen: MedicationRegimen) {
+    private func logAsNeeded(
+        medication: Medication,
+        regimen: MedicationRegimen,
+        records: [MedicationDoseRecord]
+    ) {
         switch MedicationScheduleEngine.asNeededDecision(
             regimen: regimen,
             records: records
@@ -382,8 +438,8 @@ struct MedicationsView: View {
 private struct MedicationDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \MedicationDoseRecord.loggedAt, order: .reverse) private var allDoseRecords: [MedicationDoseRecord]
-    @Query(sort: \MedicationSupplyLog.loggedAt, order: .reverse) private var allSupplyLogs: [MedicationSupplyLog]
+    @Query private var allDoseRecords: [MedicationDoseRecord]
+    @Query private var allSupplyLogs: [MedicationSupplyLog]
     let profile: CareProfile
     let medication: Medication
     let regimens: [MedicationRegimen]
@@ -396,15 +452,40 @@ private struct MedicationDetailView: View {
     @State private var doseRecordToDelete: MedicationDoseRecord?
     @State private var showingArchiveConfirmation = false
 
+    init(
+        profile: CareProfile,
+        medication: Medication,
+        regimens: [MedicationRegimen],
+        phases: [MedicationSchedulePhase]
+    ) {
+        self.profile = profile
+        self.medication = medication
+        self.regimens = regimens
+        self.phases = phases
+        let medicationID = medication.id
+        var doseDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.medicationID == medicationID },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        )
+        // The UI shows 30 rows and adherence covers at most 30 days. The editor
+        // caps schedules at 24 doses/day, so 750 retains the whole adherence
+        // window plus headroom without faulting years of history.
+        doseDescriptor.fetchLimit = 750
+        _allDoseRecords = Query(doseDescriptor)
+
+        var supplyDescriptor = FetchDescriptor<MedicationSupplyLog>(
+            predicate: #Predicate { $0.medicationID == medicationID },
+            sortBy: [SortDescriptor(\MedicationSupplyLog.loggedAt, order: .reverse)]
+        )
+        supplyDescriptor.fetchLimit = 30
+        _allSupplyLogs = Query(supplyDescriptor)
+    }
+
     private var activeRegimen: MedicationRegimen? { regimens.first { $0.isActive } }
 
-    private var records: [MedicationDoseRecord] {
-        allDoseRecords.filter { $0.medicationID == medication.id }
-    }
+    private var records: [MedicationDoseRecord] { allDoseRecords }
 
-    private var supplyLogs: [MedicationSupplyLog] {
-        allSupplyLogs.filter { $0.medicationID == medication.id }
-    }
+    private var supplyLogs: [MedicationSupplyLog] { allSupplyLogs }
 
     private var scheduleCalendar: Calendar {
         MedicationScheduleDate.currentCalendar()
@@ -545,47 +626,56 @@ private struct MedicationDetailView: View {
         .sheet(isPresented: $showingSupplyEditor) {
             supplyEditor
         }
-        .confirmationDialog(
-            "Delete this dose record?",
+        .appActionSheet(
             isPresented: Binding(
                 get: { doseRecordToDelete != nil },
                 set: { if !$0 { doseRecordToDelete = nil } }
             ),
-            titleVisibility: .visible
-        ) {
-            Button("Delete Dose", role: .destructive) {
-                if let record = doseRecordToDelete {
+            title: "Delete this dose record?",
+            message: "This removes the dose from medication history and the care timeline, and restores any supply that was deducted.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: doseRecordToDelete.map { record in
+                [AppActionSheetOption(
+                    title: "Delete Dose",
+                    subtitle: "Remove the dose and restore its deducted supply.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
                     MedicationService.deleteDoseRecord(
                         record,
                         medication: medication,
                         context: modelContext
                     )
-                }
-                doseRecordToDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                doseRecordToDelete = nil
-            }
-        } message: {
-            Text("This removes the dose from medication history and the care timeline, and restores any supply that was deducted.")
-        }
-        .confirmationDialog(
-            "Archive \(medication.name)?",
+                    doseRecordToDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { doseRecordToDelete = nil }
+        )
+        .appActionSheet(
             isPresented: $showingArchiveConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Archive Medication", role: .destructive) {
-                MedicationService.archive(
-                    medication: medication,
-                    regimens: regimens,
-                    context: modelContext
-                )
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Scheduled reminders will stop. You can restore this medication from the archived list.")
-        }
+            title: "Archive \(medication.name)?",
+            message: "Scheduled reminders will stop. You can restore this medication from the archived list.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Archive Medication",
+                    subtitle: "Stop its reminders and move it to the archived list.",
+                    systemImage: "archivebox.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    MedicationService.archive(
+                        medication: medication,
+                        regimens: regimens,
+                        context: modelContext
+                    )
+                    dismiss()
+                }
+            ]
+        )
     }
 
     @ViewBuilder

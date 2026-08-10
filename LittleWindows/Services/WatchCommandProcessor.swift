@@ -84,6 +84,9 @@ enum WatchCommandProcessor {
             if command.kind != .selectProfile,
                command.kind != .snoozeMedication,
                !PersistenceService.save(context: context) {
+                if command.kind == .discardTimer, let eventID = command.eventID {
+                    EventVisibilityStore.restore(eventID)
+                }
                 return acknowledgement(
                     for: command,
                     status: .rejected,
@@ -100,7 +103,7 @@ enum WatchCommandProcessor {
             if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
                 Task { @MainActor [container] in
                     await SystemIntegrationReconciler.reconcile(context: container.mainContext)
-                    WatchConnectivityService.shared.publishCurrentState()
+                    WatchConnectivityService.shared.scheduleCurrentStatePublish()
                 }
             }
         }
@@ -472,8 +475,11 @@ enum WatchCommandProcessor {
             guard event.isTimerDraft else {
                 return .rejected("That timer was already saved.")
             }
-            guard EventMutationService.discardTimer(event, context: context) else {
+            guard !event.isTimerRunning else {
                 return .rejected("Pause the timer before discarding it.")
+            }
+            guard EventMutationService.discardTimer(event, context: context) else {
+                return .rejected("That timer is no longer available.")
             }
         case .resumeTimer:
             guard event.isTimerDraft, !event.isTimerRunning else {

@@ -43,6 +43,7 @@ enum PersistenceService {
             SolidFoodEventItem.self,
             SolidAllergenProgress.self,
             PlannedSolidMeal.self,
+            CustomSolidRecipe.self,
             CareEvent.self,
             Medication.self,
             MedicationRegimen.self,
@@ -311,7 +312,6 @@ enum PersistenceService {
         )
     }
 
-    @MainActor
     @discardableResult
     static func save(
         context: ModelContext,
@@ -326,7 +326,10 @@ enum PersistenceService {
             return true
         } catch {
             context.rollback()
-            recordLocalSaveFailure(error.localizedDescription, defaults: defaults)
+            let description = error.localizedDescription
+            Task { @MainActor in
+                recordLocalSaveFailure(description, defaults: defaults)
+            }
             return false
         }
     }

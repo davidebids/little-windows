@@ -4,10 +4,10 @@ import WidgetKit
 
 @MainActor
 enum QuickLogActionPreferenceStore {
-    private static let prefix = "quickLog.pinnedActionIDs"
+    nonisolated private static let prefix = "quickLog.pinnedActionIDs"
     private static let maximumPinnedActions = 6
 
-    static func pinnedActionIDs(profileID: UUID?) -> [String] {
+    nonisolated static func pinnedActionIDs(profileID: UUID?) -> [String] {
         UserDefaults.standard.stringArray(forKey: key(profileID: profileID)) ?? []
     }
 
@@ -29,16 +29,16 @@ enum QuickLogActionPreferenceStore {
         return true
     }
 
-    private static func key(profileID: UUID?) -> String {
+    nonisolated private static func key(profileID: UUID?) -> String {
         "\(prefix).\(profileID?.uuidString ?? "default")"
     }
 }
 
 @MainActor
 enum CareCategoryPreferenceStore {
-    private static let prefix = "careCategory.hiddenTypeRawValues"
+    nonisolated private static let prefix = "careCategory.hiddenTypeRawValues"
 
-    static func hiddenTypes(profileID: UUID?) -> Set<EventType> {
+    nonisolated static func hiddenTypes(profileID: UUID?) -> Set<EventType> {
         Set((UserDefaults.standard.stringArray(forKey: key(profileID: profileID)) ?? []).compactMap(EventType.init(rawValue:)))
     }
 
@@ -69,14 +69,22 @@ enum CareCategoryPreferenceStore {
         return EventType.cases(for: profileType).filter { !hidden.contains($0) }
     }
 
-    private static func key(profileID: UUID?) -> String {
+    nonisolated private static func key(profileID: UUID?) -> String {
         "\(prefix).\(profileID?.uuidString ?? "default")"
     }
 }
 
 @MainActor
 enum WidgetSnapshotService {
-    private static var pendingFoodRefreshTask: Task<Void, Never>?
+    /// Shared snapshot encoding and atomic file replacement are serialized away
+    /// from SwiftUI's main actor. App Group file coordination can occasionally
+    /// stall while WidgetKit is reading the same file; timer controls must never
+    /// inherit that latency.
+    nonisolated private static var storageQueue: DispatchQueue {
+        SystemIntegrationStorage.widgetSnapshotQueue
+    }
+    private static var pendingFoodRefreshWorkItem: DispatchWorkItem?
+    private static var pendingFoodRefreshRevision: UUID?
 
     static func refresh(
         profile: CareProfile?,
@@ -96,28 +104,69 @@ enum WidgetSnapshotService {
         write(snapshot)
     }
 
+    /// Publishes a snapshot already aggregated by an isolated model actor.
+    /// Only the tiny enqueue happens on the caller; encoding, file replacement,
+    /// and WidgetKit invalidation stay on the storage queue.
+    static func publish(_ snapshot: WidgetSnapshot) {
+        write(snapshot)
+    }
+
     @discardableResult
     static func refreshActiveTimer(
         _ event: CareEvent,
+        profile: CareProfile? = nil,
         at date: Date = Date()
     ) -> ActiveTimerSnapshot {
-        var snapshot = read()
-        let existingTimer = snapshot.activeTimer
         let timer = activeSnapshot(
             event: event,
-            profileID: event.profileID ?? existingTimer?.profileID,
-            babyName: existingTimer?.babyName ?? snapshot.babyName,
-            additionalActiveCount: existingTimer?.additionalActiveCount ?? 0,
+            profileID: profile?.id ?? event.profileID,
+            babyName: profile?.name ?? "Baby",
+            additionalActiveCount: 0,
             now: date
         )
-        snapshot.generatedAt = date
-        snapshot.profileID = event.profileID ?? snapshot.profileID
-        snapshot.activeTimer = timer
-        write(snapshot)
+        // Never synchronously wait for the storage queue here. It may be busy
+        // coordinating a WidgetKit reload for several seconds on a device.
+        enqueueActiveTimerUpdate(
+            timer: timer,
+            profileID: profile?.id ?? event.profileID,
+            profileName: profile?.name,
+            now: date
+        )
         return timer
     }
 
-    static func makeSnapshot(
+    /// Updates only the timer portion of the shared snapshot. Timer completion
+    /// uses this fast path before broader summaries and predictions are rebuilt.
+    static func refreshActiveTimerState(
+        profile: CareProfile?,
+        events: [CareEvent],
+        now: Date = Date()
+    ) {
+        let timerDrafts = EventVisibilityStore.visibleEvents(in: events)
+            .filter(\.isTimerDraft)
+        let primary = EventTimerService.primaryActiveEvent(in: timerDrafts)
+            ?? timerDrafts.max { $0.updatedAt < $1.updatedAt }
+        let profileID = profile?.id
+        let profileName = profile?.name
+        let fallbackName = profileName ?? "Baby"
+        let timer = primary.map {
+            activeSnapshot(
+                event: $0,
+                profileID: profileID ?? $0.profileID,
+                babyName: fallbackName,
+                additionalActiveCount: max(0, timerDrafts.count - 1),
+                now: now
+            )
+        }
+        enqueueActiveTimerUpdate(
+            timer: timer,
+            profileID: profileID,
+            profileName: profileName,
+            now: now
+        )
+    }
+
+    nonisolated static func makeSnapshot(
         profileID: UUID? = nil,
         profileType: CareProfileType = .child,
         profileBirthDate: Date? = nil,
@@ -125,11 +174,17 @@ enum WidgetSnapshotService {
         babyName: String,
         events: [CareEvent],
         prediction: SleepPrediction?,
+        food: FoodWidgetSnapshot? = nil,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> WidgetSnapshot {
-        let timerDrafts = events.filter(\.isTimerDraft)
-        let primary = EventTimerService.primaryActiveEvent(in: timerDrafts)
+        // A cancelled background task may retain an event array captured before
+        // an optimistic deletion. Apply the process-wide tombstones here too so
+        // no widget build can resurrect a discarded timer. The visibility store
+        // is lock-protected, keeping this builder safe for model actors.
+        let visibleEvents = EventVisibilityStore.visibleEvents(in: events)
+        let timerDrafts = visibleEvents.filter(\.isTimerDraft)
+        let primary = primaryActiveEvent(in: timerDrafts)
             ?? timerDrafts.max { $0.updatedAt < $1.updatedAt }
         let activeTimer = primary.map {
             activeSnapshot(
@@ -140,12 +195,12 @@ enum WidgetSnapshotService {
                 now: now
             )
         }
-        let todayEvents = events.filter {
+        let todayEvents = visibleEvents.filter {
             !$0.isTimerDraft && $0.occursOnLocalDay(now, calendar: calendar)
         }
         let daily = DailySummaryService.summary(for: todayEvents)
         let careSessions = groupedCareSessions(todayEvents).count
-        let hasSolidHistory = events.contains {
+        let hasSolidHistory = visibleEvents.contains {
             $0.profileID == profileID && $0.type == .feed && $0.feedKind == .solid
         }
         let ageMonths = profileBirthDate.map {
@@ -154,6 +209,9 @@ enum WidgetSnapshotService {
         let allowsSolids = profileID != nil
             && profileType == .child
             && (solidsWorkspaceActivated || hasSolidHistory || ageMonths >= 6)
+        let visiblePrediction = visibleEvents.contains {
+            $0.isSleepBlock && $0.isTimerRunning
+        } ? nil : prediction
 
         return WidgetSnapshot(
             generatedAt: now,
@@ -161,7 +219,7 @@ enum WidgetSnapshotService {
             profileName: babyName,
             babyName: babyName,
             activeTimer: activeTimer,
-            prediction: prediction.map {
+            prediction: visiblePrediction.map {
                 PredictionSnapshot(
                     profileID: profileID,
                     profileName: babyName,
@@ -196,11 +254,11 @@ enum WidgetSnapshotService {
                 dogWalkSeconds: daily.walkTime,
                 summaryMetrics: summaryMetrics(for: profileType, daily: daily)
             ),
-            food: read().food,
+            food: food,
             quickActions: makeQuickActions(
                 profileID: profileID,
                 profileType: profileType,
-                events: events,
+                events: visibleEvents,
                 activeTimer: activeTimer,
                 pinnedActionIDs: QuickLogActionPreferenceStore.pinnedActionIDs(profileID: profileID),
                 now: now,
@@ -209,7 +267,7 @@ enum WidgetSnapshotService {
         )
     }
 
-    private static func summaryMetrics(
+    nonisolated private static func summaryMetrics(
         for profileType: CareProfileType,
         daily: DailySummary
     ) -> [CareSummaryMetricSnapshot] {
@@ -262,7 +320,7 @@ enum WidgetSnapshotService {
         }
     }
 
-    private static func metric(
+    nonisolated private static func metric(
         _ id: String,
         _ title: String,
         _ value: String,
@@ -280,7 +338,7 @@ enum WidgetSnapshotService {
         )
     }
 
-    static func makeQuickActions(
+    nonisolated static func makeQuickActions(
         profileID: UUID? = nil,
         profileType: CareProfileType,
         events: [CareEvent],
@@ -422,11 +480,13 @@ enum WidgetSnapshotService {
     }
 
     static func refreshFood(context: ModelContext, now: Date = Date()) {
-        let existing = read()
-        var snapshot = existing
-        snapshot.generatedAt = now
-        snapshot.food = makeFoodSnapshot(context: context, now: now)
-        write(snapshot)
+        let food = makeFoodSnapshot(context: context, now: now)
+        storageQueue.async {
+            var snapshot = readFromDisk()
+            snapshot.generatedAt = now
+            snapshot.food = food
+            persist(snapshot, reloadAllTimelines: true)
+        }
     }
 
     /// Food mutations should finish their UI update before rebuilding widget
@@ -434,21 +494,37 @@ enum WidgetSnapshotService {
     /// repeating the same bounded database reads for every tap.
     static func scheduleFoodRefresh(context: ModelContext) {
         let container = context.container
-        pendingFoodRefreshTask?.cancel()
-        pendingFoodRefreshTask = Task { @MainActor [container] in
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-            } catch {
-                return
+        let revision = UUID()
+        pendingFoodRefreshRevision = revision
+        pendingFoodRefreshWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [container] in
+            Task.detached(priority: .utility) { [container] in
+                let food = makeFoodSnapshot(context: ModelContext(container))
+                let isCurrent = await MainActor.run {
+                    pendingFoodRefreshRevision == revision
+                }
+                guard isCurrent else { return }
+                storageQueue.async {
+                    var snapshot = readFromDisk()
+                    snapshot.generatedAt = food.generatedAt
+                    snapshot.food = food
+                    persist(snapshot, reloadAllTimelines: true)
+                }
+                await MainActor.run {
+                    guard pendingFoodRefreshRevision == revision else { return }
+                    pendingFoodRefreshWorkItem = nil
+                    pendingFoodRefreshRevision = nil
+                }
             }
-            await AppInteractionMonitor.waitUntilIdle()
-            guard !Task.isCancelled else { return }
-            refreshFood(context: ModelContext(container))
-            pendingFoodRefreshTask = nil
         }
+        pendingFoodRefreshWorkItem = workItem
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + .milliseconds(250),
+            execute: workItem
+        )
     }
 
-    static func makeFoodSnapshot(
+    nonisolated static func makeFoodSnapshot(
         context: ModelContext,
         now: Date = Date()
     ) -> FoodWidgetSnapshot {
@@ -518,7 +594,7 @@ enum WidgetSnapshotService {
         )
     }
 
-    private static func shoppingItems(
+    nonisolated private static func shoppingItems(
         for lists: [ShoppingList],
         householdID: UUID,
         context: ModelContext
@@ -539,7 +615,7 @@ enum WidgetSnapshotService {
         }
     }
 
-    private static func shoppingItems(
+    nonisolated private static func shoppingItems(
         for lists: [ShoppingList],
         context: ModelContext
     ) -> [ShoppingListItem] {
@@ -559,7 +635,7 @@ enum WidgetSnapshotService {
         }
     }
 
-    static func activeSnapshot(
+    nonisolated static func activeSnapshot(
         event: CareEvent,
         profileID: UUID? = nil,
         babyName: String,
@@ -603,6 +679,7 @@ enum WidgetSnapshotService {
             typeRawValue: event.type.rawValue,
             eventLabel: runningLabel(for: event),
             systemImage: event.activityType?.systemImage ?? event.type.systemImage(for: event.profileTypeSnapshot),
+            sessionStartDate: event.startDate,
             startDate: event.timerDisplayStartDate(at: now),
             isRunning: event.isTimerRunning,
             elapsedSeconds: event.timerElapsed(at: now),
@@ -615,7 +692,13 @@ enum WidgetSnapshotService {
         )
     }
 
-    static func read() -> WidgetSnapshot {
+    nonisolated static func read() -> WidgetSnapshot {
+        storageQueue.sync {
+            readFromDisk()
+        }
+    }
+
+    nonisolated private static func readFromDisk() -> WidgetSnapshot {
         let url = SystemIntegrationConstants.sharedFileURL(
             SystemIntegrationConstants.widgetSnapshotFilename
         )
@@ -627,10 +710,58 @@ enum WidgetSnapshotService {
     }
 
     static func clear() {
-        write(.empty)
+        var snapshot = WidgetSnapshot.empty
+        snapshot.generatedAt = Date()
+        write(snapshot)
     }
 
-    private static func write(_ snapshot: WidgetSnapshot) {
+    private static func write(
+        _ snapshot: WidgetSnapshot,
+        reloadAllTimelines: Bool = true
+    ) {
+        storageQueue.async {
+            var snapshot = snapshot
+            if snapshot.food == nil {
+                snapshot.food = readFromDisk().food
+            }
+            persist(
+                snapshot,
+                reloadAllTimelines: reloadAllTimelines
+            )
+        }
+    }
+
+    nonisolated private static func enqueueActiveTimerUpdate(
+        timer: ActiveTimerSnapshot?,
+        profileID: UUID?,
+        profileName: String?,
+        now: Date
+    ) {
+        storageQueue.async {
+            var snapshot = readFromDisk()
+            snapshot.generatedAt = now
+            snapshot.profileID = profileID ?? snapshot.profileID
+            snapshot.profileName = profileName ?? snapshot.profileName
+            snapshot.babyName = profileName ?? snapshot.babyName
+            snapshot.activeTimer = timer
+            persist(snapshot, reloadAllTimelines: false)
+        }
+    }
+
+    nonisolated private static func persist(
+        _ snapshot: WidgetSnapshot,
+        reloadAllTimelines: Bool
+    ) {
+        // Model-actor analyses and system reconciliation can finish out of
+        // order. Never let an older timer-bearing snapshot overwrite a newer
+        // stopped/discarded state already visible to the widget.
+        if let data = try? Data(contentsOf: SystemIntegrationConstants.sharedFileURL(
+            SystemIntegrationConstants.widgetSnapshotFilename
+        )),
+           let current = try? JSONDecoder().decode(WidgetSnapshot.self, from: data),
+           current.generatedAt > snapshot.generatedAt {
+            return
+        }
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         let url = SystemIntegrationConstants.sharedFileURL(
             SystemIntegrationConstants.widgetSnapshotFilename
@@ -640,10 +771,20 @@ enum WidgetSnapshotService {
         } catch {
             return
         }
-        WidgetCenter.shared.reloadAllTimelines()
+        // WidgetCenter may synchronously coordinate with the widget host for
+        // several seconds on a physical device. The shared snapshot is already
+        // durable at this point, so timeline invalidation never belongs on the
+        // app's interaction-critical main actor.
+        if reloadAllTimelines {
+            WidgetCenter.shared.reloadAllTimelines()
+        } else {
+            WidgetCenter.shared.reloadTimelines(
+                ofKind: SystemIntegrationConstants.activeTimerWidgetKind
+            )
+        }
     }
 
-    private static func shoppingListSnapshot(
+    nonisolated private static func shoppingListSnapshot(
         list: ShoppingList,
         items: [ShoppingListItem],
         sectionNames: [UUID: String]
@@ -670,6 +811,20 @@ enum WidgetSnapshotService {
         )
     }
 
+    nonisolated private static func primaryActiveEvent(
+        in events: [CareEvent]
+    ) -> CareEvent? {
+        let priorities = EventTimerService.priority
+        return events
+            .filter(\.isTimerRunning)
+            .min { lhs, rhs in
+                let lhsPriority = priorities.firstIndex(of: lhs.type) ?? priorities.count
+                let rhsPriority = priorities.firstIndex(of: rhs.type) ?? priorities.count
+                if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+                return lhs.startDate < rhs.startDate
+            }
+    }
+
     private struct QuickLogActionCandidate {
         var action: QuickLogActionSnapshot
         var eventType: EventType
@@ -678,7 +833,7 @@ enum WidgetSnapshotService {
         var matches: (CareEvent) -> Bool
     }
 
-    private static func quickActionCandidates(for profileType: CareProfileType) -> [QuickLogActionCandidate] {
+    nonisolated private static func quickActionCandidates(for profileType: CareProfileType) -> [QuickLogActionCandidate] {
         switch profileType {
         case .child:
             [
@@ -723,7 +878,7 @@ enum WidgetSnapshotService {
         }
     }
 
-    private static func candidate(
+    nonisolated private static func candidate(
         _ id: String,
         _ title: String,
         _ subtitle: String?,
@@ -751,7 +906,7 @@ enum WidgetSnapshotService {
         )
     }
 
-    private static func candidate(
+    nonisolated private static func candidate(
         _ id: String,
         _ title: String,
         _ subtitle: String?,
@@ -775,7 +930,7 @@ enum WidgetSnapshotService {
         ) { $0.type == eventType }
     }
 
-    private static func groupedCareSessions(_ events: [CareEvent]) -> [Date] {
+    nonisolated private static func groupedCareSessions(_ events: [CareEvent]) -> [Date] {
         let dates = events.filter {
             $0.type == .feed || $0.type == .nursing
         }.map(\.startDate).sorted()
@@ -789,7 +944,7 @@ enum WidgetSnapshotService {
         return sessions
     }
 
-    private static func runningLabel(for event: CareEvent) -> String {
+    nonisolated private static func runningLabel(for event: CareEvent) -> String {
         switch event.type {
         case .sleep: "Sleeping"
         case .nursing: "Nursing"

@@ -157,9 +157,10 @@ enum CareReportExportService {
             predicate: #Predicate { $0.profileID == profileID && !$0.isArchived },
             sortBy: [SortDescriptor(\.name)]
         ))
-        let medicationIDs = Set(medications.map(\.id))
-        let medicationRegimens = try context.fetch(FetchDescriptor<MedicationRegimen>())
-            .filter { $0.isActive && medicationIDs.contains($0.medicationID) }
+        let medicationRegimens = try context.fetch(FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.profileID == profileID && $0.isActive },
+            sortBy: [SortDescriptor(\.createdAt)]
+        ))
 
         var normalizedOptions = options
         normalizedOptions.startDate = range.lowerBound
@@ -513,6 +514,26 @@ enum CareReportExportService {
             parts.appendIfPresent(event.solidReaction.map { "Reaction: \($0.displayName)" })
             if event.solidAllergenExposure == true { parts.append("Common allergen exposure") }
             if event.solidSensitivityObserved == true { parts.append("Sensitivity observed") }
+            let solidDetails = event.solidFoodDetails
+            let amountSummaries = solidDetails.compactMap(solidAmountSummary)
+            if !amountSummaries.isEmpty {
+                parts.append("Amounts: \(amountSummaries.joined(separator: "; "))")
+            }
+            let nutritionSnapshots = solidDetails.compactMap(\.nutritionSnapshot)
+            let nutrition = nutritionSnapshots.reduce(SolidNutritionValues()) {
+                $0.adding($1.nutrients)
+            }
+            let nutritionSummary = solidNutritionSummary(nutrition)
+            if !nutritionSummary.isEmpty {
+                let completeCount = nutritionSnapshots.filter(\.isComplete).count
+                let note = if nutritionSnapshots.count == solidDetails.count,
+                              completeCount == solidDetails.count {
+                    "Estimated nutrients"
+                } else {
+                    "Estimated nutrients (coverage: \(nutritionSnapshots.count) of \(solidDetails.count) foods quantified; \(completeCount) with all eight nutrients)"
+                }
+                parts.append("\(note): \(nutritionSummary)")
+            }
         case .nursing:
             parts.appendIfPresent(event.leftDurationSeconds.map { "Left: \(durationText(seconds: $0))" })
             parts.appendIfPresent(event.rightDurationSeconds.map { "Right: \(durationText(seconds: $0))" })
@@ -587,6 +608,49 @@ enum CareReportExportService {
             break
         }
         return compactJoined(parts)
+    }
+
+    private static func solidAmountSummary(_ detail: SolidFoodLogDetail) -> String? {
+        guard let unit = detail.portionUnit else { return nil }
+        if let eaten = detail.amountEaten {
+            return "\(detail.foodName) \(eaten.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName) eaten"
+        }
+        if let offered = detail.amountOffered, let estimate = detail.consumptionEstimate {
+            return "\(detail.foodName) \(estimate.displayName.lowercased()) of \(offered.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName)"
+        }
+        if let offered = detail.amountOffered {
+            return "\(detail.foodName) \(offered.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName) offered"
+        }
+        return nil
+    }
+
+    private static func solidNutritionSummary(_ values: SolidNutritionValues) -> String {
+        var valuesText: [String] = []
+        valuesText.appendIfPresent(values.energyKilocalories.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...1)))) kcal"
+        })
+        valuesText.appendIfPresent(values.proteinGrams.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...2)))) g protein"
+        })
+        valuesText.appendIfPresent(values.fatGrams.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...2)))) g fat"
+        })
+        valuesText.appendIfPresent(values.fiberGrams.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...2)))) g fiber"
+        })
+        valuesText.appendIfPresent(values.ironMilligrams.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...2)))) mg iron"
+        })
+        valuesText.appendIfPresent(values.zincMilligrams.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...2)))) mg zinc"
+        })
+        valuesText.appendIfPresent(values.calciumMilligrams.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...1)))) mg calcium"
+        })
+        valuesText.appendIfPresent(values.vitaminCMilligrams.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...2)))) mg vitamin C"
+        })
+        return valuesText.joined(separator: ", ")
     }
 
     static func medicationPlanDetails(

@@ -33,7 +33,7 @@ final class PredictionFactor {
     }
 }
 
-struct PredictionFactorValue: Codable, Hashable, Identifiable {
+struct PredictionFactorValue: Codable, Hashable, Identifiable, Sendable {
     var id = UUID()
     var name: String
     var valueDescription: String

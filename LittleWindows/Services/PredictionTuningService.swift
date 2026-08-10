@@ -15,6 +15,28 @@ struct AccuracyBreakdown: Identifiable, Hashable {
 }
 
 enum PredictionTuningService {
+    static func cachedCurrentPrediction(
+        profile: CareProfile?,
+        events: [CareEvent],
+        records: [SleepPredictionRecord],
+        settings: PredictionSettings = .default
+    ) -> SleepPrediction? {
+        guard let profile, profile.profileType == .child else { return nil }
+        guard !events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) else {
+            return nil
+        }
+        let committedEvents = events.filter { !$0.isTimerDraft }
+        let lastSleepID = latestCompletedSleepID(in: committedEvents)
+        let currentRecord = latestOpenRecord(in: records)
+        let cacheVersion = SleepPredictionEngine.cacheVersion(settings: settings)
+        guard let currentRecord,
+              currentRecord.basedOnLastSleepEventID == lastSleepID,
+              currentRecord.algorithmVersion == cacheVersion else {
+            return nil
+        }
+        return currentRecord.prediction
+    }
+
     static func currentPrediction(
         profile: CareProfile?,
         events: [CareEvent],
@@ -22,15 +44,18 @@ enum PredictionTuningService {
         settings: PredictionSettings = .default
     ) -> SleepPrediction? {
         guard let profile, profile.profileType == .child else { return nil }
-        let committedEvents = events.filter { !$0.isTimerDraft }
-        let lastSleepID = latestCompletedSleepID(in: committedEvents)
-        let currentRecord = latestOpenRecord(in: records)
-        let cacheVersion = SleepPredictionEngine.cacheVersion(settings: settings)
-        if let currentRecord,
-           currentRecord.basedOnLastSleepEventID == lastSleepID,
-           currentRecord.algorithmVersion == cacheVersion {
-            return currentRecord.prediction
+        guard !events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) else {
+            return nil
         }
+        if let cached = cachedCurrentPrediction(
+            profile: profile,
+            events: events,
+            records: records,
+            settings: settings
+        ) {
+            return cached
+        }
+        let committedEvents = events.filter { !$0.isTimerDraft }
         return SleepPredictionEngine.predict(
             profile: profile,
             events: committedEvents,
@@ -48,6 +73,11 @@ enum PredictionTuningService {
         settings: PredictionSettings = .default
     ) throws -> SleepPrediction? {
         guard let profile, profile.profileType == .child else { return nil }
+        guard !events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) else {
+            // Preserve the open prediction record so it can be replaced after
+            // this sleep is saved, but never present it while sleep is underway.
+            return nil
+        }
         let committedEvents = events.filter { !$0.isTimerDraft }
         let lastSleepID = latestCompletedSleepID(in: committedEvents)
         let currentRecord = latestOpenRecord(in: records)

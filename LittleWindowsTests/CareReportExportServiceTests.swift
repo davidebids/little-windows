@@ -58,6 +58,47 @@ final class CareReportExportServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testSolidNutritionExportReportsIncompleteFoodCoverage() {
+        let event = CareEvent(type: .feed)
+        event.feedKind = .solid
+        event.solidFoodDetails = [
+            SolidFoodLogDetail(
+                foodID: "banana",
+                foodName: "Banana",
+                amountEaten: 50,
+                portionUnit: .gram,
+                consumptionEstimate: .exact,
+                nutritionSnapshot: SolidNutritionSnapshot(
+                    sourceKind: .usdaFoodDataCentral,
+                    sourceID: "test-banana",
+                    sourceDescription: "Test banana",
+                    sourceVersion: "test",
+                    amountDescription: "50 g",
+                    eatenAmount: 50,
+                    portionUnit: .gram,
+                    estimatedEatenGrams: 50,
+                    nutrients: SolidNutritionValues(
+                        energyKilocalories: 44.5,
+                        proteinGrams: 0.55,
+                        fatGrams: 0.15,
+                        fiberGrams: 1.3,
+                        ironMilligrams: 0.13,
+                        zincMilligrams: 0.08,
+                        calciumMilligrams: 2.5,
+                        vitaminCMilligrams: 4.35
+                    ),
+                    isComplete: true,
+                    capturedAt: Date()
+                )
+            ),
+            SolidFoodLogDetail(foodID: "custom-test", foodName: "Test food")
+        ]
+
+        let details = CareReportExportService.detailsText(for: event)
+        XCTAssertTrue(details.contains("coverage: 1 of 2 foods quantified; 1 with all eight nutrients"))
+    }
+
+    @MainActor
     func testCSVIncludesAppointmentsAndMilestonesWhenEnabled() {
         let start = Date(timeIntervalSince1970: 1_800)
         let profile = CareProfile(

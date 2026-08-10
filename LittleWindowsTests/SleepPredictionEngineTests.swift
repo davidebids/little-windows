@@ -2277,6 +2277,12 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(tighten?.id, "tighten-window")
     }
 
+    func testSleepPlanButtonSymbolsAreAvailable() {
+        XCTAssertNotNil(UIImage(systemName: "calendar.badge.clock"))
+        XCTAssertNotNil(UIImage(systemName: "play.circle.fill"))
+        XCTAssertNotNil(UIImage(systemName: "checkmark.circle.fill"))
+    }
+
     func testSleepMiniPlanIncludesDayAheadTimeline() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -2321,6 +2327,153 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(items.map(\.id), ["awake-since", "next-window", "usual-bedtime"])
         XCTAssertEqual(items.first?.detail, "Nap ended")
         XCTAssertEqual(items.first?.timeText, DateFormatting.time.string(from: nap.endDate!))
+    }
+
+    func testSleepMiniPlanReplacesFutureWindowWhileSleepIsRunning() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(
+            from: DateComponents(year: 2026, month: 6, day: 20, hour: 9, minute: 30)
+        ))
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: try XCTUnwrap(calendar.date(
+                from: DateComponents(year: 2026, month: 2, day: 20)
+            ))
+        )
+        let completedSleep = CareEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-12 * 60 * 60),
+            endDate: now.addingTimeInterval(-4 * 60 * 60)
+        )
+        completedSleep.sleepKind = .nightSleep
+        let runningNap = CareEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-18 * 60)
+        )
+        runningNap.sleepKind = .nap
+        var prediction = makeLittleWindowPrediction()
+        prediction.predictedStart = now.addingTimeInterval(45 * 60)
+        prediction.predictedWindowStart = now.addingTimeInterval(20 * 60)
+        prediction.predictedWindowEnd = now.addingTimeInterval(70 * 60)
+
+        let plan = try XCTUnwrap(SleepMiniPlanService.plan(
+            profile: profile,
+            events: [completedSleep, runningNap],
+            records: [],
+            prediction: prediction,
+            now: now,
+            calendar: calendar
+        ))
+
+        XCTAssertEqual(plan.id, "sleep-in-progress")
+        XCTAssertEqual(plan.timelineItems.first?.id, "sleep-in-progress")
+        XCTAssertFalse(plan.timelineItems.contains { $0.id == "next-window" })
+        XCTAssertTrue(plan.summary.contains("recalculate"))
+    }
+
+    func testSleepMiniPlanUsesFirstNightOnsetInsteadOfLaterFragments() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(
+            from: DateComponents(year: 2026, month: 6, day: 30, hour: 12)
+        ))
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: now.addingTimeInterval(-180 * 86_400)
+        )
+        var events = [CareEvent]()
+
+        // Exercise the same history size as the reported profile. Most old
+        // entries should be cheap to discard; recent fragmented nights should
+        // contribute one representative onset each.
+        for offset in 0 ..< 5_964 {
+            let day = try XCTUnwrap(calendar.date(
+                byAdding: .day,
+                value: -(100 + offset),
+                to: now
+            ))
+            let start = try XCTUnwrap(calendar.date(
+                bySettingHour: 23,
+                minute: 32,
+                second: 0,
+                of: day
+            ))
+            let oldSleep = CareEvent(
+                profileID: profile.id,
+                type: .sleep,
+                startDate: start,
+                endDate: start.addingTimeInterval(60 * 60)
+            )
+            oldSleep.sleepKind = .nightSleep
+            events.append(oldSleep)
+        }
+
+        for dayOffset in -18 ..< 0 {
+            let day = try XCTUnwrap(calendar.date(
+                byAdding: .day,
+                value: dayOffset,
+                to: now
+            ))
+            let bedtime = try XCTUnwrap(calendar.date(
+                bySettingHour: 21,
+                minute: 0,
+                second: 0,
+                of: day
+            ))
+            let firstNightSleep = CareEvent(
+                profileID: profile.id,
+                type: .sleep,
+                startDate: bedtime,
+                endDate: bedtime.addingTimeInterval(9 * 60 * 60)
+            )
+            firstNightSleep.sleepKind = .nightSleep
+            events.append(firstNightSleep)
+
+            let laterFragmentStart = try XCTUnwrap(calendar.date(
+                bySettingHour: 23,
+                minute: 32,
+                second: 0,
+                of: day
+            ))
+            let laterFragment = CareEvent(
+                profileID: profile.id,
+                type: .sleep,
+                startDate: laterFragmentStart,
+                endDate: laterFragmentStart.addingTimeInterval(45 * 60)
+            )
+            laterFragment.sleepKind = .nightSleep
+            events.append(laterFragment)
+        }
+        XCTAssertEqual(events.count, 6_000)
+
+        var prediction = makeLittleWindowPrediction(kind: .bedtime)
+        prediction.confidenceLabel = .high
+        let plan = try XCTUnwrap(SleepMiniPlanService.plan(
+            profile: profile,
+            events: events,
+            records: [],
+            prediction: prediction,
+            now: now,
+            calendar: calendar
+        ))
+        let bedtimeItem = try XCTUnwrap(
+            plan.timelineItems.first { $0.id == "usual-bedtime" }
+        )
+        let expectedBedtime = try XCTUnwrap(calendar.date(
+            bySettingHour: 21,
+            minute: 0,
+            second: 0,
+            of: now
+        ))
+
+        XCTAssertEqual(
+            bedtimeItem.timeText,
+            DateFormatting.time.string(from: expectedBedtime)
+        )
+        XCTAssertTrue(bedtimeItem.detail.contains("18 recent nights"))
     }
 
     func testSleepMiniPlanUsesCircularBedtimeSpreadAcrossMidnight() throws {
@@ -2798,6 +2951,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         container.mainContext.insert(event)
         try container.mainContext.save()
+        WidgetSnapshotService.refresh(
+            profile: nil,
+            events: [event],
+            prediction: nil
+        )
 
         let processed = await IntegrationCommandProcessor.process(
             URL(string: "littlewindows://action/stop/\(event.id.uuidString)")!,
@@ -2809,6 +2967,38 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(event.isTimerDraft)
         XCTAssertFalse(event.isTimerRunning)
         XCTAssertGreaterThan(event.timerElapsed(), 0)
+        XCTAssertEqual(
+            WidgetSnapshotService.read().activeTimer?.resolvedIsRunning,
+            false
+        )
+    }
+
+    @MainActor
+    func testWidgetStopCommandOptimisticallyStopsSnapshotBeforeAppProcessing() {
+        let requestedAt = Date()
+        let event = CareEvent(
+            type: .sleep,
+            startDate: requestedAt.addingTimeInterval(-300)
+        )
+        event.sleepKind = .nap
+        WidgetSnapshotService.refresh(
+            profile: nil,
+            events: [event],
+            prediction: nil
+        )
+
+        let commandURL = IntegrationCommandStore.enqueue(
+            URL(string: "littlewindows://action/stop/\(event.id.uuidString)")!,
+            at: requestedAt
+        )
+        defer {
+            IntegrationCommandStore.clearPendingURL(matching: commandURL)
+        }
+
+        let timer = WidgetSnapshotService.read().activeTimer
+        XCTAssertEqual(timer?.id, event.id)
+        XCTAssertEqual(timer?.resolvedIsRunning, false)
+        XCTAssertEqual(timer?.resolvedElapsedSeconds ?? 0, 300, accuracy: 0.01)
     }
 
     @MainActor
@@ -3038,6 +3228,11 @@ final class SleepPredictionEngineTests: XCTestCase {
             profileID: profile.id
         )
 
+        XCTAssertNil(PredictionTuningService.cachedCurrentPrediction(
+            profile: profile,
+            events: [firstSleep, latestSleep],
+            records: [staleRecord]
+        ))
         let prediction = try XCTUnwrap(PredictionTuningService.currentPrediction(
             profile: profile,
             events: [firstSleep, latestSleep],
@@ -3094,6 +3289,12 @@ final class SleepPredictionEngineTests: XCTestCase {
             customBaselineMaximum: 60
         )
 
+        XCTAssertNil(PredictionTuningService.cachedCurrentPrediction(
+            profile: profile,
+            events: [nightSleep, latestSleep],
+            records: [cachedRecord],
+            settings: tunedSettings
+        ))
         let prediction = try XCTUnwrap(PredictionTuningService.currentPrediction(
             profile: profile,
             events: [nightSleep, latestSleep],
@@ -3106,6 +3307,91 @@ final class SleepPredictionEngineTests: XCTestCase {
             cachedRecord.algorithmVersion,
             SleepPredictionEngine.cacheVersion(settings: tunedSettings)
         )
+    }
+
+    func testCurrentPredictionSuppressesCachedWindowDuringRunningSleep() {
+        let now = Date()
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: now.addingTimeInterval(-150 * 86_400)
+        )
+        let completedSleep = CareEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-4 * 60 * 60),
+            endDate: now.addingTimeInterval(-3 * 60 * 60)
+        )
+        completedSleep.sleepKind = .nap
+        let runningSleep = CareEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-18 * 60)
+        )
+        runningSleep.sleepKind = .nap
+        let cachedRecord = SleepPredictionRecord(
+            prediction: SleepPrediction(
+                predictedStart: now.addingTimeInterval(45 * 60),
+                predictedWindowStart: now.addingTimeInterval(20 * 60),
+                predictedWindowEnd: now.addingTimeInterval(70 * 60),
+                predictionKind: .nap,
+                confidence: 0.9,
+                confidenceLabel: .high,
+                explanation: ["Cached"],
+                contributingFactors: [],
+                napIndex: 2
+            ),
+            basedOnLastSleepEventID: completedSleep.id,
+            profileID: profile.id,
+            settings: .default
+        )
+
+        let prediction = PredictionTuningService.currentPrediction(
+            profile: profile,
+            events: [completedSleep, runningSleep],
+            records: [cachedRecord]
+        )
+
+        XCTAssertNil(prediction)
+    }
+
+    func testCachedCurrentPredictionReturnsMatchingPersistedRecord() throws {
+        let now = Date()
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: now.addingTimeInterval(-150 * 86_400)
+        )
+        let latestSleep = CareEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-2 * 60 * 60),
+            endDate: now.addingTimeInterval(-90 * 60)
+        )
+        latestSleep.sleepKind = .nap
+        let expected = SleepPrediction(
+            predictedStart: now.addingTimeInterval(45 * 60),
+            predictedWindowStart: now.addingTimeInterval(25 * 60),
+            predictedWindowEnd: now.addingTimeInterval(65 * 60),
+            predictionKind: .nap,
+            confidence: 0.8,
+            confidenceLabel: .high,
+            explanation: ["Cached"],
+            contributingFactors: [],
+            napIndex: 2
+        )
+        let record = SleepPredictionRecord(
+            prediction: expected,
+            basedOnLastSleepEventID: latestSleep.id,
+            profileID: profile.id,
+            settings: .default
+        )
+
+        let cached = try XCTUnwrap(PredictionTuningService.cachedCurrentPrediction(
+            profile: profile,
+            events: [latestSleep],
+            records: [record]
+        ))
+
+        XCTAssertEqual(cached, expected)
     }
 
     func testAgeBaselineUsesFractionalMonthsForFourMonthWakeWindows() {
@@ -4569,6 +4855,12 @@ final class SleepPredictionEngineTests: XCTestCase {
             endDate: day.addingTimeInterval(23 * 3600)
         )
         evening.sleepKind = .nightSleep
+        let laterFragment = CareEvent(
+            type: .sleep,
+            startDate: day.addingTimeInterval(23 * 3600 + 32 * 60),
+            endDate: day.addingTimeInterval(24 * 3600)
+        )
+        laterFragment.sleepKind = .nightSleep
         let earlyMorning = CareEvent(
             type: .sleep,
             startDate: day.addingTimeInterval(26 * 3600),
@@ -4577,7 +4869,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         earlyMorning.sleepKind = .nightSleep
 
         let points = InsightsAnalyticsService.bedtimeExtraction(
-            events: [evening, earlyMorning],
+            events: [evening, laterFragment, earlyMorning],
             range: day..<end,
             calendar: calendar
         )
@@ -4777,30 +5069,62 @@ final class SleepPredictionEngineTests: XCTestCase {
             at: now.addingTimeInterval(-300)
         ))
 
-        WidgetSnapshotService.refresh(
+        WidgetSnapshotService.refreshActiveTimerState(
             profile: nil,
-            events: [event],
-            prediction: nil
+            events: [event]
         )
         XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.id, event.id)
         XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.resolvedIsRunning, true)
+        XCTAssertEqual(
+            WidgetSnapshotService.read().activeTimer?.sessionStartDate,
+            event.startDate
+        )
 
         EventTimerService.stop(event, context: container.mainContext, at: now)
-        WidgetSnapshotService.refresh(
+        WidgetSnapshotService.refreshActiveTimerState(
             profile: nil,
-            events: [event],
-            prediction: nil
+            events: [event]
         )
         XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.id, event.id)
         XCTAssertEqual(WidgetSnapshotService.read().activeTimer?.resolvedIsRunning, false)
 
         EventTimerService.save(event, context: container.mainContext, at: now)
-        WidgetSnapshotService.refresh(
+        WidgetSnapshotService.refreshActiveTimerState(
             profile: nil,
-            events: [event],
-            prediction: nil
+            events: [event]
         )
         XCTAssertNil(WidgetSnapshotService.read().activeTimer)
+    }
+
+    @MainActor
+    func testWidgetSnapshotSuppressesFutureWindowWhileSleepIsRunning() {
+        let now = Date()
+        let runningSleep = CareEvent(
+            type: .sleep,
+            startDate: now.addingTimeInterval(-18 * 60)
+        )
+        runningSleep.sleepKind = .nap
+        let prediction = SleepPrediction(
+            predictedStart: now.addingTimeInterval(45 * 60),
+            predictedWindowStart: now.addingTimeInterval(20 * 60),
+            predictedWindowEnd: now.addingTimeInterval(70 * 60),
+            predictionKind: .nap,
+            confidence: 0.9,
+            confidenceLabel: .high,
+            explanation: [],
+            contributingFactors: [],
+            napIndex: 2
+        )
+
+        let snapshot = WidgetSnapshotService.makeSnapshot(
+            babyName: "Test Child",
+            events: [runningSleep],
+            prediction: prediction,
+            now: now
+        )
+
+        XCTAssertNil(snapshot.prediction)
+        XCTAssertEqual(snapshot.activeTimer?.id, runningSleep.id)
     }
 
     @MainActor
@@ -5617,6 +5941,8 @@ final class SleepPredictionEngineTests: XCTestCase {
 
         XCTAssertEqual(result, correctedStart)
         XCTAssertEqual(event.startDate, correctedStart)
+        XCTAssertEqual(snapshot.resolvedSessionStartDate, correctedStart)
+        XCTAssertEqual(snapshot.startedSincePrefix, "Sleeping since")
         XCTAssertEqual(snapshot.startDate, correctedStart)
         XCTAssertEqual(snapshot.elapsedSeconds ?? 0, 420, accuracy: 0.001)
         XCTAssertEqual(widgetSnapshot.activeTimer?.startDate, correctedStart)
@@ -5654,6 +5980,145 @@ final class SleepPredictionEngineTests: XCTestCase {
             snapshot.activeNursingSideTimerStartDate,
             now.addingTimeInterval(-480)
         )
+    }
+
+    @MainActor
+    func testLiveActivityReconciliationEndsOnlyWhenTimerIsAuthoritativelyAbsent() {
+        let timerID = UUID()
+        let candidate = LiveActivityReconciliationCandidate(
+            activityID: "activity-a",
+            timerID: timerID,
+            isReusable: true
+        )
+
+        XCTAssertEqual(
+            LiveActivityReconciliationPlan.make(
+                timerID: nil,
+                activitiesEnabled: false,
+                candidates: [candidate]
+            ),
+            .end(activityIDs: ["activity-a"])
+        )
+        XCTAssertEqual(
+            LiveActivityReconciliationPlan.make(
+                timerID: timerID,
+                activitiesEnabled: false,
+                candidates: [candidate]
+            ),
+            .preserve
+        )
+    }
+
+    @MainActor
+    func testLiveActivityReconciliationPreservesMatchAndCleansOnlyDuplicates() {
+        let timerID = UUID()
+        let candidates = [
+            LiveActivityReconciliationCandidate(
+                activityID: "matching",
+                timerID: timerID,
+                isReusable: true
+            ),
+            LiveActivityReconciliationCandidate(
+                activityID: "obsolete",
+                timerID: UUID(),
+                isReusable: true
+            )
+        ]
+
+        XCTAssertEqual(
+            LiveActivityReconciliationPlan.make(
+                timerID: timerID,
+                activitiesEnabled: true,
+                candidates: candidates
+            ),
+            .update(
+                activityID: "matching",
+                obsoleteActivityIDs: ["obsolete"]
+            )
+        )
+    }
+
+    @MainActor
+    func testLiveActivityReconciliationReplacesEndedMatchWithoutPreemptiveCleanup() {
+        let timerID = UUID()
+        let ended = LiveActivityReconciliationCandidate(
+            activityID: "ended",
+            timerID: timerID,
+            isReusable: false
+        )
+
+        XCTAssertEqual(
+            LiveActivityReconciliationPlan.make(
+                timerID: timerID,
+                activitiesEnabled: true,
+                candidates: [ended]
+            ),
+            .requestReplacement(obsoleteActivityIDs: ["ended"])
+        )
+    }
+
+    @MainActor
+    func testRunningLiveActivitySnapshotIgnoresClockOnlyProgress() {
+        let now = Date(timeIntervalSinceReferenceDate: 175_000)
+        let event = CareEvent(
+            type: .nursing,
+            startDate: now.addingTimeInterval(-900)
+        )
+        event.timerState = .running
+        event.timerAccumulatedSeconds = 600
+        event.activeTimerSegmentStartDate = now.addingTimeInterval(-300)
+        event.nursingSide = .right
+        event.activeNursingSide = .right
+        event.leftDurationSeconds = 420
+        event.rightDurationSeconds = 180
+
+        let initial = WidgetSnapshotService.activeSnapshot(
+            event: event,
+            babyName: "Test Child",
+            additionalActiveCount: 0,
+            now: now
+        )
+        let oneMinuteLater = WidgetSnapshotService.activeSnapshot(
+            event: event,
+            babyName: "Test Child",
+            additionalActiveCount: 0,
+            now: now.addingTimeInterval(60)
+        )
+
+        XCTAssertGreaterThan(
+            oneMinuteLater.rightDurationSeconds,
+            initial.rightDurationSeconds
+        )
+        XCTAssertTrue(initial.isEquivalentLiveActivityState(to: oneMinuteLater))
+    }
+
+    @MainActor
+    func testLiveActivitySnapshotDoesNotDeduplicateRealTimerChanges() {
+        let now = Date(timeIntervalSinceReferenceDate: 180_000)
+        let event = CareEvent(type: .nursing, startDate: now.addingTimeInterval(-300))
+        event.timerState = .running
+        event.activeTimerSegmentStartDate = event.startDate
+        event.nursingSide = .left
+        event.activeNursingSide = .left
+
+        let initial = WidgetSnapshotService.activeSnapshot(
+            event: event,
+            babyName: "Test Child",
+            additionalActiveCount: 0,
+            now: now
+        )
+        var switchedSide = initial
+        switchedSide.activeNursingSideRawValue = NursingSide.right.rawValue
+        XCTAssertFalse(initial.isEquivalentLiveActivityState(to: switchedSide))
+
+        var paused = initial
+        paused.isRunning = false
+        paused.elapsedSeconds = initial.resolvedElapsedSeconds
+        XCTAssertFalse(initial.isEquivalentLiveActivityState(to: paused))
+
+        var correctedStart = initial
+        correctedStart.sessionStartDate = initial.resolvedSessionStartDate.addingTimeInterval(-60)
+        XCTAssertFalse(initial.isEquivalentLiveActivityState(to: correctedStart))
     }
 
     @MainActor
@@ -5747,11 +6212,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         XCTAssertEqual(event.timerElapsed(), 180, accuracy: 0.001)
 
-        EventTimerService.save(
+        XCTAssertTrue(EventTimerService.save(
             event,
             context: container.mainContext,
             at: start.addingTimeInterval(500)
-        )
+        ))
         XCTAssertFalse(event.isTimerDraft)
         XCTAssertEqual(
             event.endDate?.timeIntervalSince(event.startDate) ?? 0,
@@ -5760,6 +6225,113 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
         XCTAssertNil(event.timerState)
         XCTAssertNil(event.timerAccumulatedSeconds)
+        XCTAssertFalse(EventTimerService.save(
+            event,
+            context: container.mainContext,
+            at: start.addingTimeInterval(510)
+        ))
+    }
+
+    @MainActor
+    func testRunningTimerDraftCanBeDiscardedImmediately() throws {
+        let container = try makeInMemoryContainer()
+        let event = try XCTUnwrap(EventTimerService.start(
+            type: .sleep,
+            sleepKind: .nap,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            at: Date(timeIntervalSinceReferenceDate: 625_000)
+        ))
+
+        XCTAssertTrue(event.isTimerRunning)
+        XCTAssertTrue(EventMutationService.discardTimer(
+            event,
+            context: container.mainContext
+        ))
+        // A cancelled widget/Live Activity task may still retain its original
+        // event array. The in-process tombstone must keep that stale array from
+        // resurrecting the discarded timer on any surface.
+        XCTAssertNil(EventTimerService.primaryActiveEvent(in: [event]))
+        XCTAssertNil(WidgetSnapshotService.makeSnapshot(
+            babyName: "Test Child",
+            events: [event],
+            prediction: nil
+        ).activeTimer)
+        XCTAssertTrue(PersistenceService.save(context: container.mainContext))
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<CareEvent>()).isEmpty)
+    }
+
+    @MainActor
+    func testTimerDiscardTombstonesAndDeletesWithoutIdleDelay() throws {
+        let container = try makeInMemoryContainer()
+        let event = try XCTUnwrap(EventTimerService.start(
+            type: .sleep,
+            sleepKind: .nap,
+            caregiverName: "Caregiver 1",
+            events: [],
+            context: container.mainContext,
+            at: Date(timeIntervalSinceReferenceDate: 626_000)
+        ))
+
+        XCTAssertTrue(EventMutationService.discardTimer(
+            event,
+            context: container.mainContext
+        ))
+        XCTAssertTrue(
+            try container.mainContext.fetch(FetchDescriptor<CareEvent>()).isEmpty,
+            "The timer should be removed immediately instead of waiting for an arbitrary idle window."
+        )
+        XCTAssertFalse(EventVisibilityStore.isVisible(event))
+
+        XCTAssertTrue(EventMutationService.persistTimerMutations(
+            context: container.mainContext
+        ))
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<CareEvent>()).isEmpty)
+    }
+
+    @MainActor
+    func testIsolatedEventPersistenceOrdersRapidTimerMutationsWithoutDirtyingMainContext() async throws {
+        let container = try makeInMemoryContainer()
+        let event = CareEvent(
+            profileID: UUID(),
+            type: .sleep,
+            startDate: Date(timeIntervalSinceReferenceDate: 626_500)
+        )
+        event.sleepKind = .nap
+        event.timerState = .running
+        event.activeTimerSegmentStartDate = event.startDate
+
+        let initialUpsert = EventMutationService.timerPersistenceRequest(for: event)
+        let didUpsert = await EventMutationService.persistTimerMutation(
+            initialUpsert,
+            container: container
+        )
+        XCTAssertTrue(didUpsert)
+        XCTAssertFalse(container.mainContext.hasChanges)
+
+        var verificationContext = ModelContext(container)
+        XCTAssertEqual(
+            try verificationContext.fetch(FetchDescriptor<CareEvent>()).map(\.id),
+            [event.id]
+        )
+
+        let deletion = EventMutationService.timerPersistenceRequest(for: event, deleting: true)
+        let didDelete = await EventMutationService.persistTimerMutation(
+            deletion,
+            container: container
+        )
+        XCTAssertTrue(didDelete)
+        // Replaying an older, delayed upsert must not resurrect the timer.
+        let didIgnoreStaleUpsert = await EventMutationService.persistTimerMutation(
+            initialUpsert,
+            container: container
+        )
+        XCTAssertTrue(didIgnoreStaleUpsert)
+
+        verificationContext = ModelContext(container)
+        XCTAssertTrue(try verificationContext.fetch(FetchDescriptor<CareEvent>()).isEmpty)
+        XCTAssertFalse(container.mainContext.hasChanges)
     }
 
     @MainActor
@@ -5778,12 +6350,12 @@ final class SleepPredictionEngineTests: XCTestCase {
         ))
 
         EventTimerService.stop(event, context: container.mainContext, at: stoppedAt)
-        EventTimerService.save(
+        XCTAssertTrue(EventTimerService.save(
             event,
             context: container.mainContext,
             at: stoppedAt,
             endDate: editedEnd
-        )
+        ))
 
         XCTAssertFalse(event.isTimerDraft)
         XCTAssertEqual(event.endDate, editedEnd)
@@ -6453,7 +7025,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             imageData: Data([1, 3, 5, 7]),
             thumbnailData: Data([1, 3])
         )
-        let item = try XCTUnwrap(SolidFoodCatalogService.create(
+        _ = try XCTUnwrap(SolidFoodCatalogService.create(
             name: "  Family oatmeal  ",
             photoDraft: photoDraft,
             existingItems: [],

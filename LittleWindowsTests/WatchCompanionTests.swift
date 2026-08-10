@@ -489,6 +489,39 @@ final class WatchCompanionTests: XCTestCase {
     }
 
     @MainActor
+    func testWatchDiscardStillRequiresPausedDraft() async throws {
+        let container = try makeInMemoryContainer()
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: Date().addingTimeInterval(-180 * 86_400)
+        )
+        let event = CareEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: Date().addingTimeInterval(-300)
+        )
+        event.timerState = .running
+        event.activeTimerSegmentStartDate = event.startDate
+        container.mainContext.insert(profile)
+        container.mainContext.insert(event)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+
+        let acknowledgement = await WatchCommandProcessor.process(
+            WatchCommand(
+                kind: .discardTimer,
+                profileID: profile.id,
+                eventID: event.id,
+                expectedEventUpdatedAt: event.updatedAt
+            ),
+            container: container
+        )
+
+        XCTAssertEqual(acknowledgement.status, .rejected)
+        XCTAssertNotNil(fetchEvent(event.id, context: container.mainContext))
+    }
+
+    @MainActor
     func testWatchQuickLogCreatesCompleteDogPottyEvent() async throws {
         let container = try makeInMemoryContainer()
         let profile = CareProfile(
@@ -769,6 +802,55 @@ final class WatchCompanionTests: XCTestCase {
             state.selectedProfile?.activeTimerCategoryRawValues,
             [EventType.nursing.rawValue, EventType.sleep.rawValue].sorted()
         )
+    }
+
+    @MainActor
+    func testWatchStateSuppressesStaleWindowWhileSleepIsRunning() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let profile = CareProfile(
+            name: "Test Child",
+            birthDate: now.addingTimeInterval(-180 * 86_400)
+        )
+        container.mainContext.insert(profile)
+        try container.mainContext.save()
+        ProfileService.shared.switchProfile(profile)
+
+        let prediction = SleepPrediction(
+            predictedStart: now.addingTimeInterval(45 * 60),
+            predictedWindowStart: now.addingTimeInterval(20 * 60),
+            predictedWindowEnd: now.addingTimeInterval(70 * 60),
+            predictionKind: .nap,
+            confidence: 0.9,
+            confidenceLabel: .high,
+            explanation: [],
+            contributingFactors: [],
+            napIndex: 2
+        )
+        WidgetSnapshotService.refresh(
+            profile: profile,
+            events: [],
+            prediction: prediction
+        )
+
+        let runningSleep = CareEvent(
+            profileID: profile.id,
+            type: .sleep,
+            startDate: now.addingTimeInterval(-18 * 60)
+        )
+        runningSleep.sleepKind = .nap
+        runningSleep.timerState = .running
+        runningSleep.activeTimerSegmentStartDate = runningSleep.startDate
+        container.mainContext.insert(runningSleep)
+        try container.mainContext.save()
+
+        let state = WatchStateFactory.make(
+            context: container.mainContext,
+            now: now
+        )
+
+        XCTAssertNil(state.prediction)
+        XCTAssertEqual(state.activeTimers.map(\.id), [runningSleep.id])
     }
 
     @MainActor

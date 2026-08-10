@@ -110,7 +110,9 @@ private struct TripItineraryView: View {
     @State private var appliedInitialItem = false
     @State private var showingWeatherAttribution = false
     @State private var showingTripEditor = false
+    @State private var showingArchiveConfirmation = false
     @State private var showingDeleteConfirmation = false
+    @State private var itemPendingDelete: TripItineraryItem?
 
     private var itineraryDays: [Date] {
         let calendar = trip.tripCalendar
@@ -184,6 +186,58 @@ private struct TripItineraryView: View {
             } message: {
                 Text(failureMessage ?? "Please try again.")
             }
+            .appActionSheet(
+                isPresented: $showingArchiveConfirmation,
+                title: "Archive Trip?",
+                message: "This hides the trip from active planning. You can restore it later.",
+                systemImage: "archivebox.fill",
+                tint: .orange,
+                options: [
+                    AppActionSheetOption(
+                        title: "Archive Trip",
+                        subtitle: trip.title,
+                        systemImage: "archivebox.fill",
+                        tint: .orange
+                    ) {
+                        if TripPackingService.archive(trip, context: modelContext) {
+                            dismiss()
+                        } else {
+                            failureMessage = "The trip couldn’t be archived."
+                        }
+                    }
+                ]
+            )
+            .appActionSheet(
+                isPresented: Binding(
+                    get: { itemPendingDelete != nil },
+                    set: { if !$0 { itemPendingDelete = nil } }
+                ),
+                title: "Delete Itinerary Item?",
+                message: itemPendingDelete.map { "This permanently removes \($0.title) from the itinerary." },
+                systemImage: "trash.fill",
+                tint: .red,
+                options: itemPendingDelete.map { item in
+                    [AppActionSheetOption(
+                        title: "Delete Item",
+                        subtitle: item.title,
+                        systemImage: "trash.fill",
+                        tint: .red,
+                        role: .destructive
+                    ) {
+                        if !TripItineraryService.deleteItem(
+                            item,
+                            trip: trip,
+                            choiceGroups: choiceGroups,
+                            links: links,
+                            context: modelContext
+                        ) {
+                            failureMessage = "The itinerary item couldn’t be deleted."
+                        }
+                        itemPendingDelete = nil
+                    }]
+                } ?? [],
+                cancelAction: { itemPendingDelete = nil }
+            )
             .appActionSheet(
                 isPresented: $showingDeleteConfirmation,
                 title: "Delete Trip?",
@@ -403,11 +457,7 @@ private struct TripItineraryView: View {
                         if !trip.isArchived {
                             Divider()
                             Button("Archive", systemImage: "archivebox", role: .destructive) {
-                                if TripPackingService.archive(trip, context: modelContext) {
-                                    dismiss()
-                                } else {
-                                    failureMessage = "The trip couldn’t be archived."
-                                }
+                                showingArchiveConfirmation = true
                             }
                         }
                         Divider()
@@ -483,15 +533,7 @@ private struct TripItineraryView: View {
             },
             delete: {
                 guard !trip.isArchived else { return }
-                if !TripItineraryService.deleteItem(
-                    item,
-                    trip: trip,
-                    choiceGroups: choiceGroups,
-                    links: links,
-                    context: modelContext
-                ) {
-                    failureMessage = "The itinerary item couldn’t be deleted."
-                }
+                itemPendingDelete = item
             }
         )
         .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 6, trailing: 20))
@@ -521,15 +563,7 @@ private struct TripItineraryView: View {
             },
             editItem: { editingItem = $0 },
             deleteItem: { item in
-                if !TripItineraryService.deleteItem(
-                    item,
-                    trip: trip,
-                    choiceGroups: choiceGroups,
-                    links: links,
-                    context: modelContext
-                ) {
-                    failureMessage = "The itinerary item couldn’t be deleted."
-                }
+                itemPendingDelete = item
             },
             toggleTask: { item in
                 if !TripItineraryService.setCompleted(
