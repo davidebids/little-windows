@@ -47,8 +47,12 @@ struct LittleWindowsLiveActivity: Widget {
                     timerControl(for: timer, tint: tint)
                 }
 
-                if hasDetails(timer) {
-                    detailBar(for: timer, tint: tint)
+                if hasDetails(timer) || timer.resolvedIsRunning {
+                    detailBar(
+                        for: timer,
+                        tint: tint,
+                        includesSessionStart: true
+                    )
                 }
             }
             .padding(.horizontal, 14)
@@ -137,6 +141,11 @@ struct LittleWindowsLiveActivity: Widget {
                                 .tint(tint)
                             }
                         }
+                        if timer.resolvedIsRunning {
+                            startedSinceLabel(for: timer)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             } compactLeading: {
@@ -209,7 +218,11 @@ struct LittleWindowsLiveActivity: Widget {
     }
 
     @ViewBuilder
-    private func detailBar(for timer: ActiveTimerSnapshot, tint: Color) -> some View {
+    private func detailBar(
+        for timer: ActiveTimerSnapshot,
+        tint: Color,
+        includesSessionStart: Bool = false
+    ) -> some View {
         HStack(spacing: 8) {
             if let caregiver = timer.caregiverName, !caregiver.isEmpty {
                 detailPill(caregiver, icon: "person.fill", tint: tint)
@@ -220,7 +233,13 @@ struct LittleWindowsLiveActivity: Widget {
             if timer.additionalActiveCount > 0 {
                 detailPill("+\(timer.additionalActiveCount) active", icon: "plus", tint: tint)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: includesSessionStart ? 6 : 0)
+            if includesSessionStart, timer.resolvedIsRunning {
+                startedSinceLabel(for: timer)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .layoutPriority(1)
+            }
         }
     }
 
@@ -261,6 +280,8 @@ struct LittleWindowsLiveActivity: Widget {
     private func detailPill(_ text: String, icon: String, tint: Color) -> some View {
         Label(text, systemImage: icon)
             .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .foregroundStyle(.white.opacity(0.74))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -273,5 +294,15 @@ struct LittleWindowsLiveActivity: Widget {
     private func shortDuration(_ seconds: TimeInterval) -> String {
         let minutes = max(0, Int(seconds / 60))
         return "\(minutes)m"
+    }
+
+    private func startedSinceLabel(for timer: ActiveTimerSnapshot) -> some View {
+        HStack(spacing: 3) {
+            Text(timer.startedSincePrefix)
+            Text(timer.resolvedSessionStartDate, style: .time)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .accessibilityElement(children: .combine)
     }
 }

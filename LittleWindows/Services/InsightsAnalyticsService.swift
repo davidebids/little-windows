@@ -44,6 +44,10 @@ struct DailySolidsReportSummary: Identifiable, Hashable {
     var date: Date
     var meals: Int
     var newFoods: Int
+    var nutrients: SolidNutritionValues = SolidNutritionValues()
+    var quantifiedFoodCount: Int = 0
+    var completeNutritionFoodCount: Int = 0
+    var foodCount: Int = 0
 }
 
 struct SolidsReportSnapshot: Hashable {
@@ -52,10 +56,21 @@ struct SolidsReportSnapshot: Hashable {
     var newFoodCount: Int
     var allergenExposureCount: Int
     var reactionObservationCount: Int
+    var nutrients: SolidNutritionValues = SolidNutritionValues()
+    var quantifiedFoodCount: Int = 0
+    var completeNutritionFoodCount: Int = 0
+    var foodCount: Int = 0
     var daily: [DailySolidsReportSummary]
 }
 
 enum SolidsReportingService {
+    private struct DailyNutritionAccumulator {
+        var nutrients = SolidNutritionValues()
+        var quantifiedFoodCount = 0
+        var completeNutritionFoodCount = 0
+        var foodCount = 0
+    }
+
     static func snapshot(
         profileID: UUID,
         events: [CareEvent],
@@ -88,27 +103,64 @@ enum SolidsReportingService {
             guard $0.profileID == profileID, let firstTriedAt = $0.firstTriedAt else { return false }
             return includedDays.contains(calendar.startOfDay(for: firstTriedAt))
         }
-        let allergenExposures = Set(items.flatMap { item in
-            item.allergenIDs.map { "\(item.eventID.uuidString)|\($0)" }
-        })
         let mealsByDay = Dictionary(grouping: solidEvents) {
             $0.localStartDay(calendar: calendar)
         }.mapValues(\.count)
         let newFoodsByDay = Dictionary(grouping: newFoodProgress) {
             calendar.startOfDay(for: $0.firstTriedAt ?? firstDay)
         }.mapValues(\.count)
+        let dayByEventID = Dictionary(
+            uniqueKeysWithValues: solidEvents.map { ($0.id, $0.localStartDay(calendar: calendar)) }
+        )
+        var uniqueFoodIDs = Set<String>()
+        var allergenExposures = Set<String>()
+        var reactionObservationCount = 0
+        var totalNutrition = DailyNutritionAccumulator()
+        var nutritionByDay = [Date: DailyNutritionAccumulator]()
+        for item in items {
+            uniqueFoodIDs.insert(item.foodID)
+            for allergenID in item.allergenIDs {
+                allergenExposures.insert("\(item.eventID.uuidString)|\(allergenID)")
+            }
+            if item.suspectedReaction { reactionObservationCount += 1 }
+
+            let itemDay = dayByEventID[item.eventID] ?? firstDay
+            totalNutrition.foodCount += 1
+            nutritionByDay[itemDay, default: DailyNutritionAccumulator()].foodCount += 1
+
+            // nutritionSnapshot is JSON-backed. Decode it once per item and use
+            // that value for both the period and daily aggregates.
+            guard let snapshot = item.nutritionSnapshot else { continue }
+            totalNutrition.nutrients = totalNutrition.nutrients.adding(snapshot.nutrients)
+            totalNutrition.quantifiedFoodCount += 1
+            if snapshot.isComplete { totalNutrition.completeNutritionFoodCount += 1 }
+            var dailyNutrition = nutritionByDay[itemDay, default: DailyNutritionAccumulator()]
+            dailyNutrition.nutrients = dailyNutrition.nutrients.adding(snapshot.nutrients)
+            dailyNutrition.quantifiedFoodCount += 1
+            if snapshot.isComplete { dailyNutrition.completeNutritionFoodCount += 1 }
+            nutritionByDay[itemDay] = dailyNutrition
+        }
 
         return SolidsReportSnapshot(
             mealCount: solidEvents.count,
-            uniqueFoodCount: Set(items.map(\.foodID)).count,
+            uniqueFoodCount: uniqueFoodIDs.count,
             newFoodCount: newFoodProgress.count,
             allergenExposureCount: allergenExposures.count,
-            reactionObservationCount: items.filter(\.suspectedReaction).count,
+            reactionObservationCount: reactionObservationCount,
+            nutrients: totalNutrition.nutrients,
+            quantifiedFoodCount: totalNutrition.quantifiedFoodCount,
+            completeNutritionFoodCount: totalNutrition.completeNutritionFoodCount,
+            foodCount: totalNutrition.foodCount,
             daily: days.map {
-                DailySolidsReportSummary(
+                let nutrition = nutritionByDay[$0] ?? DailyNutritionAccumulator()
+                return DailySolidsReportSummary(
                     date: $0,
                     meals: mealsByDay[$0] ?? 0,
-                    newFoods: newFoodsByDay[$0] ?? 0
+                    newFoods: newFoodsByDay[$0] ?? 0,
+                    nutrients: nutrition.nutrients,
+                    quantifiedFoodCount: nutrition.quantifiedFoodCount,
+                    completeNutritionFoodCount: nutrition.completeNutritionFoodCount,
+                    foodCount: nutrition.foodCount
                 )
             }
         )
@@ -994,15 +1046,22 @@ enum InsightsAnalyticsService {
         range: Range<Date>,
         calendar: Calendar = .current
     ) -> [ChartDataPoint] {
-        events.filter {
+        let candidates = events.filter {
             $0.type == .sleep &&
             $0.sleepKind == .nightSleep &&
             range.contains(sleepBucketDate(for: $0, calendar: calendar)) &&
             $0.localStartMinute(calendar: calendar) >= 17 * 60
-        }.map {
+        }
+        return Dictionary(grouping: candidates) {
+            sleepBucketDate(for: $0, calendar: calendar)
+        }.compactMap { day, values in
+            guard let onset = values.min(by: {
+                $0.localStartMinute(calendar: calendar)
+                    < $1.localStartMinute(calendar: calendar)
+            }) else { return nil }
             return ChartDataPoint(
-                date: sleepBucketDate(for: $0, calendar: calendar),
-                value: $0.localStartMinute(calendar: calendar),
+                date: day,
+                value: onset.localStartMinute(calendar: calendar),
                 category: "Bedtime"
             )
         }.sorted { $0.date < $1.date }

@@ -1,5 +1,29 @@
 import SwiftUI
 
+private struct CareTimerTimelineView<Content: View>: View {
+    let isRunning: Bool
+    private let content: (Date) -> Content
+
+    init(
+        isRunning: Bool,
+        @ViewBuilder content: @escaping (Date) -> Content
+    ) {
+        self.isRunning = isRunning
+        self.content = content
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if isRunning {
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                content(timeline.date)
+            }
+        } else {
+            content(Date())
+        }
+    }
+}
+
 struct ActiveTimerCard: View {
     let event: CareEvent
     var planWakeAlert: ActiveSleepPlanWakeAlert?
@@ -10,7 +34,7 @@ struct ActiveTimerCard: View {
     var setNursingSide: ((NursingSide) -> Void)?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        CareTimerTimelineView(isRunning: event.isTimerRunning) { date in
             VStack(alignment: .leading, spacing: 14) {
                 Button(action: edit) {
                     HStack {
@@ -26,13 +50,16 @@ struct ActiveTimerCard: View {
                                 Text(event.isTimerRunning ? "Running now" : "Stopped · Ready to save")
                                     .font(.caption)
                                     .foregroundStyle(event.isTimerRunning ? .secondary : event.type.tint)
+                                    .accessibilityIdentifier(
+                                        "active-timer.status.\(event.type.rawValue)"
+                                    )
                                 Text("Started \(DateFormatting.timeString(from: event.startDate, timeZone: event.startTimeZone, includesTimeZone: event.shouldShowTimeZoneInTimeline)) · Tap to edit")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
-                        Text(elapsedText(at: context.date))
+                        Text(elapsedText(at: date))
                             .font(.system(.headline, design: .rounded).monospacedDigit())
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
@@ -44,7 +71,7 @@ struct ActiveTimerCard: View {
                 if event.type == .nursing {
                     NursingSideSelector(
                         event: event,
-                        date: context.date,
+                        date: date,
                         isCompact: true,
                         setNursingSide: setNursingSide,
                         switchNursingSide: switchNursingSide
@@ -52,7 +79,7 @@ struct ActiveTimerCard: View {
                 }
 
                 if let planWakeAlert {
-                    planWakeAlertRow(planWakeAlert, now: context.date)
+                    planWakeAlertRow(planWakeAlert, now: date)
                 }
 
                 HStack(spacing: 10) {
@@ -63,12 +90,13 @@ struct ActiveTimerCard: View {
                         )
                     }
                     .buttonStyle(TimerSecondaryButtonStyle())
+                    .accessibilityIdentifier("active-timer.toggle.\(event.type.rawValue)")
 
                     Button(action: save) {
                         Label("Save", systemImage: "checkmark")
                     }
                     .buttonStyle(TimerFilledButtonStyle())
-                    .disabled(event.timerElapsed(at: context.date) < 1)
+                    .disabled(event.timerElapsed(at: date) < 1)
                 }
             }
             .padding(16)
@@ -112,7 +140,7 @@ struct ActiveTimerEditorView: View {
     let stop: () -> Void
     let resume: () -> Void
     let reset: () -> Void
-    let save: (Date?) -> Void
+    let save: (Date?) -> Bool
     let discard: () -> Void
     let setStartTimeZone: (String) -> Void
     let setEndTimeZone: (String) -> Void
@@ -126,6 +154,8 @@ struct ActiveTimerEditorView: View {
     @State private var endTimeZoneIdentifier: String
     @State private var showingResetConfirmation = false
     @State private var showingDiscardConfirmation = false
+    @State private var showingSaveFailure = false
+    @State private var finalizedEditorAction = false
 
     init(
         event: CareEvent,
@@ -133,7 +163,7 @@ struct ActiveTimerEditorView: View {
         stop: @escaping () -> Void,
         resume: @escaping () -> Void,
         reset: @escaping () -> Void,
-        save: @escaping (Date?) -> Void,
+        save: @escaping (Date?) -> Bool,
         discard: @escaping () -> Void,
         setStartTimeZone: @escaping (String) -> Void = { _ in },
         setEndTimeZone: @escaping (String) -> Void = { _ in },
@@ -174,7 +204,7 @@ struct ActiveTimerEditorView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
+                CareTimerTimelineView(isRunning: event.isTimerRunning) { date in
                     VStack(spacing: 12) {
                         Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
                             .font(.title2.bold())
@@ -193,7 +223,7 @@ struct ActiveTimerEditorView: View {
                             .font(.title3.bold())
                         Text(
                             DurationFormatting.liveString(
-                                seconds: event.timerElapsed(at: context.date)
+                                seconds: displayedElapsed(at: date)
                             )
                         )
                         .font(
@@ -205,6 +235,7 @@ struct ActiveTimerEditorView: View {
                             .monospacedDigit()
                         )
                         .contentTransition(.numericText())
+                        .accessibilityIdentifier("active-timer.elapsed")
                         Label(
                             event.isTimerRunning ? "Running" : "Stopped",
                             systemImage: event.isTimerRunning
@@ -231,7 +262,7 @@ struct ActiveTimerEditorView: View {
                 }
 
                 if event.type == .nursing {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    CareTimerTimelineView(isRunning: event.isTimerRunning) { date in
                         VStack(alignment: .leading, spacing: 14) {
                             HStack {
                                 Label(
@@ -242,7 +273,7 @@ struct ActiveTimerEditorView: View {
 
                                 Spacer()
 
-                                Text("Total \(DurationFormatting.liveString(seconds: event.timerElapsed(at: context.date)))")
+                                Text("Total \(DurationFormatting.liveString(seconds: displayedElapsed(at: date)))")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
@@ -250,7 +281,7 @@ struct ActiveTimerEditorView: View {
 
                             NursingSideSelector(
                                 event: event,
-                                date: context.date,
+                                date: date,
                                 isCompact: false,
                                 setNursingSide: setNursingSide,
                                 switchNursingSide: switchNursingSide
@@ -273,9 +304,11 @@ struct ActiveTimerEditorView: View {
                     HStack(spacing: 12) {
                         Button {
                             if event.isTimerRunning {
+                                apply(selectedStart)
                                 stop()
                                 selectedEnd = Self.defaultEndDate(for: event)
                             } else {
+                                apply(selectedStart)
                                 resume()
                             }
                         } label: {
@@ -302,7 +335,7 @@ struct ActiveTimerEditorView: View {
                     Text(
                         event.isTimerRunning
                             ? "Stop pauses the timer without saving it."
-                            : "Edit the end time below, resume, or save the event."
+                            : "Finish & Save commits this paused timer to history."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -324,8 +357,9 @@ struct ActiveTimerEditorView: View {
                     .environment(\.timeZone, startTimeZone)
                     .font(.body.weight(.medium))
                     .onChange(of: selectedStart) { _, newValue in
-                        apply(newValue)
+                        clampStartIfNeeded(newValue)
                     }
+                    .accessibilityIdentifier("active-timer.start-date")
 
                     Divider()
 
@@ -387,16 +421,22 @@ struct ActiveTimerEditorView: View {
 
                 VStack(spacing: 12) {
                     Button {
-                        save(event.isTimerRunning ? nil : selectedEnd)
-                        dismiss()
+                        apply(selectedStart)
+                        if save(event.isTimerRunning ? nil : selectedEnd) {
+                            finalizedEditorAction = true
+                            dismiss()
+                        } else {
+                            showingSaveFailure = true
+                        }
                     } label: {
                         Label(
-                            "Save Event",
+                            "Finish & Save Event",
                             systemImage: "checkmark.circle.fill"
                         )
                     }
                     .buttonStyle(TimerFilledButtonStyle(height: 58))
-                    .disabled(event.timerElapsed() < 1)
+                    .disabled(displayedElapsed(at: Date()) < 1)
+                    .accessibilityIdentifier("active-timer.finish-and-save")
 
                     Button {
                         showingDiscardConfirmation = true
@@ -415,8 +455,17 @@ struct ActiveTimerEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
+                Button("Keep Timer") {
+                    apply(selectedStart)
+                    finalizedEditorAction = true
+                    dismiss()
+                }
             }
+        }
+        .alert("Timer wasn't saved", isPresented: $showingSaveFailure) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The timer is still open. Return to Today and try again.")
         }
         .appActionSheet(
             isPresented: $showingResetConfirmation,
@@ -456,6 +505,7 @@ struct ActiveTimerEditorView: View {
                     tint: .red,
                     role: .destructive
                 ) {
+                    finalizedEditorAction = true
                     discard()
                     dismiss()
                 }
@@ -485,6 +535,24 @@ struct ActiveTimerEditorView: View {
         .onChange(of: endTimeZoneIdentifier) { _, identifier in
             setEndTimeZone(identifier)
         }
+        .onDisappear {
+            // DatePicker can publish many intermediate values while its wheels
+            // are moving. Keep those edits local so they never enqueue a burst
+            // of SwiftData writes and system-surface refreshes. Explicit editor
+            // actions persist once; an interactive dismissal persists the final
+            // value here after the timer UI is already offscreen.
+            if !finalizedEditorAction {
+                apply(selectedStart)
+            }
+        }
+    }
+
+    private func displayedElapsed(at date: Date) -> TimeInterval {
+        max(
+            0,
+            event.timerElapsed(at: date)
+                + event.startDate.timeIntervalSince(selectedStart)
+        )
     }
 
     private func adjustmentButton(
@@ -507,11 +575,16 @@ struct ActiveTimerEditorView: View {
         )
     }
 
-    private func apply(_ date: Date) {
+    private func clampStartIfNeeded(_ date: Date) {
         let clamped = min(date, Date())
         if abs(selectedStart.timeIntervalSince(clamped)) > 0.5 {
             selectedStart = clamped
         }
+    }
+
+    private func apply(_ date: Date) {
+        let clamped = min(date, Date())
+        guard abs(event.startDate.timeIntervalSince(clamped)) > 0.5 else { return }
         adjustStart(clamped)
     }
 

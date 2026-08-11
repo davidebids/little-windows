@@ -11,6 +11,7 @@ final class SolidFoodCatalogItem {
     var minimumAgeMonths: Int = 6
     var preparationNotes: String = ""
     var safetyNotes: String = ""
+    var nutritionLabelJSON: String?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -22,6 +23,7 @@ final class SolidFoodCatalogItem {
         minimumAgeMonths: Int = 6,
         preparationNotes: String = "",
         safetyNotes: String = "",
+        nutritionLabel: SolidManualNutritionLabel? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -34,6 +36,7 @@ final class SolidFoodCatalogItem {
         self.minimumAgeMonths = minimumAgeMonths
         self.preparationNotes = preparationNotes
         self.safetyNotes = safetyNotes
+        self.nutritionLabelJSON = Self.encode(nutritionLabel)
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -41,6 +44,13 @@ final class SolidFoodCatalogItem {
     var allergenIDs: [String] {
         get { Self.decode(allergenIDsJSON) }
         set { allergenIDsJSON = Self.encode(newValue) }
+    }
+
+    var trackingID: String { "custom-\(id.uuidString.lowercased())" }
+
+    var nutritionLabel: SolidManualNutritionLabel? {
+        get { Self.decode(nutritionLabelJSON) }
+        set { nutritionLabelJSON = Self.encode(newValue) }
     }
 
     private static func encode(_ values: [String]) -> String {
@@ -52,6 +62,18 @@ final class SolidFoodCatalogItem {
     private static func decode(_ value: String) -> [String] {
         guard let data = value.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    private static func encode<T: Encodable>(_ value: T?) -> String? {
+        guard let value,
+              let data = try? JSONEncoder().encode(value),
+              let string = String(data: data, encoding: .utf8) else { return nil }
+        return string
+    }
+
+    private static func decode<T: Decodable>(_ value: String?) -> T? {
+        guard let value, let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
     }
 }
 

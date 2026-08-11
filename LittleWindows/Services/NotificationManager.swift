@@ -151,7 +151,6 @@ struct SolidMealReminderSnapshot: Sendable {
         self.isCompleted = isCompleted
     }
 
-    @MainActor
     init(plan: PlannedSolidMeal) {
         self.init(
             id: plan.id,
@@ -186,7 +185,6 @@ struct SolidAllergenReminderSnapshot: Sendable {
         self.reminderEnabled = reminderEnabled
     }
 
-    @MainActor
     init(progress: SolidAllergenProgress) {
         self.init(
             profileID: progress.profileID,
@@ -220,7 +218,6 @@ struct PackingTripReminderSnapshot: Sendable {
     var usesTargetedReminders: Bool
     var isEligibleForCurrentCaregiver: Bool
 
-    @MainActor
     init(
         trip: PackingTrip,
         items: [PackingItem] = [],
@@ -664,6 +661,10 @@ final class NotificationManager: NSObject, ObservableObject {
         if clearState {
             statesByProfile.removeAll()
             notificationState = .empty
+            Self.statusDefaults.removeObject(forKey: Self.statesByProfileKey)
+            Self.statusDefaults.removeObject(forKey: Self.stateKey)
+            // Clear legacy values too so they cannot be restored by the
+            // compatibility fallback after an explicit reset.
             UserDefaults.standard.removeObject(forKey: Self.statesByProfileKey)
             UserDefaults.standard.removeObject(forKey: Self.stateKey)
         }
@@ -1465,14 +1466,13 @@ final class NotificationManager: NSObject, ObservableObject {
     func reconcileScheduledNotifications(
         context: ModelContext,
         profiles: [CareProfile],
-        events: [CareEvent],
-        predictionRecords: [SleepPredictionRecord],
+        integrationAnalysisByProfileID: [UUID: EventIntegrationAnalysis],
         appointments: [DoctorAppointment],
         foodReminders: [FoodReminder],
-        plannedSolidMeals: [PlannedSolidMeal],
-        solidAllergenProgress: [SolidAllergenProgress],
+        plannedSolidMeals: [SolidMealReminderSnapshot],
+        solidAllergenProgress: [SolidAllergenReminderSnapshot],
         packingTrips: [PackingTrip],
-        packingItems: [PackingItem],
+        packingTripReminders: [PackingTripReminderSnapshot],
         itineraryChoiceGroups: [TripItineraryChoiceGroup],
         itineraryItems: [TripItineraryItem],
         routines: [CareRoutine],
@@ -1505,8 +1505,8 @@ final class NotificationManager: NSObject, ObservableObject {
         }.map { Self.solidMealReminderNotificationID(planID: $0.id) })
         let solidAllergenIDs = Set(solidAllergenProgress.filter {
             $0.reminderEnabled &&
-                $0.status != .suspectedReaction &&
-                $0.status != .avoidPendingAdvice &&
+                $0.statusRawValue != SolidAllergenStatus.suspectedReaction.rawValue &&
+                $0.statusRawValue != SolidAllergenStatus.avoidPendingAdvice.rawValue &&
                 $0.nextExposureDueAt.map { $0 > Date() } == true
         }.map {
             Self.solidAllergenReminderNotificationID(
@@ -1518,7 +1518,6 @@ final class NotificationManager: NSObject, ObservableObject {
             !$0.isArchived && $0.reminderEnabled
         }.map { Self.routineReminderNotificationID(routineID: $0.id) })
         let currentCaregiverName = CaregiverIdentityService.currentCaregiverName()
-        let packingItemsByTripID = Dictionary(grouping: packingItems, by: \.tripID)
         let packingTripsByID = Dictionary(
             packingTrips.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -1527,18 +1526,13 @@ final class NotificationManager: NSObject, ObservableObject {
             itineraryChoiceGroups.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let packingTripIDs = Set(packingTrips.flatMap { trip -> [String] in
-            let snapshot = PackingTripReminderSnapshot(
-                trip: trip,
-                items: packingItemsByTripID[trip.id] ?? [],
-                currentCaregiverName: currentCaregiverName
-            )
+        let packingTripIDs = Set(packingTripReminders.flatMap { snapshot -> [String] in
             guard !snapshot.isArchived,
                   snapshot.isUpcoming,
                   snapshot.isEligibleForCurrentCaregiver else { return [] }
             return [
-                trip.reminderDate.map { _ in Self.packingTripNotificationID(tripID: trip.id, kind: "start") },
-                trip.finalCheckDate.map { _ in Self.packingTripNotificationID(tripID: trip.id, kind: "final") }
+                snapshot.reminderDate.map { _ in Self.packingTripNotificationID(tripID: snapshot.id, kind: "start") },
+                snapshot.finalCheckDate.map { _ in Self.packingTripNotificationID(tripID: snapshot.id, kind: "final") }
             ].compactMap { $0 }
         })
         let itineraryIDs = Set(itineraryItems.compactMap { item -> String? in
@@ -1587,30 +1581,13 @@ final class NotificationManager: NSObject, ObservableObject {
             withIdentifiers: orphaned
         )
 
-        let predictionSettings = PredictionSettings(
-            feedAdjustmentEnabled: Self.defaultBool("feedAdjustmentEnabled", fallback: true),
-            nursingAdjustmentEnabled: Self.defaultBool("nursingAdjustmentEnabled", fallback: true),
-            bedtimePredictionEnabled: Self.defaultBool("bedtimePredictionEnabled", fallback: true),
-            customBaselineMinimum: Self.positiveDouble("customWakeMinimum"),
-            customBaselineMaximum: Self.positiveDouble("customWakeMaximum")
-        )
         if LittleWindowAlertSettings.current.enabled {
             for profile in profiles where !profile.isArchived && profile.profileType == .child {
-                let scopedEvents = events.filter { $0.matchesProfile(profile.id) }
-                let scopedRecords = predictionRecords.filter { $0.matchesProfile(profile.id) }
-                let prediction = PredictionTuningService.currentPrediction(
-                    profile: profile,
-                    events: scopedEvents,
-                    records: scopedRecords,
-                    settings: predictionSettings
-                )
                 await rescheduleLittleWindowAlertIfNeeded(
-                    prediction: prediction,
+                    prediction: integrationAnalysisByProfileID[profile.id]?.prediction,
                     babyName: profile.name,
                     profileID: profile.id,
-                    isSleeping: scopedEvents.contains {
-                        $0.isSleepBlock && $0.isTimerRunning
-                    }
+                    isSleeping: integrationAnalysisByProfileID[profile.id]?.isSleeping == true
                 )
             }
         } else {
@@ -1619,21 +1596,12 @@ final class NotificationManager: NSObject, ObservableObject {
 
         if UserDefaults.standard.bool(forKey: "sleepPressureAlertsEnabled") {
             for profile in profiles where !profile.isArchived && profile.profileType == .child {
-                let scopedEvents = events.filter { $0.matchesProfile(profile.id) }
-                let scopedRecords = predictionRecords.filter { $0.matchesProfile(profile.id) }
                 await rescheduleSleepPressureAlertIfNeeded(
-                    pressure: SleepPredictionEngine.sleepPressure(
-                        profile: profile,
-                        events: scopedEvents,
-                        records: scopedRecords,
-                        settings: predictionSettings
-                    ),
+                    pressure: integrationAnalysisByProfileID[profile.id]?.pressure,
                     babyName: profile.name,
                     profileID: profile.id,
                     enabled: true,
-                    isSleeping: scopedEvents.contains {
-                        $0.isSleepBlock && $0.isTimerRunning
-                    }
+                    isSleeping: integrationAnalysisByProfileID[profile.id]?.isSleeping == true
                 )
             }
         } else {
@@ -1663,17 +1631,13 @@ final class NotificationManager: NSObject, ObservableObject {
             }
         }
         for plan in plannedSolidMeals {
-            await scheduleSolidMealReminder(plan: plan)
+            await scheduleSolidMealReminder(snapshot: plan)
         }
         for progress in solidAllergenProgress {
-            await scheduleSolidAllergenReminder(progress: progress)
+            await scheduleSolidAllergenReminder(snapshot: progress)
         }
-        for trip in packingTrips {
-            await reschedulePackingTripReminders(
-                trip: trip,
-                items: packingItemsByTripID[trip.id] ?? [],
-                currentCaregiverName: currentCaregiverName
-            )
+        for snapshot in packingTripReminders {
+            await reschedulePackingTripReminders(snapshot: snapshot)
         }
         for item in itineraryItems {
             if let trip = packingTripsByID[item.tripID] {
@@ -1879,7 +1843,7 @@ final class NotificationManager: NSObject, ObservableObject {
         }
         if action == MedicationNotificationScheduler.snoozeActionIdentifier {
             if await MedicationNotificationScheduler.snooze(response) {
-                WatchConnectivityService.shared.publishCurrentState()
+                WatchConnectivityService.shared.scheduleCurrentStatePublish()
             }
             return
         }
@@ -2316,7 +2280,7 @@ final class NotificationManager: NSObject, ObservableObject {
         statesByProfile[Self.stateStorageKey(profileID: profileID)] = state
         notificationState = state
         if let data = try? JSONEncoder().encode(statesByProfile) {
-            UserDefaults.standard.set(data, forKey: Self.statesByProfileKey)
+            Self.statusDefaults.set(data, forKey: Self.statesByProfileKey)
         }
     }
 
@@ -2325,7 +2289,8 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     private static func loadState() -> LittleWindowNotificationState {
-        guard let data = UserDefaults.standard.data(forKey: stateKey),
+        guard let data = statusDefaults.data(forKey: stateKey)
+                ?? UserDefaults.standard.data(forKey: stateKey),
               let state = try? JSONDecoder().decode(
                 LittleWindowNotificationState.self,
                 from: data
@@ -2336,7 +2301,8 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     private static func loadStatesByProfile() -> [String: LittleWindowNotificationState] {
-        if let data = UserDefaults.standard.data(forKey: statesByProfileKey),
+        if let data = statusDefaults.data(forKey: statesByProfileKey)
+                ?? UserDefaults.standard.data(forKey: statesByProfileKey),
            let states = try? JSONDecoder().decode(
             [String: LittleWindowNotificationState].self,
             from: data
@@ -2346,18 +2312,100 @@ final class NotificationManager: NSObject, ObservableObject {
         let legacy = loadState()
         return legacy == .empty ? [:] : [unscopedStateKey: legacy]
     }
+
+    private static var statusDefaults: UserDefaults {
+        PersistenceService.operationalDefaults()
+    }
+}
+
+private struct SystemIntegrationReminderSnapshots: Sendable {
+    var plannedSolidMeals: [SolidMealReminderSnapshot]
+    var solidAllergens: [SolidAllergenReminderSnapshot]
+    var packingTrips: [PackingTripReminderSnapshot]
+}
+
+/// Converts the potentially large reminder inputs into immutable values on an
+/// isolated SwiftData context. Foreground reconciliation can then coordinate
+/// with system APIs without fetching hundreds of solids or packing rows on the
+/// UI actor.
+@ModelActor
+private actor SystemIntegrationSnapshotWorker {
+    func reminderSnapshots(
+        activeProfileIDs: Set<UUID>,
+        currentCaregiverName: String,
+        now: Date = Date()
+    ) -> SystemIntegrationReminderSnapshots {
+        let plannedSolidMeals = ((try? modelContext.fetch(
+            FetchDescriptor<PlannedSolidMeal>(
+                predicate: #Predicate {
+                    $0.reminderEnabled && $0.completedEventID == nil
+                }
+            )
+        )) ?? [])
+            .filter { activeProfileIDs.contains($0.profileID) }
+            .map(SolidMealReminderSnapshot.init(plan:))
+
+        let solidAllergens = ((try? modelContext.fetch(
+            FetchDescriptor<SolidAllergenProgress>(
+                predicate: #Predicate { $0.reminderEnabled }
+            )
+        )) ?? [])
+            .filter { activeProfileIDs.contains($0.profileID) }
+            .map(SolidAllergenReminderSnapshot.init(progress:))
+
+        let upcomingStatus = PackingTripStatus.upcoming.rawValue
+        let trips = (try? modelContext.fetch(FetchDescriptor<PackingTrip>(
+            predicate: #Predicate {
+                !$0.isArchived && $0.statusRawValue == upcomingStatus
+            }
+        ))) ?? []
+        let tripIDs = trips.map(\.id)
+        let items = tripIDs.isEmpty ? [] : ((try? modelContext.fetch(
+            FetchDescriptor<PackingItem>(
+                predicate: #Predicate { tripIDs.contains($0.tripID) }
+            )
+        )) ?? [])
+        let itemsByTripID = Dictionary(grouping: items, by: \.tripID)
+        let packingTrips = trips.map {
+            PackingTripReminderSnapshot(
+                trip: $0,
+                items: itemsByTripID[$0.id] ?? [],
+                currentCaregiverName: currentCaregiverName
+            )
+        }
+
+        return SystemIntegrationReminderSnapshots(
+            plannedSolidMeals: plannedSolidMeals,
+            solidAllergens: solidAllergens,
+            packingTrips: packingTrips
+        )
+    }
 }
 
 @MainActor
 enum SystemIntegrationReconciler {
-    static let reconciliationRequestedNotification = Notification.Name(
+    nonisolated static let reconciliationRequestedNotification = Notification.Name(
         "SystemIntegrationReconciler.reconciliationRequested"
     )
     private static let lastCompletedAtKey = "systemIntegrations.lastReconciledAt"
     private static var reconciliationTask: Task<Void, Never>?
+    private static var reconciliationGeneration: UInt64 = 0
 
-    static func requestReconciliation() {
-        NotificationCenter.default.post(name: reconciliationRequestedNotification, object: nil)
+    nonisolated static func requestReconciliation() {
+        Task { @MainActor in
+            NotificationCenter.default.post(
+                name: reconciliationRequestedNotification,
+                object: nil
+            )
+        }
+    }
+
+    /// Invalidates a full-history reconciliation when a newer event mutation
+    /// already has authoritative timer/system-surface state to publish.
+    static func invalidateInFlightReconciliation() {
+        reconciliationGeneration &+= 1
+        reconciliationTask?.cancel()
+        reconciliationTask = nil
     }
 
     static func reconcileIfNeeded(
@@ -2365,8 +2413,18 @@ enum SystemIntegrationReconciler {
         now: Date = Date(),
         defaults: UserDefaults = .standard
     ) async {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["XCTestConfigurationFilePath"] == nil,
+              environment["XCTestBundlePath"] == nil else {
+            // The XCTest host app and the test case use different model
+            // containers. A launch reconciliation from the host must not
+            // overwrite snapshots explicitly exercised by the unit test.
+            return
+        }
+        let statusDefaults = PersistenceService.operationalDefaults(for: defaults)
         guard needsForegroundReconciliation(
-            lastCompletedAt: defaults.object(forKey: lastCompletedAtKey) as? Date,
+            lastCompletedAt: statusDefaults.object(forKey: lastCompletedAtKey) as? Date
+                ?? defaults.object(forKey: lastCompletedAtKey) as? Date,
             lastLocalSaveAt: PersistenceService.lastLocalSaveAt(defaults: defaults),
             now: now
         ) else {
@@ -2400,29 +2458,31 @@ enum SystemIntegrationReconciler {
         context: ModelContext,
         defaults: UserDefaults
     ) async {
-        if let reconciliationTask {
-            await reconciliationTask.value
-            return
-        }
+        // A timer/profile mutation that arrives during a long reconciliation
+        // invalidates the older snapshot. Cancel and replace instead of merely
+        // awaiting it: awaiting used to let stale timer state publish after a
+        // newer stop or discard, and also dropped the newer reconciliation.
+        reconciliationGeneration &+= 1
+        let generation = reconciliationGeneration
+        reconciliationTask?.cancel()
+        let statusDefaults = PersistenceService.operationalDefaults(for: defaults)
         let task = Task { @MainActor in
             await performReconciliation(context: context)
-            defaults.set(Date(), forKey: lastCompletedAtKey)
+            guard !Task.isCancelled,
+                  generation == reconciliationGeneration else { return }
+            statusDefaults.set(Date(), forKey: lastCompletedAtKey)
         }
         reconciliationTask = task
         await task.value
-        reconciliationTask = nil
+        if generation == reconciliationGeneration {
+            reconciliationTask = nil
+        }
     }
 
     private static func performReconciliation(context: ModelContext) async {
-        await AppInteractionMonitor.waitUntilIdle()
         guard !Task.isCancelled else { return }
         let profiles = (try? context.fetch(FetchDescriptor<CareProfile>())) ?? []
         let profile = ProfileService.shared.ensureSelection(in: profiles)
-        let recentCutoff = Calendar.current.date(
-            byAdding: .day,
-            value: -45,
-            to: Calendar.current.startOfDay(for: Date())
-        ) ?? Date()
         let activeProfileIDs = profiles
             .filter { !$0.isArchived }
             .map(\.id)
@@ -2433,19 +2493,45 @@ enum SystemIntegrationReconciler {
         let childProfileIDs = profiles
             .filter { !$0.isArchived && $0.profileType == .child }
             .map(\.id)
-        let events = await recentEvents(
-            profileIDs: activeProfileIDs,
-            recentCutoff: recentCutoff,
-            context: context
+        let analysisProfileIDs = Array(Set(
+            childProfileIDs + [profile?.id].compactMap { $0 }
+        ))
+        let reminderWorker = SystemIntegrationSnapshotWorker(
+            modelContainer: context.container
         )
-        await AppInteractionMonitor.waitUntilIdle()
-        guard !Task.isCancelled else { return }
-        let predictionRecords = await recentPredictionRecords(
-            profileIDs: childProfileIDs,
-            recentCutoff: recentCutoff,
-            context: context
+        let currentCaregiverName = CaregiverIdentityService.currentCaregiverName()
+        async let reminderSnapshotTask = reminderWorker.reminderSnapshots(
+            activeProfileIDs: activeProfileIDSet,
+            currentCaregiverName: currentCaregiverName
         )
-        await AppInteractionMonitor.waitUntilIdle()
+        let predictionSettings = PredictionSettings(
+            feedAdjustmentEnabled: UserDefaults.standard.object(
+                forKey: "feedAdjustmentEnabled"
+            ) == nil || UserDefaults.standard.bool(forKey: "feedAdjustmentEnabled"),
+            nursingAdjustmentEnabled: UserDefaults.standard.object(
+                forKey: "nursingAdjustmentEnabled"
+            ) == nil || UserDefaults.standard.bool(forKey: "nursingAdjustmentEnabled"),
+            bedtimePredictionEnabled: UserDefaults.standard.object(
+                forKey: "bedtimePredictionEnabled"
+            ) == nil || UserDefaults.standard.bool(forKey: "bedtimePredictionEnabled"),
+            customBaselineMinimum: positiveDouble("customWakeMinimum"),
+            customBaselineMaximum: positiveDouble("customWakeMaximum")
+        )
+        var integrationAnalysisByProfileID = [UUID: EventIntegrationAnalysis]()
+        for profileID in analysisProfileIDs {
+            guard !Task.isCancelled else { return }
+            integrationAnalysisByProfileID[profileID] = await EventMutationService.integrationAnalysis(
+                profileID: profileID,
+                context: context,
+                settings: predictionSettings
+            )
+        }
+        // A failed timer-history read is not equivalent to an empty history.
+        // Preserve the existing widget and Live Activity instead of publishing
+        // a false "no active timer" state from a transient store failure.
+        guard integrationAnalysisByProfileID.values.allSatisfy(\.isAuthoritative) else {
+            return
+        }
         guard !Task.isCancelled else { return }
 
         let appointments = ((try? context.fetch(FetchDescriptor<DoctorAppointment>(
@@ -2457,20 +2543,6 @@ enum SystemIntegrationReconciler {
         let foodReminders = (try? context.fetch(FetchDescriptor<FoodReminder>(
             predicate: #Predicate { $0.isEnabled && $0.dateTime > now }
         ))) ?? []
-        let plannedSolidMeals = ((try? context.fetch(FetchDescriptor<PlannedSolidMeal>(
-            predicate: #Predicate { $0.reminderEnabled && $0.completedEventID == nil }
-        ))) ?? []).filter { activeProfileIDSet.contains($0.profileID) }
-        let solidAllergenProgress = ((try? context.fetch(
-            FetchDescriptor<SolidAllergenProgress>(
-                predicate: #Predicate { $0.reminderEnabled }
-            )
-        )) ?? []).filter { activeProfileIDSet.contains($0.profileID) }
-        let selectedProfileID = profile?.id
-            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let solidsProfileStates = (try? context.fetch(FetchDescriptor<SolidsProfileState>(
-            predicate: #Predicate { $0.profileID == selectedProfileID }
-        ))) ?? []
-        await AppInteractionMonitor.waitUntilIdle()
         guard !Task.isCancelled else { return }
 
         let upcomingStatus = PackingTripStatus.upcoming.rawValue
@@ -2480,11 +2552,6 @@ enum SystemIntegrationReconciler {
                     && $0.statusRawValue == upcomingStatus
             }
         ))) ?? []
-        let upcomingTripIDs = packingTrips.map(\.id)
-        let packingItems = upcomingTripIDs.isEmpty ? [] :
-            ((try? context.fetch(FetchDescriptor<PackingItem>(
-                predicate: #Predicate { upcomingTripIDs.contains($0.tripID) }
-            ))) ?? [])
         let itineraryItems = (try? context.fetch(FetchDescriptor<TripItineraryItem>(
             predicate: #Predicate { $0.reminderEnabled && !$0.isCompleted }
         ))) ?? []
@@ -2511,54 +2578,41 @@ enum SystemIntegrationReconciler {
         } else {
             ageGuideReadStates = []
         }
-        await AppInteractionMonitor.waitUntilIdle()
         guard !Task.isCancelled else { return }
 
-        let scopedEvents = events.filter { $0.matchesProfile(profile?.id) }
-        let scopedRecords = predictionRecords.filter { $0.matchesProfile(profile?.id) }
-        let prediction = PredictionTuningService.currentPrediction(
-            profile: profile,
-            events: scopedEvents,
-            records: scopedRecords,
-            settings: PredictionSettings(
-                feedAdjustmentEnabled: UserDefaults.standard.object(
-                    forKey: "feedAdjustmentEnabled"
-                ) == nil || UserDefaults.standard.bool(forKey: "feedAdjustmentEnabled"),
-                nursingAdjustmentEnabled: UserDefaults.standard.object(
-                    forKey: "nursingAdjustmentEnabled"
-                ) == nil || UserDefaults.standard.bool(forKey: "nursingAdjustmentEnabled"),
-                bedtimePredictionEnabled: UserDefaults.standard.object(
-                    forKey: "bedtimePredictionEnabled"
-                ) == nil || UserDefaults.standard.bool(forKey: "bedtimePredictionEnabled"),
-                customBaselineMinimum: positiveDouble("customWakeMinimum"),
-                customBaselineMaximum: positiveDouble("customWakeMaximum")
-            )
-        )
-        WidgetSnapshotService.refresh(
-            profile: profile,
-            events: scopedEvents,
-            prediction: prediction,
-            solidsState: solidsProfileStates.first { $0.profileID == profile?.id }
-        )
-        WatchConnectivityService.shared.publishCurrentState()
-        await Task.yield()
-        WidgetSnapshotService.refreshFood(context: context)
-        await AppInteractionMonitor.waitUntilIdle()
+        let reminderSnapshots = await reminderSnapshotTask
         guard !Task.isCancelled else { return }
-        await LiveActivityManager.shared.synchronize(profile: profile, events: scopedEvents)
-        await AppInteractionMonitor.waitUntilIdle()
+        let selectedAnalysis = profile.flatMap { integrationAnalysisByProfileID[$0.id] }
+        if let widgetSnapshot = selectedAnalysis?.widgetSnapshot {
+            WidgetSnapshotService.publish(widgetSnapshot)
+        } else {
+            WidgetSnapshotService.refresh(
+                profile: profile,
+                events: [],
+                prediction: selectedAnalysis?.prediction,
+                solidsState: nil
+            )
+        }
+        WatchConnectivityService.shared.scheduleCurrentStatePublish()
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        WidgetSnapshotService.scheduleFoodRefresh(context: context)
+        guard !Task.isCancelled else { return }
+        await LiveActivityManager.shared.synchronize(
+            timer: selectedAnalysis?.widgetSnapshot?.activeTimer,
+            revision: selectedAnalysis?.widgetSnapshot?.generatedAt ?? now
+        )
         guard !Task.isCancelled else { return }
         await NotificationManager.shared.reconcileScheduledNotifications(
             context: context,
             profiles: profiles,
-            events: events,
-            predictionRecords: predictionRecords,
+            integrationAnalysisByProfileID: integrationAnalysisByProfileID,
             appointments: appointments,
             foodReminders: foodReminders,
-            plannedSolidMeals: plannedSolidMeals,
-            solidAllergenProgress: solidAllergenProgress,
+            plannedSolidMeals: reminderSnapshots.plannedSolidMeals,
+            solidAllergenProgress: reminderSnapshots.solidAllergens,
             packingTrips: packingTrips,
-            packingItems: packingItems,
+            packingTripReminders: reminderSnapshots.packingTrips,
             itineraryChoiceGroups: itineraryChoiceGroups,
             itineraryItems: itineraryItems,
             routines: routines,
@@ -2577,7 +2631,13 @@ enum SystemIntegrationReconciler {
         let medications = (try? context.fetch(FetchDescriptor<Medication>())) ?? []
         let regimens = (try? context.fetch(FetchDescriptor<MedicationRegimen>())) ?? []
         let phases = (try? context.fetch(FetchDescriptor<MedicationSchedulePhase>())) ?? []
-        let doseRecords = (try? context.fetch(FetchDescriptor<MedicationDoseRecord>())) ?? []
+        let oldestRelevantSchedule = Date().addingTimeInterval(-13 * 60 * 60)
+        let doseRecordDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate {
+                ($0.scheduledAt ?? $0.loggedAt) >= oldestRelevantSchedule
+            }
+        )
+        let doseRecords = (try? context.fetch(doseRecordDescriptor)) ?? []
         let medicationByID = Dictionary(
             medications.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -2589,8 +2649,11 @@ enum SystemIntegrationReconciler {
                 regimen.profileID.map(activeProfileIDs.contains) == true &&
                 medicationByID[regimen.medicationID].map { !$0.isArchived } == true
         }.sorted { $0.id.uuidString < $1.id.uuidString }
+        let eligibleRegimenIDs = Set(eligibleRegimens.map(\.id))
+        let phasesByRegimenID = Dictionary(grouping: phases, by: \.regimenID)
+        let recordsByRegimenID = Dictionary(grouping: doseRecords) { $0.regimenID }
 
-        for regimen in regimens where !eligibleRegimens.contains(where: { $0.id == regimen.id }) {
+        for regimen in regimens where !eligibleRegimenIDs.contains(regimen.id) {
             guard !Task.isCancelled else { return }
             await MedicationNotificationScheduler.cancel(regimenID: regimen.id)
         }
@@ -2619,83 +2682,12 @@ enum SystemIntegrationReconciler {
             let scheduledCount = await MedicationNotificationScheduler.reschedule(
                 medication: medication,
                 regimen: regimen,
-                phases: phases.filter { $0.regimenID == regimen.id },
-                records: doseRecords.filter { $0.regimenID == regimen.id },
+                phases: phasesByRegimenID[regimen.id] ?? [],
+                records: recordsByRegimenID[regimen.id] ?? [],
                 maximumRequestCount: requestAllocation
             )
             remainingRequestBudget = max(remainingRequestBudget - scheduledCount, 0)
         }
-    }
-
-    private static func recentEvents(
-        profileIDs: [UUID],
-        recentCutoff: Date,
-        context: ModelContext
-    ) async -> [CareEvent] {
-        var result: [CareEvent] = []
-        let pageSize = 200
-        let maximumPerProfile = 900
-        for profileID in profileIDs {
-            var offset = 0
-            while offset < maximumPerProfile && !Task.isCancelled {
-                // Foreground reconciliation is maintenance work. Re-establish a
-                // full interaction-free window between pages so a brief pause
-                // while scrolling or changing tabs cannot let it resume and
-                // monopolize the main actor again.
-                await AppInteractionMonitor.waitUntilIdle()
-                guard !Task.isCancelled else { return result }
-                var descriptor = FetchDescriptor<CareEvent>(
-                    predicate: #Predicate<CareEvent> { event in
-                        event.profileID == profileID
-                            && (event.startDate >= recentCutoff || event.endDate == nil)
-                    },
-                    sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
-                )
-                descriptor.fetchLimit = min(pageSize, maximumPerProfile - offset)
-                descriptor.fetchOffset = offset
-                let page = (try? context.fetch(descriptor)) ?? []
-                result.append(contentsOf: page)
-                guard page.count == descriptor.fetchLimit else { break }
-                offset += page.count
-                await Task.yield()
-            }
-        }
-        return result
-    }
-
-    private static func recentPredictionRecords(
-        profileIDs: [UUID],
-        recentCutoff: Date,
-        context: ModelContext
-    ) async -> [SleepPredictionRecord] {
-        var result: [SleepPredictionRecord] = []
-        let pageSize = 120
-        let maximumPerProfile = 240
-        for profileID in profileIDs {
-            var offset = 0
-            while offset < maximumPerProfile && !Task.isCancelled {
-                await AppInteractionMonitor.waitUntilIdle()
-                guard !Task.isCancelled else { return result }
-                var descriptor = FetchDescriptor<SleepPredictionRecord>(
-                    predicate: #Predicate<SleepPredictionRecord> { record in
-                        record.profileID == profileID
-                            && (record.generatedAt >= recentCutoff
-                                || record.actualSleepEventID == nil)
-                    },
-                    sortBy: [
-                        SortDescriptor(\SleepPredictionRecord.generatedAt, order: .reverse)
-                    ]
-                )
-                descriptor.fetchLimit = min(pageSize, maximumPerProfile - offset)
-                descriptor.fetchOffset = offset
-                let page = (try? context.fetch(descriptor)) ?? []
-                result.append(contentsOf: page)
-                guard page.count == descriptor.fetchLimit else { break }
-                offset += page.count
-                await Task.yield()
-            }
-        }
-        return result
     }
 
     private static func positiveDouble(_ key: String) -> Double? {

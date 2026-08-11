@@ -21,7 +21,7 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - WeatherKit forecasts and Apple Weather attribution for trip packing suggestions.
 
 The primary Live Activity priority is Sleep, Nursing, Pumping, Feed, Tummy Time, Reading, then Bath. When another timer is active, the surface displays a `+1 more active` count.
-Nursing timer widgets and expanded Live Activity presentations show both the live total duration and the cumulative duration for the active Left or Right side.
+Running Active Timer widgets show the original session start in a compact footer, such as **Sleeping since 9:12 AM**, while keeping the live elapsed duration prominent. The Lock Screen Live Activity places that start time on the same row as the caregiver and other timer details, right-aligned to avoid increasing the activity's height. The expanded Dynamic Island repeats the start-time context in its footer. Nursing timer widgets and expanded Live Activity presentations show both the live total duration and the cumulative duration for the active Left or Right side.
 
 ## Xcode capability setup
 
@@ -135,7 +135,7 @@ Today action customization is stored per profile. Hidden care categories are exc
 
 Care event starts and ends capture concrete IANA time-zone identifiers. Appointments and Food & Home reminders also retain their selected zone. Automatic mode follows the device at each timestamp; Settings can apply a per-device manual override, and editors can override the relevant zones. Durations remain absolute elapsed time. Today, History, daily summaries, insights, widget snapshots, JSON/Family Sync datasets, and care-report exports use the recorded local day so travel does not reinterpret older entries in the device's new zone.
 
-While a draft timer is active, Today disables other start actions for that event type and Smart Picks and the Quick Log widget omit them. Timer-start routes open the matching active timer when possible, and `EventTimerService` remains the final duplicate-start guard.
+While a draft timer is active, Today disables other start actions for that event type and Smart Picks and the Quick Log widget omit them. Timer-start routes open the matching active timer when possible, and `EventTimerService` remains the final duplicate-start guard. A running sleep timer suppresses cached next-sleep predictions; Sleep day ahead shows the sleep already in progress and waits for its saved wake time before presenting a recalculated future window. Its usual-bedtime estimate uses the median first plausible night-sleep onset from each of the latest 28 usable nights, respecting the event's recorded local time and collapsing later fragments from the same sleep night.
 
 System action buttons:
 
@@ -146,7 +146,11 @@ System action buttons:
 
 The queue preserves rapid actions instead of overwriting the previous command, de-duplicates identical URLs, and gives timer mutations a short expiration so an old Lock Screen tap cannot stop a newly started timer later.
 
-Timer control commands include the time the user tapped the control. The app fetches and saves only the targeted timer before opening its editor, immediately updates the lightweight widget and matching Live Activity state, and defers broader prediction, notification, and sync reconciliation. A delayed duplicate is ignored when the timer has a newer in-app mutation, so an old Stop cannot override a later Resume.
+Timer control commands include the time the user tapped the control. Stop writes an optimistic paused state to the shared snapshot and explicitly reloads the Active Timer widget before the app finishes opening. The app then fetches and saves only the targeted timer, republishes that authoritative timer snapshot, updates the matching Live Activity state, and defers broader prediction, notification, and sync reconciliation. A delayed duplicate is ignored when the timer has a newer in-app mutation, so an old Stop cannot override a later Resume.
+
+Live Activity reconciliation keeps running and paused timer drafts visible, serializes ActivityKit lifecycle operations, and never retires an existing system surface until iOS accepts its replacement. A transient authorization or SwiftData read failure preserves the last valid surface instead of being interpreted as a completed timer; an ended activity is recreated during the next authoritative foreground reconciliation while the draft remains active. Standard Live Activities remain subject to iOS's system lifetime (up to eight hours active and up to four additional hours on the Lock Screen); the separately configurable Active Timer Lock Screen widget remains the persistent glanceable fallback for longer drafts.
+
+Every in-app timer control uses the same split update. Pause, resume, reset, time corrections, nursing-side changes, save, and discard persist their focused mutation and update the cached timer UI immediately; a timer-only snapshot then updates or retires the active widget and Live Activity. Prediction generation, Today summary rebuilding, Watch publication, notifications, and broader reconciliation are coalesced and wait until the user has stopped interacting, so timer controls and editor dismissal cannot block Today scrolling.
 
 This is intentional. The widget extension does not make unsafe concurrent edits to the full SwiftData history.
 
@@ -337,8 +341,8 @@ Family Sync creates a CloudKit record-zone subscription for the shared family zo
 3. In **Settings -> Apps -> Little Windows**, ensure Live Activities and notifications are allowed.
 4. Long-press the Home Screen or Lock Screen and add the Little Windows widgets.
 5. Start a Sleep timer, choose its type, and confirm the running timer editor opens immediately. Repeat with a non-sleep timer such as Nursing, Pumping, Activity, Walk, Rest, or Training. Dismiss an editor, then tap the active timer card and confirm it reopens.
-6. Lock the phone and verify the Live Activity.
-7. On a Dynamic Island device, verify compact, minimal, and expanded presentations.
+6. Lock the phone and verify the Live Activity shows the live duration plus the original session start, such as **Sleeping since 9:12 AM**, right-aligned on the same row as the caregiver and other timer details.
+7. On a Dynamic Island device, verify compact, minimal, and expanded presentations, including the start-time footer in the expanded presentation.
 8. Tap **Stop**. The app should open and immediately stop the selected timer, and the Active Timer widget should stop counting and offer **Resume**. Save the timer and confirm the widget returns to its ready state.
 9. With Little Window Alerts enabled at **10 minutes before**, start a Sleep timer and confirm its pending alert is removed. Stop and save the timer, then confirm the newly predicted sleep alert is scheduled without toggling alerts off and on.
 10. For nursing, confirm both Total and the active Left or Right duration count live, then tap **Switch** and confirm the side label and side duration change while the total is retained.

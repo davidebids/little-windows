@@ -767,13 +767,19 @@ enum MedicationService {
                   $0.regimenID == regimen.id && $0.medicationID == medication.id
               }) ?? true else { return nil }
         let matchingRecord: MedicationDoseRecord? = occurrence.flatMap { occurrence in
-            ((try? context.fetch(FetchDescriptor<MedicationDoseRecord>())) ?? [])
-                .first {
-                    $0.profileID == profileID
-                        && $0.medicationID == medication.id
-                        && $0.regimenID == regimen.id
-                        && $0.occurrenceKey == occurrence.occurrenceKey
+            let medicationID = medication.id
+            let regimenID = regimen.id
+            let occurrenceKey = occurrence.occurrenceKey
+            var descriptor = FetchDescriptor<MedicationDoseRecord>(
+                predicate: #Predicate { record in
+                    record.profileID == profileID
+                        && record.medicationID == medicationID
+                        && record.regimenID == regimenID
+                        && record.occurrenceKey == occurrenceKey
                 }
+            )
+            descriptor.fetchLimit = 1
+            return (try? context.fetch(descriptor))?.first
         }
         if let matchingRecord {
             return matchingRecord.status == status ? matchingRecord : nil
@@ -866,10 +872,17 @@ enum MedicationService {
         eventID: UUID,
         context: ModelContext
     ) -> Bool {
-        guard let record = ((try? context.fetch(FetchDescriptor<MedicationDoseRecord>())) ?? [])
-            .first(where: { $0.careEventID == eventID }) else { return false }
-        if let medication = ((try? context.fetch(FetchDescriptor<Medication>())) ?? [])
-            .first(where: { $0.id == record.medicationID }) {
+        var recordDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.careEventID == eventID }
+        )
+        recordDescriptor.fetchLimit = 1
+        guard let record = (try? context.fetch(recordDescriptor))?.first else { return false }
+        let medicationID = record.medicationID
+        var medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.id == medicationID }
+        )
+        medicationDescriptor.fetchLimit = 1
+        if let medication = (try? context.fetch(medicationDescriptor))?.first {
             refundSupplyIfNeeded(
                 for: record,
                 medication: medication,
@@ -955,17 +968,21 @@ enum MedicationService {
         _ regimenID: UUID,
         context: ModelContext
     ) -> [MedicationSchedulePhase] {
-        ((try? context.fetch(FetchDescriptor<MedicationSchedulePhase>())) ?? [])
-            .filter { $0.regimenID == regimenID }
-            .sorted { $0.sequence < $1.sequence }
+        let descriptor = FetchDescriptor<MedicationSchedulePhase>(
+            predicate: #Predicate { $0.regimenID == regimenID },
+            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
+        )
+        return (try? context.fetch(descriptor)) ?? []
     }
 
     static func doseRecordsForRegimen(
         _ regimenID: UUID,
         context: ModelContext
     ) -> [MedicationDoseRecord] {
-        ((try? context.fetch(FetchDescriptor<MedicationDoseRecord>())) ?? [])
-            .filter { $0.regimenID == regimenID }
+        let descriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.regimenID == regimenID }
+        )
+        return (try? context.fetch(descriptor)) ?? []
     }
 
     private static func apply(
@@ -998,8 +1015,11 @@ enum MedicationService {
                     caregiverName: record.caregiverName,
                     notes: notes.nilIfEmpty
                 )
-                event.profileTypeSnapshot = ((try? context.fetch(FetchDescriptor<CareProfile>())) ?? [])
-                    .first(where: { $0.id == profileID })?.profileType
+                var profileDescriptor = FetchDescriptor<CareProfile>(
+                    predicate: #Predicate { $0.id == profileID }
+                )
+                profileDescriptor.fetchLimit = 1
+                event.profileTypeSnapshot = (try? context.fetch(profileDescriptor))?.first?.profileType
                 event.medicineName = medication.name
                 event.dose = record.doseAmount
                 event.doseUnit = record.doseUnit
@@ -1038,8 +1058,11 @@ enum MedicationService {
         context: ModelContext
     ) {
         guard let eventID = record.careEventID else { return }
-        if let event = ((try? context.fetch(FetchDescriptor<CareEvent>())) ?? [])
-            .first(where: { $0.id == eventID }) {
+        var descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate { $0.id == eventID }
+        )
+        descriptor.fetchLimit = 1
+        if let event = (try? context.fetch(descriptor))?.first {
             context.delete(event)
         }
         record.careEventID = nil

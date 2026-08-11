@@ -271,14 +271,14 @@ enum TemperatureMethod: String, Codable, CaseIterable, Identifiable {
     var displayName: String { rawValue.capitalized }
 }
 
-enum PredictionKind: String, Codable, CaseIterable, Identifiable {
+enum PredictionKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case nap
     case bedtime
     var id: String { rawValue }
     var displayName: String { rawValue.capitalized }
 }
 
-enum ConfidenceLabel: String, Codable, CaseIterable, Identifiable {
+enum ConfidenceLabel: String, Codable, CaseIterable, Identifiable, Sendable {
     case low
     case medium
     case high

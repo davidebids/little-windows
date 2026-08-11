@@ -1,9 +1,19 @@
 import Foundation
 
+enum SystemIntegrationStorage {
+    /// Serializes active-timer snapshot file access across the app's snapshot
+    /// publisher and widget commands without blocking either caller.
+    static let widgetSnapshotQueue = DispatchQueue(
+        label: "com.debidia.LittleWindows.widget-snapshot-storage",
+        qos: .utility
+    )
+}
+
 enum SystemIntegrationConstants {
     static let appGroupIdentifier = "group.com.debidia.LittleWindows"
     static let widgetSnapshotFilename = "widget-snapshot.json"
     static let pendingURLFilename = "pending-action.txt"
+    static let activeTimerWidgetKind = "LittleWindows.ActiveTimer"
 
     private static let appGroupContainerURL = FileManager.default.containerURL(
         forSecurityApplicationGroupIdentifier: appGroupIdentifier
@@ -35,7 +45,7 @@ enum SystemIntegrationConstants {
     }
 }
 
-struct ActiveTimerSnapshot: Codable, Hashable, Identifiable {
+struct ActiveTimerSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: UUID
     var profileID: UUID?
     var profileName: String?
@@ -43,6 +53,7 @@ struct ActiveTimerSnapshot: Codable, Hashable, Identifiable {
     var typeRawValue: String
     var eventLabel: String
     var systemImage: String
+    var sessionStartDate: Date?
     var startDate: Date
     var isRunning: Bool?
     var elapsedSeconds: TimeInterval?
@@ -63,6 +74,78 @@ struct ActiveTimerSnapshot: Codable, Hashable, Identifiable {
 
     var resolvedElapsedSeconds: TimeInterval {
         elapsedSeconds ?? 0
+    }
+
+    var resolvedSessionStartDate: Date {
+        sessionStartDate ?? startDate
+    }
+
+    /// Live Activities advance running timers from their reference dates. A
+    /// fresh history snapshot naturally contains a larger elapsed/duration
+    /// value even when no timer state changed; treating that as a mutation
+    /// causes redundant ActivityKit updates during unrelated saves/deletes.
+    func isEquivalentLiveActivityState(to other: Self) -> Bool {
+        guard id == other.id,
+              profileID == other.profileID,
+              profileName == other.profileName,
+              babyName == other.babyName,
+              typeRawValue == other.typeRawValue,
+              eventLabel == other.eventLabel,
+              systemImage == other.systemImage,
+              caregiverName == other.caregiverName,
+              additionalActiveCount == other.additionalActiveCount,
+              resolvedIsRunning == other.resolvedIsRunning,
+              activeNursingSideRawValue == other.activeNursingSideRawValue,
+              datesAreEquivalent(resolvedSessionStartDate, other.resolvedSessionStartDate),
+              optionalDatesAreEquivalent(
+                activeNursingSideTimerStartDate,
+                other.activeNursingSideTimerStartDate
+              ) else {
+            return false
+        }
+
+        guard resolvedIsRunning else {
+            return datesAreEquivalent(startDate, other.startDate)
+                && valuesAreEquivalent(resolvedElapsedSeconds, other.resolvedElapsedSeconds)
+                && valuesAreEquivalent(leftDurationSeconds, other.leftDurationSeconds)
+                && valuesAreEquivalent(rightDurationSeconds, other.rightDurationSeconds)
+        }
+
+        // The active nursing side advances from its timer start date without a
+        // content push. The inactive side is fixed and must still match so a
+        // side switch or corrected duration is never deduplicated.
+        switch activeNursingSide {
+        case .left:
+            return valuesAreEquivalent(rightDurationSeconds, other.rightDurationSeconds)
+        case .right:
+            return valuesAreEquivalent(leftDurationSeconds, other.leftDurationSeconds)
+        case .none:
+            return valuesAreEquivalent(leftDurationSeconds, other.leftDurationSeconds)
+                && valuesAreEquivalent(rightDurationSeconds, other.rightDurationSeconds)
+        }
+    }
+
+    private func datesAreEquivalent(_ lhs: Date, _ rhs: Date) -> Bool {
+        valuesAreEquivalent(lhs.timeIntervalSinceReferenceDate, rhs.timeIntervalSinceReferenceDate)
+    }
+
+    private func optionalDatesAreEquivalent(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none):
+            return true
+        case let (.some(lhs), .some(rhs)):
+            return datesAreEquivalent(lhs, rhs)
+        default:
+            return false
+        }
+    }
+
+    private func valuesAreEquivalent(_ lhs: TimeInterval, _ rhs: TimeInterval) -> Bool {
+        abs(lhs - rhs) < 0.01
+    }
+
+    var startedSincePrefix: String {
+        typeRawValue == "sleep" ? "Sleeping since" : "\(eventLabel) since"
     }
 
     var activeNursingSideElapsedSeconds: TimeInterval {
@@ -96,7 +179,7 @@ struct ActiveTimerSnapshot: Codable, Hashable, Identifiable {
     }
 }
 
-struct PredictionSnapshot: Codable, Hashable {
+struct PredictionSnapshot: Codable, Hashable, Sendable {
     var profileID: UUID?
     var profileName: String?
     var kind: String
@@ -154,7 +237,7 @@ enum PredictionCountdownFormatting {
     }
 }
 
-struct TodaySummarySnapshot: Codable, Hashable {
+struct TodaySummarySnapshot: Codable, Hashable, Sendable {
     var profileID: UUID?
     var profileName: String?
     var profileTypeRawValue: String?
@@ -200,7 +283,7 @@ struct TodaySummarySnapshot: Codable, Hashable {
     }
 }
 
-struct CareSummaryMetricSnapshot: Codable, Hashable, Identifiable {
+struct CareSummaryMetricSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var title: String
     var value: String
@@ -209,14 +292,14 @@ struct CareSummaryMetricSnapshot: Codable, Hashable, Identifiable {
     var eventTypeRawValue: String?
 }
 
-struct FoodShoppingListItemSnapshot: Codable, Hashable, Identifiable {
+struct FoodShoppingListItemSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: UUID
     var name: String
     var quantityText: String
     var sectionName: String?
 }
 
-struct FoodShoppingListSnapshot: Codable, Hashable, Identifiable {
+struct FoodShoppingListSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: UUID
     var name: String
     var activeItemCount: Int
@@ -233,7 +316,7 @@ struct FoodShoppingListSnapshot: Codable, Hashable, Identifiable {
     }
 }
 
-struct FoodWidgetSnapshot: Codable, Hashable {
+struct FoodWidgetSnapshot: Codable, Hashable, Sendable {
     var generatedAt: Date
     var selectedList: FoodShoppingListSnapshot?
     var lists: [FoodShoppingListSnapshot]
@@ -245,7 +328,7 @@ struct FoodWidgetSnapshot: Codable, Hashable {
     )
 }
 
-struct QuickLogActionSnapshot: Codable, Hashable, Identifiable {
+struct QuickLogActionSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var title: String
     var subtitle: String?
@@ -270,7 +353,7 @@ struct QuickLogActionSnapshot: Codable, Hashable, Identifiable {
     }
 }
 
-struct WidgetSnapshot: Codable, Hashable {
+struct WidgetSnapshot: Codable, Hashable, Sendable {
     var generatedAt: Date
     var profileID: UUID?
     var profileName: String?

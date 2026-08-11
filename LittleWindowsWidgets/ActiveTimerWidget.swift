@@ -22,7 +22,7 @@ private struct ActiveTimerProvider: TimelineProvider {
 }
 
 struct ActiveTimerWidget: Widget {
-    let kind = "LittleWindows.ActiveTimer"
+    let kind = SystemIntegrationConstants.activeTimerWidgetKind
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: ActiveTimerProvider()) { entry in
@@ -94,8 +94,13 @@ private struct ActiveTimerWidgetView: View {
                                 }
                                 .font(.caption2.weight(.semibold))
                             } else if timer.resolvedIsRunning {
-                                Text(timer.startDate, style: .timer)
-                                    .font(.headline.monospacedDigit())
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(timer.startDate, style: .timer)
+                                        .font(.headline.monospacedDigit())
+                                    startedSinceLabel(timer)
+                                        .font(.system(size: 8, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
                             } else {
                                 Text("\(elapsedText(timer)) · Stopped")
                                     .font(.headline.monospacedDigit())
@@ -209,6 +214,13 @@ private struct ActiveTimerWidgetView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(tint)
             }
+            if timer.resolvedIsRunning {
+                startedSinceLabel(timer)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 3)
+            }
         }
         .widgetURL(timer.openURL)
     }
@@ -272,82 +284,97 @@ private struct ActiveTimerWidgetView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(tint)
             }
+            if timer.resolvedIsRunning {
+                startedSinceLabel(timer)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 3)
+            }
         }
         .widgetURL(timer.openURL)
     }
 
     private func mediumTimer(_ timer: ActiveTimerSnapshot) -> some View {
         let tint = LittleWindowsWidgetStyle.tint(for: timer.typeRawValue)
-        return HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 0) {
-                WidgetBrandLabel()
-                Spacer()
-                HStack(spacing: 11) {
-                    WidgetIconBadge(systemImage: timer.systemImage, tint: tint, size: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(timer.typeRawValue == "nursing" ? "Nursing" : timer.eventLabel)
-                            .font(.headline)
-                        Text(timer.babyName)
+        return VStack(spacing: 4) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 0) {
+                    WidgetBrandLabel()
+                    Spacer()
+                    HStack(spacing: 11) {
+                        WidgetIconBadge(systemImage: timer.systemImage, tint: tint, size: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(timer.typeRawValue == "nursing" ? "Nursing" : timer.eventLabel)
+                                .font(.headline)
+                            Text(timer.babyName)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                    }
+                    Spacer()
+                    if timer.typeRawValue == "nursing",
+                       let side = timer.activeNursingSideRawValue {
+                        HStack(spacing: 4) {
+                            Image(systemName: "\(side.prefix(1)).circle.fill")
+                            Text(side.capitalized)
+                            activeNursingSideDuration(timer)
+                                .monospacedDigit()
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                    } else if timer.additionalActiveCount > 0 {
+                        Text("+\(timer.additionalActiveCount) more active")
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.white.opacity(0.64))
                     }
                 }
-                Spacer()
-                if timer.typeRawValue == "nursing",
-                   let side = timer.activeNursingSideRawValue {
-                    HStack(spacing: 4) {
-                        Image(systemName: "\(side.prefix(1)).circle.fill")
-                        Text(side.capitalized)
-                        activeNursingSideDuration(timer)
-                            .monospacedDigit()
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
-                } else if timer.additionalActiveCount > 0 {
-                    Text("+\(timer.additionalActiveCount) more active")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.64))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .trailing, spacing: 10) {
-                Text(
-                    timer.typeRawValue == "nursing"
-                        ? "TOTAL"
-                        : (timer.resolvedIsRunning ? "RUNNING" : "STOPPED")
-                )
+                VStack(alignment: .trailing, spacing: 10) {
+                    Text(
+                        timer.typeRawValue == "nursing"
+                            ? "TOTAL"
+                            : (timer.resolvedIsRunning ? "RUNNING" : "STOPPED")
+                    )
                     .font(.caption2.weight(.heavy))
                     .tracking(1)
                     .foregroundStyle(tint)
-                timerDuration(timer)
-                    .font(.title.weight(.bold).monospacedDigit())
-                    .minimumScaleFactor(0.68)
-                    .lineLimit(1)
-                Spacer()
-                HStack(spacing: 8) {
-                    Link(destination: timer.openURL) {
-                        Image(systemName: "arrow.up.forward")
-                            .frame(width: 32, height: 28)
-                    }
-                    .buttonStyle(.bordered)
-                    if timer.resolvedIsRunning {
-                        Button(intent: StopTimerIntent(eventID: timer.id.uuidString)) {
-                            Label("Stop", systemImage: "stop.fill")
+                    timerDuration(timer)
+                        .font(.title.weight(.bold).monospacedDigit())
+                        .minimumScaleFactor(0.68)
+                        .lineLimit(1)
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Link(destination: timer.openURL) {
+                            Image(systemName: "arrow.up.forward")
+                                .frame(width: 32, height: 28)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(tint)
-                    } else {
-                        Button(intent: ResumeTimerIntent(eventID: timer.id.uuidString)) {
-                            Label("Resume", systemImage: "play.fill")
+                        .buttonStyle(.bordered)
+                        if timer.resolvedIsRunning {
+                            Button(intent: StopTimerIntent(eventID: timer.id.uuidString)) {
+                                Label("Stop", systemImage: "stop.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(tint)
+                        } else {
+                            Button(intent: ResumeTimerIntent(eventID: timer.id.uuidString)) {
+                                Label("Resume", systemImage: "play.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(tint)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(tint)
                     }
+                    .font(.caption.weight(.semibold))
                 }
-                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            if timer.resolvedIsRunning {
+                startedSinceLabel(timer)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
         .foregroundStyle(.white)
         .widgetURL(timer.openURL)
@@ -382,5 +409,15 @@ private struct ActiveTimerWidgetView: View {
         let minutes = (total % 3_600) / 60
         let remainingSeconds = total % 60
         return String(format: "%02d:%02d:%02d", hours, minutes, remainingSeconds)
+    }
+
+    private func startedSinceLabel(_ timer: ActiveTimerSnapshot) -> some View {
+        return HStack(spacing: 3) {
+            Text(timer.startedSincePrefix)
+            Text(timer.resolvedSessionStartDate, style: .time)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .accessibilityElement(children: .combine)
     }
 }

@@ -203,8 +203,10 @@ struct BackwardsSleepPlanView: View {
                 } label: {
                     Label(
                         isActivePlan ? "Active Plan" : "Activate Plan",
-                        systemImage: isActivePlan ? "checkmark.circle.fill" : "bell.badge.fill"
+                        systemImage: isActivePlan ? "checkmark.circle.fill" : "play.circle.fill"
                     )
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

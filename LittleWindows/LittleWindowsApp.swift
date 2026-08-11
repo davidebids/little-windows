@@ -23,7 +23,6 @@ final class PersistenceStartupController: ObservableObject {
         // Give SwiftUI a frame to present the branded launch view before the
         // synchronous SwiftData store open begins.
         await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
         #if DEBUG
         if let rawDelay = ProcessInfo.processInfo.environment[
             "LITTLE_WINDOWS_STARTUP_PREVIEW_DELAY_MS"
@@ -198,14 +197,13 @@ struct LittleWindowsApp: App {
     @MainActor
     private func scheduleLaunchMaintenance(container modelContainer: ModelContainer) {
         Task(priority: .utility) { @MainActor in
-            try? await Task.sleep(for: .milliseconds(650))
+            await Task.yield()
             await NotificationManager.shared.configure()
             CloudKitSharingService.processPendingAcceptedShareIfNeeded()
         }
 
         Task(priority: .utility) { @MainActor in
-            try? await Task.sleep(for: .seconds(6))
-            await AppInteractionMonitor.waitUntilIdle()
+            await Task.yield()
             guard !Task.isCancelled else { return }
             if PersistenceService.familySyncMode() == .sharedFamilySync {
                 _ = try? await CloudKitSharingService.shared.syncNow(
@@ -355,32 +353,47 @@ private struct PersistenceRecoveryView: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .interactiveDismissDisabled()
-        .alert(
-            "Restore this backup?",
+        .appActionSheet(
             isPresented: Binding(
                 get: { backupToRestore != nil },
                 set: { if !$0 { backupToRestore = nil } }
             ),
-            presenting: backupToRestore
-        ) { backup in
-            Button("Restore \(backup.displayName)", role: .destructive) {
-                backupToRestore = nil
-                controller.restore(backup)
-            }
-            Button("Cancel", role: .cancel) {
-                backupToRestore = nil
-            }
-        } message: { _ in
-            Text("The unreadable store will be preserved first. The backup will open in a new local-only store, so nothing is uploaded until you deliberately turn sync back on.")
-        }
-        .alert("Start with an empty store?", isPresented: $confirmingFreshStart) {
-            Button("Start Empty", role: .destructive) {
-                controller.startFresh()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Little Windows will preserve the unreadable store before creating an empty local-only store. This does not delete iCloud or Family Sync data.")
-        }
+            title: "Restore this backup?",
+            message: "The unreadable store will be preserved first. The backup will open in a new local-only store, so nothing is uploaded until you deliberately turn sync back on.",
+            systemImage: "clock.arrow.circlepath",
+            tint: .orange,
+            options: backupToRestore.map { backup in
+                [AppActionSheetOption(
+                    title: "Restore \(backup.displayName)",
+                    subtitle: "Preserve the unreadable store, then open this local backup.",
+                    systemImage: "clock.arrow.circlepath",
+                    tint: .orange,
+                    role: .destructive
+                ) {
+                    backupToRestore = nil
+                    controller.restore(backup)
+                }]
+            } ?? [],
+            cancelAction: { backupToRestore = nil }
+        )
+        .appActionSheet(
+            isPresented: $confirmingFreshStart,
+            title: "Start with an empty store?",
+            message: "Little Windows will preserve the unreadable store before creating an empty local-only store. This does not delete iCloud or Family Sync data.",
+            systemImage: "archivebox.fill",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Start Empty",
+                    subtitle: "Preserve the unreadable store and create a new local store.",
+                    systemImage: "archivebox.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    controller.startFresh()
+                }
+            ]
+        )
         .overlay {
             if controller.isWorking {
                 ZStack {
@@ -511,16 +524,4 @@ final class LittleWindowsSceneDelegate: NSObject, UIWindowSceneDelegate {
         CloudKitSharingService.handleAcceptedShare(metadata: cloudKitShareMetadata)
     }
 
-    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-        Task { @MainActor in
-            for context in URLContexts {
-                let url = context.url
-                if await IntegrationCommandStore.deliverToRunningApp(url) {
-                    IntegrationCommandStore.clearPendingURL(matching: url)
-                } else {
-                    DeepLinkRouter.shared.route(url)
-                }
-            }
-        }
-    }
 }

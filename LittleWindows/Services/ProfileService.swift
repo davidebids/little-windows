@@ -241,7 +241,7 @@ final class ProfileService: ObservableObject {
                 events: [],
                 prediction: nil
             )
-            WatchConnectivityService.shared.publishCurrentState()
+            WatchConnectivityService.shared.scheduleCurrentStatePublish()
             Task {
                 await LiveActivityManager.shared.synchronize(profile: nil, events: [])
             }
@@ -302,7 +302,7 @@ final class ProfileService: ObservableObject {
     func switchProfile(_ profile: CareProfile) {
         selectedProfileID = profile.id
         UserDefaults.standard.set(profile.id.uuidString, forKey: selectedProfileKey)
-        WatchConnectivityService.shared.publishCurrentState()
+        WatchConnectivityService.shared.scheduleCurrentStatePublish()
         SystemIntegrationReconciler.requestReconciliation()
     }
 
@@ -400,19 +400,49 @@ final class ProfileService: ObservableObject {
     }
 }
 
-@MainActor
 enum ProfileDuplicateRepairService {
     private static let minimumSetupShellAgeDifference: TimeInterval = 60
 
     @discardableResult
+    @MainActor
     static func repair(
         context: ModelContext,
         profiles: [CareProfile]? = nil,
         saveChanges: Bool = true
     ) -> Int {
+        let result = repairCore(
+            context: context,
+            profiles: profiles,
+            saveChanges: saveChanges,
+            selectedProfileID: ProfileService.shared.selectedProfileID
+        )
+        if let replacementProfileID = result.replacementProfileID,
+           let replacement = try? context.fetch(FetchDescriptor<CareProfile>(
+            predicate: #Predicate { $0.id == replacementProfileID }
+           )).first {
+            ProfileService.shared.switchProfile(replacement)
+        }
+        return result.removedCount
+    }
+
+    nonisolated static func repairInBackground(context: ModelContext) -> Int {
+        repairCore(
+            context: context,
+            profiles: nil,
+            saveChanges: true,
+            selectedProfileID: nil
+        ).removedCount
+    }
+
+    nonisolated private static func repairCore(
+        context: ModelContext,
+        profiles: [CareProfile]?,
+        saveChanges: Bool,
+        selectedProfileID: UUID?
+    ) -> (removedCount: Int, replacementProfileID: UUID?) {
         let fetchedProfiles = profiles
             ?? ((try? context.fetch(FetchDescriptor<CareProfile>())) ?? [])
-        guard fetchedProfiles.count > 1 else { return 0 }
+        guard fetchedProfiles.count > 1 else { return (0, nil) }
 
         let sortedProfiles = fetchedProfiles.sorted { lhs, rhs in
             if lhs.createdAt != rhs.createdAt {
@@ -474,21 +504,19 @@ enum ProfileDuplicateRepairService {
         let removedProfiles = fetchedProfiles.filter {
             removedObjectIDs.contains(ObjectIdentifier($0))
         }
-        guard !removedProfiles.isEmpty else { return 0 }
+        guard !removedProfiles.isEmpty else { return (0, nil) }
 
-        if let selectedProfileID = ProfileService.shared.selectedProfileID,
-           let replacement = replacementByRemovedProfileID[selectedProfileID] {
-            ProfileService.shared.switchProfile(replacement)
-        }
+        let replacementProfileID = selectedProfileID
+            .flatMap { replacementByRemovedProfileID[$0]?.id }
         removedProfiles.forEach(context.delete)
 
         if saveChanges, !PersistenceService.save(context: context) {
-            return 0
+            return (0, nil)
         }
         if saveChanges {
             SystemIntegrationReconciler.requestReconciliation()
         }
-        return removedProfiles.count
+        return (removedProfiles.count, replacementProfileID)
     }
 
     private static func profilesRepresentSamePerson(
@@ -667,6 +695,16 @@ enum ProfileDuplicateRepairService {
         } catch {
             return nil
         }
+    }
+}
+
+/// Duplicate detection performs a series of existence queries across every
+/// profile-scoped model. Keep those reads and the repair save out of SwiftUI's
+/// main context; RootView only reconciles its lightweight selection afterward.
+@ModelActor
+actor ProfileDuplicateRepairWorker {
+    func repair() -> Int {
+        ProfileDuplicateRepairService.repairInBackground(context: modelContext)
     }
 }
 

@@ -62,6 +62,7 @@ final class CloudKitSharingService {
 
     private let containerIdentifier: String
     private let defaults: UserDefaults
+    private let statusDefaults: UserDefaults
 
     private enum Constant {
         static let zoneName = "LittleWindowsFamily"
@@ -112,7 +113,28 @@ final class CloudKitSharingService {
     ) {
         self.containerIdentifier = containerIdentifier
         self.defaults = defaults
+        statusDefaults = PersistenceService.operationalDefaults(for: defaults)
+        if statusDefaults !== defaults {
+            for key in Self.operationalDefaultsKeys
+            where statusDefaults.object(forKey: key) == nil {
+                if let existingValue = defaults.object(forKey: key) {
+                    statusDefaults.set(existingValue, forKey: key)
+                }
+            }
+        }
     }
+
+    private nonisolated static let operationalDefaultsKeys = [
+        DefaultsKey.lastSyncAt,
+        DefaultsKey.lastUploadedAt,
+        DefaultsKey.lastDownloadedAt,
+        DefaultsKey.lastDatasetChecksum,
+        DefaultsKey.lastNotifiedDatasetChecksum,
+        DefaultsKey.pushSubscriptionID,
+        DefaultsKey.lastError,
+        DefaultsKey.pendingUpload,
+        DefaultsKey.participantCount
+    ]
 
     static func install(container: ModelContainer) {
         installedContainer = container
@@ -151,7 +173,7 @@ final class CloudKitSharingService {
         guard !isApplyingRemoteDataset else { return }
         guard PersistenceService.familySyncMode() == .sharedFamilySync else { return }
         guard let container = installedContainer else { return }
-        shared.defaults.set(true, forKey: DefaultsKey.pendingUpload)
+        shared.statusDefaults.set(true, forKey: DefaultsKey.pendingUpload)
         shared.enqueueLocalMutationSync(context: container.mainContext)
     }
 
@@ -191,7 +213,7 @@ final class CloudKitSharingService {
         let hasShare = storedRootRecordID != nil
         let canUseStoredShare = hasShare && role != .none
         let availability = privateSyncAvailable ?? syncMode.requiresICloudAccount
-        let lastError = defaults.string(forKey: DefaultsKey.lastError)
+        let lastError = statusDefaults.string(forKey: DefaultsKey.lastError)
         let inactiveReason = defaults.string(forKey: DefaultsKey.inactiveReason)
             .flatMap(FamilyShareInactiveReason.init(rawValue:))
         let status: FamilyShareStatus
@@ -218,9 +240,9 @@ final class CloudKitSharingService {
             ownerDescription: ownerDescription(role: role),
             participantDescription: participantDescription(role: role),
             sharingIsImplemented: true,
-            participantCount: defaults.integer(forKey: "familySync.participantCount"),
-            lastSyncAt: defaults.object(forKey: DefaultsKey.lastSyncAt) as? Date,
-            pendingUploadCount: defaults.bool(forKey: DefaultsKey.pendingUpload) ? 1 : 0,
+            participantCount: statusDefaults.integer(forKey: DefaultsKey.participantCount),
+            lastSyncAt: statusDefaults.object(forKey: DefaultsKey.lastSyncAt) as? Date,
+            pendingUploadCount: statusDefaults.bool(forKey: DefaultsKey.pendingUpload) ? 1 : 0,
             pendingDownloadCount: 0,
             canResumeShare: inactiveReason == nil && syncMode == .privateICloudSync
                 && availability && canUseStoredShare,
@@ -311,7 +333,7 @@ final class CloudKitSharingService {
             }
 
             progress(.finishing)
-            try saveBaselineData(payload.data)
+            try await saveBaselineData(payload.data)
             store(
                 mode: .sharedFamilySync,
                 role: .owner,
@@ -320,7 +342,7 @@ final class CloudKitSharingService {
                 shareRecordID: share.recordID
             )
             updateShareMembership(from: share)
-            defaults.removeObject(forKey: DefaultsKey.lastError)
+            statusDefaults.removeObject(forKey: DefaultsKey.lastError)
             markSynced(uploaded: true, downloaded: false)
             schedulePushSubscriptionSetup(rootRecordID: rootID, role: .owner)
             return share
@@ -342,7 +364,7 @@ final class CloudKitSharingService {
         do {
             try await ensureFamilySyncPushSubscription(rootRecordID: rootID, role: storedRole)
             _ = try await syncNow(context: context, reason: .manual)
-            defaults.removeObject(forKey: DefaultsKey.lastError)
+            statusDefaults.removeObject(forKey: DefaultsKey.lastError)
         } catch {
             PersistenceService.setFamilySyncMode(.privateICloudSync, defaults: defaults)
             throw error
@@ -381,7 +403,7 @@ final class CloudKitSharingService {
         guard storedRole != .none else { return }
         do {
             _ = try await existingShare()
-            defaults.removeObject(forKey: DefaultsKey.lastError)
+            statusDefaults.removeObject(forKey: DefaultsKey.lastError)
         } catch {
             record(error: error)
         }
@@ -416,17 +438,17 @@ final class CloudKitSharingService {
         updateShareMembership(from: share)
         try await ensureFamilySyncPushSubscription(rootRecordID: rootID, role: .participant)
         let remoteData = try await datasetData(from: root, template: localPayload.data)
-        let mergedData = try DataExportImportService.mergeFamilySyncData(
+        let mergedData = try await mergeFamilySyncData(
             base: nil,
             local: localPayload.data,
             remote: remoteData,
             localChangedAt: PersistenceService.lastLocalSaveAt(defaults: defaults),
             remoteChangedAt: root[Constant.datasetUpdatedAtKey] as? Date
         )
-        let mergedPayload = try FamilySyncDatasetPayload(data: mergedData)
+        let mergedPayload = try await makeDatasetPayload(from: mergedData)
         defer { mergedPayload.removeTemporaryFile() }
         if mergedPayload.checksum != localPayload.checksum {
-            try importDataset(mergedData, from: root, context: context)
+            try await importDataset(mergedData, from: root, context: context)
         }
         if mergedPayload.checksum != (root[Constant.datasetChecksumKey] as? String) {
             try await uploadEntityChanges(
@@ -443,8 +465,8 @@ final class CloudKitSharingService {
                 atomically: true
             )
         }
-        try saveBaselineData(mergedData)
-        defaults.removeObject(forKey: DefaultsKey.lastError)
+        try await saveBaselineData(mergedData)
+        statusDefaults.removeObject(forKey: DefaultsKey.lastError)
         if !CaregiverIdentityService.hasExplicitCurrentCaregiverName(defaults: defaults) {
             defaults.set(true, forKey: CaregiverIdentityService.needsLogNamePromptKey)
         }
@@ -471,7 +493,7 @@ final class CloudKitSharingService {
             _ = try? await existingShare()
         }
 
-        let pendingUpload = defaults.bool(forKey: DefaultsKey.pendingUpload)
+        let pendingUpload = statusDefaults.bool(forKey: DefaultsKey.pendingUpload)
         if reason.usesLightweightRemoteCheck, !pendingUpload {
             let metadataRoot = try await fetchRootRecord(
                 id: rootID,
@@ -486,10 +508,16 @@ final class CloudKitSharingService {
             let remoteChecksum = metadataRoot[Constant.datasetChecksumKey] as? String
             guard Self.foregroundPollNeedsDownload(
                 remoteChecksum: remoteChecksum,
-                lastKnownChecksum: defaults.string(forKey: DefaultsKey.lastDatasetChecksum),
+                lastKnownChecksum: statusDefaults.string(forKey: DefaultsKey.lastDatasetChecksum),
                 pendingUpload: pendingUpload
             ) else {
-                markSynced(uploaded: false, downloaded: false)
+                // A five-second foreground check with no remote changes must
+                // be completely silent. Updating sync timestamps here used to
+                // invalidate every `@AppStorage`-backed SwiftUI view on each
+                // poll, producing the repeating Today/timer scroll freeze.
+                if reason != .foregroundTimerPoll {
+                    markSynced(uploaded: false, downloaded: false)
+                }
                 return false
             }
             // The full record is fetched below only when its checksum changed.
@@ -502,14 +530,17 @@ final class CloudKitSharingService {
         let localPayload = try await makeDatasetPayload(fallbackContext: context)
         defer { localPayload.removeTemporaryFile() }
         if remoteChecksum == localPayload.checksum {
-            try saveBaselineData(localPayload.data)
+            try await saveBaselineData(localPayload.data)
             markSynced(uploaded: false, downloaded: false)
             return false
         }
 
-        let baselineData = loadBaselineData()
-        let baselineChecksum = try baselineData.map {
-            try FamilySyncDatasetPayload(data: $0)
+        let baselineData = await loadBaselineData()
+        let baselineChecksum: FamilySyncDatasetPayload?
+        if let baselineData {
+            baselineChecksum = try await makeDatasetPayload(from: baselineData)
+        } else {
+            baselineChecksum = nil
         }
         let remoteData: Data
         if let baselineData,
@@ -526,20 +557,20 @@ final class CloudKitSharingService {
                 remoteData: remoteData
             )
             : nil
-        let mergedData = try DataExportImportService.mergeFamilySyncData(
-            base: loadBaselineData(),
+        let mergedData = try await mergeFamilySyncData(
+            base: baselineData,
             local: localPayload.data,
             remote: remoteData,
             localChangedAt: PersistenceService.lastLocalSaveAt(defaults: defaults),
             remoteChangedAt: remoteUpdatedAt
         )
-        let mergedPayload = try FamilySyncDatasetPayload(data: mergedData)
+        let mergedPayload = try await makeDatasetPayload(from: mergedData)
         defer { mergedPayload.removeTemporaryFile() }
         let downloaded = mergedPayload.checksum != localPayload.checksum
         let needsUpload = mergedPayload.checksum != remoteChecksum
 
         if downloaded {
-            try importDataset(mergedData, from: root, context: context)
+            try await importDataset(mergedData, from: root, context: context)
         }
         if needsUpload {
             try await uploadEntityChanges(
@@ -556,9 +587,9 @@ final class CloudKitSharingService {
                 atomically: true
             )
         }
-        try saveBaselineData(mergedData)
-        defaults.set(mergedPayload.checksum, forKey: DefaultsKey.lastDatasetChecksum)
-        defaults.removeObject(forKey: DefaultsKey.lastError)
+        try await saveBaselineData(mergedData)
+        statusDefaults.set(mergedPayload.checksum, forKey: DefaultsKey.lastDatasetChecksum)
+        statusDefaults.removeObject(forKey: DefaultsKey.lastError)
         markSynced(uploaded: needsUpload, downloaded: downloaded)
         if downloaded {
             await SystemIntegrationReconciler.reconcile(context: context)
@@ -580,14 +611,14 @@ final class CloudKitSharingService {
             var busyRetryAttempt = 0
             while self.localMutationSyncRequested, !Task.isCancelled {
                 self.localMutationSyncRequested = false
-                self.defaults.set(true, forKey: DefaultsKey.pendingUpload)
+                self.statusDefaults.set(true, forKey: DefaultsKey.pendingUpload)
                 do {
                     let changed = try await self.syncNow(
                         context: context,
                         reason: .localMutation
                     )
                     if !changed,
-                       self.defaults.bool(forKey: DefaultsKey.pendingUpload) {
+                       self.statusDefaults.bool(forKey: DefaultsKey.pendingUpload) {
                         self.localMutationSyncRequested = true
                         let delay = Self.localMutationBusyRetryDelaySeconds(
                             attempt: busyRetryAttempt
@@ -651,12 +682,17 @@ final class CloudKitSharingService {
             .max { $0.generatedAt < $1.generatedAt }?
             .prediction
 
+        let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        var solidsStateDescriptor = FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == selectedProfileID }
+        )
+        solidsStateDescriptor.fetchLimit = 1
         WidgetSnapshotService.refresh(
             profile: profile,
             events: events,
             prediction: prediction,
-            solidsState: ((try? context.fetch(FetchDescriptor<SolidsProfileState>())) ?? [])
-                .first { $0.profileID == profile?.id }
+            solidsState: (try? context.fetch(solidsStateDescriptor))?.first
         )
         await LiveActivityManager.shared.synchronize(profile: profile, events: events)
     }
@@ -679,7 +715,7 @@ final class CloudKitSharingService {
         }
         if deleteLocalData {
             try deleteLocalDataWithoutEnqueuingFamilySync(context: context)
-            defaults.removeObject(forKey: DefaultsKey.lastUploadedAt)
+            statusDefaults.removeObject(forKey: DefaultsKey.lastUploadedAt)
             await SystemIntegrationReconciler.reconcile(context: context)
         }
         if role == .owner {
@@ -717,7 +753,7 @@ final class CloudKitSharingService {
     }
 
     func handleShareSheetDidSave() {
-        defaults.removeObject(forKey: DefaultsKey.lastError)
+        statusDefaults.removeObject(forKey: DefaultsKey.lastError)
         postShareStateDidChange()
         Task { @MainActor in
             _ = try? await existingShare()
@@ -868,22 +904,21 @@ final class CloudKitSharingService {
             DefaultsKey.ownerName,
             DefaultsKey.rootRecordName,
             DefaultsKey.shareRecordName,
-            DefaultsKey.lastSyncAt,
-            DefaultsKey.lastUploadedAt,
-            DefaultsKey.lastDownloadedAt,
-            DefaultsKey.lastDatasetChecksum,
-            DefaultsKey.lastNotifiedDatasetChecksum,
-            DefaultsKey.pushSubscriptionID,
             DefaultsKey.acceptanceStatusMessage,
             DefaultsKey.acceptanceStatusAt,
-            DefaultsKey.lastError,
-            DefaultsKey.pendingUpload,
             DefaultsKey.inactiveReason,
             DefaultsKey.inactiveEventID,
-            DefaultsKey.participantCount,
             CaregiverIdentityService.familySyncCaregiverNamesKey
         ] {
             defaults.removeObject(forKey: key)
+        }
+        for key in Self.operationalDefaultsKeys {
+            statusDefaults.removeObject(forKey: key)
+            if statusDefaults !== defaults {
+                // Remove legacy operational values from the standard domain
+                // only when the share itself is explicitly cleared.
+                defaults.removeObject(forKey: key)
+            }
         }
     }
 
@@ -902,9 +937,9 @@ final class CloudKitSharingService {
         localMutationSyncTask = nil
         localMutationSyncRequested = false
         verifiedPushSubscriptionID = nil
-        defaults.removeObject(forKey: DefaultsKey.pushSubscriptionID)
-        defaults.removeObject(forKey: DefaultsKey.pendingUpload)
-        defaults.removeObject(forKey: DefaultsKey.lastError)
+        statusDefaults.removeObject(forKey: DefaultsKey.pushSubscriptionID)
+        statusDefaults.removeObject(forKey: DefaultsKey.pendingUpload)
+        statusDefaults.removeObject(forKey: DefaultsKey.lastError)
         PersistenceService.setFamilySyncMode(.privateICloudSync, defaults: defaults)
         postShareStateDidChange()
     }
@@ -967,7 +1002,7 @@ final class CloudKitSharingService {
               let subscriptionID = notification.subscriptionID else {
             return false
         }
-        if let storedSubscriptionID = defaults.string(forKey: DefaultsKey.pushSubscriptionID) {
+        if let storedSubscriptionID = statusDefaults.string(forKey: DefaultsKey.pushSubscriptionID) {
             return subscriptionID == storedSubscriptionID
         }
         return subscriptionID.hasPrefix(Constant.subscriptionIDPrefix)
@@ -989,7 +1024,7 @@ final class CloudKitSharingService {
                 matches: rootRecordID,
                 role: role
             ) {
-                defaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
+                statusDefaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
                 verifiedPushSubscriptionID = subscriptionID
                 return
             }
@@ -1003,7 +1038,7 @@ final class CloudKitSharingService {
             subscriptionID: subscriptionID
         )
         _ = try await database.save(subscription)
-        defaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
+        statusDefaults.set(subscriptionID, forKey: DefaultsKey.pushSubscriptionID)
         verifiedPushSubscriptionID = subscriptionID
     }
 
@@ -1086,7 +1121,7 @@ final class CloudKitSharingService {
         rootRecordID: CKRecord.ID,
         role: FamilyShareRole
     ) async throws {
-        let subscriptionID = defaults.string(forKey: DefaultsKey.pushSubscriptionID)
+        let subscriptionID = statusDefaults.string(forKey: DefaultsKey.pushSubscriptionID)
             ?? Self.subscriptionID(for: rootRecordID, role: role)
         _ = try await database(for: role).deleteSubscription(withID: subscriptionID)
         if verifiedPushSubscriptionID == subscriptionID {
@@ -1198,6 +1233,30 @@ final class CloudKitSharingService {
         )
     }
 
+    private func makeDatasetPayload(from data: Data) async throws -> FamilySyncDatasetPayload {
+        try await Task.detached(priority: .utility) {
+            try FamilySyncDatasetPayload(data: data)
+        }.value
+    }
+
+    private func mergeFamilySyncData(
+        base: Data?,
+        local: Data,
+        remote: Data,
+        localChangedAt: Date?,
+        remoteChangedAt: Date?
+    ) async throws -> Data {
+        try await Task.detached(priority: .utility) {
+            try DataExportImportService.mergeFamilySyncData(
+                base: base,
+                local: local,
+                remote: remote,
+                localChangedAt: localChangedAt,
+                remoteChangedAt: remoteChangedAt
+            )
+        }.value
+    }
+
     private func applyDatasetPayload(
         _ payload: FamilySyncDatasetPayload,
         to root: CKRecord,
@@ -1223,7 +1282,7 @@ final class CloudKitSharingService {
         _ data: Data,
         from root: CKRecord,
         context: ModelContext
-    ) throws {
+    ) async throws {
         Self.isApplyingRemoteDataset = true
         defer { Self.isApplyingRemoteDataset = false }
         try DataExportImportService.importData(
@@ -1234,7 +1293,7 @@ final class CloudKitSharingService {
             preservePrivateProfiles: true
         )
         if let checksum = root[Constant.datasetChecksumKey] as? String {
-            defaults.set(checksum, forKey: DefaultsKey.lastDatasetChecksum)
+            statusDefaults.set(checksum, forKey: DefaultsKey.lastDatasetChecksum)
         }
     }
 
@@ -1557,13 +1616,15 @@ final class CloudKitSharingService {
 
     private func markSynced(uploaded: Bool, downloaded: Bool) {
         let now = Date()
-        defaults.set(now, forKey: DefaultsKey.lastSyncAt)
-        defaults.set(false, forKey: DefaultsKey.pendingUpload)
+        statusDefaults.set(now, forKey: DefaultsKey.lastSyncAt)
+        if statusDefaults.bool(forKey: DefaultsKey.pendingUpload) {
+            statusDefaults.set(false, forKey: DefaultsKey.pendingUpload)
+        }
         if uploaded {
-            defaults.set(now, forKey: DefaultsKey.lastUploadedAt)
+            statusDefaults.set(now, forKey: DefaultsKey.lastUploadedAt)
         }
         if downloaded {
-            defaults.set(now, forKey: DefaultsKey.lastDownloadedAt)
+            statusDefaults.set(now, forKey: DefaultsKey.lastDownloadedAt)
         }
     }
 
@@ -1579,17 +1640,22 @@ final class CloudKitSharingService {
             .appendingPathComponent("last-synced-dataset.json")
     }
 
-    private func loadBaselineData() -> Data? {
-        try? Data(contentsOf: baselineFileURL)
+    private func loadBaselineData() async -> Data? {
+        let url = baselineFileURL
+        return await Task.detached(priority: .utility) {
+            try? Data(contentsOf: url)
+        }.value
     }
 
-    private func saveBaselineData(_ data: Data) throws {
+    private func saveBaselineData(_ data: Data) async throws {
         let url = baselineFileURL
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try data.write(to: url, options: .atomic)
+        try await Task.detached(priority: .utility) {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: url, options: .atomic)
+        }.value
     }
 
     private func removeBaselineData() {
@@ -1597,12 +1663,12 @@ final class CloudKitSharingService {
     }
 
     private func updateShareMembership(from share: CKShare) {
-        let hadPreviousValue = defaults.object(forKey: DefaultsKey.participantCount) != nil
-        let previousCount = defaults.integer(forKey: DefaultsKey.participantCount)
+        let hadPreviousValue = statusDefaults.object(forKey: DefaultsKey.participantCount) != nil
+        let previousCount = statusDefaults.integer(forKey: DefaultsKey.participantCount)
         let count = share.participants.filter {
             $0.role != .owner && $0.acceptanceStatus == .accepted
         }.count
-        defaults.set(count, forKey: DefaultsKey.participantCount)
+        statusDefaults.set(count, forKey: DefaultsKey.participantCount)
         let currentUserRecordID = share.currentUserParticipant?.userIdentity.userRecordID
         let formatter = PersonNameComponentsFormatter()
         let caregiverNames = share.participants.compactMap { participant -> String? in
@@ -1640,7 +1706,7 @@ final class CloudKitSharingService {
 
     private func record(error: Error) {
         guard defaults.string(forKey: DefaultsKey.inactiveReason) == nil else { return }
-        defaults.set(error.localizedDescription, forKey: DefaultsKey.lastError)
+        statusDefaults.set(error.localizedDescription, forKey: DefaultsKey.lastError)
     }
 
     private func recordAcceptance(_ message: String) {
@@ -1658,12 +1724,12 @@ final class CloudKitSharingService {
     ) async {
         guard let notification else { return }
         if let remoteChecksum,
-           defaults.string(forKey: DefaultsKey.lastNotifiedDatasetChecksum) == remoteChecksum {
+           statusDefaults.string(forKey: DefaultsKey.lastNotifiedDatasetChecksum) == remoteChecksum {
             return
         }
         await NotificationManager.shared.showFamilySyncActivityNotification(notification)
         if let remoteChecksum {
-            defaults.set(remoteChecksum, forKey: DefaultsKey.lastNotifiedDatasetChecksum)
+            statusDefaults.set(remoteChecksum, forKey: DefaultsKey.lastNotifiedDatasetChecksum)
         }
     }
 }

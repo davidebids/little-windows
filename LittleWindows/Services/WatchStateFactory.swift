@@ -53,7 +53,6 @@ enum WatchFavoritePreferenceStore {
     }
 }
 
-@MainActor
 enum WatchStateFactory {
     static func make(context: ModelContext, now: Date = Date()) -> WatchCompanionState {
         let fetchedProfiles = ((try? context.fetch(FetchDescriptor<CareProfile>(
@@ -64,8 +63,12 @@ enum WatchStateFactory {
         let profiles = fetchedProfiles.filter {
             seenProfileIDs.insert($0.id).inserted
         }
-        let selectedProfile = ProfileService.shared.selectedProfile(in: profiles)
-            ?? profiles.first
+        let selectedProfileID = UserDefaults.standard
+            .string(forKey: "selectedCareProfileID")
+            .flatMap(UUID.init(uuidString:))
+        let selectedProfile = selectedProfileID.flatMap { selectedID in
+            profiles.first { $0.id == selectedID && !$0.isArchived }
+        } ?? profiles.first { !$0.isArchived }
         guard let selectedProfile else {
             return WatchCompanionState(
                 schemaVersion: WatchCompanionProtocol.schemaVersion,
@@ -191,7 +194,10 @@ enum WatchStateFactory {
                 )
             }
             : nil
-        let currentPrediction = prediction.flatMap {
+        let hasRunningSleep = events.contains {
+            $0.isSleepBlock && $0.isTimerRunning
+        }
+        let currentPrediction = hasRunningSleep ? nil : prediction.flatMap {
             $0.windowEnd >= now ? $0 : nil
         }
         let metrics = orderedMetrics(

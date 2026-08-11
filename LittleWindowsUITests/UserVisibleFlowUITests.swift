@@ -610,6 +610,313 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
     }
 
+    func testProductionScaleSolidsAmountsAndPostSaveCareNavigationStayResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/quick-log/feed")
+
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 8))
+        let kindPicker = app.buttons["event.feed-kind"]
+        XCTAssertTrue(kindPicker.waitForExistence(timeout: 4))
+        kindPicker.tap()
+        XCTAssertTrue(app.buttons["Solid"].waitForExistence(timeout: 3))
+        app.buttons["Solid"].tap()
+
+        let chooseFoods = app.buttons["solid-food.choose"]
+        XCTAssertTrue(chooseFoods.waitForExistence(timeout: 4))
+        chooseFoods.tap()
+        let foodSearch = app.searchFields["Search or enter a food"]
+        XCTAssertTrue(foodSearch.waitForExistence(timeout: 4))
+        foodSearch.tap()
+        foodSearch.typeText("spinach")
+        if app.keyboards.buttons["Search"].exists {
+            app.keyboards.buttons["Search"].tap()
+        }
+        let spinach = app.buttons["solid-food.option.spinach"]
+        XCTAssertTrue(spinach.waitForExistence(timeout: 3))
+        spinach.tap()
+        app.buttons["solid-food.use-selection"].tap()
+
+        XCTAssertTrue(app.buttons["Spinach"].waitForExistence(timeout: 4))
+        app.buttons["Spinach"].tap()
+        XCTAssertTrue(app.navigationBars["Spinach"].waitForExistence(timeout: 4))
+
+        let offered = app.textFields["solid-food.amount-offered"]
+        XCTAssertTrue(offered.waitForExistence(timeout: 4))
+        offered.tap()
+        let offeredTypingStartedAt = ContinuousClock.now
+        offered.typeText("12")
+        XCTAssertLessThan(
+            offeredTypingStartedAt.duration(to: .now),
+            .seconds(2.5),
+            "Typing an offered amount must not invalidate the full event editor or intake history."
+        )
+
+        let eaten = app.textFields["solid-food.amount-eaten"]
+        XCTAssertTrue(eaten.waitForExistence(timeout: 2))
+        eaten.tap()
+        let eatenTypingStartedAt = ContinuousClock.now
+        eaten.typeText("8")
+        XCTAssertLessThan(
+            eatenTypingStartedAt.duration(to: .now),
+            .seconds(2.5),
+            "Typing an eaten amount must stay local to the food detail editor."
+        )
+
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 3))
+        app.navigationBars["Add Event"].buttons["Save"].tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+
+        let careStartedAt = ContinuousClock.now
+        app.tabBars.buttons["Care"].tap()
+        XCTAssertTrue(app.navigationBars["Care"].waitForExistence(timeout: 3))
+        XCTAssertLessThan(
+            careStartedAt.duration(to: .now),
+            .seconds(3),
+            "Saving intake must not make the next primary-tab transition wait for derived nutrition or history work."
+        )
+        app.swipeUp(velocity: .fast)
+
+        let postSaveDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var opensToday = true
+        while ContinuousClock.now < postSaveDeadline {
+            let transitionStartedAt = ContinuousClock.now
+            if opensToday {
+                app.tabBars.buttons["Today"].tap()
+                XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 3))
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.tabBars.buttons["Care"].tap()
+                XCTAssertTrue(app.navigationBars["Care"].waitForExistence(timeout: 3))
+                app.swipeUp(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                transitionStartedAt.duration(to: .now),
+                .seconds(6),
+                "Nutrition reconciliation and sleep analysis must not freeze either primary tab after intake is saved."
+            )
+            opensToday.toggle()
+        }
+    }
+
+    func testProductionScaleCustomRecipeSaveDeleteKeepsRecipesScrollable() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://food/solids/recipes")
+
+        XCTAssertTrue(app.navigationBars["Solids Recipes"].waitForExistence(timeout: 8))
+        let create = app.buttons["solids.recipes.create-custom"]
+        XCTAssertTrue(create.waitForExistence(timeout: 4))
+        create.tap()
+
+        XCTAssertTrue(app.navigationBars["Build Recipe"].waitForExistence(timeout: 4))
+        let name = app.textFields["solids.custom-recipe.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 3))
+        name.tap()
+        name.typeText("Performance Spinach Mash")
+
+        let chooseFood = app.buttons["solids.custom-recipe.choose-food"]
+        XCTAssertTrue(chooseFood.waitForExistence(timeout: 3))
+        chooseFood.tap()
+        XCTAssertTrue(app.navigationBars["Choose Food"].waitForExistence(timeout: 3))
+        let search = app.searchFields["Search foods"]
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        search.tap()
+        search.typeText("spinach")
+        let spinach = app.buttons["solids.custom-recipe.food.spinach"]
+        XCTAssertTrue(spinach.waitForExistence(timeout: 3))
+        spinach.tap()
+
+        let amount = app.textFields["solids.custom-recipe.ingredient-amount"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 3))
+        amount.tap()
+        amount.typeText("20")
+        let addIngredient = app.buttons["solids.custom-recipe.add-ingredient"]
+        XCTAssertTrue(addIngredient.waitForExistence(timeout: 3))
+        addIngredient.tap()
+
+        let save = app.buttons["solids.custom-recipe.save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 3))
+        let saveStartedAt = ContinuousClock.now
+        save.tap()
+        XCTAssertTrue(app.navigationBars["Solids Recipes"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            saveStartedAt.duration(to: .now),
+            .seconds(4),
+            "Saving one custom recipe must not block the recipes list on unrelated meal-plan history."
+        )
+
+        let postSaveScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            postSaveScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "The recipes list must accept scrolling immediately after a custom recipe is saved."
+        )
+        let postSaveDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var scrollsUp = false
+        while ContinuousClock.now < postSaveDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Recipe persistence and query merging must not freeze the recipes list after save."
+            )
+            scrollsUp.toggle()
+        }
+        for _ in 0..<5 {
+            app.swipeDown(velocity: .fast)
+        }
+
+        let customRecipe = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS[c] %@",
+            "Performance Spinach Mash"
+        )).firstMatch
+        XCTAssertTrue(customRecipe.waitForExistence(timeout: 4))
+        customRecipe.tap()
+        XCTAssertTrue(app.navigationBars["Performance Spinach Mash"].waitForExistence(timeout: 4))
+
+        let delete = app.buttons["solids.custom-recipe.delete"]
+        for _ in 0..<5 where !delete.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(delete.waitForExistence(timeout: 3))
+        delete.tap()
+        let confirmDelete = app.buttons["Delete Recipe"]
+        XCTAssertTrue(confirmDelete.waitForExistence(timeout: 3))
+        let deleteStartedAt = ContinuousClock.now
+        confirmDelete.tap()
+        XCTAssertTrue(app.navigationBars["Solids Recipes"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            deleteStartedAt.duration(to: .now),
+            .seconds(4),
+            "Deleting one custom recipe must not scan or invalidate unrelated recipe and plan data."
+        )
+
+        let postDeleteScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            postDeleteScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "The recipes list must accept scrolling immediately after a custom recipe is deleted."
+        )
+        let postDeleteDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        scrollsUp = false
+        while ContinuousClock.now < postDeleteDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Recipe deletion and query merging must not freeze the recipes list at a later callback boundary."
+            )
+            scrollsUp.toggle()
+        }
+        XCTAssertFalse(customRecipe.exists)
+    }
+
+    func testProductionScaleAdultHealthKeepsNavigationAndMetricsResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000103/today")
+
+        XCTAssertTrue(app.buttons["Sample Adult settings"].waitForExistence(timeout: 12))
+        let reportsStartedAt = ContinuousClock.now
+        app.tabBars.buttons["Reports"].tap()
+        let reportsDestination = app.navigationBars.matching(NSPredicate(
+            format: "identifier == %@ OR identifier == %@",
+            "Reports",
+            "Health Log"
+        )).firstMatch
+        XCTAssertTrue(reportsDestination.waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            reportsStartedAt.duration(to: .now),
+            .seconds(4),
+            "Six thousand Adult Care observations must not delay opening Reports."
+        )
+
+        // Reports remembers its last segment across launches. Return to Day so
+        // the measured Summary transition always constructs Adult Care anew.
+        let day = app.buttons["Day"]
+        XCTAssertTrue(day.waitForExistence(timeout: 3))
+        day.tap()
+        XCTAssertTrue(app.navigationBars["Reports"].waitForExistence(timeout: 3))
+
+        let summary = app.buttons["Summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 3))
+        let healthLogStartedAt = ContinuousClock.now
+        summary.tap()
+        XCTAssertTrue(app.navigationBars["Health Log"].waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["adult-health.overview"].exists
+        )
+        XCTAssertLessThan(
+            healthLogStartedAt.duration(to: .now),
+            .seconds(4),
+            "Adult Care must fetch bounded overview data instead of materializing the full history."
+        )
+
+        let initialScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            initialScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Adult Care should accept scrolling as soon as the health log opens."
+        )
+
+        // Return to the top, then approach Trends in small steps. List laziness
+        // intentionally removes offscreen picker cells from the accessibility
+        // tree, so querying the control before it is near the viewport would
+        // test XCTest's snapshot behavior instead of app responsiveness.
+        for _ in 0..<3 {
+            app.swipeDown(velocity: .fast)
+        }
+        let metricPicker = app.descendants(matching: .any)["adult-health.metric-picker"]
+        for _ in 0..<8 where !(metricPicker.exists && metricPicker.isHittable) {
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(metricPicker.waitForExistence(timeout: 3))
+        XCTAssertTrue(metricPicker.isHittable)
+        metricPicker.tap()
+        let heartRate = app.buttons["Heart rate"]
+        XCTAssertTrue(heartRate.waitForExistence(timeout: 3))
+        let metricStartedAt = ContinuousClock.now
+        heartRate.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["adult-health.trend-loaded.heartRate"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertLessThan(
+            metricStartedAt.duration(to: .now),
+            .seconds(3),
+            "Changing the Adult Care metric must fetch only its bounded trend."
+        )
+
+        let postMetricScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            postMetricScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Rendering a 365-point Adult Care trend must not block scrolling."
+        )
+    }
+
     func testProductionScaleTodoEditorFocusesTitlePromptly() {
         continueAfterFailure = false
 
@@ -1046,6 +1353,58 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Plan Meals"].waitForExistence(timeout: 4))
     }
 
+    func testFoodDetailShowsCompleteNutritionWithoutStartingALog() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 5) {
+            activate.tap()
+        }
+
+        launch(
+            startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids/foods/avocado"
+        )
+        XCTAssertTrue(app.navigationBars["Avocado"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.navigationBars["Add Event"].exists)
+
+        let expectedNutrients: [(identifier: String, value: String)] = [
+            ("calories", "160 kcal"),
+            ("protein", "2 g"),
+            ("fat", "14.7 g"),
+            ("fiber", "6.7 g"),
+            ("iron", "0.55 mg"),
+            ("zinc", "0.64 mg"),
+            ("calcium", "12 mg"),
+            ("vitamin-c", "10 mg")
+        ]
+
+        for expected in expectedNutrients {
+            let row = app.descendants(matching: .any)[
+                "solids.food.nutrition.\(expected.identifier)"
+            ]
+            for _ in 0..<12 where !row.exists {
+                app.swipeUp()
+            }
+            XCTAssertTrue(row.waitForExistence(timeout: 3), expected.identifier)
+            XCTAssertTrue(
+                row.label.contains(expected.value),
+                "Expected \(row.label) to show \(expected.value)."
+            )
+        }
+
+        XCTAssertTrue(app.staticTexts["All eight tracked nutrients are included."].exists)
+        let source = app.descendants(matching: .any)["solids.food.nutrition.source"]
+        for _ in 0..<3 where !source.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(source.waitForExistence(timeout: 3))
+        XCTAssertTrue(source.label.contains("USDA FoodData Central"))
+    }
+
     func testPreparationWalkthroughUsesAnInteractiveChecklist() {
         continueAfterFailure = false
 
@@ -1162,9 +1521,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
         XCTAssertTrue(delete.isHittable)
         delete.tap()
-        let deleteAlert = app.alerts["Delete planned meal?"]
-        XCTAssertTrue(deleteAlert.waitForExistence(timeout: 4))
-        deleteAlert.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts["Delete planned meal?"].waitForExistence(timeout: 4))
+        let confirmDelete = app.buttons["Delete Planned Meal"]
+        XCTAssertTrue(confirmDelete.waitForExistence(timeout: 2))
+        confirmDelete.tap()
         XCTAssertTrue(app.navigationBars["Avocado bean mash"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["solids.recipe.plan-tomorrow"].waitForExistence(timeout: 5))
         XCTAssertFalse(
@@ -1459,7 +1819,11 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.buttons["Spinach"].tap()
         XCTAssertTrue(app.navigationBars["Spinach"].waitForExistence(timeout: 4))
         XCTAssertTrue(app.buttons["solid-reaction.preference"].exists)
-        XCTAssertTrue(app.buttons["solid-allergen.egg"].exists)
+        let eggAllergen = app.buttons["solid-allergen.egg"]
+        for _ in 0..<8 where !eggAllergen.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(eggAllergen.waitForExistence(timeout: 3))
         let reactionToggle = app.switches["solid-reaction.observed"]
         for _ in 0..<6 where !reactionToggle.exists {
             app.swipeUp()
@@ -1572,10 +1936,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(delete.waitForExistence(timeout: 4))
         XCTAssertTrue(delete.isHittable)
         delete.tap()
-        let deleteAlert = app.alerts["Delete planned meal?"]
-        XCTAssertTrue(deleteAlert.waitForExistence(timeout: 4))
-        XCTAssertTrue(deleteAlert.buttons["Delete"].waitForExistence(timeout: 2))
-        deleteAlert.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts["Delete planned meal?"].waitForExistence(timeout: 4))
+        let confirmDelete = app.buttons["Delete Planned Meal"]
+        XCTAssertTrue(confirmDelete.waitForExistence(timeout: 2))
+        confirmDelete.tap()
 
         XCTAssertTrue(app.navigationBars["Plan Meals"].waitForExistence(timeout: 4))
         XCTAssertTrue(app.staticTexts["No meals planned"].waitForExistence(timeout: 4))
@@ -1748,7 +2112,16 @@ final class UserVisibleFlowUITests: XCTestCase {
         let manage = app.buttons["Manage recipe lists"]
         XCTAssertTrue(manage.waitForExistence(timeout: 4))
         manage.tap()
-        XCTAssertTrue(app.buttons["Rename Early days"].waitForExistence(timeout: 4))
+        let rename = app.buttons["Rename Early days"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 4))
+        rename.tap()
+        let renamedField = app.textFields["List name"]
+        XCTAssertTrue(
+            renamedField.waitForExistence(timeout: 4),
+            "The rename alert should present when the action sheet actually finishes dismissing."
+        )
+        XCTAssertEqual(renamedField.value as? String, "Early days")
+        app.buttons["Cancel"].tap()
     }
 
     func testFoodRecipeAndIngredientLinksOpenThePageTheyName() {
@@ -1930,8 +2303,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Remove Bakery"].waitForExistence(timeout: 4))
 
         app.buttons["Remove Produce"].tap()
-        XCTAssertTrue(app.alerts["Remove Produce?"].waitForExistence(timeout: 4))
-        app.alerts["Remove Produce?"].buttons["Remove Section"].tap()
+        XCTAssertTrue(app.staticTexts["Remove Produce?"].waitForExistence(timeout: 4))
+        let removeSection = app.buttons["Remove Section"]
+        XCTAssertTrue(removeSection.waitForExistence(timeout: 2))
+        removeSection.tap()
         XCTAssertTrue(app.buttons["Remove Produce"].waitForNonExistence(timeout: 4))
     }
 
@@ -1997,31 +2372,9 @@ final class UserVisibleFlowUITests: XCTestCase {
     func testStartingSleepOpensRunningTimerEditor() {
         continueAfterFailure = false
 
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
-        ]
-        app.launch()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
-
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
-        ]
-        app.launch()
-
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
-        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
-
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/sleep"
-        ]
-        app.launch()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://quick-log/sleep")
 
         let nap = app.buttons["Nap"]
         XCTAssertTrue(nap.waitForExistence(timeout: 4))
@@ -2031,36 +2384,16 @@ final class UserVisibleFlowUITests: XCTestCase {
             app.staticTexts["Running"].waitForExistence(timeout: 5),
             "Starting sleep should immediately show the active timer editor."
         )
+        assertActiveTimerTicksContinuously()
         XCTAssertTrue(app.buttons["Stop"].exists)
     }
 
     func testStartingNonSleepTimerOpensRunningTimerEditor() {
         continueAfterFailure = false
 
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/reset-empty"
-        ]
-        app.launch()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
-
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://debug/seed-smoke"
-        ]
-        app.launch()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
-        XCTAssertTrue(waitForAnyText(["Today", "Sample Child"], timeout: 8))
-
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/pumping"
-        ]
-        app.launch()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://quick-log/pumping")
 
         XCTAssertTrue(
             app.staticTexts["Pumping"].waitForExistence(timeout: 5),
@@ -2068,6 +2401,506 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
         XCTAssertTrue(app.staticTexts["Running"].exists)
         XCTAssertTrue(app.buttons["Stop"].exists)
+    }
+
+    func testPausedTimerEditorFinishAndSaveCommitsEvent() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        let nap = app.buttons["Nap"]
+        XCTAssertTrue(nap.waitForExistence(timeout: 5))
+        nap.tap()
+
+        let stop = app.scrollViews.buttons["Stop"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+        XCTAssertTrue(app.staticTexts["Stopped"].waitForExistence(timeout: 4))
+
+        let adjustStart = app.buttons["−1 min"]
+        for _ in 0..<4 where !adjustStart.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(adjustStart.waitForExistence(timeout: 4))
+        XCTAssertTrue(adjustStart.isHittable)
+        adjustStart.tap()
+
+        let finishAndSave = app.buttons["active-timer.finish-and-save"]
+        for _ in 0..<4 where !finishAndSave.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(finishAndSave.waitForExistence(timeout: 4))
+        XCTAssertTrue(finishAndSave.isHittable)
+        finishAndSave.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 5))
+        let scrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            scrollStartedAt.duration(to: .now),
+            // XCUI's synthesized fast swipe takes about 2.7 seconds on the
+            // current simulator runtime even when the app is fully idle.
+            .seconds(3.5),
+            "Today should accept scrolling immediately after a timer is saved."
+        )
+        XCTAssertFalse(
+            app.staticTexts["Stopped · Ready to save"].exists,
+            "Finishing in the editor must remove the paused timer from Today without a second save."
+        )
+
+        let postSaveDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var scrollsUp = false
+        while ContinuousClock.now < postSaveDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Prediction, persistence, or system-surface work must not freeze Today at any point after a timer save."
+            )
+            scrollsUp.toggle()
+        }
+
+        let savedSleep = app.buttons["today-timeline.event.sleep"].firstMatch
+        let tabBar = app.tabBars.firstMatch
+        for _ in 0..<8 where !elementIsClearOfTabBar(savedSleep, tabBar: tabBar) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(savedSleep.waitForExistence(timeout: 3))
+        XCTAssertTrue(savedSleep.isHittable)
+        XCTAssertTrue(
+            elementIsClearOfTabBar(savedSleep, tabBar: tabBar),
+            "The saved timer row must be visibly above the tab bar before testing its swipe action."
+        )
+        let savedEventID = savedSleep.value as? String
+        let revealDeleteStartedAt = ContinuousClock.now
+        savedSleep.swipeLeft()
+        XCTAssertLessThan(
+            revealDeleteStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "The saved timer row must accept its delete swipe without waiting for background work."
+        )
+        let deleteAction = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(deleteAction.waitForExistence(timeout: 2))
+        deleteAction.tap()
+
+        XCTAssertTrue(app.staticTexts["Delete event?"].waitForExistence(timeout: 2))
+        let confirmDelete = app.buttons["Delete Sleep"]
+        XCTAssertTrue(confirmDelete.waitForExistence(timeout: 2))
+        confirmDelete.tap()
+
+        let postDeleteScrollStartedAt = ContinuousClock.now
+        app.swipeDown(velocity: .fast)
+        XCTAssertLessThan(
+            postDeleteScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Today must remain scrollable immediately after an event is deleted."
+        )
+        if let savedEventID {
+            XCTAssertFalse(
+                app.buttons.matching(NSPredicate(format: "value == %@", savedEventID)).firstMatch.exists,
+                "The deleted event should disappear from Today before persistence reconciliation."
+            )
+        }
+
+        let postDeleteDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        scrollsUp = true
+        while ContinuousClock.now < postDeleteDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "SwiftData deletion and related reconciliation must not freeze Today at any later callback boundary."
+            )
+            scrollsUp.toggle()
+        }
+        if let savedEventID {
+            XCTAssertFalse(
+                app.buttons.matching(NSPredicate(format: "value == %@", savedEventID)).firstMatch.exists,
+                "The deleted event must stay removed after persistence reconciliation."
+            )
+        }
+    }
+
+    func testPausingTimerThenReturningKeepsTodayImmediatelyScrollable() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
+        app.buttons["Nap"].tap()
+
+        assertActiveTimerTicksContinuously()
+
+        let stop = app.scrollViews.buttons["Stop"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        let pauseStartedAt = ContinuousClock.now
+        stop.tap()
+        // `tap()` already waits for the app's interaction transaction to
+        // settle. A second multi-second existence wait adds XCUI's one-second
+        // polling quantum to the measured app latency and can fail even when
+        // the stopped state is already rendered.
+        XCTAssertTrue(app.staticTexts["Stopped"].exists)
+        XCTAssertLessThan(
+            pauseStartedAt.duration(to: .now),
+            .seconds(2.5),
+            "Pausing must update the editor without running broad reconciliation first."
+        )
+
+        let editorScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            editorScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "The timer editor should accept scrolling immediately after Stop."
+        )
+        let finishAndSave = app.buttons["active-timer.finish-and-save"]
+        XCTAssertTrue(finishAndSave.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            finishAndSave.isHittable,
+            "Finish & Save should be reachable without waiting for persistence or widget refreshes."
+        )
+
+        app.navigationBars["Timer"].buttons["Keep Timer"].tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Stopped · Ready to save"].exists)
+        let scrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            scrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Today should accept scrolling immediately after a timer is paused."
+        )
+    }
+
+    func testStoppingTimerFromTodayCardKeepsTodayImmediatelyScrollable() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
+        app.buttons["Nap"].tap()
+        assertActiveTimerTicksContinuously()
+
+        let keepTimer = app.navigationBars["Timer"].buttons["Keep Timer"]
+        XCTAssertTrue(keepTimer.waitForExistence(timeout: 3))
+        keepTimer.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        let sleepTimerStatus = app.staticTexts["active-timer.status.sleep"]
+        XCTAssertEqual(sleepTimerStatus.label, "Running now")
+
+        let stop = app.buttons["active-timer.toggle.sleep"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 3))
+        let stopStartedAt = ContinuousClock.now
+        stop.tap()
+        XCTAssertEqual(sleepTimerStatus.label, "Stopped · Ready to save")
+        XCTAssertLessThan(
+            stopStartedAt.duration(to: .now),
+            .seconds(2),
+            "Stopping from the Today card must update without blocking on persistence or integrations."
+        )
+
+        let scrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            scrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Today should accept scrolling immediately after Stop is tapped on the timer card."
+        )
+
+        let timerSurfaceRefreshSettled = expectation(description: "Timer surface refresh started")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            timerSurfaceRefreshSettled.fulfill()
+        }
+        wait(for: [timerSurfaceRefreshSettled], timeout: 3)
+        let postRefreshScrollStartedAt = ContinuousClock.now
+        app.swipeDown(velocity: .fast)
+        XCTAssertLessThan(
+            postRefreshScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Widget and Live Activity refresh must not freeze Today after Stop."
+        )
+    }
+
+    func testDiscardingPausedTimerKeepsTodayImmediatelyScrollable() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
+        app.buttons["Nap"].tap()
+
+        assertActiveTimerTicksContinuously()
+
+        let stop = app.scrollViews.buttons["Stop"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+        XCTAssertTrue(app.staticTexts["Stopped"].waitForExistence(timeout: 2))
+
+        let discard = app.buttons["Discard Timer"].firstMatch
+        for _ in 0..<5 where !discard.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(discard.isHittable)
+        discard.tap()
+
+        XCTAssertTrue(app.staticTexts["Discard Timer?"].waitForExistence(timeout: 3))
+        let confirmDiscard = app.buttons["Discard Timer"].firstMatch
+        XCTAssertTrue(confirmDiscard.waitForExistence(timeout: 3))
+        confirmDiscard.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        let scrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            scrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Today should accept scrolling immediately after a timer is discarded."
+        )
+        let sleepTimerStatus = app.staticTexts["active-timer.status.sleep"]
+        XCTAssertFalse(
+            sleepTimerStatus.exists,
+            "A discarded timer must not be resurrected as running on Today."
+        )
+
+        let delayedRefreshSettled = expectation(description: "Delayed timer refresh settled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 9) {
+            delayedRefreshSettled.fulfill()
+        }
+        wait(for: [delayedRefreshSettled], timeout: 10)
+        XCTAssertFalse(
+            sleepTimerStatus.exists,
+            "Delayed persistence or widget reconciliation must not restore a discarded timer."
+        )
+        let delayedScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            delayedScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Deferred persistence must not freeze Today several seconds after discard."
+        )
+    }
+
+    func testDiscardingRunningTimerRemovesItFromTodayImmediately() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
+        app.buttons["Nap"].tap()
+        assertActiveTimerTicksContinuously()
+
+        let discard = app.buttons["Discard Timer"].firstMatch
+        for _ in 0..<5 where !discard.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(discard.isHittable)
+        discard.tap()
+
+        XCTAssertTrue(app.staticTexts["Discard Timer?"].waitForExistence(timeout: 3))
+        let confirmDiscard = app.buttons["Discard Timer"].firstMatch
+        XCTAssertTrue(confirmDiscard.waitForExistence(timeout: 3))
+        confirmDiscard.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        XCTAssertFalse(
+            app.staticTexts["active-timer.status.sleep"].waitForExistence(timeout: 1),
+            "Discarding a running timer must remove it from Today immediately."
+        )
+
+        let scrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            scrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Today must remain scrollable after discarding a running timer."
+        )
+
+        let timerSurfaceRefreshSettled = expectation(description: "Discard surface refresh started")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            timerSurfaceRefreshSettled.fulfill()
+        }
+        wait(for: [timerSurfaceRefreshSettled], timeout: 3)
+        let postRefreshScrollStartedAt = ContinuousClock.now
+        app.swipeDown(velocity: .fast)
+        XCTAssertLessThan(
+            postRefreshScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Discard reconciliation must not freeze Today after dismissal."
+        )
+    }
+
+    func testProductionScaleTimerPauseDiscardKeepsTodayResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
+        app.buttons["Nap"].tap()
+
+        assertActiveTimerTicksContinuously()
+
+        // Exercise the compact Today card, which is where a delayed SwiftData
+        // merge previously interrupted an already-active scroll gesture.
+        let sheetTop = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
+        let sheetBottom = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92))
+        sheetTop.press(forDuration: 0.05, thenDragTo: sheetBottom)
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+
+        let stop = app.buttons["active-timer.toggle.sleep"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        let pauseStartedAt = ContinuousClock.now
+        stop.tap()
+        XCTAssertTrue(app.staticTexts["active-timer.status.sleep"].label.contains("Stopped"))
+        XCTAssertLessThan(
+            pauseStartedAt.duration(to: .now),
+            .seconds(2.5),
+            "A production-scale history must not delay pausing a timer."
+        )
+
+        let scrollingDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        var scrollsUp = true
+        while ContinuousClock.now < scrollingDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "A delayed timer persistence or system-surface callback must not freeze Today."
+            )
+            scrollsUp.toggle()
+        }
+
+        for _ in 0..<8 where !app.staticTexts["active-timer.status.sleep"].isHittable {
+            app.swipeDown(velocity: .fast)
+        }
+        let timerStatus = app.staticTexts["active-timer.status.sleep"]
+        XCTAssertTrue(timerStatus.isHittable)
+        timerStatus.tap()
+
+        let discard = app.buttons["Discard Timer"].firstMatch
+        for _ in 0..<5 where !discard.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(discard.isHittable)
+        discard.tap()
+
+        XCTAssertTrue(app.staticTexts["Discard Timer?"].waitForExistence(timeout: 3))
+        let confirmDiscard = app.buttons["Discard Timer"].firstMatch
+        XCTAssertTrue(confirmDiscard.waitForExistence(timeout: 3))
+        confirmDiscard.tap()
+
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+        let postDiscardDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        scrollsUp = true
+        while ContinuousClock.now < postDiscardDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Discard completion work must not freeze Today several seconds later."
+            )
+            scrollsUp.toggle()
+        }
+        XCTAssertFalse(app.staticTexts["active-timer.status.sleep"].exists)
+    }
+
+    func testProductionScaleTimerStartTimeEditingStaysResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://quick-log/sleep")
+
+        XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
+        app.buttons["Nap"].tap()
+        assertActiveTimerTicksContinuously()
+
+        let adjustStart = app.buttons["−5 min"]
+        for _ in 0..<5 where !adjustStart.isHittable {
+            app.swipeUp(velocity: .fast)
+        }
+        XCTAssertTrue(adjustStart.waitForExistence(timeout: 3))
+        XCTAssertTrue(adjustStart.isHittable)
+
+        // Date controls can publish a stream of intermediate values. Every tap
+        // must remain an editor-local change rather than synchronously queuing a
+        // store save, widget refresh, prediction scan, and Live Activity update.
+        for _ in 0..<6 {
+            let adjustmentStartedAt = ContinuousClock.now
+            adjustStart.tap()
+            XCTAssertLessThan(
+                adjustmentStartedAt.duration(to: .now),
+                .seconds(1.5),
+                "Backdating an active timer must stay responsive on every intermediate edit."
+            )
+        }
+        assertActiveTimerTicksContinuously()
+
+        let editorScrollStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            editorScrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Editing a timer start time must not leave persistence work blocking the timer editor."
+        )
+
+        let keepTimer = app.navigationBars["Timer"].buttons["Keep Timer"]
+        XCTAssertTrue(keepTimer.waitForExistence(timeout: 3))
+        keepTimer.tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 4))
+
+        let scrollingDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+        var scrollsUp = true
+        while ContinuousClock.now < scrollingDeadline {
+            let gestureStartedAt = ContinuousClock.now
+            if scrollsUp {
+                app.swipeUp(velocity: .fast)
+            } else {
+                app.swipeDown(velocity: .fast)
+            }
+            XCTAssertLessThan(
+                gestureStartedAt.duration(to: .now),
+                .seconds(4.5),
+                "Persisting the final backdated start must not freeze Today later."
+            )
+            scrollsUp.toggle()
+        }
+        for _ in 0..<5 where !app.staticTexts["active-timer.status.sleep"].exists {
+            app.swipeDown(velocity: .fast)
+        }
+        XCTAssertTrue(app.staticTexts["active-timer.status.sleep"].exists)
     }
 
     func testPlanDayArcAppearsInPlanner() {
@@ -2874,14 +3707,17 @@ final class UserVisibleFlowUITests: XCTestCase {
         let archiveTrip = app.buttons["Archive"]
         XCTAssertTrue(archiveTrip.waitForExistence(timeout: 3))
         archiveTrip.tap()
+        XCTAssertTrue(app.staticTexts["Archive Trip?"].waitForExistence(timeout: 3))
+        let confirmArchiveTrip = app.buttons["Archive Trip"]
+        XCTAssertTrue(confirmArchiveTrip.waitForExistence(timeout: 3))
+        confirmArchiveTrip.tap()
 
         XCTAssertTrue(
             app.descendants(matching: .any)["trip.detail"].waitForNonExistence(timeout: 5)
         )
         XCTAssertTrue(app.descendants(matching: .any)["trips.home"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 3))
         let archivedTrip = app.staticTexts["Automation Trip Copy"]
-        XCTAssertTrue(archivedTrip.exists)
+        XCTAssertTrue(archivedTrip.waitForExistence(timeout: 3))
         archivedTrip.tap()
 
         XCTAssertTrue(app.navigationBars["Automation Trip Copy"].waitForExistence(timeout: 5))
@@ -3162,6 +3998,53 @@ final class UserVisibleFlowUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
         return false
+    }
+
+    private func assertActiveTimerTicksContinuously() {
+        let elapsed = app.staticTexts["active-timer.elapsed"]
+        XCTAssertTrue(
+            elapsed.waitForExistence(timeout: 1.5),
+            "Expected the active timer elapsed display to appear immediately."
+        )
+
+        var observedSeconds: [Int] = []
+        let deadline = Date().addingTimeInterval(3.4)
+        while Date() < deadline {
+            if let seconds = timerSeconds(from: elapsed.label),
+               observedSeconds.last != seconds {
+                observedSeconds.append(seconds)
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            observedSeconds.count,
+            3,
+            "The timer must repaint continuously; observed only \(observedSeconds)."
+        )
+        for (previous, current) in zip(observedSeconds, observedSeconds.dropFirst()) {
+            XCTAssertGreaterThan(current, previous)
+            XCTAssertLessThanOrEqual(
+                current - previous,
+                2,
+                "The timer stalled and jumped from \(previous)s to \(current)s instead of incrementing each second."
+            )
+        }
+    }
+
+    private func timerSeconds(from label: String) -> Int? {
+        let components = label.split(separator: ":").compactMap { Int($0) }
+        guard components.count == 3 else { return nil }
+        return components[0] * 3_600 + components[1] * 60 + components[2]
+    }
+
+    private func elementIsClearOfTabBar(
+        _ element: XCUIElement,
+        tabBar: XCUIElement
+    ) -> Bool {
+        guard element.exists, element.isHittable else { return false }
+        guard tabBar.exists else { return true }
+        return element.frame.maxY <= tabBar.frame.minY - 8
     }
 
     private func firstExistingButton(_ labels: [String]) -> XCUIElement {

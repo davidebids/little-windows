@@ -1,6 +1,44 @@
 import PhotosUI
 import SwiftData
 import SwiftUI
+
+@ModelActor
+private actor AutomaticMilestoneSummaryWorker {
+    func summaries(
+        profileID: UUID,
+        startDate: Date,
+        endDate: Date
+    ) -> [AutomaticMilestoneSummary] {
+        var profileDescriptor = FetchDescriptor<CareProfile>(
+            predicate: #Predicate { $0.id == profileID }
+        )
+        profileDescriptor.fetchLimit = 1
+        guard let profile = try? modelContext.fetch(profileDescriptor).first else { return [] }
+        let supportedTypeRawValues = Set([
+            EventType.sleep,
+            .nursing,
+            .diaper,
+            .activity,
+            .growth,
+            .custom
+        ].map(\.rawValue))
+        let descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
+                event.profileID == profileID
+                    && event.startDate >= startDate
+                    && event.startDate < endDate
+            },
+            sortBy: [SortDescriptor(\CareEvent.startDate)]
+        )
+        let events = ((try? modelContext.fetch(descriptor)) ?? []).filter {
+            supportedTypeRawValues.contains($0.typeRawValue)
+        }
+        return AutomaticMilestoneSummaryService.summaries(
+            profile: profile,
+            events: events
+        )
+    }
+}
 import UIKit
 
 enum MilestoneSortOption: String, CaseIterable, Identifiable {
@@ -45,6 +83,16 @@ private enum MilestoneTimelineItem: Identifiable {
     }
 }
 
+private enum CareNavigationRoute: Hashable {
+    case food(FoodRoute)
+    case medications
+
+    var foodRoute: FoodRoute? {
+        guard case .food(let route) = self else { return nil }
+        return route
+    }
+}
+
 struct CareView: View {
     @ObservedObject private var router = DeepLinkRouter.shared
     @StateObject private var profileService = ProfileService.shared
@@ -53,7 +101,7 @@ struct CareView: View {
     @Query(sort: \CareEvent.startDate, order: .reverse) private var careEvents: [CareEvent]
     @Query(sort: \SolidsProfileState.updatedAt, order: .reverse) private var solidsProfileStates: [SolidsProfileState]
 
-    @State private var path: [FoodRoute] = []
+    @State private var path: [CareNavigationRoute] = []
     @State private var returnOriginAfterSolids: SolidsNavigationOrigin?
 
     init(profileID: UUID? = nil) {
@@ -105,7 +153,7 @@ struct CareView: View {
             } else {
                 CareSolidsRouteDataLoader(
                     profileID: profile?.id,
-                    activeRoute: path.last
+                    activeRoute: path.last?.foodRoute
                 ) { data in
                     navigationContent(data: data)
                 }
@@ -115,9 +163,14 @@ struct CareView: View {
             _ = profileService.ensureSelection(in: profiles)
             handlePendingProfileSwitch()
             handlePendingSolidsCommand()
+            await presentPendingMedications()
         }
         .onReceive(router.$pendingSolidsCommand.compactMap { $0 }) { command in
             handle(command)
+        }
+        .onReceive(router.$pendingMedications.removeDuplicates()) { pending in
+            guard pending else { return }
+            Task { await presentPendingMedications() }
         }
         .onChange(of: router.pendingProfileID) { _, _ in
             handlePendingProfileSwitch()
@@ -144,39 +197,74 @@ struct CareView: View {
                 solidsAccessLevel: solidsAccessLevel,
                 openSolids: openSolids
             )
-                .navigationDestination(for: FoodRoute.self) { route in
-                    Group {
-                        if let data {
-                            destinationContent(for: route, data: data)
-                        } else {
-                            CareUnavailableView()
+                .navigationDestination(for: CareNavigationRoute.self) { route in
+                    careDestination(for: route, data: data)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func careDestination(
+        for route: CareNavigationRoute,
+        data: CareSolidsRouteData?
+    ) -> some View {
+        switch route {
+        case .medications:
+            if let profile {
+                MedicationsView(profile: profile)
+            } else {
+                CareUnavailableView()
+            }
+        case .food(let foodRoute):
+            Group {
+                if let data {
+                    destinationContent(for: foodRoute, data: data)
+                } else {
+                    CareUnavailableView()
+                }
+            }
+            .navigationBarBackButtonHidden(shouldShowOriginBackButton)
+            .toolbar {
+                if shouldShowOriginBackButton,
+                   let returnOriginAfterSolids {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            returnToOrigin()
+                        } label: {
+                            Label(
+                                returnTitle(for: returnOriginAfterSolids.tab),
+                                systemImage: "chevron.left"
+                            )
                         }
-                    }
-                    .navigationBarBackButtonHidden(shouldShowOriginBackButton)
-                    .toolbar {
-                        if shouldShowOriginBackButton,
-                           let returnOriginAfterSolids {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button {
-                                    returnToOrigin()
-                                } label: {
-                                    Label(
-                                        returnTitle(for: returnOriginAfterSolids.tab),
-                                        systemImage: "chevron.left"
-                                    )
-                                }
-                                .accessibilityIdentifier("solids.return-to-origin")
-                            }
-                        }
+                        .accessibilityIdentifier("solids.return-to-origin")
                     }
                 }
+            }
         }
     }
 
     private func openSolids(_ route: FoodRoute) {
         guard profile?.profileType == .child, solidsAccessLevel != .hidden else { return }
         returnOriginAfterSolids = nil
-        path = [route]
+        path = [.food(route)]
+    }
+
+    private func appendFoodRoute(_ route: FoodRoute) {
+        path.append(.food(route))
+    }
+
+    @MainActor
+    private func presentPendingMedications() async {
+        guard router.pendingMedications,
+              router.selectedTab == .milestones else { return }
+        await Task.yield()
+        guard !Task.isCancelled,
+              router.pendingMedications,
+              router.selectedTab == .milestones,
+              router.isDataReady,
+              profile != nil else { return }
+        router.pendingMedications = false
+        path = [.medications]
     }
 
     private func handlePendingProfileSwitch() {
@@ -209,7 +297,7 @@ struct CareView: View {
             returnToOrigin()
             return
         }
-        path = [solidsAccessLevel == .readinessPreview ? .solidsHome : route]
+        path = [.food(solidsAccessLevel == .readinessPreview ? .solidsHome : route)]
     }
 
     private var shouldShowOriginBackButton: Bool {
@@ -263,12 +351,12 @@ struct CareView: View {
     }
 
     private func correctUnavailableRoute() {
-        guard path.contains(where: { $0.isSolidsWorkspaceRoute }) else { return }
+        guard path.contains(where: { $0.foodRoute?.isSolidsWorkspaceRoute == true }) else { return }
         if solidsAccessLevel == .hidden || profile?.profileType != .child {
             path.removeLast(path.count)
         } else if solidsAccessLevel == .readinessPreview,
-                  path != [.solidsHome] {
-            path = [.solidsHome]
+                  path != [.food(.solidsHome)] {
+            path = [.food(.solidsHome)]
         }
     }
 
@@ -297,7 +385,6 @@ struct CareView: View {
         let solidFoodEventItems = data.solidFoodEventItems
         let solidAllergenProgress = data.solidAllergenProgress
         let customSolidFoods = data.customSolidFoods
-        let solidFoodPhotos = data.solidFoodPhotos
         let plannedSolidMeals = data.plannedSolidMeals
 
         switch route {
@@ -306,12 +393,10 @@ struct CareView: View {
                 SolidsHomeView(
                     profile: profile,
                     accessLevel: solidsAccessLevel,
-                    events: data.careEvents,
-                    eventItems: solidFoodEventItems,
                     progress: solidFoodProgress,
                     plans: plannedSolidMeals,
                     profileState: solidsProfileState,
-                    open: { path.append($0) }
+                    open: { appendFoodRoute($0) }
                 )
             } else {
                 CareUnavailableView()
@@ -321,13 +406,12 @@ struct CareView: View {
                 SolidsGuidedPathView(
                     profile: profile,
                     progress: solidFoodProgress,
-                    eventItems: solidFoodEventItems,
                     allergenProgress: solidAllergenProgress,
                     plans: plannedSolidMeals,
                     profileState: solidsProfileState,
-                    openFood: { path.append(.solidFood($0)) },
-                    openRecipe: { path.append(.solidsRecipe($0)) },
-                    openPlan: { path.append(.plannedSolidMeal($0)) }
+                    openFood: { appendFoodRoute(.solidFood($0)) },
+                    openRecipe: { appendFoodRoute(.solidsRecipe($0)) },
+                    openPlan: { appendFoodRoute(.plannedSolidMeal($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -338,9 +422,8 @@ struct CareView: View {
                     profile: profile,
                     progress: solidFoodProgress,
                     customFoods: customSolidFoods,
-                    photoAttachments: solidFoodPhotos,
-                    openFood: { path.append(.solidFood($0)) },
-                    openCustomFood: { path.append(.customSolidFood($0)) }
+                    openFood: { appendFoodRoute(.solidFood($0)) },
+                    openCustomFood: { appendFoodRoute(.customSolidFood($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -358,8 +441,8 @@ struct CareView: View {
                     shoppingItems: householdShoppingItems,
                     inventoryItems: householdInventoryItems,
                     foodItems: householdFoodItems,
-                    openHistory: { path.append(.solidFoodHistory($0, $1)) },
-                    openRecipe: { path.append(.solidsRecipe($0)) }
+                    openHistory: { appendFoodRoute(.solidFoodHistory($0, $1)) },
+                    openRecipe: { appendFoodRoute(.solidsRecipe($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -369,22 +452,22 @@ struct CareView: View {
                profile.profileType == .child,
                solidsAccessLevel == .full,
                let food = customSolidFoods.first(where: { $0.id == id }) {
-                CustomSolidFoodDetailView(
-                    food: food,
-                    profile: profile,
-                    photo: food.photoAttachmentID.flatMap { photoID in
-                        solidFoodPhotos.first { $0.id == photoID }
-                    },
-                    allFoods: customSolidFoods,
-                    progress: solidFoodProgress,
-                    plannedMeals: plannedSolidMeals,
-                    shoppingLists: householdShoppingLists,
-                    shoppingItems: householdShoppingItems,
-                    inventoryItems: householdInventoryItems,
-                    foodItems: householdFoodItems,
-                    openPlan: { path.append(.plannedSolidMeal($0)) },
-                    openHistory: { path.append(.solidFoodHistory($0, $1)) }
-                )
+                SolidFoodPhotoDataLoader(attachmentID: food.photoAttachmentID) { photo in
+                    CustomSolidFoodDetailView(
+                        food: food,
+                        profile: profile,
+                        photo: photo,
+                        allFoods: customSolidFoods,
+                        progress: solidFoodProgress,
+                        plannedMeals: plannedSolidMeals,
+                        shoppingLists: householdShoppingLists,
+                        shoppingItems: householdShoppingItems,
+                        inventoryItems: householdInventoryItems,
+                        foodItems: householdFoodItems,
+                        openPlan: { appendFoodRoute(.plannedSolidMeal($0)) },
+                        openHistory: { appendFoodRoute(.solidFoodHistory($0, $1)) }
+                    )
+                }
             } else {
                 CareUnavailableView()
             }
@@ -393,7 +476,7 @@ struct CareView: View {
                 SolidsPlannerView(
                     profile: profile,
                     plans: plannedSolidMeals,
-                    openPlan: { path.append(.plannedSolidMeal($0)) }
+                    openPlan: { appendFoodRoute(.plannedSolidMeal($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -414,16 +497,16 @@ struct CareView: View {
                     foodItems: householdFoodItems,
                     openFood: { foodID, foodName in
                         if SolidsReferenceCatalog.food(id: foodID) != nil {
-                            path.append(.solidFood(foodID))
+                            appendFoodRoute(.solidFood(foodID))
                         } else if foodID.hasPrefix("custom-"),
                                   let customID = UUID(uuidString: String(foodID.dropFirst("custom-".count))),
                                   customSolidFoods.contains(where: { $0.id == customID }) {
-                            path.append(.customSolidFood(customID))
+                            appendFoodRoute(.customSolidFood(customID))
                         } else {
-                            path.append(.solidFoodHistory(foodID, foodName))
+                            appendFoodRoute(.solidFoodHistory(foodID, foodName))
                         }
                     },
-                    openRecipe: { path.append(.solidsRecipe($0)) }
+                    openRecipe: { appendFoodRoute(.solidsRecipe($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -436,8 +519,8 @@ struct CareView: View {
                     events: data.careEvents,
                     progress: solidFoodProgress,
                     eventItems: solidFoodEventItems,
-                    openFoodHistory: { path.append(.solidFoodHistory($0, $1)) },
-                    openMeal: { path.append(.solidMeal($0)) }
+                    openFoodHistory: { appendFoodRoute(.solidFoodHistory($0, $1)) },
+                    openMeal: { appendFoodRoute(.solidMeal($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -448,9 +531,8 @@ struct CareView: View {
                     profile: profile,
                     foodID: foodID,
                     foodName: foodName,
-                    events: data.careEvents,
                     eventItems: solidFoodEventItems,
-                    openMeal: { path.append(.solidMeal($0)) }
+                    openMeal: { appendFoodRoute(.solidMeal($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -476,9 +558,8 @@ struct CareView: View {
             if let profile, profile.profileType == .child, solidsAccessLevel == .full {
                 SolidsAllergensView(
                     profile: profile,
-                    eventItems: solidFoodEventItems,
                     progress: solidAllergenProgress,
-                    openAllergen: { path.append(.solidAllergen($0)) }
+                    openAllergen: { appendFoodRoute(.solidAllergen($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -497,7 +578,7 @@ struct CareView: View {
                     },
                     allProgress: solidAllergenProgress,
                     plans: plannedSolidMeals,
-                    openRecipe: { path.append(.solidsRecipe($0)) }
+                    openRecipe: { appendFoodRoute(.solidsRecipe($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -507,7 +588,7 @@ struct CareView: View {
                 SolidsRecipesView(
                     profile: profile,
                     profileState: solidsProfileState,
-                    openRecipe: { path.append(.solidsRecipe($0)) }
+                    openRecipe: { appendFoodRoute(.solidsRecipe($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -528,8 +609,8 @@ struct CareView: View {
                     inventoryItems: householdInventoryItems,
                     foodItems: householdFoodItems,
                     locations: householdLocations,
-                    openPlan: { path.append(.plannedSolidMeal($0)) },
-                    openFood: { path.append(.solidFood($0)) }
+                    openPlan: { appendFoodRoute(.plannedSolidMeal($0)) },
+                    openFood: { appendFoodRoute(.solidFood($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -553,7 +634,6 @@ private struct CareSolidsRouteData {
     let solidFoodEventItems: [SolidFoodEventItem]
     let solidAllergenProgress: [SolidAllergenProgress]
     let customSolidFoods: [SolidFoodCatalogItem]
-    let solidFoodPhotos: [PhotoAttachment]
     let plannedSolidMeals: [PlannedSolidMeal]
 }
 
@@ -565,7 +645,7 @@ private struct CareSolidsDataScope {
 
     var loadsEvents: Bool {
         switch route {
-        case .solidsHome, .solidsTracker, .solidFoodHistory, .solidMeal: true
+        case .solidsTracker, .solidMeal: true
         default: false
         }
     }
@@ -580,8 +660,7 @@ private struct CareSolidsDataScope {
 
     var loadsEventItems: Bool {
         switch route {
-        case .solidsHome, .solidsGuided, .solidsTracker, .solidFoodHistory,
-             .solidMeal, .solidsAllergens, .solidAllergen: true
+        case .solidsTracker, .solidFoodHistory, .solidMeal, .solidAllergen: true
         default: false
         }
     }
@@ -608,10 +687,6 @@ private struct CareSolidsDataScope {
         }
     }
 
-    var loadsPhotos: Bool {
-        route == .solidsDatabase || isCustomFoodRoute
-    }
-
     var loadsHomeData: Bool {
         switch route {
         case .solidFood, .customSolidFood, .plannedSolidMeal, .solidsRecipe: true
@@ -624,10 +699,6 @@ private struct CareSolidsDataScope {
         return false
     }
 
-    private var isCustomFoodRoute: Bool {
-        if case .customSolidFood = route { return true }
-        return false
-    }
 }
 
 private struct CareSolidsRouteDataLoader<Content: View>: View {
@@ -643,7 +714,6 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
     @Query private var solidFoodEventItems: [SolidFoodEventItem]
     @Query private var solidAllergenProgress: [SolidAllergenProgress]
     @Query(sort: \SolidFoodCatalogItem.name) private var customSolidFoods: [SolidFoodCatalogItem]
-    @Query private var solidFoodPhotos: [PhotoAttachment]
     @Query private var plannedSolidMeals: [PlannedSolidMeal]
 
     private let scope: CareSolidsDataScope
@@ -667,22 +737,55 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
         let planProfileID = scope.loadsPlans ? selectedProfileID : unloadedID
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
-        _careEvents = Query(FetchDescriptor<CareEvent>(
-            predicate: #Predicate { event in
-                event.profileID == eventProfileID
-                    && event.typeRawValue == feedRawValue
-                    && event.feedKindRawValue == solidRawValue
-            },
-            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
-        ))
+        let careEventDescriptor: FetchDescriptor<CareEvent>
+        if case .solidMeal(let eventID) = activeRoute {
+            careEventDescriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate { event in
+                    event.id == eventID
+                        && event.profileID == eventProfileID
+                        && event.typeRawValue == feedRawValue
+                        && event.feedKindRawValue == solidRawValue
+                },
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+            )
+        } else {
+            careEventDescriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate { event in
+                    event.profileID == eventProfileID
+                        && event.typeRawValue == feedRawValue
+                        && event.feedKindRawValue == solidRawValue
+                },
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+            )
+        }
+        _careEvents = Query(careEventDescriptor)
         _solidFoodProgress = Query(FetchDescriptor<SolidFoodProgress>(
             predicate: #Predicate { $0.profileID == progressProfileID },
             sortBy: [SortDescriptor(\SolidFoodProgress.updatedAt, order: .reverse)]
         ))
-        _solidFoodEventItems = Query(FetchDescriptor<SolidFoodEventItem>(
-            predicate: #Predicate { $0.profileID == eventItemProfileID },
-            sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt, order: .reverse)]
-        ))
+        let eventItemDescriptor: FetchDescriptor<SolidFoodEventItem>
+        switch activeRoute {
+        case .solidFoodHistory(let foodID, _):
+            eventItemDescriptor = FetchDescriptor<SolidFoodEventItem>(
+                predicate: #Predicate {
+                    $0.profileID == eventItemProfileID && $0.foodID == foodID
+                },
+                sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt, order: .reverse)]
+            )
+        case .solidMeal(let eventID):
+            eventItemDescriptor = FetchDescriptor<SolidFoodEventItem>(
+                predicate: #Predicate {
+                    $0.profileID == eventItemProfileID && $0.eventID == eventID
+                },
+                sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt, order: .reverse)]
+            )
+        default:
+            eventItemDescriptor = FetchDescriptor<SolidFoodEventItem>(
+                predicate: #Predicate { $0.profileID == eventItemProfileID },
+                sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt, order: .reverse)]
+            )
+        }
+        _solidFoodEventItems = Query(eventItemDescriptor)
         _solidAllergenProgress = Query(FetchDescriptor<SolidAllergenProgress>(
             predicate: #Predicate { $0.profileID == allergenProfileID },
             sortBy: [SortDescriptor(\SolidAllergenProgress.updatedAt, order: .reverse)]
@@ -690,13 +793,6 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
         _plannedSolidMeals = Query(FetchDescriptor<PlannedSolidMeal>(
             predicate: #Predicate { $0.profileID == planProfileID },
             sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
-        ))
-        let photoKind = scope.loadsPhotos
-            ? PhotoAttachmentOwnerKind.solidFood.rawValue
-            : "__unloaded_solid_food_photo__"
-        _solidFoodPhotos = Query(FetchDescriptor<PhotoAttachment>(
-            predicate: #Predicate { $0.ownerKindRawValue == photoKind },
-            sortBy: [SortDescriptor(\PhotoAttachment.createdAt)]
         ))
         if scope.loadsCustomFoods {
             _customSolidFoods = Query(FetchDescriptor<SolidFoodCatalogItem>(
@@ -777,7 +873,6 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
             solidFoodEventItems: solidFoodEventItems,
             solidAllergenProgress: solidAllergenProgress,
             customSolidFoods: customSolidFoods,
-            solidFoodPhotos: solidFoodPhotos,
             plannedSolidMeals: plannedSolidMeals
         ))
         .task {
@@ -820,8 +915,6 @@ struct MilestonesView: View {
     @State private var selectedAgeGuide: AgeGuide?
     @State private var selectedPuppyStageGuideID: String?
     @State private var showingAgeGuides = false
-    @State private var showingMedications = false
-    @State private var events: [CareEvent] = []
     @State private var foodsTriedCount = 0
     @State private var upcomingSolidsPlanCount = 0
     @State private var milestonePendingDelete: MilestoneEntry?
@@ -986,7 +1079,6 @@ struct MilestonesView: View {
             refreshSolidsSummaryCounts()
             await refreshAutomaticSummaries()
             handlePendingAgeGuideDeepLink()
-            handlePendingMedicationsDeepLink()
         }
         .navigationDestination(item: $selectedAutomaticSummary) { summary in
             AutomaticMilestoneSummaryDetailView(summary: summary)
@@ -1006,50 +1098,34 @@ struct MilestonesView: View {
                 readStates: readStates
             )
         }
-        .navigationDestination(isPresented: $showingMedications) {
-            if let profile {
-                MedicationsView(profile: profile)
-            } else {
-                CareUnavailableView()
-            }
-        }
         .onChange(of: deepLinkRouter.pendingAgeGuideCommand) { _, _ in
             handlePendingAgeGuideDeepLink()
-        }
-        .onChange(of: deepLinkRouter.pendingMedications) { _, _ in
-            handlePendingMedicationsDeepLink()
         }
         .onChange(of: deepLinkRouter.isDataReady) { _, ready in
             if ready {
                 handlePendingAgeGuideDeepLink()
-                handlePendingMedicationsDeepLink()
             }
         }
-        .confirmationDialog(
-            "Delete memory?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Memory", role: .destructive) {
-                if let milestonePendingDelete {
-                    delete(milestonePendingDelete)
-                }
-                milestonePendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                milestonePendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the memory from the timeline.")
-        }
-    }
-
-    private func handlePendingMedicationsDeepLink() {
-        guard deepLinkRouter.pendingMedications,
-              deepLinkRouter.isDataReady,
-              profile != nil else { return }
-        deepLinkRouter.pendingMedications = false
-        showingMedications = true
+            title: "Delete memory?",
+            message: "This permanently removes the memory from the timeline.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: milestonePendingDelete.map { milestone in
+                [AppActionSheetOption(
+                    title: "Delete Memory",
+                    subtitle: "Permanently remove this memory from the timeline.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    delete(milestone)
+                    milestonePendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { milestonePendingDelete = nil }
+        )
     }
 
     @ViewBuilder
@@ -1357,76 +1433,28 @@ struct MilestonesView: View {
     @MainActor
     private func refreshAutomaticSummaries() async {
         guard let profile else {
-            events = []
             automaticSummaries = []
             return
         }
         guard profile.profileType == .child,
               let birthDateValue = profile.birthDate else {
-            events = []
             automaticSummaries = []
             return
         }
 
         await Task.yield()
-        do {
-            let birthDate = Calendar.current.startOfDay(for: birthDateValue)
-            let endDate = Calendar.current.startOfNextDay(for: Date())
-            let profileID = profile.id
-            let fetchedEvents = try await automaticSummaryEvents(
+        let birthDate = Calendar.current.startOfDay(for: birthDateValue)
+        let endDate = Calendar.current.startOfNextDay(for: Date())
+        let profileID = profile.id
+        let container = modelContext.container
+        automaticSummaries = await Task.detached(priority: .utility) { [container] in
+            let worker = AutomaticMilestoneSummaryWorker(modelContainer: container)
+            return await worker.summaries(
                 profileID: profileID,
                 startDate: birthDate,
                 endDate: endDate
             )
-            events = fetchedEvents
-            automaticSummaries = AutomaticMilestoneSummaryService.summaries(
-                profile: profile,
-                events: fetchedEvents
-            )
-        } catch {
-            events = []
-            automaticSummaries = []
-        }
-    }
-
-    private func automaticSummaryEvents(
-        profileID: UUID,
-        startDate: Date,
-        endDate: Date
-    ) async throws -> [CareEvent] {
-        var values: [CareEvent] = []
-        for type in [
-            EventType.sleep,
-            .nursing,
-            .diaper,
-            .activity,
-            .growth,
-            .custom
-        ] {
-            let typeRawValue = type.rawValue
-            var offset = 0
-            while !Task.isCancelled {
-                await AppInteractionMonitor.waitUntilIdle()
-                try Task.checkCancellation()
-                var descriptor = FetchDescriptor<CareEvent>(
-                    predicate: #Predicate<CareEvent> { event in
-                        event.profileID == profileID &&
-                            event.startDate >= startDate &&
-                            event.startDate < endDate &&
-                            event.typeRawValue == typeRawValue
-                    },
-                    sortBy: [SortDescriptor(\CareEvent.startDate)]
-                )
-                descriptor.fetchLimit = 200
-                descriptor.fetchOffset = offset
-                let page = try modelContext.fetch(descriptor)
-                values.append(contentsOf: page)
-                guard page.count == descriptor.fetchLimit else { break }
-                offset += page.count
-                await Task.yield()
-            }
-        }
-        return values.sorted { $0.startDate < $1.startDate }
+        }.value
     }
 
     private var memoryHeader: some View {

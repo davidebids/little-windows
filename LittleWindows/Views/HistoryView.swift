@@ -105,6 +105,8 @@ struct HistoryView: View {
     @State private var showingDeleteEventConfirmation = false
     @State private var showingDeleteMilestoneConfirmation = false
     @State private var showingDeleteAppointmentConfirmation = false
+    @State private var timerSystemRefreshTask: Task<Void, Never>?
+    @State private var timerSystemRefreshRevision = UUID()
     @StateObject private var profileService = ProfileService.shared
     private let forcedDisplayMode: HistoryDisplayMode?
     private let showsDisplayModePicker: Bool
@@ -236,7 +238,7 @@ struct HistoryView: View {
                     resume: { resume(event) },
                     reset: { reset(event) },
                     save: { endDate in save(event, endDate: endDate) },
-                    discard: { delete(event) },
+                    discard: { discardTimer(event) },
                     setStartTimeZone: { setStartTimeZone($0, for: event) },
                     setEndTimeZone: { setEndTimeZone($0, for: event) },
                     switchNursingSide: event.type == .nursing
@@ -248,57 +250,66 @@ struct HistoryView: View {
                 )
             }
         }
-        .confirmationDialog(
-            "Delete event?",
+        .appActionSheet(
             isPresented: $showingDeleteEventConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Event", role: .destructive) {
-                if let eventPendingDelete {
-                    delete(eventPendingDelete)
-                }
-                eventPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                eventPendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the event from the timeline.")
-        }
-        .confirmationDialog(
-            "Delete memory?",
+            title: "Delete event?",
+            message: "This permanently removes the event from the timeline.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: eventPendingDelete.map { event in
+                [AppActionSheetOption(
+                    title: "Delete Event",
+                    subtitle: "Permanently remove this event from the timeline.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    delete(event)
+                    eventPendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { eventPendingDelete = nil }
+        )
+        .appActionSheet(
             isPresented: $showingDeleteMilestoneConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Memory", role: .destructive) {
-                if let milestonePendingDelete {
-                    delete(milestonePendingDelete)
-                }
-                milestonePendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                milestonePendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the memory from the timeline.")
-        }
-        .confirmationDialog(
-            "Delete appointment?",
+            title: "Delete memory?",
+            message: "This permanently removes the memory from the timeline.",
+            systemImage: "trash.fill",
+            tint: .red,
+            options: milestonePendingDelete.map { milestone in
+                [AppActionSheetOption(
+                    title: "Delete Memory",
+                    subtitle: "Permanently remove this memory from the timeline.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    delete(milestone)
+                    milestonePendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { milestonePendingDelete = nil }
+        )
+        .appActionSheet(
             isPresented: $showingDeleteAppointmentConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Appointment", role: .destructive) {
-                if let appointmentPendingDelete {
-                    delete(appointmentPendingDelete)
-                }
-                appointmentPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                appointmentPendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the appointment and cancels its reminders.")
-        }
+            title: "Delete appointment?",
+            message: "This permanently removes the appointment and cancels its reminders.",
+            systemImage: "calendar.badge.minus",
+            tint: .red,
+            options: appointmentPendingDelete.map { appointment in
+                [AppActionSheetOption(
+                    title: "Delete Appointment",
+                    subtitle: "Remove the appointment and cancel its reminders.",
+                    systemImage: "calendar.badge.minus",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    delete(appointment)
+                    appointmentPendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { appointmentPendingDelete = nil }
+        )
     }
 
     private var historyRefreshToken: String {
@@ -606,7 +617,9 @@ struct HistoryView: View {
     }
 
     static func visibleDayEvent(_ event: CareEvent, selectedProfileID: UUID?) -> Bool {
-        event.matchesProfile(selectedProfileID) && !event.isTimerDraft
+        event.matchesProfile(selectedProfileID)
+            && !event.isTimerDraft
+            && EventVisibilityStore.isVisible(event)
     }
 
     private var settings: PredictionSettings {
@@ -628,8 +641,6 @@ struct HistoryView: View {
         await EventMutationService.eventDidChange(
             event,
             profile: profile,
-            events: recentPredictionEvents(including: event),
-            records: scopedRecords,
             context: modelContext,
             settings: settings,
             notificationsEnabled: notificationsEnabled,
@@ -638,28 +649,6 @@ struct HistoryView: View {
             waitForSystemIntegrations: waitForSystemIntegrations
         )
         refreshDayData()
-    }
-
-    private func recentPredictionEvents(including event: CareEvent? = nil) -> [CareEvent] {
-        let selectedProfileID = profile?.id
-            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let cutoff = Calendar.current.date(
-            byAdding: .day,
-            value: -45,
-            to: Calendar.current.startOfDay(for: Date())
-        ) ?? Date()
-        var descriptor = FetchDescriptor<CareEvent>(
-            predicate: #Predicate<CareEvent> { value in
-                value.profileID == selectedProfileID && value.startDate >= cutoff
-            },
-            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
-        )
-        descriptor.fetchLimit = 900
-        var values = (try? modelContext.fetch(descriptor)) ?? []
-        if let event, !values.contains(where: { $0.id == event.id }) {
-            values.append(event)
-        }
-        return values
     }
 
     private func open(_ event: CareEvent) {
@@ -673,7 +662,7 @@ struct HistoryView: View {
             return
         }
         if event.isTimerDraft {
-            activeTimerToEdit = event
+            activeTimerToEdit = editableTimer(event)
         } else {
             editorRoute = EventEditorRoute(type: event.type, event: event)
         }
@@ -695,116 +684,294 @@ struct HistoryView: View {
     }
 
     private func adjustStart(of event: CareEvent, to date: Date) {
-        EventTimerService.adjustStartDate(event, to: date)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        EventTimerService.adjustStartDate(draft, to: date)
+        persistTimerMutation(draft)
     }
 
     private func stop(_ event: CareEvent) {
-        EventMutationService.stopTimer(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        EventMutationService.stopTimer(draft, context: modelContext)
+        persistTimerMutation(draft)
     }
 
     private func resume(_ event: CareEvent) {
-        EventMutationService.resumeTimer(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        EventMutationService.resumeTimer(draft, context: modelContext)
+        persistTimerMutation(draft)
     }
 
     private func reset(_ event: CareEvent) {
-        EventMutationService.resetTimer(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        EventMutationService.resetTimer(draft, context: modelContext)
+        persistTimerMutation(draft)
     }
 
     private func setStartTimeZone(_ identifier: String, for event: CareEvent) {
-        event.startTimeZoneIdentifier = identifier
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        draft.startTimeZoneIdentifier = identifier
+        persistTimerMutation(draft)
     }
 
     private func setEndTimeZone(_ identifier: String, for event: CareEvent) {
-        event.endTimeZoneIdentifier = identifier
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        draft.endTimeZoneIdentifier = identifier
+        persistTimerMutation(draft)
     }
 
-    private func save(_ event: CareEvent, endDate: Date? = nil) {
-        EventMutationService.saveTimer(event, context: modelContext, endDate: endDate)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: true,
-                waitForSystemIntegrations: true
-            )
+    @discardableResult
+    private func save(_ event: CareEvent, endDate: Date? = nil) -> Bool {
+        let draft = timerDraftForMutation(event)
+        let didFinish = EventMutationService.saveTimer(
+            draft,
+            context: modelContext,
+            endDate: endDate
+        )
+        guard didFinish else {
+            return !draft.isTimerDraft && draft.endDate != nil
         }
+        scheduleTimerSystemRefresh(
+            activeTimers: activeTimerDrafts(replacing: draft),
+            scheduleNotification: true,
+            refreshPredictionFor: draft,
+            persistenceRequest: EventMutationService.timerPersistenceRequest(for: draft)
+        )
+        return true
     }
 
     private func switchNursingSide(_ event: CareEvent) {
-        EventTimerService.switchNursingSide(event, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
-            )
-        }
+        let draft = timerDraftForMutation(event)
+        EventTimerService.switchNursingSide(draft, context: modelContext)
+        persistTimerMutation(draft)
     }
 
     private func setNursingSide(_ side: NursingSide, for event: CareEvent) {
-        EventTimerService.setNursingSide(event, to: side, context: modelContext)
-        Task {
-            await eventChanged(
-                event,
-                refreshPrediction: false,
-                waitForSystemIntegrations: true
+        let draft = timerDraftForMutation(event)
+        EventTimerService.setNursingSide(draft, to: side, context: modelContext)
+        persistTimerMutation(draft)
+    }
+
+    private func persistTimerMutation(_ event: CareEvent) {
+        scheduleTimerSystemRefresh(
+            activeTimers: activeTimerDrafts(replacing: event),
+            scheduleNotification: EventMutationService.shouldRefreshLittleWindowAlert(
+                after: event
+            ),
+            persistenceRequest: EventMutationService.timerPersistenceRequest(for: event)
+        )
+    }
+
+    private func discardTimer(_ event: CareEvent) {
+        guard event.isTimerDraft else { return }
+        let eventID = event.id
+        let scheduleNotification = EventMutationService.shouldRefreshLittleWindowAlert(
+            after: event
+        )
+        guard EventMutationService.discardTimer(
+            event,
+            context: modelContext,
+            deleteFromContext: false
+        ) else {
+            return
+        }
+        scheduleTimerSystemRefresh(
+            activeTimers: activeTimerDrafts(removing: eventID),
+            scheduleNotification: scheduleNotification,
+            persistenceRequest: EventMutationService.timerPersistenceRequest(
+                for: event,
+                deleting: true
+            ),
+            discardedTimerID: eventID
+        )
+    }
+
+    private func activeTimerDrafts(
+        replacing replacement: CareEvent? = nil,
+        removing removedID: UUID? = nil
+    ) -> [CareEvent] {
+        let selectedProfileID = profile?.id
+            ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        var descriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate<CareEvent> { event in
+                event.profileID == selectedProfileID && event.timerStateRawValue != nil
+            },
+            sortBy: [SortDescriptor(\CareEvent.updatedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 30
+        var values = EventVisibilityStore.visibleEvents(
+            in: (try? modelContext.fetch(descriptor)) ?? []
+        )
+        if let removedID {
+            values.removeAll { $0.id == removedID }
+        }
+        if let replacement {
+            values.removeAll { $0.id == replacement.id }
+            if replacement.isTimerDraft {
+                values.append(replacement)
+            }
+        }
+        return values
+    }
+
+    private func scheduleTimerSystemRefresh(
+        activeTimers: [CareEvent],
+        scheduleNotification: Bool,
+        refreshPredictionFor event: CareEvent? = nil,
+        persistenceRequest: TimerPersistenceRequest? = nil,
+        discardedTimerID: UUID? = nil
+    ) {
+        timerSystemRefreshTask?.cancel()
+        let refreshRevision = UUID()
+        timerSystemRefreshRevision = refreshRevision
+        let currentProfile = profile
+        let currentRecords = scopedRecords
+        let currentSettings = settings
+        let alertsEnabled = notificationsEnabled
+        let leadMinutes = notificationLeadMinutes
+        let surfaceRevision = Date()
+        let timerSnapshot = WidgetSnapshotService.refreshActiveTimerState(
+            profile: currentProfile,
+            events: activeTimers,
+            now: surfaceRevision
+        )
+        let container = modelContext.container
+        let profileID = currentProfile?.id
+        let profileName = currentProfile?.name ?? "Baby"
+        let currentPrediction = currentRecords
+            .lazy
+            .filter { $0.actualSleepEventID == nil }
+            .max { $0.generatedAt < $1.generatedAt }?
+            .prediction
+        let hasSleepDraft = activeTimers.contains {
+            $0.isSleepBlock && $0.isTimerDraft
+        }
+
+        Task.detached(priority: .utility) {
+            await LiveActivityManager.shared.synchronize(
+                timer: timerSnapshot,
+                revision: surfaceRevision
             )
+        }
+
+        if event == nil {
+            // Pausing, resuming, and discarding drafts do not alter completed
+            // history. Persist the one row without starting a full prediction
+            // scan or retaining the Reports interaction transaction.
+            timerSystemRefreshTask = Task.detached(priority: .userInitiated) {
+                let persisted: Bool
+                if let persistenceRequest {
+                    persisted = await EventMutationService.persistTimerMutation(
+                        persistenceRequest,
+                        container: container
+                    )
+                } else {
+                    persisted = true
+                }
+                guard !Task.isCancelled else { return }
+                if !persisted {
+                    await MainActor.run {
+                        guard timerSystemRefreshRevision == refreshRevision else { return }
+                        if let discardedTimerID {
+                            EventVisibilityStore.restore(discardedTimerID)
+                        }
+                        timerSystemRefreshTask = nil
+                    }
+                    return
+                }
+                if scheduleNotification {
+                    await NotificationManager.shared.schedule(
+                        prediction: currentPrediction,
+                        babyName: profileName,
+                        profileID: profileID,
+                        leadMinutes: leadMinutes,
+                        enabled: alertsEnabled,
+                        isSleeping: hasSleepDraft
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                WatchConnectivityService.shared.scheduleCurrentStatePublish()
+                await MainActor.run {
+                    guard timerSystemRefreshRevision == refreshRevision else { return }
+                    timerSystemRefreshTask = nil
+                }
+            }
+            return
+        }
+
+        timerSystemRefreshTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+
+            if let persistenceRequest,
+               !(await EventMutationService.persistTimerMutation(
+                    persistenceRequest,
+                    container: modelContext.container
+               )) {
+                if let discardedTimerID {
+                    EventVisibilityStore.restore(discardedTimerID)
+                }
+                refreshDayData()
+                timerSystemRefreshTask = nil
+                return
+            }
+            guard !Task.isCancelled else { return }
+            if let event {
+                await EventMutationService.eventDidChange(
+                    event,
+                    profile: currentProfile,
+                    context: modelContext,
+                    settings: currentSettings,
+                    notificationsEnabled: alertsEnabled,
+                    notificationLeadMinutes: leadMinutes,
+                    refreshPrediction: true,
+                    waitForSystemIntegrations: false,
+                    eventAlreadyPersisted: persistenceRequest != nil
+                )
+            }
+            guard !Task.isCancelled else { return }
+            refreshDayData()
+            timerSystemRefreshTask = nil
         }
     }
 
+    private func editableTimer(_ event: CareEvent) -> CareEvent {
+        event.modelContext == nil
+            ? event
+            : EventMutationService.detachedTimerCopy(event)
+    }
+
+    private func timerDraftForMutation(_ event: CareEvent) -> CareEvent {
+        let draft = editableTimer(event)
+        if activeTimerToEdit?.id == event.id, activeTimerToEdit !== draft {
+            activeTimerToEdit = draft
+        }
+        return draft
+    }
+
     private func delete(_ event: CareEvent) {
-        Task {
-            await EventMutationService.delete(
+        let eventID = event.id
+        let currentProfile = profile
+        let currentSettings = settings
+        let alertsEnabled = notificationsEnabled
+        let leadMinutes = notificationLeadMinutes
+
+        EventVisibilityStore.markPendingDeletion(eventID)
+        events.removeAll { $0.id == eventID }
+
+        Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            let outcome = await EventMutationService.delete(
                 event,
-                profile: profile,
-                events: recentPredictionEvents(including: event),
-                records: scopedRecords,
+                profile: currentProfile,
                 context: modelContext,
-                settings: settings,
-                notificationsEnabled: notificationsEnabled,
-                notificationLeadMinutes: notificationLeadMinutes
+                settings: currentSettings,
+                notificationsEnabled: alertsEnabled,
+                notificationLeadMinutes: leadMinutes
             )
+            if !outcome.didPersist {
+                EventVisibilityStore.restore(eventID)
+            }
             refreshDayData()
         }
     }

@@ -14,11 +14,11 @@ enum IntegrationCommandProcessor {
 
         let context = container.mainContext
         switchToCommandProfileIfNeeded(command.profileID, context: context)
-        let event = fetchEvent(for: command, context: context)
-        guard let event else { return true }
-        guard shouldApply(command.action, to: event, requestedAt: requestedAt) else {
+        guard let storedEvent = fetchEvent(for: command, context: context) else { return true }
+        guard shouldApply(command.action, to: storedEvent, requestedAt: requestedAt) else {
             return true
         }
+        let event = EventMutationService.detachedTimerCopy(storedEvent)
 
         switch command.action {
         case .stopActive, .stop:
@@ -28,16 +28,52 @@ enum IntegrationCommandProcessor {
         case .switchSide:
             EventTimerService.switchNursingSide(event, context: context, at: requestedAt)
         }
-        guard PersistenceService.save(context: context) else { return true }
+        let persistenceRequest = EventMutationService.timerPersistenceRequest(for: event)
+        guard await EventMutationService.persistTimerMutation(
+            persistenceRequest,
+            container: container
+        ) else { return true }
 
-        let timer = WidgetSnapshotService.refreshActiveTimer(event, at: requestedAt)
+        // The isolated writer owns the durable commit, but SwiftData does not
+        // automatically merge that actor's values into an object already
+        // registered in the SwiftUI main context. Mirror the committed timer
+        // fields into that existing object so Today and any foreground
+        // reconciliation cannot keep publishing the pre-command running state.
+        // No second main-actor save is needed; the authoritative write above is
+        // already complete.
+        CareEventPersistenceSnapshot(event: event).apply(to: storedEvent)
+
+        let profile = fetchProfile(id: event.profileID, context: context)
+        let timer = WidgetSnapshotService.refreshActiveTimer(
+            event,
+            profile: profile,
+            at: requestedAt
+        )
         let environment = ProcessInfo.processInfo.environment
         if environment["XCTestConfigurationFilePath"] == nil,
            environment["XCTestBundlePath"] == nil {
-            await LiveActivityManager.shared.updateTimer(timer)
-            WatchConnectivityService.shared.publishCurrentState()
+            // `requestedAt` is the timer's effective stop/resume time, but the
+            // persisted command becomes authoritative now. A foreground
+            // reconciliation may have generated a newer wall-clock snapshot
+            // from the old running state while the app was waking; ordering the
+            // surface update by the old tap time would incorrectly reject this
+            // successfully committed mutation.
+            await LiveActivityManager.shared.updateTimer(timer, revision: Date())
+            WatchConnectivityService.shared.scheduleCurrentStatePublish()
         }
         return true
+    }
+
+    private static func fetchProfile(
+        id profileID: UUID?,
+        context: ModelContext
+    ) -> CareProfile? {
+        guard let profileID else { return nil }
+        var descriptor = FetchDescriptor<CareProfile>(
+            predicate: #Predicate { $0.id == profileID }
+        )
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
     }
 
     private static func fetchEvent(

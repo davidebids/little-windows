@@ -1,6 +1,6 @@
 import Foundation
 
-struct SleepPrediction: Hashable {
+struct SleepPrediction: Hashable, Sendable {
     var predictedStart: Date
     var predictedWindowStart: Date
     var predictedWindowEnd: Date
@@ -12,7 +12,7 @@ struct SleepPrediction: Hashable {
     var napIndex: Int
 }
 
-struct SleepMiniPlan: Hashable, Identifiable {
+struct SleepMiniPlan: Hashable, Identifiable, Sendable {
     var id: String
     var title: String
     var horizon: String
@@ -23,7 +23,7 @@ struct SleepMiniPlan: Hashable, Identifiable {
     var tintName: String
 }
 
-struct SleepMiniPlanTimelineItem: Hashable, Identifiable {
+struct SleepMiniPlanTimelineItem: Hashable, Identifiable, Sendable {
     var id: String
     var title: String
     var timeText: String
@@ -44,6 +44,9 @@ enum SleepMiniPlanService {
     ) -> SleepMiniPlan? {
         guard profile.profileType == .child else { return nil }
         let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
+        let runningSleep = events
+            .filter { $0.isSleepBlock && $0.isTimerRunning && $0.startDate <= now }
+            .max { $0.startDate < $1.startDate }
         var hasCompletedSleep = false
         var recentSleeps: [CareEvent] = []
         for event in events where event.isSleepBlock && !event.isTimerDraft && event.endDate != nil && event.startDate <= now {
@@ -52,6 +55,44 @@ enum SleepMiniPlanService {
                 recentSleeps.append(event)
             }
         }
+        let bedtimeStarts = nightlyBedtimeStarts(
+            events: events,
+            now: now,
+            calendar: calendar
+        )
+        let usualBedtime = typicalBedtime(
+            from: bedtimeStarts,
+            on: now,
+            calendar: calendar
+        )
+        let effectivePrediction = runningSleep == nil ? prediction : nil
+        let timelineItems = dayAheadItems(
+            recentSleeps: recentSleeps,
+            prediction: effectivePrediction,
+            runningSleep: runningSleep,
+            usualBedtime: usualBedtime,
+            bedtimeSampleCount: bedtimeStarts.count,
+            now: now,
+            calendar: calendar
+        )
+
+        if let runningSleep {
+            return SleepMiniPlan(
+                id: "sleep-in-progress",
+                title: "Sleep in progress",
+                horizon: "Now",
+                summary: "The next sleep window will recalculate after this \(runningSleep.sleepKind == .nap ? "nap" : "sleep") ends.",
+                timelineItems: timelineItems,
+                steps: [
+                    "Let the current sleep timer keep the live duration.",
+                    "Save the wake time when this sleep ends.",
+                    "Review the recalculated next window after saving."
+                ],
+                systemImage: "moon.zzz.fill",
+                tintName: "indigo"
+            )
+        }
+
         guard hasCompletedSleep else {
             return SleepMiniPlan(
                 id: "baseline",
@@ -93,17 +134,11 @@ enum SleepMiniPlanService {
             .compactMap(\.errorMinutes)
         let averagePredictionError = average(recentPredictionErrors.map { abs($0) })
         let bedtimeSpread = circularSpreadMinutes(
-            recentSleeps.filter { $0.sleepKind == .nightSleep }.map(\.startDate),
-            calendar: calendar
-        )
-        let timelineItems = dayAheadItems(
-            recentSleeps: recentSleeps,
-            prediction: prediction,
-            now: now,
-            calendar: calendar
+            bedtimeStarts.map { $0.localStartMinute(calendar: calendar) }
         )
 
-        if let prediction, prediction.confidenceLabel == .low || averagePredictionError > 35 {
+        if let effectivePrediction,
+           effectivePrediction.confidenceLabel == .low || averagePredictionError > 35 {
             return SleepMiniPlan(
                 id: "tighten-window",
                 title: "Tighten the next window",
@@ -185,11 +220,8 @@ enum SleepMiniPlanService {
         return sqrt(variance)
     }
 
-    private static func circularSpreadMinutes(_ dates: [Date], calendar: Calendar) -> Double {
-        let minutes = dates.map {
-            let components = calendar.dateComponents([.hour, .minute], from: $0)
-            return Double((components.hour ?? 0) * 60 + (components.minute ?? 0))
-        }.sorted()
+    private static func circularSpreadMinutes(_ values: [Double]) -> Double {
+        let minutes = values.sorted()
         guard minutes.count > 1 else { return 0 }
 
         var largestGap = 0.0
@@ -205,12 +237,25 @@ enum SleepMiniPlanService {
     private static func dayAheadItems(
         recentSleeps: [CareEvent],
         prediction: SleepPrediction?,
+        runningSleep: CareEvent?,
+        usualBedtime: Date?,
+        bedtimeSampleCount: Int,
         now: Date,
         calendar: Calendar
     ) -> [SleepMiniPlanTimelineItem] {
         var items = [SleepMiniPlanTimelineItem]()
 
-        if let lastSleep = recentSleeps
+        if let runningSleep {
+            items.append(SleepMiniPlanTimelineItem(
+                id: "sleep-in-progress",
+                title: runningSleep.sleepKind == .nap ? "Nap in progress" : "Sleep in progress",
+                timeText: "Since \(DateFormatting.time.string(from: runningSleep.startDate))",
+                detail: "The next window waits for the wake time",
+                systemImage: "moon.zzz.fill",
+                tintName: "indigo",
+                isCurrent: true
+            ))
+        } else if let lastSleep = recentSleeps
             .filter(\.isSleepBlock)
             .compactMap({ event -> CareEvent? in
                 guard let endDate = event.endDate, endDate <= now else { return nil }
@@ -229,7 +274,7 @@ enum SleepMiniPlanService {
             ))
         }
 
-        if let prediction {
+        if runningSleep == nil, let prediction {
             items.append(SleepMiniPlanTimelineItem(
                 id: "next-window",
                 title: prediction.predictionKind == .bedtime ? "Bedtime window" : "Next sleep window",
@@ -244,15 +289,14 @@ enum SleepMiniPlanService {
             ))
         }
 
-        if let usualBedtime = circularTimeAverage(
-            recentSleeps.filter { $0.sleepKind == .nightSleep }.map(\.startDate),
-            calendar: calendar
-        ) {
+        if let usualBedtime {
             items.append(SleepMiniPlanTimelineItem(
                 id: "usual-bedtime",
                 title: "Usual bedtime",
                 timeText: DateFormatting.time.string(from: usualBedtime),
-                detail: "Based on recent night-sleep starts",
+                detail: bedtimeSampleCount == 1
+                    ? "First night-sleep start from the latest usable night"
+                    : "Median first night-sleep start across \(bedtimeSampleCount) recent nights",
                 systemImage: "bed.double.fill",
                 tintName: "purple"
             ))
@@ -270,30 +314,65 @@ enum SleepMiniPlanService {
         return Array(items.prefix(3))
     }
 
-    private static func circularTimeAverage(_ dates: [Date], calendar: Calendar) -> Date? {
-        guard !dates.isEmpty else { return nil }
-        var x = 0.0
-        var y = 0.0
-        for date in dates {
-            let components = calendar.dateComponents([.hour, .minute], from: date)
-            let minutes = Double((components.hour ?? 0) * 60 + (components.minute ?? 0))
-            let angle = minutes / 1_440 * 2 * Double.pi
-            x += cos(angle)
-            y += sin(angle)
+    /// Returns one plausible bedtime onset per sleep night. A sleep started
+    /// after midnight belongs to the preceding evening, and duplicate or
+    /// fragmented night-sleep entries keep only the earliest onset.
+    static func nightlyBedtimeStarts(
+        events: [CareEvent],
+        now: Date,
+        calendar: Calendar
+    ) -> [CareEvent] {
+        let cutoff = calendar.date(byAdding: .day, value: -28, to: now) ?? .distantPast
+        var startsByNight: [Date: (event: CareEvent, unfoldedMinute: Double)] = [:]
+
+        for event in events where
+            event.sleepKind == .nightSleep &&
+            !event.isTimerDraft &&
+            event.endDate != nil &&
+            event.startDate >= cutoff &&
+            event.startDate <= now {
+            let minute = event.localStartMinute(calendar: calendar)
+            guard minute >= 17 * 60 || minute < 5 * 60 else { continue }
+            let unfoldedMinute = minute < 5 * 60 ? minute + 1_440 : minute
+            let localDay = event.localStartDay(calendar: calendar)
+            let sleepNight = minute < 5 * 60
+                ? (calendar.date(byAdding: .day, value: -1, to: localDay) ?? localDay)
+                : localDay
+            if startsByNight[sleepNight].map({ unfoldedMinute < $0.unfoldedMinute }) ?? true {
+                startsByNight[sleepNight] = (event, unfoldedMinute)
+            }
         }
-        let averageAngle = atan2(y / Double(dates.count), x / Double(dates.count))
-        let normalizedAngle = averageAngle < 0 ? averageAngle + 2 * Double.pi : averageAngle
-        let averageMinutes = Int((normalizedAngle / (2 * Double.pi) * 1_440).rounded()) % 1_440
+
+        return startsByNight
+            .sorted { $0.key < $1.key }
+            .map { $0.value.event }
+    }
+
+    static func typicalBedtime(
+        from starts: [CareEvent],
+        on targetDate: Date,
+        calendar: Calendar
+    ) -> Date? {
+        let minutes = starts.map {
+            let minute = $0.localStartMinute(calendar: calendar)
+            return minute < 5 * 60 ? minute + 1_440 : minute
+        }.sorted()
+        guard !minutes.isEmpty else { return nil }
+        let middle = minutes.count / 2
+        let median = minutes.count.isMultiple(of: 2)
+            ? (minutes[middle - 1] + minutes[middle]) / 2
+            : minutes[middle]
+        let normalized = Int(median.rounded()) % 1_440
         return calendar.date(
-            bySettingHour: averageMinutes / 60,
-            minute: averageMinutes % 60,
+            bySettingHour: normalized / 60,
+            minute: normalized % 60,
             second: 0,
-            of: Date()
+            of: targetDate
         )
     }
 }
 
-enum SleepPressureBand: String, Hashable, CaseIterable {
+enum SleepPressureBand: String, Hashable, CaseIterable, Sendable {
     case learning
     case low
     case building
@@ -331,7 +410,7 @@ enum SleepPressureBand: String, Hashable, CaseIterable {
     }
 }
 
-struct SleepPressure: Hashable {
+struct SleepPressure: Hashable, Sendable {
     var score: Double?
     var band: SleepPressureBand
     var confidence: Double
@@ -550,7 +629,7 @@ enum BackwardsSleepPlanHistoryRange: String, CaseIterable, Identifiable, Hashabl
     }
 }
 
-struct PredictionSettings {
+struct PredictionSettings: Sendable {
     var feedAdjustmentEnabled: Bool
     var nursingAdjustmentEnabled: Bool
     var bedtimePredictionEnabled: Bool
@@ -1165,14 +1244,13 @@ enum SleepPredictionEngine {
         }
 
         let provisionalStart = lastSleepEnd.addingTimeInterval(predictedWakeMinutes * 60)
-        let typicalBedtimes = completedSleeps
-            .filter {
-                $0.sleepKind == .nightSleep &&
-                $0.localStartMinute(calendar: calendar) >= 17 * 60
-            }
-            .suffix(14)
-        let bedtimeDate = circularTypicalTime(
-            for: Array(typicalBedtimes),
+        let typicalBedtimes = SleepMiniPlanService.nightlyBedtimeStarts(
+            events: completedSleeps,
+            now: now,
+            calendar: calendar
+        )
+        let bedtimeDate = SleepMiniPlanService.typicalBedtime(
+            from: typicalBedtimes,
             on: now,
             calendar: calendar
         )
@@ -1422,15 +1500,14 @@ enum SleepPredictionEngine {
             ))
         }
 
-        let typicalBedtimes = completedSleeps
-            .filter {
-                $0.sleepKind == .nightSleep &&
-                    $0.localStartMinute(calendar: calendar) >= 17 * 60
-            }
-            .suffix(14)
+        let typicalBedtimes = SleepMiniPlanService.nightlyBedtimeStarts(
+            events: completedSleeps,
+            now: now,
+            calendar: calendar
+        )
         if bedtimeCandidate,
-           let bedtime = circularTypicalTime(
-                for: Array(typicalBedtimes),
+           let bedtime = SleepMiniPlanService.typicalBedtime(
+                from: typicalBedtimes,
                 on: now,
                 calendar: calendar
            ),
@@ -1722,24 +1799,6 @@ enum SleepPredictionEngine {
         let grouped = Dictionary(grouping: naps) { $0.localStartDay(calendar: calendar) }
         guard !grouped.isEmpty else { return 3 }
         return Double(grouped.values.reduce(0) { $0 + $1.count }) / Double(grouped.count)
-    }
-
-    private static func circularTypicalTime(
-        for events: [CareEvent],
-        on targetDate: Date,
-        calendar: Calendar
-    ) -> Date? {
-        guard !events.isEmpty else { return nil }
-        let minutes = events.map { $0.localStartMinute(calendar: calendar) }
-        let shifted = minutes.map { $0 < 12 * 60 ? $0 + 24 * 60 : $0 }
-        let average = shifted.reduce(0, +) / Double(shifted.count)
-        let normalized = Int(average.rounded()) % (24 * 60)
-        return calendar.date(
-            bySettingHour: normalized / 60,
-            minute: normalized % 60,
-            second: 0,
-            of: targetDate
-        )
     }
 
     private static func typicalDailyNapCountForPlanning(

@@ -728,7 +728,9 @@ struct PackingListDetailView: View {
     @State private var weatherSuggestionMessage: String?
     @State private var showingWeatherDetails = false
     @State private var showingWeatherAttribution = false
+    @State private var showingArchiveConfirmation = false
     @State private var showingDeleteConfirmation = false
+    @State private var itemPendingDelete: PackingItem?
     @State private var actionFailureMessage: String?
     @State private var itemEditMode = EditMode.inactive
 
@@ -907,7 +909,7 @@ struct PackingListDetailView: View {
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 if !trip.isArchived {
                                     Button(role: .destructive) {
-                                        TripPackingService.deleteItem(item, trip: trip, context: modelContext)
+                                        itemPendingDelete = item
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -1022,11 +1024,7 @@ struct PackingListDetailView: View {
                         if !trip.isArchived {
                             Divider()
                             Button("Archive", systemImage: "archivebox", role: .destructive) {
-                                if TripPackingService.archive(trip, context: modelContext) {
-                                    dismiss()
-                                } else {
-                                    actionFailureMessage = "The trip couldn’t be archived. Please try again."
-                                }
+                                showingArchiveConfirmation = true
                             }
                         }
                         Divider()
@@ -1150,27 +1148,30 @@ struct PackingListDetailView: View {
         } message: {
             Text(weatherSuggestionMessage ?? "")
         }
-        .appActionSheet(
-            isPresented: $showingDeleteConfirmation,
-            title: "Delete Trip?",
-            message: "This permanently removes the trip, itinerary, packing list, bags, and traveler assignments. Items already added to Shopping will remain.",
-            systemImage: "trash.fill",
-            tint: .red,
-            options: [
-                AppActionSheetOption(
-                    title: "Delete Trip",
-                    subtitle: trip.title,
-                    systemImage: "trash.fill",
-                    tint: .red,
-                    role: .destructive
-                ) {
+        .modifier(
+            PackingListActionConfirmationModifier(
+                showingArchiveConfirmation: $showingArchiveConfirmation,
+                itemPendingDelete: $itemPendingDelete,
+                showingDeleteConfirmation: $showingDeleteConfirmation,
+                tripTitle: trip.title,
+                archiveTrip: {
+                    if TripPackingService.archive(trip, context: modelContext) {
+                        dismiss()
+                    } else {
+                        actionFailureMessage = "The trip couldn’t be archived. Please try again."
+                    }
+                },
+                deleteItem: { item in
+                    TripPackingService.deleteItem(item, trip: trip, context: modelContext)
+                },
+                deleteTrip: {
                     if TripPackingService.deleteTrip(trip, context: modelContext) {
                         dismiss()
                     } else {
                         actionFailureMessage = "The trip couldn’t be deleted. Please try again."
                     }
                 }
-            ]
+            )
         )
         .alert("Couldn’t Update Trip", isPresented: Binding(
             get: { actionFailureMessage != nil },
@@ -1438,6 +1439,76 @@ struct PackingListDetailView: View {
     private func refreshWeather() {
         forceWeatherRefresh = true
         weatherRefreshToken += 1
+    }
+}
+
+private struct PackingListActionConfirmationModifier: ViewModifier {
+    @Binding var showingArchiveConfirmation: Bool
+    @Binding var itemPendingDelete: PackingItem?
+    @Binding var showingDeleteConfirmation: Bool
+    let tripTitle: String
+    let archiveTrip: () -> Void
+    let deleteItem: (PackingItem) -> Void
+    let deleteTrip: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .appActionSheet(
+                isPresented: $showingArchiveConfirmation,
+                title: "Archive Trip?",
+                message: "This hides the trip from active planning. You can restore it later.",
+                systemImage: "archivebox.fill",
+                tint: .orange,
+                options: [
+                    AppActionSheetOption(
+                        title: "Archive Trip",
+                        subtitle: tripTitle,
+                        systemImage: "archivebox.fill",
+                        tint: .orange,
+                        action: archiveTrip
+                    )
+                ]
+            )
+            .appActionSheet(
+                isPresented: Binding(
+                    get: { itemPendingDelete != nil },
+                    set: { if !$0 { itemPendingDelete = nil } }
+                ),
+                title: "Delete Packing Item?",
+                message: itemPendingDelete.map { "This permanently removes \($0.title) from the packing list." },
+                systemImage: "trash.fill",
+                tint: .red,
+                options: itemPendingDelete.map { item in
+                    [AppActionSheetOption(
+                        title: "Delete Item",
+                        subtitle: item.title,
+                        systemImage: "trash.fill",
+                        tint: .red,
+                        role: .destructive
+                    ) {
+                        deleteItem(item)
+                        itemPendingDelete = nil
+                    }]
+                } ?? [],
+                cancelAction: { itemPendingDelete = nil }
+            )
+            .appActionSheet(
+                isPresented: $showingDeleteConfirmation,
+                title: "Delete Trip?",
+                message: "This permanently removes the trip, itinerary, packing list, bags, and traveler assignments. Items already added to Shopping will remain.",
+                systemImage: "trash.fill",
+                tint: .red,
+                options: [
+                    AppActionSheetOption(
+                        title: "Delete Trip",
+                        subtitle: tripTitle,
+                        systemImage: "trash.fill",
+                        tint: .red,
+                        role: .destructive,
+                        action: deleteTrip
+                    )
+                ]
+            )
     }
 }
 
@@ -2204,19 +2275,30 @@ private struct PackingTravelersEditorView: View {
                 }
             }
         }
-        .alert(
-            "Remove traveler?",
+        .appActionSheet(
             isPresented: Binding(
                 get: { travelerToRemove != nil },
                 set: { if !$0 { travelerToRemove = nil } }
             ),
-            presenting: travelerToRemove
-        ) { traveler in
-            Button("Remove", role: .destructive) { remove(traveler) }
-            Button("Cancel", role: .cancel) { travelerToRemove = nil }
-        } message: { traveler in
-            Text("\(traveler.displayName)'s items and bags will move to Shared.")
-        }
+            title: "Remove traveler?",
+            message: travelerToRemove.map {
+                "\($0.displayName)'s items and bags will move to Shared."
+            },
+            systemImage: "person.crop.circle.badge.minus",
+            tint: .red,
+            options: travelerToRemove.map { traveler in
+                [AppActionSheetOption(
+                    title: "Remove \(traveler.displayName)",
+                    subtitle: "Keep their items and bags on the shared list.",
+                    systemImage: "person.crop.circle.badge.minus",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    remove(traveler)
+                }]
+            } ?? [],
+            cancelAction: { travelerToRemove = nil }
+        )
     }
 
     private func saveAdultNames() {
@@ -2808,22 +2890,33 @@ private struct PackingBagsEditorView: View {
                 _ = flushPendingSaves()
             }
         }
-        .alert(
-            "Delete bag?",
+        .appActionSheet(
             isPresented: Binding(
                 get: { bagToDelete != nil },
                 set: { if !$0 { bagToDelete = nil } }
             ),
-            presenting: bagToDelete
-        ) { bag in
-            Button("Delete", role: .destructive) { delete(bag) }
-            Button("Cancel", role: .cancel) { bagToDelete = nil }
-        } message: { bag in
-            let count = items.filter { $0.bagID == bag.id }.count
-            Text(count == 0
-                 ? "This removes \(bag.name)."
-                 : "This removes \(bag.name) and leaves \(count) assigned \(count == 1 ? "item" : "items") unassigned.")
-        }
+            title: "Delete bag?",
+            message: bagToDelete.map { bag in
+                let count = items.filter { $0.bagID == bag.id }.count
+                return count == 0
+                    ? "This removes \(bag.name)."
+                    : "This removes \(bag.name) and leaves \(count) assigned \(count == 1 ? "item" : "items") unassigned."
+            },
+            systemImage: "trash.fill",
+            tint: .red,
+            options: bagToDelete.map { bag in
+                [AppActionSheetOption(
+                    title: "Delete \(bag.name)",
+                    subtitle: "Assigned items will remain on the trip without a bag.",
+                    systemImage: "trash.fill",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    delete(bag)
+                }]
+            } ?? [],
+            cancelAction: { bagToDelete = nil }
+        )
     }
 
     private var currentBags: [PackingBag] {

@@ -6,8 +6,8 @@ struct AppointmentDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var appointment: DoctorAppointment
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
-    @Query(sort: \Medication.name) private var allMedications: [Medication]
-    @Query(sort: \MedicationRegimen.createdAt) private var allMedicationRegimens: [MedicationRegimen]
+    @Query private var allMedications: [Medication]
+    @Query private var allMedicationRegimens: [MedicationRegimen]
     @StateObject private var profileService = ProfileService.shared
 
     @State private var showingEditor = false
@@ -21,6 +21,19 @@ struct AppointmentDetailView: View {
     @State private var medicationsDiscussedDraft = ""
     @State private var hasLoadedVisitJournalDrafts = false
     @State private var pendingVisitJournalSave: Task<Void, Never>?
+
+    init(appointment: DoctorAppointment) {
+        self.appointment = appointment
+        let profileID = appointment.profileID
+        _allMedications = Query(FetchDescriptor<Medication>(
+            predicate: #Predicate { profileID == nil || $0.profileID == profileID },
+            sortBy: [SortDescriptor(\Medication.name)]
+        ))
+        _allMedicationRegimens = Query(FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { profileID == nil || $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationRegimen.createdAt)]
+        ))
+    }
 
     private var profile: CareProfile? {
         if let profileID = appointment.profileID,
@@ -232,6 +245,7 @@ struct AppointmentDetailView: View {
                     if let appointmentProfileID = appointment.profileID ?? profile?.id {
                         event.profileID = appointmentProfileID
                     }
+                    let appointmentLinkKind: AppointmentEventLinkKind?
                     if event.type == .growth {
                         event.startDate = appointment.startDate
                         switch profile?.profileType {
@@ -239,13 +253,30 @@ struct AppointmentDetailView: View {
                         case .adult: event.growthSource = .medicalVisit
                         default: event.growthSource = .other
                         }
-                        appointment.growthEntryID = event.id
+                        appointmentLinkKind = .growth
                     } else if event.type == .temperature {
                         event.startDate = appointment.startDate
-                        appointment.temperatureEntryID = event.id
+                        appointmentLinkKind = .temperature
+                    } else {
+                        appointmentLinkKind = nil
                     }
-                    appointment.updatedAt = Date()
-                    _ = PersistenceService.save(context: modelContext)
+                    let container = modelContext.container
+                    let appointmentID = appointment.id
+                    Task {
+                        if let appointmentLinkKind {
+                            _ = await EventMutationService.persistStandaloneEvent(
+                                event,
+                                appointmentID: appointmentID,
+                                appointmentLinkKind: appointmentLinkKind,
+                                container: container
+                            )
+                        } else {
+                            _ = await EventMutationService.persistStandaloneEvent(
+                                event,
+                                container: container
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -257,18 +288,24 @@ struct AppointmentDetailView: View {
                 )
             }
         }
-        .confirmationDialog(
-            "Delete \(appointment.displayTitle)?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Appointment", role: .destructive) {
-                Task { await deleteAppointment() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This permanently removes the appointment and cancels its reminders.")
-        }
+            title: "Delete \(appointment.displayTitle)?",
+            message: "This permanently removes the appointment and cancels its reminders.",
+            systemImage: "calendar.badge.minus",
+            tint: .red,
+            options: [
+                AppActionSheetOption(
+                    title: "Delete Appointment",
+                    subtitle: "Remove the appointment and cancel its reminders.",
+                    systemImage: "calendar.badge.minus",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    Task { await deleteAppointment() }
+                }
+            ]
+        )
     }
 
     private var latestGrowth: CareEvent? {

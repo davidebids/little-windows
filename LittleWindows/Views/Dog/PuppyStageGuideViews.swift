@@ -228,7 +228,14 @@ struct PuppyStageGuideDetailView: View {
                 EventEditorView(type: route.type, event: route.event) { event in
                     event.profileID = event.profileID ?? profile?.id
                     event.profileTypeSnapshot = .dog
-                    _ = PersistenceService.save(context: modelContext)
+                    let container = modelContext.container
+                    Task {
+                        guard await EventMutationService.persistStandaloneEvent(
+                            event,
+                            container: container
+                        ) else { return }
+                        WatchConnectivityService.shared.scheduleCurrentStatePublish()
+                    }
                 }
             }
         }

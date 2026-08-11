@@ -1444,6 +1444,77 @@ final class MedicationScheduleEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testDuplicateDoseLookupLargeHistoryPerformance() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profileID = UUID()
+        let medication = Medication(profileID: profileID, name: "Test Medication")
+        let regimen = MedicationRegimen(
+            profileID: profileID,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        let occurrence = try XCTUnwrap(MedicationScheduleEngine.occurrences(
+            regimen: regimen,
+            phases: [],
+            from: date(1),
+            through: date(1, hour: 23),
+            calendar: calendar
+        ).first)
+        let existingRecord = MedicationDoseRecord(
+            profileID: profileID,
+            medicationID: medication.id,
+            regimenID: regimen.id,
+            occurrenceKey: occurrence.occurrenceKey,
+            scheduledAt: occurrence.scheduledAt,
+            status: .taken,
+            loggedAt: occurrence.scheduledAt,
+            takenAt: occurrence.scheduledAt,
+            doseAmount: occurrence.doseAmount,
+            doseUnit: occurrence.doseUnit
+        )
+        context.insert(medication)
+        context.insert(regimen)
+        context.insert(existingRecord)
+        for index in 0..<5_000 {
+            context.insert(MedicationDoseRecord(
+                profileID: UUID(),
+                medicationID: UUID(),
+                regimenID: UUID(),
+                occurrenceKey: "unrelated-\(index)",
+                scheduledAt: date(1),
+                status: .taken,
+                loggedAt: date(1),
+                takenAt: date(1),
+                doseAmount: 1,
+                doseUnit: "tablet"
+            ))
+        }
+        try context.save()
+        var resolvedRecord: MedicationDoseRecord?
+
+        measure(metrics: [XCTClockMetric()]) {
+            resolvedRecord = MedicationService.recordDose(
+                medication: medication,
+                regimen: regimen,
+                occurrence: occurrence,
+                status: .taken,
+                at: occurrence.scheduledAt,
+                context: context
+            )
+        }
+
+        XCTAssertEqual(resolvedRecord?.id, existingRecord.id)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MedicationDoseRecord>()), 5_001)
+    }
+
+    @MainActor
     private func makeRegimen(
         kind: MedicationScheduleKind,
         start: Date? = nil,

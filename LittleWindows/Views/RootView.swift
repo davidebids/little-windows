@@ -2,50 +2,11 @@ import SwiftData
 import SwiftUI
 import UIKit
 
-@MainActor
-enum AppInteractionMonitor {
-    private static var lastInteractionAt = Date()
-    private static var interactionIsActive = false
-
-    static func noteInteraction(at date: Date = Date()) {
-        lastInteractionAt = date
-    }
-
-    static func beginInteraction(at date: Date = Date()) {
-        interactionIsActive = true
-        lastInteractionAt = date
-    }
-
-    static func endInteraction(at date: Date = Date()) {
-        interactionIsActive = false
-        lastInteractionAt = date
-    }
-
-    static func waitUntilIdle(
-        for idleDuration: TimeInterval = 3
-    ) async {
-        while !Task.isCancelled {
-            let remaining = idleDuration - Date().timeIntervalSince(lastInteractionAt)
-            guard interactionIsActive || remaining > 0 else { return }
-            do {
-                let delay = interactionIsActive ? 100 : min(500, remaining * 1_000)
-                try await Task.sleep(for: .milliseconds(max(1, delay)))
-            } catch {
-                return
-            }
-        }
-    }
-}
-
 enum AppTheme {
     static let accent = Color.indigo
     static let background = Color(uiColor: .systemGroupedBackground)
     static let surface = Color(uiColor: .secondarySystemGroupedBackground)
     static let line = Color.primary.opacity(0.08)
-}
-
-private final class RootScrollInteractionState {
-    var isDragging = false
 }
 
 extension EventType {
@@ -170,10 +131,11 @@ extension View {
         tint: Color = AppTheme.accent,
         options: [AppActionSheetOption],
         cancelTitle: String = "Cancel",
-        cancelAction: (() -> Void)? = nil
+        cancelAction: (() -> Void)? = nil,
+        onDismiss: (() -> Void)? = nil
     ) -> some View {
         let estimatedHeight = max(320, min(700, 220 + CGFloat(options.count) * 78))
-        return sheet(isPresented: isPresented) {
+        return sheet(isPresented: isPresented, onDismiss: onDismiss) {
             AppActionSheetView(
                 title: title,
                 message: message,
@@ -378,7 +340,6 @@ struct RootView: View {
     @State private var showingFamilySyncAcceptanceStatus = false
     @State private var showingFamilySyncAccessEndedStatus = false
     @State private var localSaveErrorMessage: String?
-    @State private var scrollInteractionState = RootScrollInteractionState()
     @State private var reconciliationRequestTask: Task<Void, Never>?
     @State private var careProfilePresentationTask: Task<Void, Never>?
     @AppStorage(CloudKitSharingService.acceptanceStatusMessageKey)
@@ -460,20 +421,7 @@ struct RootView: View {
                 .tabItem { Label("Night Light", systemImage: "lightbulb.fill") }
                 .tag(LittleWindowsTab.nightLight)
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { _ in
-                    guard !scrollInteractionState.isDragging else { return }
-                    scrollInteractionState.isDragging = true
-                    AppInteractionMonitor.beginInteraction()
-                }
-                .onEnded { _ in
-                    scrollInteractionState.isDragging = false
-                    AppInteractionMonitor.endInteraction()
-                }
-        )
         .onChange(of: router.selectedTab) { _, _ in
-            AppInteractionMonitor.noteInteraction()
             handleNavigationRequestForCurrentExperience()
         }
     }
@@ -646,18 +594,16 @@ struct RootView: View {
         tabsWithStateObservers
         .task(id: "profile-duplicate-repair-\(profiles.count)") {
             guard profiles.count > 1 else { return }
-            for retryDelaySeconds in [0, 3, 12, 30] {
-                if retryDelaySeconds > 0 {
-                    do {
-                        try await Task.sleep(for: .seconds(retryDelaySeconds))
-                    } catch {
-                        return
-                    }
-                }
-                guard !Task.isCancelled else { return }
-                _ = ProfileDuplicateRepairService.repair(context: modelContext)
+            let worker = ProfileDuplicateRepairWorker(
+                modelContainer: modelContext.container
+            )
+            let removedCount = await worker.repair()
+            guard !Task.isCancelled, removedCount > 0 else { return }
+            let currentProfiles = (try? modelContext.fetch(
+                FetchDescriptor<CareProfile>()
+            )) ?? []
+            _ = profileService.ensureSelection(in: currentProfiles)
             }
-        }
         .onChange(of: hasCompletedInitialOnboarding) { _, completed in
             guard completed else { return }
             ensureHouseholdWorkspaceIfNeeded()
@@ -668,9 +614,16 @@ struct RootView: View {
                 router.showingSettings = true
             }
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) {
+            let phase = scenePhase
             if phase == .active {
                 consumePendingSystemAction()
+            } else {
+                // Flush any main-context timer field changes before iOS
+                // suspends the process.
+                _ = EventMutationService.persistTimerMutations(
+                    context: modelContext
+                )
             }
         }
         .onReceive(NotificationCenter.default.publisher(
@@ -678,7 +631,7 @@ struct RootView: View {
         )) { _ in
             reconciliationRequestTask?.cancel()
             reconciliationRequestTask = Task {
-                await AppInteractionMonitor.waitUntilIdle()
+                await Task.yield()
                 guard !Task.isCancelled else { return }
                 await SystemIntegrationReconciler.reconcile(context: modelContext)
             }
@@ -689,9 +642,7 @@ struct RootView: View {
         }
         .task(id: "system-integrations-\(scenePhase)") {
             guard scenePhase == .active else { return }
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            await AppInteractionMonitor.waitUntilIdle()
+            await Task.yield()
             guard !Task.isCancelled else { return }
             await SystemIntegrationReconciler.reconcileIfNeeded(context: modelContext)
         }
@@ -781,8 +732,14 @@ struct RootView: View {
     }
 
     private func normalizeNavigationForCurrentExperience() {
-        router.selectedTab = experienceMode.normalizedTab(router.selectedTab)
-        router.todayDisplayMode = experienceMode.normalizedTodayMode(router.todayDisplayMode)
+        let normalizedTab = experienceMode.normalizedTab(router.selectedTab)
+        if router.selectedTab != normalizedTab {
+            router.selectedTab = normalizedTab
+        }
+        let normalizedTodayMode = experienceMode.normalizedTodayMode(router.todayDisplayMode)
+        if router.todayDisplayMode != normalizedTodayMode {
+            router.todayDisplayMode = normalizedTodayMode
+        }
     }
 
     private func handleNavigationRequestForCurrentExperience() {
@@ -1635,7 +1592,7 @@ private struct FirstRunOnboardingView: View {
 
 #if DEBUG
 enum DebugSimulatorSmokeSeedService {
-    private static let performanceSeededKey = "debug.performanceSeeded.v2"
+    private static let performanceSeededKey = "debug.performanceSeeded.v5"
     static var isEnabled: Bool {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
@@ -1647,6 +1604,7 @@ enum DebugSimulatorSmokeSeedService {
 
     static let childProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
     static let dogProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
+    static let adultProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000103")!
     static let sleepEventID = UUID(uuidString: "00000000-0000-0000-0000-000000000201")!
     static let activeNursingEventID = UUID(uuidString: "00000000-0000-0000-0000-000000000202")!
     static let appointmentID = UUID(uuidString: "00000000-0000-0000-0000-000000000301")!
@@ -1691,6 +1649,9 @@ enum DebugSimulatorSmokeSeedService {
         UserDefaults.standard.removeObject(forKey: "selectedCareProfileID")
         UserDefaults.standard.removeObject(forKey: FoodNavigationRestorationState.defaultsKey)
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v1")
+        UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v2")
+        UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v3")
+        UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v4")
         UserDefaults.standard.removeObject(forKey: performanceSeededKey)
         PersistenceService.setICloudSyncEnabled(false)
     }
@@ -1705,6 +1666,15 @@ enum DebugSimulatorSmokeSeedService {
         guard let profile = fetch(CareProfile.self, id: childProfileID, context: context) else {
             return
         }
+        let adult = fetchOrCreateProfile(
+            id: adultProfileID,
+            profileType: .adult,
+            name: "Sample Adult",
+            birthDate: calendarDate(year: 1990, month: 1, day: 1),
+            sex: .unknown,
+            displayColor: "purple",
+            context: context
+        )
         let household = HouseholdService.ensureDefaultHousehold(context: context)
         let calendar = Calendar.current
         let solidsState = SolidsTrackingService.activate(
@@ -1716,7 +1686,10 @@ enum DebugSimulatorSmokeSeedService {
         )
         solidsState.guidedStartDate = calendar.startOfDay(for: now)
 
-        for index in 0..<3_000 {
+        // Match the largest reported child profile so timer, Today, and solids
+        // performance tests exercise production-scale history rather than a
+        // smaller synthetic workload that can conceal main-actor scans.
+        for index in 0..<6_000 {
             let date = calendar.date(byAdding: .hour, value: -index * 5, to: now) ?? now
             let type: EventType = switch index % 4 {
             case 0: .sleep
@@ -1724,11 +1697,21 @@ enum DebugSimulatorSmokeSeedService {
             case 2: .diaper
             default: .activity
             }
+            let endDate: Date? = switch type {
+            case .sleep:
+                date.addingTimeInterval(45 * 60)
+            case .feed:
+                date.addingTimeInterval(15 * 60)
+            case .activity:
+                date.addingTimeInterval(20 * 60)
+            default:
+                nil
+            }
             let event = CareEvent(
                 profileID: profile.id,
                 type: type,
                 startDate: date,
-                endDate: type == .sleep ? date.addingTimeInterval(45 * 60) : nil,
+                endDate: endDate,
                 caregiverName: "Sample Caregiver"
             )
             event.profileTypeSnapshot = .child
@@ -1761,6 +1744,13 @@ enum DebugSimulatorSmokeSeedService {
             }
         }
 
+        seedAdultHealthPerformanceEvents(
+            profile: adult,
+            now: now,
+            calendar: calendar,
+            context: context
+        )
+
         for index in 0..<400 {
             context.insert(SolidFoodProgress(
                 profileID: profile.id,
@@ -1769,6 +1759,56 @@ enum DebugSimulatorSmokeSeedService {
                 status: .tried,
                 lastTriedAt: now.addingTimeInterval(Double(-index) * 86_400),
                 exposureCount: 1
+            ))
+        }
+
+        // Exercise the user-created side of the nutrition catalog as well as
+        // the bundled references. These rows catch screens that accidentally
+        // observe or decode every manual label and recipe during unrelated
+        // timer, Today, and primary-navigation interactions.
+        var performanceCustomFoods: [SolidFoodCatalogItem] = []
+        performanceCustomFoods.reserveCapacity(400)
+        for index in 0..<400 {
+            let food = SolidFoodCatalogItem(
+                name: "Custom Performance Food \(index + 1)",
+                allergenIDs: index.isMultiple(of: 20) ? [SolidsAllergen.milk.rawValue] : [],
+                preparationNotes: "Prepare in an age-appropriate texture.",
+                nutritionLabel: SolidManualNutritionLabel(
+                    servingQuantity: 30,
+                    servingUnit: .gram,
+                    servingGrams: 30,
+                    sourceDescription: "Sample nutrition label",
+                    nutrients: SolidNutritionValues(
+                        energyKilocalories: Double(20 + index % 80),
+                        proteinGrams: Double(index % 8) + 0.5,
+                        fatGrams: Double(index % 6) + 0.25,
+                        fiberGrams: Double(index % 5) + 0.2,
+                        ironMilligrams: Double(index % 4) + 0.1,
+                        zincMilligrams: Double(index % 3) + 0.1,
+                        calciumMilligrams: Double(10 + index % 90),
+                        vitaminCMilligrams: Double(index % 25) + 0.5
+                    )
+                ),
+                createdAt: now.addingTimeInterval(Double(-index)),
+                updatedAt: now.addingTimeInterval(Double(-index))
+            )
+            performanceCustomFoods.append(food)
+            context.insert(food)
+        }
+        for index in 0..<160 {
+            let food = performanceCustomFoods[index % performanceCustomFoods.count]
+            context.insert(CustomSolidRecipe(
+                name: "Custom Performance Recipe \(index + 1)",
+                ingredients: [CustomSolidRecipeIngredient(
+                    foodID: food.trackingID,
+                    foodName: food.name,
+                    amount: Double(15 + index % 30),
+                    unit: .gram
+                )],
+                servings: Double(1 + index % 4),
+                instructions: "Combine and serve safely.",
+                createdAt: now.addingTimeInterval(Double(-index)),
+                updatedAt: now.addingTimeInterval(Double(-index))
             ))
         }
 
@@ -1962,6 +2002,87 @@ enum DebugSimulatorSmokeSeedService {
         )
         context.insert(profile)
         return profile
+    }
+
+    private static func calendarDate(year: Int, month: Int, day: Int) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: month, day: day)) ?? Date()
+    }
+
+    @MainActor
+    private static func seedAdultHealthPerformanceEvents(
+        profile: CareProfile,
+        now: Date,
+        calendar: Calendar,
+        context: ModelContext
+    ) {
+        let eventTypes: [EventType] = [
+            .bloodPressure,
+            .heartRate,
+            .oxygenSaturation,
+            .respiratoryRate,
+            .glucose,
+            .temperature,
+            .growth,
+            .pain,
+            .symptom
+        ]
+
+        // Match a long-lived real profile closely enough to expose accidental
+        // full-history work in Adult Care while keeping this simulator-only.
+        for index in 0..<6_000 {
+            let type = eventTypes[index % eventTypes.count]
+            let date = calendar.date(byAdding: .hour, value: -index * 6, to: now) ?? now
+            let event = CareEvent(
+                profileID: profile.id,
+                type: type,
+                startDate: date,
+                caregiverName: "Sample Caregiver"
+            )
+            event.profileTypeSnapshot = .adult
+
+            switch type {
+            case .bloodPressure:
+                event.healthObservationDetails = HealthObservationDetails(
+                    systolicBloodPressure: 112 + index % 18,
+                    diastolicBloodPressure: 70 + index % 12
+                )
+            case .heartRate:
+                event.healthObservationDetails = HealthObservationDetails(
+                    heartRateBPM: 62 + index % 30
+                )
+            case .oxygenSaturation:
+                event.healthObservationDetails = HealthObservationDetails(
+                    oxygenSaturationPercent: Double(96 + index % 4)
+                )
+            case .respiratoryRate:
+                event.healthObservationDetails = HealthObservationDetails(
+                    respiratoryRatePerMinute: 12 + index % 7
+                )
+            case .glucose:
+                event.healthObservationDetails = HealthObservationDetails(
+                    bloodGlucoseValue: Double(82 + index % 35),
+                    bloodGlucoseUnitRawValue: BloodGlucoseUnit.milligramsPerDeciliter.rawValue
+                )
+            case .temperature:
+                event.temperatureCelsius = 36.4 + Double(index % 9) / 10
+            case .growth:
+                event.weightKilograms = 68 + Double(index % 30) / 10
+            case .pain:
+                event.healthObservationDetails = HealthObservationDetails(
+                    painScore: index % 6,
+                    painLocation: "General"
+                )
+            case .symptom:
+                event.healthObservationDetails = HealthObservationDetails(
+                    symptomName: "Sample symptom",
+                    symptomSeverity: index % 6,
+                    symptomResolved: index.isMultiple(of: 3)
+                )
+            default:
+                break
+            }
+            context.insert(event)
+        }
     }
 
     @MainActor

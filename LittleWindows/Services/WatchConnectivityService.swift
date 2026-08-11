@@ -61,11 +61,39 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
     @MainActor
     @discardableResult
     func publishCurrentState(force: Bool = false) -> Bool {
-        guard let container = installedContainer() else { return false }
+        guard let container = installedContainer(), canPublishState else {
+            notifyStatusDidChange()
+            return false
+        }
         return publish(
             WatchStateFactory.make(context: container.mainContext),
             force: force
         )
+    }
+
+    /// Builds the Watch payload in its own SwiftData context. Automatic
+    /// system-surface refreshes use this path so a paired Watch can never turn
+    /// an event save, timer control, or Today scroll into a main-thread query.
+    func scheduleCurrentStatePublish(force: Bool = false) {
+        guard let container = installedContainer(), canPublishState else {
+            notifyStatusDidChange()
+            return
+        }
+        Task.detached(priority: .utility) { [weak self, container] in
+            guard let self else { return }
+            let state = WatchStateFactory.make(context: ModelContext(container))
+            _ = self.publish(state, force: force)
+        }
+    }
+
+    /// Avoid fetching and summarizing hundreds of records when there is no
+    /// installed Watch app that can receive the result.
+    private var canPublishState: Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        return session.activationState == .activated
+            && session.isPaired
+            && session.isWatchAppInstalled
     }
 
     @discardableResult
@@ -98,9 +126,12 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
 
     func statusSnapshot() -> WatchConnectivityStatus {
         guard WCSession.isSupported() else { return .unavailable }
-        let defaults = UserDefaults.standard
+        let defaults = Self.statusDefaults
+        let legacyDefaults = UserDefaults.standard
         let queuedRevision = defaults.string(forKey: Self.lastQueuedRevisionKey)
+            ?? legacyDefaults.string(forKey: Self.lastQueuedRevisionKey)
         let confirmedRevision = defaults.string(forKey: Self.lastConfirmedRevisionKey)
+            ?? legacyDefaults.string(forKey: Self.lastConfirmedRevisionKey)
         let session = WCSession.default
         return WatchConnectivityStatus(
             isSupported: true,
@@ -110,11 +141,17 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
             isReachable: session.isReachable,
             lastConfirmedContactAt: defaults.object(
                 forKey: Self.lastConfirmedContactAtKey
+            ) as? Date ?? legacyDefaults.object(
+                forKey: Self.lastConfirmedContactAtKey
             ) as? Date,
             lastStateQueuedAt: defaults.object(
                 forKey: Self.lastStateQueuedAtKey
+            ) as? Date ?? legacyDefaults.object(
+                forKey: Self.lastStateQueuedAtKey
             ) as? Date,
             lastStateReceiptAt: defaults.object(
+                forKey: Self.lastStateReceiptAtKey
+            ) as? Date ?? legacyDefaults.object(
                 forKey: Self.lastStateReceiptAtKey
             ) as? Date,
             isLatestStateConfirmed: queuedRevision != nil
@@ -129,9 +166,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
     ) {
         notifyStatusDidChange()
         guard activationState == .activated, error == nil else { return }
-        Task { @MainActor in
-            publishCurrentState()
-        }
+        scheduleCurrentStatePublish()
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
@@ -143,9 +178,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
 
     func sessionWatchStateDidChange(_ session: WCSession) {
         notifyStatusDidChange()
-        Task { @MainActor in
-            publishCurrentState(force: true)
-        }
+        scheduleCurrentStatePublish(force: true)
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
@@ -159,12 +192,16 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
     ) {
         if message[WatchCompanionProtocol.stateRequestMessageKey] as? Bool == true {
             recordWatchContact()
-            Task { @MainActor in
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else {
+                    replyHandler([:])
+                    return
+                }
                 guard let container = installedContainer() else {
                     replyHandler([:])
                     return
                 }
-                let state = WatchStateFactory.make(context: container.mainContext)
+                let state = WatchStateFactory.make(context: ModelContext(container))
                 publish(state, force: true)
                 let data = try? JSONEncoder().encode(state)
                 replyHandler(data.map {
@@ -263,20 +300,20 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
     }
 
     private func recordStateQueued(_ state: WatchCompanionState) {
-        let defaults = UserDefaults.standard
+        let defaults = Self.statusDefaults
         defaults.set(Date(), forKey: Self.lastStateQueuedAtKey)
         defaults.set(state.revision.uuidString, forKey: Self.lastQueuedRevisionKey)
         notifyStatusDidChange()
     }
 
     private func recordWatchContact(at date: Date = Date()) {
-        UserDefaults.standard.set(date, forKey: Self.lastConfirmedContactAtKey)
+        Self.statusDefaults.set(date, forKey: Self.lastConfirmedContactAtKey)
         notifyStatusDidChange()
     }
 
     private func recordStateReceipt(_ receipt: WatchStateReceipt) {
         let receivedAt = Date()
-        let defaults = UserDefaults.standard
+        let defaults = Self.statusDefaults
         defaults.set(receivedAt, forKey: Self.lastConfirmedContactAtKey)
         defaults.set(receivedAt, forKey: Self.lastStateReceiptAtKey)
         defaults.set(
@@ -284,6 +321,10 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
             forKey: Self.lastConfirmedRevisionKey
         )
         notifyStatusDidChange()
+    }
+
+    private static var statusDefaults: UserDefaults {
+        PersistenceService.operationalDefaults()
     }
 
     private func notifyStatusDidChange() {

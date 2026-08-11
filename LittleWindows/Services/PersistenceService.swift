@@ -22,6 +22,10 @@ enum PersistenceService {
     static let appGroupIdentifier = "group.com.debidia.LittleWindows"
     static let iCloudSyncEnabledKey = "isICloudSyncEnabled"
     static let familySyncModeKey = "familySyncMode"
+    private static let operationalDefaultsSuiteName =
+        "com.debidia.LittleWindows.operational-status"
+    private static let operationalDefaultsStore =
+        UserDefaults(suiteName: operationalDefaultsSuiteName) ?? .standard
 
     // Update this if the bundle/team container in Xcode differs.
     static let iCloudContainerIdentifier = "iCloud.com.debidia.LittleWindows"
@@ -43,6 +47,7 @@ enum PersistenceService {
             SolidFoodEventItem.self,
             SolidAllergenProgress.self,
             PlannedSolidMeal.self,
+            CustomSolidRecipe.self,
             CareEvent.self,
             Medication.self,
             MedicationRegimen.self,
@@ -291,8 +296,9 @@ enum PersistenceService {
     }
 
     static func recordLocalSave(at date: Date = Date(), defaults: UserDefaults = .standard) {
-        defaults.removeObject(forKey: localSaveErrorKey)
-        defaults.set(date, forKey: "lastSuccessfulLocalSaveAt")
+        let statusDefaults = operationalDefaults(for: defaults)
+        statusDefaults.removeObject(forKey: localSaveErrorKey)
+        statusDefaults.set(date, forKey: "lastSuccessfulLocalSaveAt")
         Task { @MainActor in
             CloudKitSharingService.noteLocalDataChanged()
         }
@@ -303,7 +309,7 @@ enum PersistenceService {
         _ description: String,
         defaults: UserDefaults = .standard
     ) {
-        defaults.set(description, forKey: localSaveErrorKey)
+        operationalDefaults(for: defaults).set(description, forKey: localSaveErrorKey)
         NotificationCenter.default.post(
             name: localSaveDidFailNotification,
             object: nil,
@@ -311,7 +317,6 @@ enum PersistenceService {
         )
     }
 
-    @MainActor
     @discardableResult
     static func save(
         context: ModelContext,
@@ -326,13 +331,27 @@ enum PersistenceService {
             return true
         } catch {
             context.rollback()
-            recordLocalSaveFailure(error.localizedDescription, defaults: defaults)
+            let description = error.localizedDescription
+            Task { @MainActor in
+                recordLocalSaveFailure(description, defaults: defaults)
+            }
             return false
         }
     }
 
     static func lastLocalSaveAt(defaults: UserDefaults = .standard) -> Date? {
-        defaults.object(forKey: "lastSuccessfulLocalSaveAt") as? Date
+        let statusDefaults = operationalDefaults(for: defaults)
+        return statusDefaults.object(forKey: "lastSuccessfulLocalSaveAt") as? Date
+            ?? defaults.object(forKey: "lastSuccessfulLocalSaveAt") as? Date
+    }
+
+    /// High-frequency persistence and sync diagnostics live outside the
+    /// standard defaults domain. SwiftUI's `@AppStorage` observes that domain
+    /// broadly, so writing a save timestamp there invalidated the entire app
+    /// hierarchy after every timer, event, and solids mutation.
+    static func operationalDefaults(for defaults: UserDefaults = .standard) -> UserDefaults {
+        guard defaults === UserDefaults.standard else { return defaults }
+        return operationalDefaultsStore
     }
 
     static func isICloudSyncEnabled(defaults: UserDefaults = .standard) -> Bool {

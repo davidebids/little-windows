@@ -101,13 +101,13 @@ enum WatchTimerStartPolicy {
     }
 }
 
-struct WatchStateReceipt: Codable, Hashable {
+struct WatchStateReceipt: Codable, Hashable, Sendable {
     var schemaVersion: Int
     var stateRevision: UUID
     var receivedAt: Date
 }
 
-struct WatchProfileSnapshot: Codable, Hashable, Identifiable {
+struct WatchProfileSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: UUID
     var name: String
     var profileTypeRawValue: String
@@ -116,13 +116,13 @@ struct WatchProfileSnapshot: Codable, Hashable, Identifiable {
     var activeTimerCategoryRawValues: [String]? = nil
 }
 
-struct WatchActionOption: Codable, Hashable, Identifiable {
+struct WatchActionOption: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var title: String
     var systemImage: String
 }
 
-struct WatchActionSnapshot: Codable, Hashable, Identifiable {
+struct WatchActionSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var title: String
     var subtitle: String?
@@ -135,7 +135,7 @@ struct WatchActionSnapshot: Codable, Hashable, Identifiable {
     var startsTimer: Bool { subtitle == "Timer" || id == "nursing" }
 }
 
-struct WatchTimerSnapshot: Codable, Hashable, Identifiable {
+struct WatchTimerSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: UUID
     var profileID: UUID
     var title: String
@@ -198,7 +198,7 @@ struct WatchTimerSnapshot: Codable, Hashable, Identifiable {
     }
 }
 
-struct WatchPredictionSnapshot: Codable, Hashable {
+struct WatchPredictionSnapshot: Codable, Hashable, Sendable {
     var title: String
     var expectedStart: Date
     var windowStart: Date
@@ -206,7 +206,7 @@ struct WatchPredictionSnapshot: Codable, Hashable {
     var confidenceLabel: String
 }
 
-struct WatchMetricSnapshot: Codable, Hashable, Identifiable {
+struct WatchMetricSnapshot: Codable, Hashable, Identifiable, Sendable {
     var id: String
     var title: String
     var value: String
@@ -214,7 +214,7 @@ struct WatchMetricSnapshot: Codable, Hashable, Identifiable {
     var tintName: String
 }
 
-struct WatchMedicationSnapshot: Codable, Hashable, Identifiable {
+struct WatchMedicationSnapshot: Codable, Hashable, Identifiable, Sendable {
     var profileID: UUID
     var medicationID: UUID
     var regimenID: UUID
@@ -229,7 +229,7 @@ struct WatchMedicationSnapshot: Codable, Hashable, Identifiable {
     var id: String { occurrenceKey }
 }
 
-struct WatchCompanionState: Codable, Hashable {
+struct WatchCompanionState: Codable, Hashable, Sendable {
     var schemaVersion: Int
     var generatedAt: Date
     var revision: UUID

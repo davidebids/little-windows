@@ -77,23 +77,26 @@ struct AppointmentsListView: View {
                 )
             }
         }
-        .confirmationDialog(
-            "Delete appointment?",
+        .appActionSheet(
             isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Appointment", role: .destructive) {
-                if let appointmentPendingDelete {
-                    Task { await delete(appointmentPendingDelete) }
-                }
-                appointmentPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                appointmentPendingDelete = nil
-            }
-        } message: {
-            Text("This permanently removes the appointment and cancels its reminders.")
-        }
+            title: "Delete appointment?",
+            message: "This permanently removes the appointment and cancels its reminders.",
+            systemImage: "calendar.badge.minus",
+            tint: .red,
+            options: appointmentPendingDelete.map { appointment in
+                [AppActionSheetOption(
+                    title: "Delete Appointment",
+                    subtitle: "Remove the appointment and cancel its reminders.",
+                    systemImage: "calendar.badge.minus",
+                    tint: .red,
+                    role: .destructive
+                ) {
+                    Task { await delete(appointment) }
+                    appointmentPendingDelete = nil
+                }]
+            } ?? [],
+            cancelAction: { appointmentPendingDelete = nil }
+        )
     }
 
     private var emptyDescription: String {

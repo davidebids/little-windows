@@ -41,6 +41,7 @@ private struct BackupEnvelope: Codable {
     var profiles: [ProfileDTO]
     var photoAttachments: [PhotoAttachmentDTO]?
     var solidFoods: [SolidFoodCatalogItemDTO]?
+    var customSolidRecipes: [CustomSolidRecipeDTO]?
     var solidsProfileStates: [SolidsProfileStateDTO]?
     var solidFoodProgress: [SolidFoodProgressDTO]?
     var solidFoodEventItems: [SolidFoodEventItemDTO]?
@@ -140,6 +141,19 @@ private struct SolidFoodCatalogItemDTO: Codable {
     var minimumAgeMonths: Int?
     var preparationNotes: String?
     var safetyNotes: String?
+    var nutritionLabelJSON: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct CustomSolidRecipeDTO: Codable {
+    var id: UUID
+    var name: String
+    var ingredientsJSON: String
+    var servings: Double
+    var minimumAgeMonths: Int
+    var instructions: String
+    var notes: String
     var createdAt: Date
     var updatedAt: Date
 }
@@ -185,6 +199,13 @@ private struct SolidFoodEventItemDTO: Codable {
     var confirmedAllergenPortionIDsJSON: String?
     var reactionRawValue: String?
     var servingAmount: String?
+    var amountOffered: Double?
+    var amountEaten: Double?
+    var portionUnitRawValue: String?
+    var consumptionEstimateRawValue: String?
+    var nutritionSnapshotJSON: String?
+    var recipeID: String?
+    var recipeNameSnapshot: String?
     var notes: String?
     var suspectedReaction: Bool?
     var symptomIDsJSON: String?
@@ -914,7 +935,7 @@ enum CareDataExportProfileScope: Equatable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 25
+    private static let currentBackupVersion = 26
     private static let recoveryBackupLimit = 3
 
     static func exportData(
@@ -975,6 +996,20 @@ enum DataExportImportService {
                 minimumAgeMonths: $0.minimumAgeMonths,
                 preparationNotes: $0.preparationNotes,
                 safetyNotes: $0.safetyNotes,
+                nutritionLabelJSON: $0.nutritionLabelJSON,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let customSolidRecipes = try context.fetch(FetchDescriptor<CustomSolidRecipe>()).map {
+            CustomSolidRecipeDTO(
+                id: $0.id,
+                name: $0.name,
+                ingredientsJSON: $0.ingredientsJSON,
+                servings: $0.servings,
+                minimumAgeMonths: $0.minimumAgeMonths,
+                instructions: $0.instructions,
+                notes: $0.notes,
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt
             )
@@ -1023,6 +1058,13 @@ enum DataExportImportService {
                 confirmedAllergenPortionIDsJSON: $0.confirmedAllergenPortionIDsJSON,
                 reactionRawValue: $0.reactionRawValue,
                 servingAmount: $0.servingAmount,
+                amountOffered: $0.amountOffered,
+                amountEaten: $0.amountEaten,
+                portionUnitRawValue: $0.portionUnitRawValue,
+                consumptionEstimateRawValue: $0.consumptionEstimateRawValue,
+                nutritionSnapshotJSON: $0.nutritionSnapshotJSON,
+                recipeID: $0.recipeID,
+                recipeNameSnapshot: $0.recipeNameSnapshot,
                 notes: $0.notes,
                 suspectedReaction: $0.suspectedReaction,
                 symptomIDsJSON: $0.symptomIDsJSON,
@@ -1790,6 +1832,7 @@ enum DataExportImportService {
             profiles: profiles,
             photoAttachments: photoAttachments,
             solidFoods: solidFoods,
+            customSolidRecipes: customSolidRecipes,
             solidsProfileStates: solidsProfileStates,
             solidFoodProgress: solidFoodProgress,
             solidFoodEventItems: solidFoodEventItems,
@@ -1985,6 +2028,26 @@ enum DataExportImportService {
                 minimumAgeMonths: value.minimumAgeMonths ?? 6,
                 preparationNotes: value.preparationNotes ?? "",
                 safetyNotes: value.safetyNotes ?? "",
+                nutritionLabel: value.nutritionLabelJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode(SolidManualNutritionLabel.self, from: $0)
+                    }
+                },
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.customSolidRecipes ?? [] {
+            context.insert(CustomSolidRecipe(
+                id: value.id,
+                name: value.name,
+                ingredients: value.ingredientsJSON.data(using: .utf8).flatMap {
+                    try? JSONDecoder().decode([CustomSolidRecipeIngredient].self, from: $0)
+                } ?? [],
+                servings: value.servings,
+                minimumAgeMonths: value.minimumAgeMonths,
+                instructions: value.instructions,
+                notes: value.notes,
                 createdAt: value.createdAt,
                 updatedAt: value.updatedAt
             ))
@@ -2052,6 +2115,17 @@ enum DataExportImportService {
                 },
                 reactionRawValue: value.reactionRawValue,
                 servingAmount: value.servingAmount ?? "",
+                amountOffered: value.amountOffered,
+                amountEaten: value.amountEaten,
+                portionUnit: value.portionUnitRawValue.flatMap(SolidPortionUnit.init(rawValue:)),
+                consumptionEstimate: value.consumptionEstimateRawValue.flatMap(SolidConsumptionEstimate.init(rawValue:)),
+                nutritionSnapshot: value.nutritionSnapshotJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode(SolidNutritionSnapshot.self, from: $0)
+                    }
+                },
+                recipeID: value.recipeID,
+                recipeNameSnapshot: value.recipeNameSnapshot,
                 notes: value.notes ?? "",
                 suspectedReaction: value.suspectedReaction ?? false,
                 severity: SolidReactionSeverity(rawValue: value.severityRawValue ?? "") ?? .unknown,
@@ -2972,6 +3046,7 @@ enum DataExportImportService {
         try deleteAll(SolidFoodEventItem.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
         try deleteAll(SolidFoodProgress.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
         try deleteAll(SolidsProfileState.self, context: context) { !preservingProfileIDs.contains($0.profileID) }
+        try deleteAll(CustomSolidRecipe.self, context: context)
         try deleteAll(SolidFoodCatalogItem.self, context: context)
         try deleteAll(PhotoAttachment.self, context: context) {
             $0.profileID.map(preservingProfileIDs.contains) != true
@@ -3360,6 +3435,21 @@ enum DataExportImportService {
         )
     }
 
+    private static func isValidNutritionSnapshot(_ snapshot: SolidNutritionSnapshot) -> Bool {
+        let savedAmountIsValid = snapshot.eatenAmount.map { $0.isFinite && $0 >= 0 } ?? true
+        let savedAmountAndUnitArePaired = (snapshot.eatenAmount == nil) == (snapshot.portionUnit == nil)
+        return !snapshot.sourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !snapshot.sourceDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !snapshot.sourceVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !snapshot.amountDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && savedAmountIsValid
+            && savedAmountAndUnitArePaired
+            && (snapshot.estimatedEatenGrams.map { $0.isFinite && $0 >= 0 } ?? true)
+            && snapshot.nutrients.hasValues
+            && !snapshot.nutrients.hasNegativeValue
+            && snapshot.isComplete == snapshot.nutrients.isComplete
+    }
+
     private static func validate(_ envelope: BackupEnvelope) throws {
         let profileIDs = Set(envelope.profiles.map(\.id))
         guard profileIDs.count == envelope.profiles.count else {
@@ -3372,8 +3462,43 @@ enum DataExportImportService {
         guard requiredCollections.allSatisfy({ Set($0).count == $0.count }) else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        if let solidFoods = envelope.solidFoods,
-           Set(solidFoods.map(\.id)).count != solidFoods.count {
+        let solidFoods = envelope.solidFoods ?? []
+        if envelope.solidFoods != nil {
+            guard Set(solidFoods.map(\.id)).count == solidFoods.count,
+                  solidFoods.allSatisfy({ food in
+                      guard let labelJSON = food.nutritionLabelJSON else { return true }
+                      return labelJSON.data(using: .utf8).flatMap {
+                          try? JSONDecoder().decode(SolidManualNutritionLabel.self, from: $0)
+                      }?.isValid == true
+                  }) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+        }
+        let validCustomFoodIDs = Set(
+            solidFoods.map { "custom-\($0.id.uuidString.lowercased())" }
+        )
+        let customSolidRecipes = envelope.customSolidRecipes ?? []
+        guard Set(customSolidRecipes.map(\.id)).count == customSolidRecipes.count,
+              Set(customSolidRecipes.map {
+                  SolidFoodSelection.normalizedName($0.name)
+              }).count == customSolidRecipes.count,
+              customSolidRecipes.allSatisfy({ recipe in
+                  guard recipe.servings.isFinite, recipe.servings > 0,
+                        !recipe.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        let data = recipe.ingredientsJSON.data(using: .utf8),
+                        let ingredients = try? JSONDecoder().decode([CustomSolidRecipeIngredient].self, from: data),
+                        !ingredients.isEmpty else { return false }
+                  return ingredients.allSatisfy {
+                      $0.amount.isFinite
+                          && $0.amount > 0
+                          && !$0.foodID.isEmpty
+                          && !$0.foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          && (validCustomFoodIDs.contains($0.foodID)
+                              || SolidsReferenceCatalog.foodSummary(id: $0.foodID) != nil)
+                  }
+                      && Set(ingredients.map(\.foodID)).count == ingredients.count
+                      && Set(ingredients.map(\.id)).count == ingredients.count
+              }) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let solidsProfileStates = envelope.solidsProfileStates ?? []
@@ -3393,8 +3518,25 @@ enum DataExportImportService {
               Set(plannedSolidMeals.map(\.id)).count == plannedSolidMeals.count,
               solidsProfileStates.allSatisfy({ profileIDs.contains($0.profileID) }),
               solidFoodProgress.allSatisfy({ profileIDs.contains($0.profileID) && !$0.foodID.isEmpty }),
-              solidFoodEventItems.allSatisfy({
-                  profileIDs.contains($0.profileID) && eventIDs.contains($0.eventID) && !$0.foodID.isEmpty
+              solidFoodEventItems.allSatisfy({ item in
+                  guard profileIDs.contains(item.profileID), eventIDs.contains(item.eventID), !item.foodID.isEmpty,
+                        [item.amountOffered, item.amountEaten].compactMap({ $0 }).allSatisfy({ $0.isFinite && $0 >= 0 }),
+                        (item.portionUnitRawValue.flatMap(SolidPortionUnit.init(rawValue:)) != nil
+                            || item.portionUnitRawValue == nil),
+                        (item.consumptionEstimateRawValue.flatMap(SolidConsumptionEstimate.init(rawValue:)) != nil
+                            || item.consumptionEstimateRawValue == nil),
+                        (item.amountOffered == nil && item.amountEaten == nil) || item.portionUnitRawValue != nil,
+                        !(item.amountOffered.map { offered in
+                            item.amountEaten.map { $0 > offered } ?? false
+                        } ?? false),
+                        !(item.consumptionEstimateRawValue.flatMap(SolidConsumptionEstimate.init(rawValue:))?.offeredFraction != nil
+                            && item.amountEaten == nil
+                            && item.amountOffered == nil) else { return false }
+                  guard let snapshotJSON = item.nutritionSnapshotJSON else { return true }
+                  guard let snapshot = snapshotJSON.data(using: .utf8).flatMap({
+                      try? JSONDecoder().decode(SolidNutritionSnapshot.self, from: $0)
+                  }) else { return false }
+                  return isValidNutritionSnapshot(snapshot)
               }),
               solidAllergenProgress.allSatisfy({
                   profileIDs.contains($0.profileID) && SolidsAllergen(rawValue: $0.allergenID) != nil
@@ -3405,6 +3547,31 @@ enum DataExportImportService {
                       && ($0.allergenID.map { SolidsAllergen(rawValue: $0) != nil } ?? true)
                       && ($0.allergenIntroductionStep.map { (1...3).contains($0) } ?? true)
         }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let solidFoodDetailsAreValid = envelope.events.allSatisfy { event in
+            guard let detailsJSON = event.solidFoodDetailsJSON else { return true }
+            guard let data = detailsJSON.data(using: .utf8),
+                  let details = try? JSONDecoder().decode([SolidFoodLogDetail].self, from: data) else {
+                return false
+            }
+            return details.allSatisfy { detail in
+                let amounts = [detail.amountOffered, detail.amountEaten].compactMap { $0 }
+                guard !detail.foodID.isEmpty,
+                      !detail.foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      amounts.allSatisfy({ $0.isFinite && $0 >= 0 }),
+                      amounts.isEmpty || detail.portionUnit != nil,
+                      !(detail.amountOffered.map { offered in
+                          detail.amountEaten.map { $0 > offered } ?? false
+                      } ?? false),
+                      !(detail.consumptionEstimate?.offeredFraction != nil
+                          && detail.amountEaten == nil
+                          && detail.amountOffered == nil) else { return false }
+                guard let snapshot = detail.nutritionSnapshot else { return true }
+                return isValidNutritionSnapshot(snapshot)
+            }
+        }
+        guard solidFoodDetailsAreValid else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let profileTypesByID = Dictionary(
