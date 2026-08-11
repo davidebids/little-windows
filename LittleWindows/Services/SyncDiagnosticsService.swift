@@ -15,8 +15,9 @@ enum SyncDiagnosticsService {
         defaults: UserDefaults = .standard,
         now: Date = Date()
     ) {
-        defaults.set(now, forKey: DefaultsKey.lastRemoteNotificationRegistrationAt)
-        defaults.removeObject(forKey: DefaultsKey.lastRemoteNotificationRegistrationError)
+        let statusDefaults = PersistenceService.operationalDefaults(for: defaults)
+        statusDefaults.set(now, forKey: DefaultsKey.lastRemoteNotificationRegistrationAt)
+        statusDefaults.removeObject(forKey: DefaultsKey.lastRemoteNotificationRegistrationError)
     }
 
     static func recordRemoteNotificationRegistrationFailure(
@@ -24,14 +25,17 @@ enum SyncDiagnosticsService {
         defaults: UserDefaults = .standard,
         now: Date = Date()
     ) {
-        defaults.set(now, forKey: DefaultsKey.lastRemoteNotificationRegistrationAt)
-        defaults.set(
+        let statusDefaults = PersistenceService.operationalDefaults(for: defaults)
+        statusDefaults.set(now, forKey: DefaultsKey.lastRemoteNotificationRegistrationAt)
+        statusDefaults.set(
             error.localizedDescription,
             forKey: DefaultsKey.lastRemoteNotificationRegistrationError
         )
     }
 
     static func snapshot(context: ModelContext) -> SyncDiagnosticSnapshot {
+        let statusDefaults = PersistenceService.operationalDefaults()
+        let legacyDefaults = UserDefaults.standard
         let profiles = (try? context.fetch(FetchDescriptor<CareProfile>())) ?? []
         let profileIDs = Set(profiles.map(\.id))
         let eventCount = count(CareEvent.self, context: context)
@@ -139,12 +143,14 @@ enum SyncDiagnosticsService {
             lastLocalSaveAt: PersistenceService.lastLocalSaveAt(),
             isRegisteredForRemoteNotifications:
                 UIApplication.shared.isRegisteredForRemoteNotifications,
-            lastRemoteNotificationRegistrationAt: UserDefaults.standard.object(
+            lastRemoteNotificationRegistrationAt: statusDefaults.object(
+                forKey: DefaultsKey.lastRemoteNotificationRegistrationAt
+            ) as? Date ?? legacyDefaults.object(
                 forKey: DefaultsKey.lastRemoteNotificationRegistrationAt
             ) as? Date,
-            lastRemoteNotificationRegistrationError: UserDefaults.standard.string(
+            lastRemoteNotificationRegistrationError: statusDefaults.string(
                 forKey: DefaultsKey.lastRemoteNotificationRegistrationError
-            )
+            ) ?? legacyDefaults.string(forKey: DefaultsKey.lastRemoteNotificationRegistrationError)
         )
     }
 

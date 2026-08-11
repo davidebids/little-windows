@@ -661,6 +661,10 @@ final class NotificationManager: NSObject, ObservableObject {
         if clearState {
             statesByProfile.removeAll()
             notificationState = .empty
+            Self.statusDefaults.removeObject(forKey: Self.statesByProfileKey)
+            Self.statusDefaults.removeObject(forKey: Self.stateKey)
+            // Clear legacy values too so they cannot be restored by the
+            // compatibility fallback after an explicit reset.
             UserDefaults.standard.removeObject(forKey: Self.statesByProfileKey)
             UserDefaults.standard.removeObject(forKey: Self.stateKey)
         }
@@ -2276,7 +2280,7 @@ final class NotificationManager: NSObject, ObservableObject {
         statesByProfile[Self.stateStorageKey(profileID: profileID)] = state
         notificationState = state
         if let data = try? JSONEncoder().encode(statesByProfile) {
-            UserDefaults.standard.set(data, forKey: Self.statesByProfileKey)
+            Self.statusDefaults.set(data, forKey: Self.statesByProfileKey)
         }
     }
 
@@ -2285,7 +2289,8 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     private static func loadState() -> LittleWindowNotificationState {
-        guard let data = UserDefaults.standard.data(forKey: stateKey),
+        guard let data = statusDefaults.data(forKey: stateKey)
+                ?? UserDefaults.standard.data(forKey: stateKey),
               let state = try? JSONDecoder().decode(
                 LittleWindowNotificationState.self,
                 from: data
@@ -2296,7 +2301,8 @@ final class NotificationManager: NSObject, ObservableObject {
     }
 
     private static func loadStatesByProfile() -> [String: LittleWindowNotificationState] {
-        if let data = UserDefaults.standard.data(forKey: statesByProfileKey),
+        if let data = statusDefaults.data(forKey: statesByProfileKey)
+                ?? UserDefaults.standard.data(forKey: statesByProfileKey),
            let states = try? JSONDecoder().decode(
             [String: LittleWindowNotificationState].self,
             from: data
@@ -2305,6 +2311,10 @@ final class NotificationManager: NSObject, ObservableObject {
         }
         let legacy = loadState()
         return legacy == .empty ? [:] : [unscopedStateKey: legacy]
+    }
+
+    private static var statusDefaults: UserDefaults {
+        PersistenceService.operationalDefaults()
     }
 }
 
@@ -2411,8 +2421,10 @@ enum SystemIntegrationReconciler {
             // overwrite snapshots explicitly exercised by the unit test.
             return
         }
+        let statusDefaults = PersistenceService.operationalDefaults(for: defaults)
         guard needsForegroundReconciliation(
-            lastCompletedAt: defaults.object(forKey: lastCompletedAtKey) as? Date,
+            lastCompletedAt: statusDefaults.object(forKey: lastCompletedAtKey) as? Date
+                ?? defaults.object(forKey: lastCompletedAtKey) as? Date,
             lastLocalSaveAt: PersistenceService.lastLocalSaveAt(defaults: defaults),
             now: now
         ) else {
@@ -2453,11 +2465,12 @@ enum SystemIntegrationReconciler {
         reconciliationGeneration &+= 1
         let generation = reconciliationGeneration
         reconciliationTask?.cancel()
+        let statusDefaults = PersistenceService.operationalDefaults(for: defaults)
         let task = Task { @MainActor in
             await performReconciliation(context: context)
             guard !Task.isCancelled,
                   generation == reconciliationGeneration else { return }
-            defaults.set(Date(), forKey: lastCompletedAtKey)
+            statusDefaults.set(Date(), forKey: lastCompletedAtKey)
         }
         reconciliationTask = task
         await task.value

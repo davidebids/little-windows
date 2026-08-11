@@ -1162,11 +1162,13 @@ struct TodayView: View {
             NotificationCenter.default.publisher(for: ModelContext.didSave)
                 .receive(on: RunLoop.main)
         ) { _ in
-            // Event and timer workflows publish optimistic render state before
-            // their isolated transactions begin. Ignore every intermediate
-            // SwiftData merge and rebuild once when the workflow completes.
+            // Event and timer workflows publish their exact optimistic state
+            // before isolated persistence begins. Their worker saves must not
+            // trigger a redundant full Today rebuild while system surfaces are
+            // still synchronizing.
             guard localEventMutationCount == 0,
-                  !timerMutationRenderDeferralActive else { return }
+                  !timerMutationRenderDeferralActive,
+                  timerSystemRefreshTask == nil else { return }
             scheduleRenderStateRefresh()
         }
         .onChange(of: deepLinkRouter.pendingProfileID) { _, _ in
@@ -2846,7 +2848,6 @@ struct TodayView: View {
         let refreshRevision = UUID()
         timerSystemRefreshRevision = refreshRevision
         let currentProfile = profile
-        let currentRecords = scopedRecords
         let currentSettings = predictionSettings
         let alertsEnabled = notificationsEnabled
         let leadMinutes = notificationLeadMinutes

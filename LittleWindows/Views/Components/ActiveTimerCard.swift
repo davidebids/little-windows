@@ -1,5 +1,29 @@
 import SwiftUI
 
+private struct CareTimerTimelineView<Content: View>: View {
+    let isRunning: Bool
+    private let content: (Date) -> Content
+
+    init(
+        isRunning: Bool,
+        @ViewBuilder content: @escaping (Date) -> Content
+    ) {
+        self.isRunning = isRunning
+        self.content = content
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if isRunning {
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                content(timeline.date)
+            }
+        } else {
+            content(Date())
+        }
+    }
+}
+
 struct ActiveTimerCard: View {
     let event: CareEvent
     var planWakeAlert: ActiveSleepPlanWakeAlert?
@@ -10,9 +34,7 @@ struct ActiveTimerCard: View {
     var setNursingSide: ((NursingSide) -> Void)?
 
     var body: some View {
-        TimelineView(
-            .animation(minimumInterval: 1, paused: !event.isTimerRunning)
-        ) { context in
+        CareTimerTimelineView(isRunning: event.isTimerRunning) { date in
             VStack(alignment: .leading, spacing: 14) {
                 Button(action: edit) {
                     HStack {
@@ -37,7 +59,7 @@ struct ActiveTimerCard: View {
                             }
                         }
                         Spacer()
-                        Text(elapsedText(at: context.date))
+                        Text(elapsedText(at: date))
                             .font(.system(.headline, design: .rounded).monospacedDigit())
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
@@ -49,7 +71,7 @@ struct ActiveTimerCard: View {
                 if event.type == .nursing {
                     NursingSideSelector(
                         event: event,
-                        date: context.date,
+                        date: date,
                         isCompact: true,
                         setNursingSide: setNursingSide,
                         switchNursingSide: switchNursingSide
@@ -57,7 +79,7 @@ struct ActiveTimerCard: View {
                 }
 
                 if let planWakeAlert {
-                    planWakeAlertRow(planWakeAlert, now: context.date)
+                    planWakeAlertRow(planWakeAlert, now: date)
                 }
 
                 HStack(spacing: 10) {
@@ -74,7 +96,7 @@ struct ActiveTimerCard: View {
                         Label("Save", systemImage: "checkmark")
                     }
                     .buttonStyle(TimerFilledButtonStyle())
-                    .disabled(event.timerElapsed(at: context.date) < 1)
+                    .disabled(event.timerElapsed(at: date) < 1)
                 }
             }
             .padding(16)
@@ -182,9 +204,7 @@ struct ActiveTimerEditorView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                TimelineView(
-                    .animation(minimumInterval: 1, paused: !event.isTimerRunning)
-                ) { context in
+                CareTimerTimelineView(isRunning: event.isTimerRunning) { date in
                     VStack(spacing: 12) {
                         Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
                             .font(.title2.bold())
@@ -203,7 +223,7 @@ struct ActiveTimerEditorView: View {
                             .font(.title3.bold())
                         Text(
                             DurationFormatting.liveString(
-                                seconds: displayedElapsed(at: context.date)
+                                seconds: displayedElapsed(at: date)
                             )
                         )
                         .font(
@@ -242,9 +262,7 @@ struct ActiveTimerEditorView: View {
                 }
 
                 if event.type == .nursing {
-                    TimelineView(
-                        .animation(minimumInterval: 1, paused: !event.isTimerRunning)
-                    ) { context in
+                    CareTimerTimelineView(isRunning: event.isTimerRunning) { date in
                         VStack(alignment: .leading, spacing: 14) {
                             HStack {
                                 Label(
@@ -255,7 +273,7 @@ struct ActiveTimerEditorView: View {
 
                                 Spacer()
 
-                                Text("Total \(DurationFormatting.liveString(seconds: displayedElapsed(at: context.date)))")
+                                Text("Total \(DurationFormatting.liveString(seconds: displayedElapsed(at: date)))")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
@@ -263,7 +281,7 @@ struct ActiveTimerEditorView: View {
 
                             NursingSideSelector(
                                 event: event,
-                                date: context.date,
+                                date: date,
                                 isCompact: false,
                                 setNursingSide: setNursingSide,
                                 switchNursingSide: switchNursingSide

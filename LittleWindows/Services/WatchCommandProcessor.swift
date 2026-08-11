@@ -588,11 +588,13 @@ enum WatchCommandProcessor {
         if ids.count > maximumProcessedCommandCount {
             ids.removeFirst(ids.count - maximumProcessedCommandCount)
         }
-        UserDefaults.standard.set(ids, forKey: processedCommandIDsKey)
+        PersistenceService.operationalDefaults().set(ids, forKey: processedCommandIDsKey)
     }
 
     private static func processedCommandIDs() -> [String] {
-        UserDefaults.standard.stringArray(forKey: processedCommandIDsKey) ?? []
+        PersistenceService.operationalDefaults().stringArray(forKey: processedCommandIDsKey)
+            ?? UserDefaults.standard.stringArray(forKey: processedCommandIDsKey)
+            ?? []
     }
 
     private enum MutationOutcome {

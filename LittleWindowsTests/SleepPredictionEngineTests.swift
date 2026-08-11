@@ -159,6 +159,23 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(PersistenceService.isICloudSyncEnabled(defaults: defaults))
     }
 
+    func testOperationalDefaultsIsolateHighFrequencyStatusFromAppPreferences() throws {
+        XCTAssertFalse(
+            PersistenceService.operationalDefaults() === UserDefaults.standard,
+            "Save and sync status must not invalidate the standard @AppStorage domain."
+        )
+
+        let isolatedDefaults = try makeIsolatedDefaults()
+        XCTAssertTrue(
+            PersistenceService.operationalDefaults(for: isolatedDefaults) === isolatedDefaults,
+            "Injected defaults must remain isolated and deterministic in tests."
+        )
+
+        let saveDate = Date(timeIntervalSince1970: 1_753_000_000)
+        PersistenceService.recordLocalSave(at: saveDate, defaults: isolatedDefaults)
+        XCTAssertEqual(PersistenceService.lastLocalSaveAt(defaults: isolatedDefaults), saveDate)
+    }
+
     func testDestructiveDataScopeUsesOpenStoreAndConfirmedFamilyRole() {
         XCTAssertEqual(
             DataMutationScope.resolve(

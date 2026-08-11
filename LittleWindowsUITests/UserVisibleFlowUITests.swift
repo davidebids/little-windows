@@ -2384,7 +2384,7 @@ final class UserVisibleFlowUITests: XCTestCase {
             app.staticTexts["Running"].waitForExistence(timeout: 5),
             "Starting sleep should immediately show the active timer editor."
         )
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
         XCTAssertTrue(app.buttons["Stop"].exists)
     }
 
@@ -2543,7 +2543,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
         app.buttons["Nap"].tap()
 
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
 
         let stop = app.scrollViews.buttons["Stop"].firstMatch
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
@@ -2595,7 +2595,7 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
         app.buttons["Nap"].tap()
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
 
         let keepTimer = app.navigationBars["Timer"].buttons["Keep Timer"]
         XCTAssertTrue(keepTimer.waitForExistence(timeout: 3))
@@ -2648,7 +2648,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
         app.buttons["Nap"].tap()
 
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
 
         let stop = app.scrollViews.buttons["Stop"].firstMatch
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
@@ -2708,7 +2708,7 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
         app.buttons["Nap"].tap()
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
 
         let discard = app.buttons["Discard Timer"].firstMatch
         for _ in 0..<5 where !discard.isHittable {
@@ -2760,7 +2760,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
         app.buttons["Nap"].tap()
 
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
 
         // Exercise the compact Today card, which is where a delayed SwiftData
         // merge previously interrupted an already-active scroll gesture.
@@ -2845,7 +2845,7 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["Nap"].waitForExistence(timeout: 5))
         app.buttons["Nap"].tap()
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
 
         let adjustStart = app.buttons["−5 min"]
         for _ in 0..<5 where !adjustStart.isHittable {
@@ -2866,7 +2866,7 @@ final class UserVisibleFlowUITests: XCTestCase {
                 "Backdating an active timer must stay responsive on every intermediate edit."
             )
         }
-        assertActiveTimerAdvancesWithinThreeSeconds()
+        assertActiveTimerTicksContinuously()
 
         let editorScrollStartedAt = ContinuousClock.now
         app.swipeUp(velocity: .fast)
@@ -4000,22 +4000,42 @@ final class UserVisibleFlowUITests: XCTestCase {
         return false
     }
 
-    private func assertActiveTimerAdvancesWithinThreeSeconds() {
+    private func assertActiveTimerTicksContinuously() {
         let elapsed = app.staticTexts["active-timer.elapsed"]
         XCTAssertTrue(
-            elapsed.waitForExistence(timeout: 2),
+            elapsed.waitForExistence(timeout: 1.5),
             "Expected the active timer elapsed display to appear immediately."
         )
-        let initialLabel = elapsed.label
-        let advances = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label != %@", initialLabel),
-            object: elapsed
+
+        var observedSeconds: [Int] = []
+        let deadline = Date().addingTimeInterval(3.4)
+        while Date() < deadline {
+            if let seconds = timerSeconds(from: elapsed.label),
+               observedSeconds.last != seconds {
+                observedSeconds.append(seconds)
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            observedSeconds.count,
+            3,
+            "The timer must repaint continuously; observed only \(observedSeconds)."
         )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [advances], timeout: 3),
-            .completed,
-            "The active timer should begin incrementing within three seconds, not stall behind background refresh work."
-        )
+        for (previous, current) in zip(observedSeconds, observedSeconds.dropFirst()) {
+            XCTAssertGreaterThan(current, previous)
+            XCTAssertLessThanOrEqual(
+                current - previous,
+                2,
+                "The timer stalled and jumped from \(previous)s to \(current)s instead of incrementing each second."
+            )
+        }
+    }
+
+    private func timerSeconds(from label: String) -> Int? {
+        let components = label.split(separator: ":").compactMap { Int($0) }
+        guard components.count == 3 else { return nil }
+        return components[0] * 3_600 + components[1] * 60 + components[2]
     }
 
     private func elementIsClearOfTabBar(
