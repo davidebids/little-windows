@@ -168,11 +168,9 @@ final class SolidsFeatureTests: XCTestCase {
             XCTAssertTrue(food.servingVisuals.allSatisfy { !$0.assetName.isEmpty }, food.name)
             XCTAssertFalse(food.details.introductionSummary.isEmpty, food.name)
             XCTAssertFalse(food.details.backgroundSummary?.isEmpty ?? true, food.name)
-            XCTAssertFalse(food.details.nutritionSummary.isEmpty, food.name)
             XCTAssertFalse(food.details.allergenSummary.isEmpty, food.name)
             XCTAssertFalse(food.details.choosingGuidance.isEmpty, food.name)
             XCTAssertFalse(food.details.storageGuidance.isEmpty, food.name)
-            XCTAssertGreaterThanOrEqual(food.details.questions.count, 2, food.name)
             XCTAssertTrue(food.details.questions.allSatisfy {
                 !$0.question.isEmpty && !$0.answer.isEmpty
             }, food.name)
@@ -190,13 +188,15 @@ final class SolidsFeatureTests: XCTestCase {
 
         XCTAssertTrue(firstStage.servingAmount.firstServing.contains("1 tsp"))
         XCTAssertTrue(firstStage.servingAmount.routineServing.contains("2 tsp"))
-        XCTAssertTrue(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("smooth"))
-        XCTAssertTrue(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("thinned"))
+        XCTAssertFalse(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("smooth"))
+        XCTAssertFalse(peanutButter.details.introductionSummary.localizedCaseInsensitiveContains("thinned"))
+        XCTAssertTrue(firstStage.instructions.localizedCaseInsensitiveContains("smooth"))
+        XCTAssertTrue(firstStage.instructions.localizedCaseInsensitiveContains("thinned"))
 
         let displayedCopy = [
             peanutButter.details.introductionSummary,
             peanutButter.details.backgroundSummary ?? "",
-            peanutButter.details.nutritionSummary,
+            peanutButter.details.nutritionContext ?? "",
             peanutButter.details.allergenSummary,
             peanutButter.details.choosingGuidance,
             peanutButter.details.storageGuidance,
@@ -223,7 +223,7 @@ final class SolidsFeatureTests: XCTestCase {
             let content = [
                 food.details.introductionSummary,
                 food.details.backgroundSummary ?? "",
-                food.details.nutritionSummary,
+                food.details.nutritionContext ?? "",
                 food.details.choosingGuidance,
                 food.details.storageGuidance,
                 food.safetyNote,
@@ -251,7 +251,7 @@ final class SolidsFeatureTests: XCTestCase {
             let details = [
                 food.details.introductionSummary,
                 food.details.backgroundSummary ?? "",
-                food.details.nutritionSummary,
+                food.details.nutritionContext ?? "",
                 food.details.allergenSummary,
                 food.details.choosingGuidance,
                 food.details.storageGuidance,
@@ -285,6 +285,38 @@ final class SolidsFeatureTests: XCTestCase {
                 XCTAssertFalse(copy.contains(phrase), "\(food.name) contains cross-category copy: \(phrase)")
             }
         }
+
+        let banana = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Banana"))
+        let bananaCopy = displayedCopy(for: banana)
+        XCTAssertFalse(bananaCopy.contains("seed"))
+        XCTAssertFalse(bananaCopy.contains("core"))
+        XCTAssertFalse(bananaCopy.contains("pit"))
+        XCTAssertTrue(bananaCopy.contains("peel"))
+        XCTAssertTrue(bananaCopy.contains("fibrous strings"))
+        XCTAssertTrue(bananaCopy.contains("firm stem end"))
+        XCTAssertTrue(bananaCopy.contains("brown speckles"))
+
+        let kumquat = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Kumquat"))
+        let kumquatCopy = displayedCopy(for: kumquat)
+        XCTAssertFalse(kumquatCopy.contains("remove the peel"))
+        XCTAssertFalse(kumquatCopy.contains("after peeling"))
+        XCTAssertTrue(kumquatCopy.contains("washed fruit"))
+        XCTAssertTrue(kumquatCopy.contains("slice"))
+
+        let jujube = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Jujube"))
+        let jujubeCopy = displayedCopy(for: jujube)
+        XCTAssertFalse(jujubeCopy.contains("core"))
+        XCTAssertTrue(jujubeCopy.contains("single hard stone"))
+
+        let broccoliRabe = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Broccoli rabe"))
+        let broccoliRabeCopy = displayedCopy(for: broccoliRabe)
+        XCTAssertFalse(broccoliRabeCopy.contains("flower head"))
+        XCTAssertFalse(broccoliRabeCopy.contains("large soft floret"))
+        XCTAssertTrue(broccoliRabeCopy.contains("leaves"))
+
+        let puffedRice = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Puffed rice cereal"))
+        XCTAssertTrue(puffedRice.preparations[0].instructions.localizedCaseInsensitiveContains("crush and moisten"))
+        XCTAssertFalse(puffedRice.preparations[0].instructions.localizedCaseInsensitiveContains("cook until very soft"))
 
         let applesauce = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Applesauce"))
         let applesauceCopy = displayedCopy(for: applesauce)
@@ -381,6 +413,79 @@ final class SolidsFeatureTests: XCTestCase {
         let tuna = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Tuna"))
         XCTAssertFalse(tuna.isEligibleForGuidedPath)
         XCTAssertTrue(tuna.safetyNote.localizedCaseInsensitiveContains("bigeye tuna"))
+    }
+
+    func testNutritionPanelIsTheOnlyQuantitativeNutritionNarrative() throws {
+        for food in SolidsReferenceCatalog.foods {
+            let reference = try XCTUnwrap(SolidsNutritionCatalog.reference(foodID: food.id), food.name)
+            let isProxy = reference.sourceDescription.hasPrefix("Representative USDA estimate")
+            if isProxy {
+                XCTAssertTrue(
+                    reference.sourceDescription.localizedCaseInsensitiveContains("estimate for \(food.name)"),
+                    food.name
+                )
+            }
+            XCTAssertFalse(food.details.nutritionContext?.contains(reference.sourceID) == true, food.name)
+            XCTAssertFalse(food.details.nutritionContext?.localizedCaseInsensitiveContains("per 100 g") == true, food.name)
+            XCTAssertFalse(food.details.nutritionContext?.localizedCaseInsensitiveContains("kcal") == true, food.name)
+        }
+    }
+
+    func testBananaSectionsEachHaveOneEditorialJob() throws {
+        let banana = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Banana"))
+
+        XCTAssertEqual(
+            banana.details.introductionSummary,
+            "Banana can generally be introduced once a child shows developmental readiness for solids, usually around 6 months."
+        )
+        XCTAssertEqual(
+            banana.details.backgroundSummary,
+            "Banana is a peelable tropical fruit. Its starchy flesh becomes softer and sweeter as it ripens."
+        )
+        XCTAssertNil(banana.details.nutritionContext)
+        XCTAssertTrue(banana.details.questions.isEmpty)
+        XCTAssertTrue(banana.details.choosingGuidance.localizedCaseInsensitiveContains("brown speckles"))
+        XCTAssertFalse(banana.details.introductionSummary.localizedCaseInsensitiveContains("peel"))
+        XCTAssertFalse(banana.details.backgroundSummary?.localizedCaseInsensitiveContains("remove") == true)
+        XCTAssertFalse(banana.details.choosingGuidance.localizedCaseInsensitiveContains("remove"))
+        XCTAssertTrue(banana.preparations[0].instructions.localizedCaseInsensitiveContains("remove the peel"))
+        XCTAssertFalse(banana.preparations[0].instructions.localizedCaseInsensitiveContains("brown speckles"))
+    }
+
+    func testEveryFoodPageUsesSectionSpecificEditorialStructure() {
+        let preparationWords = ["remove", "peel", "mash", "mince", "grate", "cook", "flatten", "thinly"]
+
+        for food in SolidsReferenceCatalog.foods where food.id != "acai" {
+            XCTAssertNil(food.details.nutritionContext, "\(food.name) should use the quantitative panel instead of a second nutrition narrative")
+            XCTAssertTrue(food.details.questions.isEmpty, "\(food.name) should not have a generated FAQ that repeats its page")
+
+            let introductionWithoutName = food.details.introductionSummary.replacingOccurrences(
+                of: food.name,
+                with: "",
+                options: [.caseInsensitive, .diacriticInsensitive]
+            )
+            for word in preparationWords {
+                XCTAssertFalse(
+                    introductionWithoutName.localizedCaseInsensitiveContains(word),
+                    "\(food.name) introduction should cover readiness, not repeat preparation: \(word)"
+                )
+            }
+
+            let pageSections = [
+                food.details.introductionSummary,
+                food.details.backgroundSummary ?? "",
+                food.details.allergenSummary,
+                food.details.choosingGuidance,
+                food.details.storageGuidance,
+                food.chokingGuidance
+            ]
+            XCTAssertEqual(Set(pageSections).count, pageSections.count, "\(food.name) repeats a complete section verbatim")
+            XCTAssertEqual(
+                Set(food.preparations.map(\.instructions)).count,
+                food.preparations.count,
+                "\(food.name) repeats the same preparation at multiple ages"
+            )
+        }
     }
 
     func testIngredientFormsKeepTheirOwnPreparationProgressions() throws {
@@ -562,16 +667,12 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(Set(food.sourceURLs).count, food.sourceURLs.count)
         XCTAssertTrue(food.details.introductionSummary.localizedCaseInsensitiveContains("seedless pulp"))
         XCTAssertTrue(food.details.backgroundSummary?.localizedCaseInsensitiveContains("Amazon") == true)
-        XCTAssertTrue(food.details.nutritionSummary.localizedCaseInsensitiveContains("anthocyanins"))
-        XCTAssertTrue(food.details.nutritionSummary.localizedCaseInsensitiveContains("too limited"))
+        XCTAssertTrue(food.details.nutritionContext?.localizedCaseInsensitiveContains("anthocyanins") == true)
+        XCTAssertTrue(food.details.nutritionContext?.localizedCaseInsensitiveContains("too limited") == true)
         XCTAssertTrue(food.details.allergenSummary.localizedCaseInsensitiveContains("not one of the nine"))
         XCTAssertTrue(food.details.allergenSummary.localizedCaseInsensitiveContains("do not establish"))
         XCTAssertTrue(food.details.choosingGuidance.localizedCaseInsensitiveContains("caffeine"))
-        XCTAssertEqual(food.details.questions.count, 2)
-        XCTAssertTrue(food.details.questions.contains {
-            $0.question.localizedCaseInsensitiveContains("bowl")
-                && $0.answer.localizedCaseInsensitiveContains("honey")
-        })
+        XCTAssertEqual(food.details.questions.count, 1)
         XCTAssertTrue(food.details.questions.contains {
             $0.question.localizedCaseInsensitiveContains("juice")
                 && $0.answer.localizedCaseInsensitiveContains("12 months")
@@ -676,7 +777,8 @@ final class SolidsFeatureTests: XCTestCase {
         })
 
         XCTAssertEqual(cottageCheese.servingVisuals, [.spoon, .spoon, .spoon, .spoon])
-        XCTAssertTrue(cottageCheese.preparations[1].instructions.localizedCaseInsensitiveContains("scoopable"))
+        XCTAssertTrue(cottageCheese.preparations[1].instructions.localizedCaseInsensitiveContains("curds"))
+        XCTAssertFalse(cottageCheese.preparations[1].instructions.localizedCaseInsensitiveContains("slice"))
         XCTAssertEqual(cheddar.servingVisuals, [.shredded, .shredded, .softPieces, .softPieces])
         XCTAssertTrue(cheddar.preparations[0].instructions.localizedCaseInsensitiveContains("finely grate"))
     }
@@ -973,6 +1075,37 @@ final class SolidsFeatureTests: XCTestCase {
 
         let zaatar = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Za'atar herb blend"))
         XCTAssertTrue(zaatar.possibleAllergenIDs.contains(SolidsAllergen.sesame.rawValue))
+
+        let buckwheat = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Buckwheat"))
+        XCTAssertFalse(buckwheat.allergenIDs.contains(SolidsAllergen.wheat.rawValue))
+
+        let buckwheatNoodle = try XCTUnwrap(SolidsReferenceCatalog.food(named: "Buckwheat noodle"))
+        XCTAssertFalse(buckwheatNoodle.allergenIDs.contains(SolidsAllergen.wheat.rawValue))
+        XCTAssertTrue(buckwheatNoodle.possibleAllergenIDs.contains(SolidsAllergen.wheat.rawValue))
+
+        for wheatFoodName in ["Semolina", "Spelt", "Einkorn", "Farro", "Freekeh", "Kamut", "Orzo"] {
+            let food = try XCTUnwrap(SolidsReferenceCatalog.food(named: wheatFoodName))
+            XCTAssertTrue(
+                food.allergenIDs.contains(SolidsAllergen.wheat.rawValue),
+                "Missing confirmed wheat allergen for \(wheatFoodName)"
+            )
+        }
+
+        XCTAssertTrue(
+            try XCTUnwrap(SolidsReferenceCatalog.food(named: "Pea protein patty"))
+                .possibleAllergenIDs.contains(SolidsAllergen.soy.rawValue)
+        )
+        for meatballName in ["Beef meatball", "Chicken meatball", "Lamb meatball", "Pork meatball", "Turkey meatball"] {
+            XCTAssertTrue(
+                try XCTUnwrap(SolidsReferenceCatalog.food(named: meatballName))
+                    .possibleAllergenIDs.contains(SolidsAllergen.egg.rawValue),
+                "Missing recipe-variable egg warning for \(meatballName)"
+            )
+        }
+        XCTAssertTrue(
+            try XCTUnwrap(SolidsReferenceCatalog.food(named: "Refried bean"))
+                .possibleAllergenIDs.contains(SolidsAllergen.milk.rawValue)
+        )
     }
 
     @MainActor

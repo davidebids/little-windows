@@ -487,6 +487,7 @@ struct SolidsGuidedPathView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
+
             }
 
             if !visibleBlockedAllergenNames.isEmpty {
@@ -1606,6 +1607,10 @@ private struct SolidFoodNutritionFactsView: View {
     let reference: SolidNutritionReference
     var showsCommonPortions = false
 
+    private var isRepresentativeEstimate: Bool {
+        reference.sourceDescription.hasPrefix("Representative USDA estimate")
+    }
+
     private var providedNutrientCount: Int {
         [
             reference.nutrients.energyKilocalories,
@@ -1690,15 +1695,19 @@ private struct SolidFoodNutritionFactsView: View {
             Divider()
 
             Label(
-                reference.nutrients.isComplete
+                isRepresentativeEstimate
+                    ? "Complete for the named USDA proxy—not exact for this food."
+                    : reference.nutrients.isComplete
                     ? "All eight tracked nutrients are included."
                     : "\(providedNutrientCount) of 8 tracked nutrients are included.",
-                systemImage: reference.nutrients.isComplete
+                systemImage: isRepresentativeEstimate
+                    ? "exclamationmark.triangle.fill"
+                    : reference.nutrients.isComplete
                     ? "checkmark.circle.fill"
                     : "exclamationmark.circle.fill"
             )
             .font(.caption.weight(.semibold))
-            .foregroundStyle(reference.nutrients.isComplete ? .green : .orange)
+            .foregroundStyle(isRepresentativeEstimate ? .orange : (reference.nutrients.isComplete ? .green : .orange))
 
             factRow("Source", value: reference.sourceKind.displayName)
                 .accessibilityElement(children: .combine)
@@ -1806,29 +1815,6 @@ struct SolidsFoodDetailView: View {
                 .padding(.vertical, 6)
             }
 
-            Section("For \(profile.name) now") {
-                let stage = food.preparation(forAgeMonths: visibleAgeMonths)
-                Label(stage.title, systemImage: "figure.child")
-                    .font(.headline)
-                Text(stage.instructions)
-                servingAmountRow(
-                    title: "First serving",
-                    value: stage.servingAmount.firstServing,
-                    systemImage: "1.circle.fill"
-                )
-                servingAmountRow(
-                    title: "After tolerated",
-                    value: stage.servingAmount.routineServing,
-                    systemImage: "fork.knife.circle.fill"
-                )
-                Text("These are suggested starting portions, not amounts the child must finish. Follow hunger and fullness cues and offer more when they show interest.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(food.safetyNote)
-                    .font(.subheadline)
-                    .foregroundStyle(.orange)
-            }
-
             Section("When can babies have \(food.name.lowercased())?") {
                 Text(food.details.introductionSummary)
             }
@@ -1847,12 +1833,26 @@ struct SolidsFoodDetailView: View {
                         let visual = food.servingVisuals[min(index, food.servingVisuals.count - 1)]
                         SolidsServingPhoto(visual: visual, foodName: food.name, compact: true)
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(stage.title).font(.subheadline.weight(.semibold))
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(stage.title).font(.subheadline.weight(.semibold))
+                                if visibleAgeMonths >= food.minimumAgeMonths,
+                                   stage.id == food.preparation(forAgeMonths: visibleAgeMonths).id {
+                                    Text("For \(profile.name) now")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.orange)
+                                }
+                            }
                             Text(visual.displayName).font(.caption).foregroundStyle(.orange)
                             Text(stage.instructions)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text("Suggested amount")
+                            Text("First serving")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(stage.servingAmount.firstServing)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("After tolerated")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.primary)
                             Text(stage.servingAmount.routineServing)
@@ -1871,31 +1871,17 @@ struct SolidsFoodDetailView: View {
                 Text("Technique photos are illustrative. Use the food-specific written instructions for shape, texture, and safety.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text("Amounts are starting suggestions, not requirements. Follow hunger and fullness cues and offer more when the child shows interest.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            Section("Choking guidance") {
+            Section("Safety and choking") {
                 Text(food.chokingGuidance)
             }
 
-            Section("Is \(food.name.lowercased()) a common allergen?") {
+            Section("Allergens") {
                 Text(food.details.allergenSummary)
-                if !food.allergenIDs.isEmpty {
-                    ForEach(food.allergenIDs, id: \.self) { allergenID in
-                        Label(
-                            SolidsAllergen(rawValue: allergenID)?.displayName ?? allergenID,
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .foregroundStyle(.orange)
-                    }
-                }
-                if !food.possibleAllergenIDs.isEmpty {
-                    Text("Prepared versions may contain these major allergens; confirm what was actually served when logging.")
-                        .font(.subheadline)
-                    ForEach(food.possibleAllergenIDs, id: \.self) { allergenID in
-                        Label(SolidsAllergen(rawValue: allergenID)?.displayName ?? allergenID, systemImage: "questionmark.diamond.fill")
-                        .foregroundStyle(.orange)
-                    }
-                }
             }
 
             Section("Choosing and storage") {
@@ -2046,17 +2032,10 @@ struct SolidsFoodDetailView: View {
 
     @ViewBuilder
     private var nutritionSections: some View {
-        Section("Is \(food.name.lowercased()) nutritious?") {
-            Text(food.details.nutritionSummary)
-            ForEach(food.nutritionHighlights, id: \.self) { highlight in
-                Label(highlight, systemImage: "leaf.fill")
-            }
-            Text("Quantitative estimates and their exact USDA source are shown below. Nutrient amounts still vary by variety and preparation.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-
         Section {
+            if let nutritionContext = food.details.nutritionContext {
+                Text(nutritionContext)
+            }
             if let nutritionReference = SolidsNutritionCatalog.reference(foodID: food.id) {
                 SolidFoodNutritionFactsView(
                     reference: nutritionReference,
@@ -2070,9 +2049,9 @@ struct SolidsFoodDetailView: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("Nutrition estimates")
+            Text("Nutrition")
         } footer: {
-            Text("Estimates are reference values, not a requirement for how much a child should eat.")
+            Text("Reference values describe the named USDA food form, not how much a child must eat.")
         }
     }
 
