@@ -535,6 +535,46 @@ final class CloudKitSharingService {
             return false
         }
 
+        if Self.localMutationCanUploadWithoutDownload(
+            reason: reason,
+            remoteChecksum: remoteChecksum,
+            lastKnownChecksum: statusDefaults.string(forKey: DefaultsKey.lastDatasetChecksum)
+        ) {
+            let baselineData = await loadBaselineData()
+            let baselinePayload: FamilySyncDatasetPayload?
+            if let baselineData {
+                baselinePayload = try await makeDatasetPayload(from: baselineData)
+            } else {
+                baselinePayload = nil
+            }
+            defer { baselinePayload?.removeTemporaryFile() }
+            let remoteData: Data
+            if let baselineData,
+               baselinePayload?.checksum == remoteChecksum {
+                remoteData = baselineData
+            } else {
+                remoteData = try await datasetData(from: root, template: localPayload.data)
+            }
+            try await uploadEntityChanges(
+                from: remoteData,
+                to: localPayload.data,
+                rootRecordID: rootID,
+                database: database(for: storedRole)
+            )
+            applyDatasetPayload(localPayload, to: root)
+            _ = try await database(for: storedRole).modifyRecords(
+                saving: [root],
+                deleting: [],
+                savePolicy: .ifServerRecordUnchanged,
+                atomically: true
+            )
+            try await saveBaselineData(localPayload.data)
+            statusDefaults.set(localPayload.checksum, forKey: DefaultsKey.lastDatasetChecksum)
+            statusDefaults.removeObject(forKey: DefaultsKey.lastError)
+            markSynced(uploaded: true, downloaded: false)
+            return true
+        }
+
         let baselineData = await loadBaselineData()
         let baselineChecksum: FamilySyncDatasetPayload?
         if let baselineData {
@@ -651,6 +691,16 @@ final class CloudKitSharingService {
     ) -> Bool {
         guard !pendingUpload, let remoteChecksum else { return false }
         return remoteChecksum != lastKnownChecksum
+    }
+
+    nonisolated static func localMutationCanUploadWithoutDownload(
+        reason: FamilySyncReason,
+        remoteChecksum: String?,
+        lastKnownChecksum: String?
+    ) -> Bool {
+        reason == .localMutation
+            && remoteChecksum != nil
+            && remoteChecksum == lastKnownChecksum
     }
 
     nonisolated static func localMutationBusyRetryDelaySeconds(attempt: Int) -> TimeInterval {

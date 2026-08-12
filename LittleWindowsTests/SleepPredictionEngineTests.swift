@@ -925,6 +925,21 @@ final class SleepPredictionEngineTests: XCTestCase {
             lastKnownChecksum: "old",
             pendingUpload: true
         ))
+        XCTAssertTrue(CloudKitSharingService.localMutationCanUploadWithoutDownload(
+            reason: .localMutation,
+            remoteChecksum: "remote-checksum",
+            lastKnownChecksum: "remote-checksum"
+        ))
+        XCTAssertFalse(CloudKitSharingService.localMutationCanUploadWithoutDownload(
+            reason: .localMutation,
+            remoteChecksum: "new-remote-checksum",
+            lastKnownChecksum: "old-remote-checksum"
+        ))
+        XCTAssertFalse(CloudKitSharingService.localMutationCanUploadWithoutDownload(
+            reason: .foregroundTimerPoll,
+            remoteChecksum: "remote-checksum",
+            lastKnownChecksum: "remote-checksum"
+        ))
         XCTAssertTrue(FamilySyncReason.launch.usesLightweightRemoteCheck)
         XCTAssertTrue(FamilySyncReason.foregroundTimerPoll.usesLightweightRemoteCheck)
         XCTAssertFalse(FamilySyncReason.localMutation.usesLightweightRemoteCheck)

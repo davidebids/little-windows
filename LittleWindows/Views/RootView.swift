@@ -156,7 +156,7 @@ extension View {
 }
 
 struct AppActionSheetOption: Identifiable {
-    let id = UUID()
+    let id: String
     var title: String
     var subtitle: String?
     var systemImage: String
@@ -167,6 +167,7 @@ struct AppActionSheetOption: Identifiable {
     var action: () -> Void
 
     init(
+        id: String = UUID().uuidString,
         title: String,
         subtitle: String? = nil,
         systemImage: String,
@@ -176,6 +177,7 @@ struct AppActionSheetOption: Identifiable {
         isSelected: Bool = false,
         action: @escaping () -> Void
     ) {
+        self.id = id
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage

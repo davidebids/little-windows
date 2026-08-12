@@ -183,6 +183,7 @@ struct TodayView: View {
     @AppStorage("customWakeMaximum") private var customWakeMaximum = 0.0
 
     @State private var editorRoute: EventEditorRoute?
+    @State private var pendingActivityEditorRoute: EventEditorRoute?
     @State private var activeTimerToEdit: CareEvent?
     @State private var showingExplanation = false
     @State private var showingBackwardsPlanner = false
@@ -1114,7 +1115,8 @@ struct TodayView: View {
             message: "Pick a common activity timer or open a custom activity entry.",
             systemImage: "figure.play",
             tint: .green,
-            options: showingActivityChooser ? activityOptions(state: state) : []
+            options: showingActivityChooser ? activityOptions(state: state) : [],
+            onDismiss: presentPendingActivityEditor
         )
         .appActionSheet(
             isPresented: $showingAlertPermissionPrompt,
@@ -3544,6 +3546,7 @@ struct TodayView: View {
         return ActivityType.cases(for: profileType).map { activity in
             let timerAlreadyActive = activity != .custom && state.hasActiveTimer(of: .activity)
             return AppActionSheetOption(
+                id: "activity.\(activity.rawValue)",
                 title: activity.displayName,
                 subtitle: timerAlreadyActive
                     ? "An activity timer is already active."
@@ -3555,12 +3558,22 @@ struct TodayView: View {
                 isEnabled: !timerAlreadyActive
             ) {
                 if activity == .custom {
-                    editorRoute = EventEditorRoute(type: .activity)
+                    // Let the chooser finish its dismissal before presenting
+                    // another sheet. Building EventEditorView during the
+                    // dismissal animation caused a measurable main-thread
+                    // layout hitch on physical devices.
+                    pendingActivityEditorRoute = EventEditorRoute(type: .activity)
                 } else {
                     startTimer(.activity, activityType: activity)
                 }
             }
         }
+    }
+
+    private func presentPendingActivityEditor() {
+        guard let route = pendingActivityEditorRoute else { return }
+        pendingActivityEditorRoute = nil
+        editorRoute = route
     }
 }
 
