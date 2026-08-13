@@ -5251,7 +5251,7 @@ private struct TodayCaregiverHandoffCard: View {
                         }
                     }
                     ForEach(handoff.recentNotes) { note in
-                        TodayHandoffNoteRow(note: note)
+                        TodayHandoffNoteRow(note: note, openSource: open)
                     }
                 }
             }
@@ -5277,7 +5277,14 @@ private struct TodayCaregiverHandoffCard: View {
         .sheet(isPresented: $showingAllHandoffNotes) {
             NavigationStack {
                 List(handoff.notes) { note in
-                    TodayHandoffNoteRow(note: note, showsFullDate: true)
+                    TodayHandoffNoteRow(
+                        note: note,
+                        showsFullDate: true,
+                        openSource: { route in
+                            showingAllHandoffNotes = false
+                            open(route)
+                        }
+                    )
                         .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         .listRowSeparator(.hidden)
                 }
@@ -5316,6 +5323,7 @@ private struct TodayCaregiverHandoffCard: View {
 private struct TodayHandoffNoteRow: View {
     let note: TodayHandoffNoteSummary
     var showsFullDate = false
+    var openSource: ((TodayHomeSummaryRoute) -> Void)?
 
     private var authorInitial: String {
         note.authorName
@@ -5360,26 +5368,17 @@ private struct TodayHandoffNoteRow: View {
                 }
 
                 if let sourceTitle = note.sourceTitle {
-                    HStack(spacing: 4) {
-                        Image(systemName: "link")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.blue)
-                        Text("Linked to")
-                            .foregroundStyle(.tertiary)
-                        Text(sourceTitle)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
+                    if let sourceRoute = note.sourceRoute, let openSource {
+                        Button {
+                            openSource(sourceRoute)
+                        } label: {
+                            TodayHandoffSourceLabel(title: sourceTitle, isLink: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open linked item, \(sourceTitle)")
+                    } else {
+                        TodayHandoffSourceLabel(title: sourceTitle, isLink: false)
                     }
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(Color.secondary.opacity(0.08), in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
-                    }
-                    .accessibilityElement(children: .combine)
                 }
 
                 Text(note.body)
@@ -5395,6 +5394,46 @@ private struct TodayHandoffNoteRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
         }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TodayHandoffSourceLabel: View {
+    let title: String
+    let isLink: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isLink ? "link" : "doc.text")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(isLink ? Color.blue : Color.secondary)
+            Text(isLink ? "Linked to" : "Related to")
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .fontWeight(.semibold)
+                .foregroundStyle(isLink ? Color.primary : Color.secondary)
+            if isLink {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.blue)
+            }
+        }
+        .font(.caption2)
+        .lineLimit(1)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            (isLink ? Color.blue : Color.secondary).opacity(0.08),
+            in: Capsule()
+        )
+        .overlay {
+            Capsule()
+                .stroke(
+                    (isLink ? Color.blue : Color.secondary).opacity(0.12),
+                    lineWidth: 1
+                )
+        }
+        .contentShape(Capsule())
         .accessibilityElement(children: .combine)
     }
 }

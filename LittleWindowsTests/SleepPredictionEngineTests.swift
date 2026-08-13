@@ -8854,13 +8854,24 @@ final class SleepPredictionEngineTests: XCTestCase {
         let oldestNote = CaregiverHandoffNote(
             householdID: household.id,
             profileID: sharedProfile.id,
-            sourceKey: sharedFollowUp.attentionSourceKey,
-            sourceTitleSnapshot: sharedFollowUp.title,
+            sourceKey: completedSharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: completedSharedFollowUp.title,
             body: "Oldest shared note.",
             authorCaregiverIdentifier: otherCaregiverID,
             authorCaregiverName: "Caregiver Two",
             createdAt: now.addingTimeInterval(-400),
             updatedAt: now.addingTimeInterval(-400)
+        )
+        let missingSourceNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: "\(HouseholdAttentionSourceKind.trip.rawValue):\(UUID().uuidString.lowercased())",
+            sourceTitleSnapshot: "Deleted trip",
+            body: "Keep historical context without a dead link.",
+            authorCaregiverIdentifier: currentCaregiverID,
+            authorCaregiverName: "Caregiver One",
+            createdAt: now.addingTimeInterval(-500),
+            updatedAt: now.addingTimeInterval(-500)
         )
         let unscopedFollowUp = AppointmentFollowUp(
             appointmentID: UUID(),
@@ -8934,6 +8945,7 @@ final class SleepPredictionEngineTests: XCTestCase {
                 currentCaregiverNote,
                 olderNote,
                 oldestNote,
+                missingSourceNote,
                 unscopedNote
             ],
             familyCaregiverIdentities: identities,
@@ -8977,8 +8989,17 @@ final class SleepPredictionEngineTests: XCTestCase {
             handoff.recentNotes.map(\.body),
             ["I will make the call.", "The clinic asked us to call tomorrow.", "Older shared note."]
         )
-        XCTAssertEqual(handoff.notes.count, 4)
+        XCTAssertEqual(handoff.notes.count, 5)
         XCTAssertFalse(handoff.notes.contains { $0.body == "Must not enter the shared handoff." })
+        XCTAssertEqual(
+            handoff.notes.first { $0.id == note.id }?.sourceRoute,
+            .appointment(appointmentID, profileID: sharedProfile.id)
+        )
+        XCTAssertEqual(
+            handoff.notes.first { $0.id == oldestNote.id }?.sourceRoute,
+            .appointment(appointmentID, profileID: sharedProfile.id)
+        )
+        XCTAssertNil(handoff.notes.first { $0.id == missingSourceNote.id }?.sourceRoute)
         XCTAssertEqual(handoff.needsAcknowledgementItemID, sharedItem.id)
         XCTAssertEqual(handoff.nextUpItemID, sharedItem.id)
         XCTAssertEqual(handoff.latestObservedActivityAt, now.addingTimeInterval(-50))

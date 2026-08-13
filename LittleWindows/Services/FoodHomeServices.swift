@@ -1616,6 +1616,7 @@ struct TodayHandoffNoteSummary: Identifiable, Equatable {
     var authorName: String
     var body: String
     var sourceTitle: String?
+    var sourceRoute: TodayHomeSummaryRoute?
     var createdAt: Date
 }
 
@@ -1815,19 +1816,37 @@ enum TodayHomeSummaryService {
                   let until = snoozes[sourceKey] else { return nil }
             return TodaySnoozedAttentionItem(item: item, until: until)
         }.sorted { $0.until < $1.until }
+        let sharedProfileIDs = Set(profiles.filter { $0.sharingScope == .family }.map(\.id))
         let handoff = familySyncEnabled ? handoffSummary(
             items: attention,
             followUps: appointmentFollowUps,
             acknowledgements: acknowledgements,
             claims: claims,
             notes: handoffNotes,
-            sharedProfileIDs: Set(profiles.filter { $0.sharingScope == .family }.map(\.id)),
+            sharedProfileIDs: sharedProfileIDs,
             caregiverNamesByIdentifier: Dictionary(
                 familyCaregiverIdentities.map { ($0.caregiverIdentifier, $0.displayName) },
                 uniquingKeysWith: { first, _ in first }
             ),
             currentCaregiverIdentifier: currentCaregiverIdentifier,
-            checkpoint: handoffCheckpoint ?? now.addingTimeInterval(-12 * 60 * 60)
+            checkpoint: handoffCheckpoint ?? now.addingTimeInterval(-12 * 60 * 60),
+            sourceRoutesByKey: handoffSourceRoutes(
+                householdID: householdID,
+                items: sortedAttention,
+                notes: handoffNotes,
+                sharedProfileIDs: sharedProfileIDs,
+                inventoryItems: inventoryItems,
+                mealPrepItems: mealPrepItems,
+                packingTrips: packingTrips,
+                returnRequests: returnRequests,
+                reminders: reminders,
+                medicationRegimens: medicationRegimens,
+                appointmentFollowUps: appointmentFollowUps,
+                careRoutines: careRoutines,
+                careRoutineRuns: careRoutineRuns,
+                plannedSolidMeals: plannedSolidMeals,
+                solidAllergenProgress: solidAllergenProgress
+            )
         ) : nil
 
         return TodayHomeSummary(
@@ -2152,7 +2171,8 @@ enum TodayHomeSummaryService {
         sharedProfileIDs: Set<UUID>,
         caregiverNamesByIdentifier: [String: String],
         currentCaregiverIdentifier: String,
-        checkpoint: Date
+        checkpoint: Date,
+        sourceRoutesByKey: [String: TodayHomeSummaryRoute]
     ) -> TodayCaregiverHandoffSummary {
         let appointmentFollowUpPrefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
         let sharedFollowUpSourceKeys: Set<String> = Set(followUps.compactMap { followUp in
@@ -2266,6 +2286,7 @@ enum TodayHomeSummaryService {
                         ?? $0.authorCaregiverName,
                     body: $0.body,
                     sourceTitle: $0.sourceTitleSnapshot,
+                    sourceRoute: $0.sourceKey.flatMap { sourceRoutesByKey[$0] },
                     createdAt: $0.createdAt
                 )
             },
@@ -2273,6 +2294,135 @@ enum TodayHomeSummaryService {
             nextUpItemID: nextUp?.id,
             latestObservedActivityAt: latestObservedActivityAt
         )
+    }
+
+    private static func handoffSourceRoutes(
+        householdID: UUID,
+        items: [TodayHomeSummaryItem],
+        notes: [CaregiverHandoffNote],
+        sharedProfileIDs: Set<UUID>,
+        inventoryItems: [InventoryItem],
+        mealPrepItems: [MealPrepItem],
+        packingTrips: [PackingTrip],
+        returnRequests: [ReturnRequest],
+        reminders: [FoodReminder],
+        medicationRegimens: [MedicationRegimen],
+        appointmentFollowUps: [AppointmentFollowUp],
+        careRoutines: [CareRoutine],
+        careRoutineRuns: [CareRoutineRun],
+        plannedSolidMeals: [PlannedSolidMeal],
+        solidAllergenProgress: [SolidAllergenProgress]
+    ) -> [String: TodayHomeSummaryRoute] {
+        var routes = Dictionary(
+            items.compactMap { item in
+                item.sourceKey.map { ($0, item.route) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let sourceKeys = Set(notes.compactMap { note in
+            note.householdID == householdID ? note.sourceKey : nil
+        })
+        let routinesByID = Dictionary(uniqueKeysWithValues: careRoutines.map { ($0.id, $0) })
+        let routineRunsByID = Dictionary(uniqueKeysWithValues: careRoutineRuns.map { ($0.id, $0) })
+
+        for sourceKey in sourceKeys where routes[sourceKey] == nil {
+            guard let separator = sourceKey.firstIndex(of: ":"),
+                  let kind = HouseholdAttentionSourceKind(
+                    rawValue: String(sourceKey[..<separator])
+                  ) else { continue }
+            let value = String(sourceKey[sourceKey.index(after: separator)...])
+
+            switch kind {
+            case .appointmentFollowUp:
+                guard let id = UUID(uuidString: value),
+                      let followUp = appointmentFollowUps.first(where: {
+                          $0.id == id
+                              && $0.householdID == householdID
+                              && $0.profileID.map(sharedProfileIDs.contains) == true
+                      }) else { continue }
+                routes[sourceKey] = .appointment(
+                    followUp.appointmentID,
+                    profileID: followUp.profileID
+                )
+
+            case .medicationDose:
+                guard let regimenIDText = value.split(separator: "|", maxSplits: 1).first,
+                      let regimenID = UUID(uuidString: String(regimenIDText)),
+                      let profileID = medicationRegimens.first(where: { $0.id == regimenID })?.profileID,
+                      sharedProfileIDs.contains(profileID) else { continue }
+                routes[sourceKey] = .medications(profileID: profileID)
+
+            case .routine:
+                let components = value.split(separator: ":")
+                let routineID: UUID?
+                if components.first == "run",
+                   components.count > 1,
+                   let runID = UUID(uuidString: String(components[1])) {
+                    routineID = routineRunsByID[runID]?.routineID
+                } else {
+                    routineID = components.first.flatMap { UUID(uuidString: String($0)) }
+                }
+                guard let routineID,
+                      let routine = routinesByID[routineID],
+                      routine.profileID.map(sharedProfileIDs.contains)
+                        ?? (routine.householdID == householdID) else { continue }
+                routes[sourceKey] = .routines(profileID: routine.profileID)
+
+            case .inventory:
+                guard let id = UUID(uuidString: value),
+                      inventoryItems.contains(where: {
+                          $0.id == id && $0.householdID == householdID
+                      }) else { continue }
+                routes[sourceKey] = .food(.inventoryItem(id))
+
+            case .mealPrep:
+                guard let id = UUID(uuidString: value),
+                      mealPrepItems.contains(where: {
+                          $0.id == id && $0.householdID == householdID
+                      }) else { continue }
+                routes[sourceKey] = .food(.mealPrepItem(id))
+
+            case .returnRequest:
+                guard let id = UUID(uuidString: value),
+                      returnRequests.contains(where: {
+                          $0.id == id && $0.householdID == householdID
+                      }) else { continue }
+                routes[sourceKey] = .food(.returnRequest(id))
+
+            case .trip:
+                guard let id = UUID(uuidString: value),
+                      packingTrips.contains(where: {
+                          $0.id == id && $0.householdID == householdID
+                      }) else { continue }
+                routes[sourceKey] = .food(.packingList(id))
+
+            case .plannedSolidMeal:
+                guard let id = UUID(uuidString: value),
+                      let plan = plannedSolidMeals.first(where: {
+                          $0.id == id && sharedProfileIDs.contains($0.profileID)
+                      }) else { continue }
+                routes[sourceKey] = .plannedSolidMeal(id, profileID: plan.profileID)
+
+            case .solidAllergen:
+                guard let id = UUID(uuidString: value),
+                      let progress = solidAllergenProgress.first(where: {
+                          $0.id == id && sharedProfileIDs.contains($0.profileID)
+                      }) else { continue }
+                routes[sourceKey] = .solidAllergen(
+                    progress.allergenID,
+                    profileID: progress.profileID
+                )
+
+            case .homeReminder:
+                guard let id = UUID(uuidString: value),
+                      let reminder = reminders.first(where: {
+                          $0.id == id && $0.householdID == householdID
+                      }) else { continue }
+                routes[sourceKey] = .food(route(for: reminder))
+            }
+        }
+
+        return routes
     }
 
     private static func dueUrgency(
