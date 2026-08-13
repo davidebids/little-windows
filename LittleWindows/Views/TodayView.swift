@@ -5013,11 +5013,15 @@ private struct TodayHomeAttentionRow: View {
 
             HStack(spacing: 8) {
                 if let acknowledgementText {
-                    Text(acknowledgementText)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.blue)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    HStack(spacing: 3) {
+                        Image(systemName: "eye.fill")
+                            .font(.caption2)
+                        Text(acknowledgementText)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.blue)
                 }
 
                 if item.medicationAttention != nil {
