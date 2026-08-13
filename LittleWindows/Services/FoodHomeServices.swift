@@ -2150,9 +2150,11 @@ enum TodayHomeSummaryService {
         currentCaregiverIdentifier: String,
         checkpoint: Date
     ) -> TodayCaregiverHandoffSummary {
-        let sharedOtherNotes = notes.filter {
+        let sharedNotes = notes.filter {
             ($0.profileID.map(sharedProfileIDs.contains) ?? true)
-                && $0.authorCaregiverIdentifier != currentCaregiverIdentifier
+        }
+        let sharedOtherNotes = sharedNotes.filter {
+            $0.authorCaregiverIdentifier != currentCaregiverIdentifier
         }
         let sharedOtherAcknowledgements = acknowledgements.filter {
             ($0.profileID.map(sharedProfileIDs.contains) ?? true)
@@ -2169,8 +2171,9 @@ enum TodayHomeSummaryService {
                 } == true
                 && $0.completedAt != nil
         }
-        let recentNotes = sharedOtherNotes.filter { $0.createdAt > checkpoint }
+        let newNotes = sharedOtherNotes.filter { $0.createdAt > checkpoint }
             .sorted { $0.createdAt > $1.createdAt }
+        let recentNotes = sharedNotes.sorted { $0.createdAt > $1.createdAt }
         let acknowledgementUpdates = sharedOtherAcknowledgements.filter { $0.updatedAt > checkpoint }
         let claimUpdates = sharedOtherClaims.filter { $0.updatedAt > checkpoint }
         let completedFollowUps = sharedOtherCompletions.filter {
@@ -2235,11 +2238,11 @@ enum TodayHomeSummaryService {
                 && $0.claimedCaregiverIdentifier == currentCaregiverIdentifier
         }
         return TodayCaregiverHandoffSummary(
-            activityCount: recentNotes.count
+            activityCount: newNotes.count
                 + acknowledgementUpdates.count
                 + claimUpdates.count
                 + completedFollowUps.count,
-            newNoteCount: recentNotes.count,
+            newNoteCount: newNotes.count,
             recentActivities: Array(recentActivities.prefix(4)),
             recentNotes: recentNotes.prefix(3).map {
                 TodayHandoffNoteSummary(

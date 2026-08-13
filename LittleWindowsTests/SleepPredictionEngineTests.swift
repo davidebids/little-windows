@@ -8753,6 +8753,17 @@ final class SleepPredictionEngineTests: XCTestCase {
             createdAt: now.addingTimeInterval(-40),
             updatedAt: now.addingTimeInterval(-40)
         )
+        let currentCaregiverNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: sharedFollowUp.title,
+            body: "I will make the call.",
+            authorCaregiverIdentifier: currentCaregiverID,
+            authorCaregiverName: "Caregiver One",
+            createdAt: now.addingTimeInterval(-30),
+            updatedAt: now.addingTimeInterval(-30)
+        )
         let identities = [
             FamilyCaregiverIdentity(
                 id: UUID(),
@@ -8795,7 +8806,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             appointmentFollowUps: [sharedFollowUp, privateFollowUp, completedSharedFollowUp],
             acknowledgements: [acknowledgement, thirdCaregiverAcknowledgement],
             claims: [claim],
-            handoffNotes: [note, privateNote],
+            handoffNotes: [note, privateNote, currentCaregiverNote],
             familyCaregiverIdentities: identities,
             currentCaregiverIdentifier: currentCaregiverID,
             familySyncEnabled: true,
@@ -8828,7 +8839,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(handoff.recentActivities.count, 4)
         XCTAssertTrue(handoff.recentActivities.contains { $0.text.hasPrefix("Caregiver Three saw") })
         XCTAssertFalse(handoff.recentActivities.contains { $0.text.contains("Old Third Name") })
-        XCTAssertEqual(handoff.recentNotes.first?.body, "The clinic asked us to call tomorrow.")
+        XCTAssertEqual(
+            handoff.recentNotes.map(\.body),
+            ["I will make the call.", "The clinic asked us to call tomorrow."]
+        )
         XCTAssertEqual(handoff.needsAcknowledgementItemID, sharedItem.id)
         XCTAssertEqual(handoff.nextUpItemID, sharedItem.id)
         XCTAssertEqual(handoff.latestObservedActivityAt, now.addingTimeInterval(-50))

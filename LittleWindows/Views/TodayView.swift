@@ -5211,7 +5211,7 @@ private struct TodayCaregiverHandoffCard: View {
 
             if !handoff.recentNotes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(handoff.newNoteCount == 1 ? "New handoff note" : "New handoff notes")
+                    Text("Recent handoff notes")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                     ForEach(handoff.recentNotes) { note in
