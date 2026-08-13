@@ -5231,11 +5231,19 @@ private struct TodayCaregiverHandoffCard: View {
             }
 
             if !handoff.recentNotes.isEmpty {
+                Divider()
+
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Recent handoff notes")
+                    HStack(spacing: 6) {
+                        Label("Recent handoff notes", systemImage: "text.bubble")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.secondary)
+                        Text("\(handoff.notes.count)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.1), in: Capsule())
                         Spacer()
                         if handoff.notes.count > handoff.recentNotes.count {
                             Button("View all") { showingAllHandoffNotes = true }
@@ -5243,18 +5251,7 @@ private struct TodayCaregiverHandoffCard: View {
                         }
                     }
                     ForEach(handoff.recentNotes) { note in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(note.sourceTitle.map { "\(note.authorName) · \($0)" } ?? note.authorName)
-                                    .font(.caption.weight(.semibold))
-                                Spacer(minLength: 8)
-                                Text(note.createdAt, style: .relative)
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            Text(note.body)
-                                .font(.subheadline)
-                        }
+                        TodayHandoffNoteRow(note: note)
                     }
                 }
             }
@@ -5280,25 +5277,11 @@ private struct TodayCaregiverHandoffCard: View {
         .sheet(isPresented: $showingAllHandoffNotes) {
             NavigationStack {
                 List(handoff.notes) { note in
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(note.authorName)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer(minLength: 8)
-                            Text(note.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let sourceTitle = note.sourceTitle {
-                            Label(sourceTitle, systemImage: "link")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text(note.body)
-                            .font(.body)
-                    }
-                    .padding(.vertical, 4)
+                    TodayHandoffNoteRow(note: note, showsFullDate: true)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        .listRowSeparator(.hidden)
                 }
+                .listStyle(.plain)
                 .navigationTitle("Handoff Notes")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -5327,6 +5310,68 @@ private struct TodayCaregiverHandoffCard: View {
             caregiverIdentifier: currentCaregiverIdentifier,
             at: reviewedThrough
         )
+    }
+}
+
+private struct TodayHandoffNoteRow: View {
+    let note: TodayHandoffNoteSummary
+    var showsFullDate = false
+
+    private var authorInitial: String {
+        note.authorName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .first
+            .map { String($0).uppercased() } ?? "?"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text(authorInitial)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.blue)
+                .frame(width: 26, height: 26)
+                .background(Color.blue.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(note.authorName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if showsFullDate {
+                        Text(note.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Text(note.createdAt, style: .relative)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                if let sourceTitle = note.sourceTitle {
+                    Label(sourceTitle, systemImage: "link")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.blue)
+                        .lineLimit(1)
+                }
+
+                Text(note.body)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
