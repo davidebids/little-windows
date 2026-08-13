@@ -105,6 +105,7 @@ struct HistoryView: View {
     @State private var showingDeleteEventConfirmation = false
     @State private var showingDeleteMilestoneConfirmation = false
     @State private var showingDeleteAppointmentConfirmation = false
+    @State private var appointmentDeleteErrorMessage: String?
     @State private var timerSystemRefreshTask: Task<Void, Never>?
     @State private var timerSystemRefreshRevision = UUID()
     @StateObject private var profileService = ProfileService.shared
@@ -310,6 +311,14 @@ struct HistoryView: View {
             } ?? [],
             cancelAction: { appointmentPendingDelete = nil }
         )
+        .alert("Couldn't Delete Appointment", isPresented: Binding(
+            get: { appointmentDeleteErrorMessage != nil },
+            set: { if !$0 { appointmentDeleteErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { appointmentDeleteErrorMessage = nil }
+        } message: {
+            Text(appointmentDeleteErrorMessage ?? "Please try again.")
+        }
     }
 
     private var historyRefreshToken: String {
@@ -991,7 +1000,10 @@ struct HistoryView: View {
             guard await HouseholdAttentionService.deleteAppointment(
                 appointment,
                 context: modelContext
-            ) else { return }
+            ) else {
+                appointmentDeleteErrorMessage = "The appointment and its follow-ups weren't deleted. Please try again."
+                return
+            }
             refreshDayData()
         }
     }

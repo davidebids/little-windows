@@ -4426,14 +4426,6 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
                 context: modelContext
             )
         }
-        .onDisappear {
-            guard familySyncEnabled,
-                  let reviewedThrough = cachedSummary?.handoff?.latestObservedActivityAt else { return }
-            CaregiverHandoffCheckpointStore.markReviewed(
-                caregiverIdentifier: caregiverIdentifier,
-                at: reviewedThrough
-            )
-        }
     }
 }
 
@@ -4452,6 +4444,7 @@ private struct TodayHomeSummaryView: View {
     @State private var attentionNow = Date()
     @State private var isSnoozedExpanded = false
     @State private var showingAllAttention = false
+    @State private var actionErrorMessage: String?
 
     init(
         summary: TodayHomeSummary,
@@ -4633,6 +4626,7 @@ private struct TodayHomeSummaryView: View {
                         householdID: householdID,
                         handoff: handoff,
                         items: allVisibleAttentionItems,
+                        currentCaregiverIdentifier: currentCaregiverIdentifier,
                         acknowledge: acknowledge,
                         open: open
                     )
@@ -4710,52 +4704,72 @@ private struct TodayHomeSummaryView: View {
                 }
             }
         }
+        .alert("Couldn't Complete Action", isPresented: Binding(
+            get: { actionErrorMessage != nil },
+            set: { if !$0 { actionErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionErrorMessage = nil }
+        } message: {
+            Text(actionErrorMessage ?? "Please try again.")
+        }
     }
 
     private func acknowledge(_ item: TodayHomeSummaryItem) {
         guard let sourceKey = item.sourceKey,
               let sourceUpdatedAt = item.sourceUpdatedAt else { return }
-        _ = HouseholdAttentionService.acknowledge(
+        guard HouseholdAttentionService.acknowledge(
             sourceKey: sourceKey,
             sourceUpdatedAt: sourceUpdatedAt,
             householdID: householdID,
             profileID: item.profileID,
             context: modelContext
-        )
+        ) else {
+            actionErrorMessage = "This item couldn't be marked seen. Please try again."
+            return
+        }
     }
 
     private func claim(_ item: TodayHomeSummaryItem, _ caregiver: FamilyCaregiverIdentity) {
         guard let sourceKey = item.sourceKey else { return }
-        _ = HouseholdAttentionService.claim(
+        guard HouseholdAttentionService.claim(
             sourceKey: sourceKey,
             householdID: householdID,
             profileID: item.profileID,
             caregiverIdentifier: caregiver.caregiverIdentifier,
             caregiverName: caregiver.displayName,
             context: modelContext
-        )
+        ) else {
+            actionErrorMessage = "Responsibility couldn't be assigned. Please try again."
+            return
+        }
     }
 
     private func takeResponsibility(_ item: TodayHomeSummaryItem) {
         guard let sourceKey = item.sourceKey else { return }
-        _ = HouseholdAttentionService.claim(
+        guard HouseholdAttentionService.claim(
             sourceKey: sourceKey,
             householdID: householdID,
             profileID: item.profileID,
             caregiverIdentifier: currentCaregiverIdentifier,
             caregiverName: CaregiverIdentityService.currentCaregiverName(),
             context: modelContext
-        )
+        ) else {
+            actionErrorMessage = "Responsibility couldn't be assigned. Please try again."
+            return
+        }
     }
 
     private func clearClaim(_ item: TodayHomeSummaryItem) {
         guard let sourceKey = item.sourceKey else { return }
-        _ = HouseholdAttentionService.clearClaim(
+        guard HouseholdAttentionService.clearClaim(
             sourceKey: sourceKey,
             householdID: householdID,
             profileID: item.profileID,
             context: modelContext
-        )
+        ) else {
+            actionErrorMessage = "The assignment couldn't be cleared. Please try again."
+            return
+        }
     }
 
     private func complete(_ item: TodayHomeSummaryItem) {
@@ -4764,11 +4778,14 @@ private struct TodayHomeSummaryView: View {
             predicate: #Predicate { $0.id == followUpID }
         )
         guard let followUp = try? modelContext.fetch(descriptor).first else { return }
-        _ = HouseholdAttentionService.setFollowUpCompleted(
+        guard HouseholdAttentionService.setFollowUpCompleted(
             followUp,
             completed: true,
             context: modelContext
-        )
+        ) else {
+            actionErrorMessage = "The follow-up couldn't be completed. Please try again."
+            return
+        }
     }
 
     private func snooze(_ item: TodayHomeSummaryItem, until date: Date) {
@@ -5121,10 +5138,13 @@ private struct TodayCaregiverHandoffCard: View {
     let householdID: UUID
     let handoff: TodayCaregiverHandoffSummary
     let items: [TodayHomeSummaryItem]
+    let currentCaregiverIdentifier: String
     let acknowledge: (TodayHomeSummaryItem) -> Void
     let open: (TodayHomeSummaryRoute) -> Void
 
     @State private var showingHandoffNoteEditor = false
+    @State private var showingAllHandoffNotes = false
+    @State private var isVisible = false
 
     private var needsAcknowledgement: TodayHomeSummaryItem? {
         handoff.needsAcknowledgementItemID.flatMap { id in items.first { $0.id == id } }
@@ -5212,13 +5232,26 @@ private struct TodayCaregiverHandoffCard: View {
 
             if !handoff.recentNotes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Recent handoff notes")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("Recent handoff notes")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if handoff.notes.count > handoff.recentNotes.count {
+                            Button("View all") { showingAllHandoffNotes = true }
+                                .font(.caption2.weight(.semibold))
+                        }
+                    }
                     ForEach(handoff.recentNotes) { note in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(note.sourceTitle.map { "\(note.authorName) · \($0)" } ?? note.authorName)
-                                .font(.caption.weight(.semibold))
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(note.sourceTitle.map { "\(note.authorName) · \($0)" } ?? note.authorName)
+                                    .font(.caption.weight(.semibold))
+                                Spacer(minLength: 8)
+                                Text(note.createdAt, style: .relative)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                             Text(note.body)
                                 .font(.subheadline)
                         }
@@ -5244,6 +5277,56 @@ private struct TodayCaregiverHandoffCard: View {
         .sheet(isPresented: $showingHandoffNoteEditor) {
             CaregiverHandoffNoteSheet(householdID: householdID, item: nil)
         }
+        .sheet(isPresented: $showingAllHandoffNotes) {
+            NavigationStack {
+                List(handoff.notes) { note in
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(note.authorName)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer(minLength: 8)
+                            Text(note.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let sourceTitle = note.sourceTitle {
+                            Label(sourceTitle, systemImage: "link")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(note.body)
+                            .font(.body)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .navigationTitle("Handoff Notes")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingAllHandoffNotes = false }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            isVisible = true
+            markVisibleActivityReviewed()
+        }
+        .onDisappear {
+            isVisible = false
+        }
+        .onChange(of: handoff.latestObservedActivityAt) { _, _ in
+            guard isVisible else { return }
+            markVisibleActivityReviewed()
+        }
+    }
+
+    private func markVisibleActivityReviewed() {
+        guard let reviewedThrough = handoff.latestObservedActivityAt else { return }
+        CaregiverHandoffCheckpointStore.markReviewed(
+            caregiverIdentifier: currentCaregiverIdentifier,
+            at: reviewedThrough
+        )
     }
 }
 
@@ -5274,6 +5357,7 @@ private struct CaregiverHandoffNoteEditor: View {
 
     @State private var bodyText = ""
     @State private var shouldFocusBody = false
+    @State private var showingSaveError = false
 
     var body: some View {
         NavigationStack {
@@ -5327,10 +5411,19 @@ private struct CaregiverHandoffNoteEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        if save(bodyText) { dismiss() }
+                        if save(bodyText) {
+                            dismiss()
+                        } else {
+                            showingSaveError = true
+                        }
                     }
                     .disabled(bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+            }
+            .alert("Couldn't Add Note", isPresented: $showingSaveError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("The handoff note wasn't saved. Please try again.")
             }
         }
     }

@@ -155,12 +155,26 @@ enum HouseholdAttentionService {
         title: String,
         details: String?,
         dueDate: Date?,
+        assignedCaregiverIdentifier: String? = nil,
+        assignedCaregiverName: String? = nil,
         context: ModelContext,
         now: Date = Date(),
         defaults: UserDefaults = .standard
     ) -> AppointmentFollowUp? {
         let cleanedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedTitle.isEmpty else { return nil }
+        let assignedIdentifier = assignedCaregiverIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let assignedName = assignedCaregiverName?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard assignedIdentifier.isEmpty == assignedName.isEmpty else { return nil }
+        if !assignedIdentifier.isEmpty {
+            guard PersistenceService.familySyncMode(defaults: defaults) == .sharedFamilySync,
+                  let profileID = appointment.profileID,
+                  isFamilySharedProfile(profileID, context: context) else {
+                return nil
+            }
+        }
         let caregiverIdentifier = CaregiverIdentityService.stableCaregiverIdentifier(defaults: defaults)
         let caregiverName = CaregiverIdentityService.currentCaregiverName(defaults: defaults)
         let followUp = AppointmentFollowUp(
@@ -176,6 +190,20 @@ enum HouseholdAttentionService {
             updatedAt: now
         )
         context.insert(followUp)
+        if !assignedIdentifier.isEmpty {
+            context.insert(HouseholdAttentionClaim(
+                id: deterministicID("claim", followUp.attentionSourceKey),
+                householdID: householdID,
+                profileID: followUp.profileID,
+                sourceKey: followUp.attentionSourceKey,
+                caregiverIdentifier: assignedIdentifier,
+                caregiverName: assignedName,
+                updatedByCaregiverIdentifier: caregiverIdentifier,
+                updatedByCaregiverName: caregiverName,
+                createdAt: now,
+                updatedAt: now
+            ))
+        }
         appointment.updatedAt = now
         guard PersistenceService.save(context: context) else { return nil }
         return followUp
@@ -279,7 +307,12 @@ enum HouseholdAttentionService {
         }
         let cleanedSourceKey = sourceKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedSourceKey.isEmpty else { return false }
-        guard isShareEligible(profileID: profileID, context: context) else { return false }
+        guard isShareEligible(
+            householdID: householdID,
+            profileID: profileID,
+            sourceKey: cleanedSourceKey,
+            context: context
+        ) else { return false }
         let caregiverIdentifier = CaregiverIdentityService.stableCaregiverIdentifier(defaults: defaults)
         let caregiverName = CaregiverIdentityService.currentCaregiverName(defaults: defaults)
         let id = deterministicID("ack", cleanedSourceKey, caregiverIdentifier)
@@ -323,7 +356,12 @@ enum HouseholdAttentionService {
         guard PersistenceService.familySyncMode(defaults: defaults) == .sharedFamilySync else {
             return false
         }
-        guard isShareEligible(profileID: profileID, context: context) else { return false }
+        guard isShareEligible(
+            householdID: householdID,
+            profileID: profileID,
+            sourceKey: sourceKey,
+            context: context
+        ) else { return false }
         guard isClaimableFollowUp(
             sourceKey: sourceKey,
             householdID: householdID,
@@ -384,6 +422,49 @@ enum HouseholdAttentionService {
     }
 
     @discardableResult
+    static func setClaimIfNeeded(
+        sourceKey: String,
+        householdID: UUID,
+        profileID: UUID?,
+        currentClaim: HouseholdAttentionClaim?,
+        caregiverIdentifier: String?,
+        caregiverName: String?,
+        context: ModelContext,
+        now: Date = Date(),
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        let desiredIdentifier = caregiverIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let desiredName = caregiverName?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentIdentifier = currentClaim?.sourceKey == sourceKey
+            ? currentClaim?.caregiverIdentifier?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            : ""
+        guard desiredIdentifier != currentIdentifier else { return true }
+        if desiredIdentifier.isEmpty {
+            return clearClaim(
+                sourceKey: sourceKey,
+                householdID: householdID,
+                profileID: profileID,
+                context: context,
+                now: now,
+                defaults: defaults
+            )
+        }
+        return claim(
+            sourceKey: sourceKey,
+            householdID: householdID,
+            profileID: profileID,
+            caregiverIdentifier: desiredIdentifier,
+            caregiverName: desiredName,
+            context: context,
+            now: now,
+            defaults: defaults
+        )
+    }
+
+    @discardableResult
     static func addHandoffNote(
         householdID: UUID,
         profileID: UUID?,
@@ -397,7 +478,12 @@ enum HouseholdAttentionService {
         guard PersistenceService.familySyncMode(defaults: defaults) == .sharedFamilySync else {
             return nil
         }
-        guard isShareEligible(profileID: profileID, context: context) else { return nil }
+        guard isShareEligible(
+            householdID: householdID,
+            profileID: profileID,
+            sourceKey: sourceKey,
+            context: context
+        ) else { return nil }
         let cleanedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedBody.isEmpty else { return nil }
         let cleanedSourceKey = cleanedOptional(sourceKey)
@@ -459,8 +545,38 @@ enum HouseholdAttentionService {
             && !followUp.isCompleted
     }
 
-    private static func isShareEligible(profileID: UUID?, context: ModelContext) -> Bool {
+    private static func isShareEligible(
+        householdID: UUID,
+        profileID: UUID?,
+        sourceKey: String?,
+        context: ModelContext
+    ) -> Bool {
+        let appointmentPrefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
+        if let sourceKey, sourceKey.hasPrefix(appointmentPrefix) {
+            // Profile-less appointments are legacy/private records. Family Sync's
+            // shared payload intentionally excludes them, so never create local-only
+            // collaboration state that another caregiver cannot receive.
+            guard let followUpID = UUID(uuidString: String(sourceKey.dropFirst(appointmentPrefix.count))) else {
+                return false
+            }
+            let descriptor = FetchDescriptor<AppointmentFollowUp>(
+                predicate: #Predicate { $0.id == followUpID }
+            )
+            guard let followUp = try? context.fetch(descriptor).first,
+                  followUp.householdID == householdID,
+                  let followUpProfileID = followUp.profileID,
+                  followUpProfileID == profileID else {
+                return false
+            }
+        }
         guard let profileID else { return true }
+        return isFamilySharedProfile(profileID, context: context)
+    }
+
+    private static func isFamilySharedProfile(
+        _ profileID: UUID,
+        context: ModelContext
+    ) -> Bool {
         let descriptor = FetchDescriptor<CareProfile>(
             predicate: #Predicate { $0.id == profileID }
         )

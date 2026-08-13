@@ -26,9 +26,11 @@ struct AppointmentDetailView: View {
     @State private var vaccinesGivenDraft = ""
     @State private var medicationsDiscussedDraft = ""
     @State private var followUpToEdit: AppointmentFollowUp?
+    @State private var followUpPendingDeletion: AppointmentFollowUp?
     @State private var showingNewFollowUp = false
     @State private var hasLoadedVisitJournalDrafts = false
     @State private var pendingVisitJournalSave: Task<Void, Never>?
+    @State private var actionErrorMessage: String?
 
     init(appointment: DoctorAppointment) {
         self.appointment = appointment
@@ -89,6 +91,11 @@ struct AppointmentDetailView: View {
 
     private var familySyncEnabled: Bool {
         FamilySyncMode(rawValue: syncModeRawValue) == .sharedFamilySync
+    }
+
+    private var appointmentFamilyCollaborationEnabled: Bool {
+        guard familySyncEnabled, let profileID = appointment.profileID else { return false }
+        return profiles.first(where: { $0.id == profileID })?.sharingScope == .family
     }
 
     private var currentHouseholdID: UUID? { households.first?.id }
@@ -184,24 +191,22 @@ struct AppointmentDetailView: View {
                     ForEach(followUps) { followUp in
                         AppointmentFollowUpRow(
                             followUp: followUp,
-                            claim: profile?.sharingScope == .family
-                                ? claimsBySourceKey[followUp.attentionSourceKey]
-                                : nil,
+                            assignedCaregiverName: assignedCaregiverName(for: followUp),
                             toggleCompleted: {
-                                _ = HouseholdAttentionService.setFollowUpCompleted(
+                                guard HouseholdAttentionService.setFollowUpCompleted(
                                     followUp,
                                     completed: !followUp.isCompleted,
                                     context: modelContext
-                                )
+                                ) else {
+                                    actionErrorMessage = "The follow-up couldn't be updated. Please try again."
+                                    return
+                                }
                             },
                             edit: { followUpToEdit = followUp }
                         )
-                        .swipeActions(edge: .trailing) {
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                _ = HouseholdAttentionService.deleteFollowUp(
-                                    followUp,
-                                    context: modelContext
-                                )
+                                followUpPendingDeletion = followUp
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -360,6 +365,29 @@ struct AppointmentDetailView: View {
         .sheet(item: $followUpToEdit) { followUp in
             followUpEditor(followUp: followUp)
         }
+        .confirmationDialog(
+            "Delete follow-up?",
+            isPresented: Binding(
+                get: { followUpPendingDeletion != nil },
+                set: { if !$0 { followUpPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Follow-up", role: .destructive) {
+                guard let followUp = followUpPendingDeletion else { return }
+                followUpPendingDeletion = nil
+                guard HouseholdAttentionService.deleteFollowUp(
+                    followUp,
+                    context: modelContext
+                ) else {
+                    actionErrorMessage = "The follow-up couldn't be deleted. Please try again."
+                    return
+                }
+            }
+            Button("Cancel", role: .cancel) { followUpPendingDeletion = nil }
+        } message: {
+            Text("This also removes its seen status, assignment, and linked handoff notes.")
+        }
         .sheet(item: $milestoneTemplate) { template in
             NavigationStack {
                 MilestoneEditorView(
@@ -386,6 +414,14 @@ struct AppointmentDetailView: View {
                 }
             ]
         )
+        .alert("Couldn't Complete Action", isPresented: Binding(
+            get: { actionErrorMessage != nil },
+            set: { if !$0 { actionErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionErrorMessage = nil }
+        } message: {
+            Text(actionErrorMessage ?? "Please try again.")
+        }
     }
 
     private var latestGrowth: CareEvent? {
@@ -622,13 +658,25 @@ struct AppointmentDetailView: View {
         guard await HouseholdAttentionService.deleteAppointment(
             appointment,
             context: modelContext
-        ) else { return }
+        ) else {
+            actionErrorMessage = "The appointment couldn't be deleted. Please try again."
+            return
+        }
         dismiss()
     }
 
+    private func assignedCaregiverName(for followUp: AppointmentFollowUp) -> String? {
+        guard appointmentFamilyCollaborationEnabled,
+              let claim = claimsBySourceKey[followUp.attentionSourceKey],
+              let identifier = claim.caregiverIdentifier,
+              !identifier.isEmpty else { return nil }
+        return familyCaregivers.first {
+            $0.householdID == currentHouseholdID && $0.caregiverIdentifier == identifier
+        }?.displayName ?? claim.caregiverName
+    }
+
     private func followUpEditor(followUp: AppointmentFollowUp?) -> some View {
-        let collaborationEnabled = familySyncEnabled
-            && profile?.sharingScope == .family
+        let collaborationEnabled = appointmentFamilyCollaborationEnabled
             && followUp?.isCompleted != true
         let currentClaim = collaborationEnabled
             ? followUp.flatMap { claimsBySourceKey[$0.attentionSourceKey] }
@@ -658,29 +706,26 @@ struct AppointmentDetailView: View {
                         title: title,
                         details: details,
                         dueDate: dueDate,
+                        assignedCaregiverIdentifier: collaborationEnabled
+                            ? assignee?.identifier
+                            : nil,
+                        assignedCaregiverName: collaborationEnabled
+                            ? assignee?.name
+                            : nil,
                         context: modelContext
                     )
                 }
                 guard let savedFollowUp else { return false }
-                if collaborationEnabled {
-                    if let assignee,
-                       assignee.identifier != currentClaim?.caregiverIdentifier {
-                        _ = HouseholdAttentionService.claim(
-                            sourceKey: savedFollowUp.attentionSourceKey,
-                            householdID: householdID,
-                            profileID: savedFollowUp.profileID,
-                            caregiverIdentifier: assignee.identifier,
-                            caregiverName: assignee.name,
-                            context: modelContext
-                        )
-                    } else if currentClaim?.caregiverIdentifier?.isEmpty == false {
-                        _ = HouseholdAttentionService.clearClaim(
-                            sourceKey: savedFollowUp.attentionSourceKey,
-                            householdID: householdID,
-                            profileID: savedFollowUp.profileID,
-                            context: modelContext
-                        )
-                    }
+                if collaborationEnabled, followUp != nil {
+                    guard HouseholdAttentionService.setClaimIfNeeded(
+                        sourceKey: savedFollowUp.attentionSourceKey,
+                        householdID: householdID,
+                        profileID: savedFollowUp.profileID,
+                        currentClaim: currentClaim,
+                        caregiverIdentifier: assignee?.identifier,
+                        caregiverName: assignee?.name,
+                        context: modelContext
+                    ) else { return false }
                 }
                 return true
             }
@@ -695,7 +740,7 @@ private struct AppointmentFollowUpAssignee {
 
 private struct AppointmentFollowUpRow: View {
     let followUp: AppointmentFollowUp
-    let claim: HouseholdAttentionClaim?
+    let assignedCaregiverName: String?
     let toggleCompleted: () -> Void
     let edit: () -> Void
 
@@ -728,7 +773,7 @@ private struct AppointmentFollowUpRow: View {
                                 systemImage: "calendar"
                             )
                         }
-                        if let name = claim?.caregiverName, !name.isEmpty {
+                        if let name = assignedCaregiverName, !name.isEmpty {
                             Label(name, systemImage: "person.fill")
                         }
                     }
@@ -758,6 +803,7 @@ private struct AppointmentFollowUpEditorView: View {
     @State private var hasDueDate: Bool
     @State private var dueDate: Date
     @State private var assigneeIdentifier: String
+    @State private var showingSaveError = false
 
     init(
         followUp: AppointmentFollowUp?,
@@ -831,10 +877,17 @@ private struct AppointmentFollowUpEditorView: View {
                         assignee
                     ) {
                         dismiss()
+                    } else {
+                        showingSaveError = true
                     }
                 }
                 .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+        }
+        .alert("Couldn't Save Follow-up", isPresented: $showingSaveError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Your changes weren't saved. Please try again.")
         }
     }
 

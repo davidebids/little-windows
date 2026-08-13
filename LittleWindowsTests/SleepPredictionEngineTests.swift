@@ -8535,8 +8535,18 @@ final class SleepPredictionEngineTests: XCTestCase {
             title: "Schedule lab visit",
             updatedAt: sourceUpdatedAt
         )
+        let unscopedAppointment = DoctorAppointment(title: "Legacy private appointment")
+        let unscopedFollowUp = AppointmentFollowUp(
+            appointmentID: unscopedAppointment.id,
+            householdID: household.id,
+            profileID: nil,
+            title: "Legacy private follow-up",
+            updatedAt: sourceUpdatedAt
+        )
         context.insert(appointment)
         context.insert(followUp)
+        context.insert(unscopedAppointment)
+        context.insert(unscopedFollowUp)
         try context.save()
         let sourceKey = followUp.attentionSourceKey
         XCTAssertTrue(HouseholdAttentionService.acknowledge(
@@ -8561,6 +8571,22 @@ final class SleepPredictionEngineTests: XCTestCase {
             now: Date(timeIntervalSince1970: 1_200),
             defaults: defaults
         ))
+        let unchangedClaim = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<HouseholdAttentionClaim>()).first
+        )
+        XCTAssertTrue(HouseholdAttentionService.setClaimIfNeeded(
+            sourceKey: sourceKey,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            currentClaim: unchangedClaim,
+            caregiverIdentifier: secondCaregiverID,
+            caregiverName: "Caregiver Two",
+            context: context,
+            now: Date(timeIntervalSince1970: 1_250),
+            defaults: defaults
+        ))
+        XCTAssertEqual(unchangedClaim.caregiverIdentifier, secondCaregiverID)
+        XCTAssertEqual(unchangedClaim.updatedAt, Date(timeIntervalSince1970: 1_200))
         XCTAssertTrue(HouseholdAttentionService.claim(
             sourceKey: sourceKey,
             householdID: household.id,
@@ -8642,6 +8668,56 @@ final class SleepPredictionEngineTests: XCTestCase {
             sourceKey: nil,
             sourceTitle: "Missing source",
             body: "Must not be created",
+            context: context,
+            defaults: defaults
+        ))
+
+        let atomicallyAssignedFollowUp = try XCTUnwrap(HouseholdAttentionService.createFollowUp(
+            appointment: appointment,
+            householdID: household.id,
+            title: "Confirm results",
+            details: nil,
+            dueDate: nil,
+            assignedCaregiverIdentifier: secondCaregiverID,
+            assignedCaregiverName: "Caregiver Two",
+            context: context,
+            now: Date(timeIntervalSince1970: 1_450),
+            defaults: defaults
+        ))
+        let assignedClaimID = HouseholdAttentionService.deterministicID(
+            "claim",
+            atomicallyAssignedFollowUp.attentionSourceKey
+        )
+        let assignedClaimDescriptor = FetchDescriptor<HouseholdAttentionClaim>(
+            predicate: #Predicate { $0.id == assignedClaimID }
+        )
+        let assignedClaim = try XCTUnwrap(try context.fetch(assignedClaimDescriptor).first)
+        XCTAssertEqual(assignedClaim.caregiverIdentifier, secondCaregiverID)
+        XCTAssertEqual(assignedClaim.updatedAt, Date(timeIntervalSince1970: 1_450))
+
+        XCTAssertFalse(HouseholdAttentionService.acknowledge(
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceUpdatedAt: sourceUpdatedAt,
+            householdID: household.id,
+            profileID: nil,
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertFalse(HouseholdAttentionService.claim(
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            householdID: household.id,
+            profileID: nil,
+            caregiverIdentifier: currentCaregiverID,
+            caregiverName: "Caregiver One",
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertNil(HouseholdAttentionService.addHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceTitle: unscopedFollowUp.title,
+            body: "Must remain private.",
             context: context,
             defaults: defaults
         ))
@@ -8764,6 +8840,47 @@ final class SleepPredictionEngineTests: XCTestCase {
             createdAt: now.addingTimeInterval(-30),
             updatedAt: now.addingTimeInterval(-30)
         )
+        let olderNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: sharedFollowUp.title,
+            body: "Older shared note.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-300),
+            updatedAt: now.addingTimeInterval(-300)
+        )
+        let oldestNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: sharedFollowUp.title,
+            body: "Oldest shared note.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-400),
+            updatedAt: now.addingTimeInterval(-400)
+        )
+        let unscopedFollowUp = AppointmentFollowUp(
+            appointmentID: UUID(),
+            householdID: household.id,
+            profileID: nil,
+            title: "Legacy private follow-up",
+            dueDate: now,
+            updatedAt: now.addingTimeInterval(-20)
+        )
+        let unscopedNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: unscopedFollowUp.title,
+            body: "Must not enter the shared handoff.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-10),
+            updatedAt: now.addingTimeInterval(-10)
+        )
         let identities = [
             FamilyCaregiverIdentity(
                 id: UUID(),
@@ -8803,10 +8920,22 @@ final class SleepPredictionEngineTests: XCTestCase {
             returnPackages: [],
             reminders: [],
             profiles: [sharedProfile, privateProfile],
-            appointmentFollowUps: [sharedFollowUp, privateFollowUp, completedSharedFollowUp],
+            appointmentFollowUps: [
+                sharedFollowUp,
+                privateFollowUp,
+                completedSharedFollowUp,
+                unscopedFollowUp
+            ],
             acknowledgements: [acknowledgement, thirdCaregiverAcknowledgement],
             claims: [claim],
-            handoffNotes: [note, privateNote, currentCaregiverNote],
+            handoffNotes: [
+                note,
+                privateNote,
+                currentCaregiverNote,
+                olderNote,
+                oldestNote,
+                unscopedNote
+            ],
             familyCaregiverIdentities: identities,
             currentCaregiverIdentifier: currentCaregiverID,
             familySyncEnabled: true,
@@ -8833,6 +8962,11 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(privateItem.acknowledgedByNames.isEmpty)
         XCTAssertNil(privateItem.claimedCaregiverIdentifier)
 
+        let unscopedItem = try XCTUnwrap(summary.allAttentionItems.first {
+            $0.followUpID == unscopedFollowUp.id
+        })
+        XCTAssertFalse(unscopedItem.isFamilyShared)
+
         let handoff = try XCTUnwrap(summary.handoff)
         XCTAssertEqual(handoff.activityCount, 5)
         XCTAssertEqual(handoff.newNoteCount, 1)
@@ -8841,8 +8975,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertFalse(handoff.recentActivities.contains { $0.text.contains("Old Third Name") })
         XCTAssertEqual(
             handoff.recentNotes.map(\.body),
-            ["I will make the call.", "The clinic asked us to call tomorrow."]
+            ["I will make the call.", "The clinic asked us to call tomorrow.", "Older shared note."]
         )
+        XCTAssertEqual(handoff.notes.count, 4)
+        XCTAssertFalse(handoff.notes.contains { $0.body == "Must not enter the shared handoff." })
         XCTAssertEqual(handoff.needsAcknowledgementItemID, sharedItem.id)
         XCTAssertEqual(handoff.nextUpItemID, sharedItem.id)
         XCTAssertEqual(handoff.latestObservedActivityAt, now.addingTimeInterval(-50))

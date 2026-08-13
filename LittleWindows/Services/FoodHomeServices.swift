@@ -1629,14 +1629,18 @@ struct TodayCaregiverHandoffSummary: Equatable {
     var activityCount: Int
     var newNoteCount: Int
     var recentActivities: [TodayHandoffActivitySummary]
-    var recentNotes: [TodayHandoffNoteSummary]
+    var notes: [TodayHandoffNoteSummary]
     var needsAcknowledgementItemID: String?
     var nextUpItemID: String?
     var latestObservedActivityAt: Date?
 
+    var recentNotes: [TodayHandoffNoteSummary] {
+        Array(notes.prefix(3))
+    }
+
     var isEmpty: Bool {
         activityCount == 0
-            && recentNotes.isEmpty
+            && notes.isEmpty
             && needsAcknowledgementItemID == nil
             && nextUpItemID == nil
     }
@@ -2110,7 +2114,7 @@ enum TodayHomeSummaryService {
             guard familySyncEnabled, let sourceKey = item.sourceKey else { return result }
             let isShared = item.profileID.map {
                 profilesByID[$0]?.sharingScope == .family
-            } ?? true
+            } ?? (item.category != .appointments)
             guard isShared else { return result }
             result.isFamilyShared = true
             let sourceUpdatedAt = item.sourceUpdatedAt ?? .distantPast
@@ -2150,22 +2154,33 @@ enum TodayHomeSummaryService {
         currentCaregiverIdentifier: String,
         checkpoint: Date
     ) -> TodayCaregiverHandoffSummary {
+        let appointmentFollowUpPrefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
+        let sharedFollowUpSourceKeys: Set<String> = Set(followUps.compactMap { followUp in
+            guard followUp.profileID.map(sharedProfileIDs.contains) == true else { return nil }
+            return followUp.attentionSourceKey
+        })
+        let isSharedInteraction: (UUID?, String?) -> Bool = { profileID, sourceKey in
+            if let sourceKey, sourceKey.hasPrefix(appointmentFollowUpPrefix) {
+                return sharedFollowUpSourceKeys.contains(sourceKey)
+            }
+            return profileID.map(sharedProfileIDs.contains) ?? true
+        }
         let sharedNotes = notes.filter {
-            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+            isSharedInteraction($0.profileID, $0.sourceKey)
         }
         let sharedOtherNotes = sharedNotes.filter {
             $0.authorCaregiverIdentifier != currentCaregiverIdentifier
         }
         let sharedOtherAcknowledgements = acknowledgements.filter {
-            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+            isSharedInteraction($0.profileID, $0.sourceKey)
                 && $0.caregiverIdentifier != currentCaregiverIdentifier
         }
         let sharedOtherClaims = claims.filter {
-            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+            isSharedInteraction($0.profileID, $0.sourceKey)
                 && $0.updatedByCaregiverIdentifier != currentCaregiverIdentifier
         }
         let sharedOtherCompletions = followUps.filter {
-            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+            $0.profileID.map(sharedProfileIDs.contains) == true
                 && $0.completedByCaregiverIdentifier.map {
                     !$0.isEmpty && $0 != currentCaregiverIdentifier
                 } == true
@@ -2244,10 +2259,11 @@ enum TodayHomeSummaryService {
                 + completedFollowUps.count,
             newNoteCount: newNotes.count,
             recentActivities: Array(recentActivities.prefix(4)),
-            recentNotes: recentNotes.prefix(3).map {
+            notes: recentNotes.map {
                 TodayHandoffNoteSummary(
                     id: $0.id,
-                    authorName: $0.authorCaregiverName,
+                    authorName: caregiverNamesByIdentifier[$0.authorCaregiverIdentifier]
+                        ?? $0.authorCaregiverName,
                     body: $0.body,
                     sourceTitle: $0.sourceTitleSnapshot,
                     createdAt: $0.createdAt
