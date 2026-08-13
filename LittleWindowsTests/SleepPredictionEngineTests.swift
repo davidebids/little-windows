@@ -1652,10 +1652,48 @@ final class SleepPredictionEngineTests: XCTestCase {
             date: Date(),
             category: .social
         ))
-        context.insert(DoctorAppointment(
+        let appointment = DoctorAppointment(
             profileID: testChild.id,
             title: "Checkup",
             startDate: Date()
+        )
+        let household = Household(name: "Test Home")
+        let followUp = AppointmentFollowUp(
+            appointmentID: appointment.id,
+            householdID: household.id,
+            profileID: testChild.id,
+            title: "Schedule follow-up"
+        )
+        context.insert(household)
+        context.insert(appointment)
+        context.insert(followUp)
+        context.insert(HouseholdAttentionAcknowledgement(
+            id: UUID(),
+            householdID: household.id,
+            profileID: testChild.id,
+            sourceKey: followUp.attentionSourceKey,
+            sourceUpdatedAt: followUp.updatedAt,
+            caregiverIdentifier: UUID().uuidString,
+            caregiverName: "Caregiver"
+        ))
+        context.insert(HouseholdAttentionClaim(
+            id: UUID(),
+            householdID: household.id,
+            profileID: testChild.id,
+            sourceKey: followUp.attentionSourceKey,
+            caregiverIdentifier: UUID().uuidString,
+            caregiverName: "Caregiver",
+            updatedByCaregiverIdentifier: UUID().uuidString,
+            updatedByCaregiverName: "Caregiver"
+        ))
+        context.insert(CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: testChild.id,
+            sourceKey: followUp.attentionSourceKey,
+            sourceTitleSnapshot: followUp.title,
+            body: "Follow up tomorrow.",
+            authorCaregiverIdentifier: UUID().uuidString,
+            authorCaregiverName: "Caregiver"
         ))
         context.insert(AgeGuideReadState(profileID: testChild.id, guideID: "month-1"))
         context.insert(PuppyStageGuideReadState(profileID: testChild.id, guideID: "puppy-1"))
@@ -1695,6 +1733,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         let predictions = try context.fetch(FetchDescriptor<SleepPredictionRecord>())
         let milestones = try context.fetch(FetchDescriptor<MilestoneEntry>())
         let appointments = try context.fetch(FetchDescriptor<DoctorAppointment>())
+        let appointmentFollowUps = try context.fetch(FetchDescriptor<AppointmentFollowUp>())
+        let attentionAcknowledgements = try context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>())
+        let attentionClaims = try context.fetch(FetchDescriptor<HouseholdAttentionClaim>())
+        let handoffNotes = try context.fetch(FetchDescriptor<CaregiverHandoffNote>())
         let ageGuideStates = try context.fetch(FetchDescriptor<AgeGuideReadState>())
         let puppyGuideStates = try context.fetch(FetchDescriptor<PuppyStageGuideReadState>())
         let solidsProfileStates = try context.fetch(FetchDescriptor<SolidsProfileState>())
@@ -1708,6 +1750,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(predictions.isEmpty)
         XCTAssertTrue(milestones.isEmpty)
         XCTAssertTrue(appointments.isEmpty)
+        XCTAssertTrue(appointmentFollowUps.isEmpty)
+        XCTAssertTrue(attentionAcknowledgements.isEmpty)
+        XCTAssertTrue(attentionClaims.isEmpty)
+        XCTAssertTrue(handoffNotes.isEmpty)
         XCTAssertTrue(ageGuideStates.isEmpty)
         XCTAssertTrue(puppyGuideStates.isEmpty)
         XCTAssertTrue(solidsProfileStates.isEmpty)
@@ -7133,8 +7179,10 @@ final class SleepPredictionEngineTests: XCTestCase {
         let growthID = UUID()
         let temperatureID = UUID()
 
-        context.insert(CareProfile(name: "Test Child", birthDate: birthDate))
-        context.insert(DoctorAppointment(
+        let profile = CareProfile(name: "Test Child", birthDate: birthDate)
+        let household = Household(name: "Home")
+        let appointment = DoctorAppointment(
+            profileID: profile.id,
             title: "6-month wellness check",
             appointmentType: .wellnessCheck,
             startDate: startDate,
@@ -7148,7 +7196,6 @@ final class SleepPredictionEngineTests: XCTestCase {
             notes: "Bring vaccine card.",
             questionsToAsk: "Ask about sleep stretches.",
             visitSummary: "Everything looked good.",
-            followUpInstructions: "Next visit at 9 months.",
             medicationsDiscussed: "Vitamin D",
             vaccinesGiven: "DTaP",
             growthEntryID: growthID,
@@ -7162,7 +7209,64 @@ final class SleepPredictionEngineTests: XCTestCase {
             lastScheduledAt: startDate.addingTimeInterval(-2 * 24 * 60 * 60),
             isCompleted: true,
             caregiverName: "Caregiver 2"
-        ))
+        )
+        let followUp = AppointmentFollowUp(
+            appointmentID: appointment.id,
+            householdID: household.id,
+            profileID: profile.id,
+            title: "Schedule the next visit",
+            details: "Book the 9-month appointment.",
+            dueDate: startDate.addingTimeInterval(30 * 24 * 60 * 60),
+            createdByCaregiverIdentifier: UUID().uuidString,
+            createdByCaregiverName: "Caregiver 2"
+        )
+        let caregiverIdentifier = UUID().uuidString
+        let acknowledgement = HouseholdAttentionAcknowledgement(
+            id: HouseholdAttentionService.deterministicID(
+                "ack",
+                followUp.attentionSourceKey,
+                caregiverIdentifier
+            ),
+            householdID: household.id,
+            profileID: profile.id,
+            sourceKey: followUp.attentionSourceKey,
+            sourceUpdatedAt: followUp.updatedAt,
+            caregiverIdentifier: caregiverIdentifier,
+            caregiverName: "Caregiver 2"
+        )
+        let claim = HouseholdAttentionClaim(
+            id: HouseholdAttentionService.deterministicID("claim", followUp.attentionSourceKey),
+            householdID: household.id,
+            profileID: profile.id,
+            sourceKey: followUp.attentionSourceKey,
+            caregiverIdentifier: caregiverIdentifier,
+            caregiverName: "Caregiver 2",
+            updatedByCaregiverIdentifier: caregiverIdentifier,
+            updatedByCaregiverName: "Caregiver 2"
+        )
+        let handoffNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: profile.id,
+            sourceKey: followUp.attentionSourceKey,
+            sourceTitleSnapshot: followUp.title,
+            body: "The next visit can be booked online.",
+            authorCaregiverIdentifier: caregiverIdentifier,
+            authorCaregiverName: "Caregiver 2"
+        )
+        let caregiverIdentity = FamilyCaregiverIdentity(
+            id: try XCTUnwrap(UUID(uuidString: caregiverIdentifier)),
+            householdID: household.id,
+            caregiverIdentifier: caregiverIdentifier,
+            displayName: "Caregiver 2"
+        )
+        context.insert(profile)
+        context.insert(household)
+        context.insert(appointment)
+        context.insert(followUp)
+        context.insert(acknowledgement)
+        context.insert(claim)
+        context.insert(handoffNote)
+        context.insert(caregiverIdentity)
         try context.save()
 
         let backup = try DataExportImportService.exportData(context: context)
@@ -7184,7 +7288,6 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(imported.notes, "Bring vaccine card.")
         XCTAssertEqual(imported.questionsToAsk, "Ask about sleep stretches.")
         XCTAssertEqual(imported.visitSummary, "Everything looked good.")
-        XCTAssertEqual(imported.followUpInstructions, "Next visit at 9 months.")
         XCTAssertEqual(imported.medicationsDiscussed, "Vitamin D")
         XCTAssertEqual(imported.vaccinesGiven, "DTaP")
         XCTAssertEqual(imported.growthEntryID, growthID)
@@ -7193,6 +7296,28 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(imported.remindersEnabled)
         XCTAssertTrue(imported.isCompleted)
         XCTAssertEqual(imported.caregiverName, "Caregiver 2")
+        let importedFollowUp = try XCTUnwrap(
+            context.fetch(FetchDescriptor<AppointmentFollowUp>()).first
+        )
+        XCTAssertEqual(importedFollowUp.appointmentID, imported.id)
+        XCTAssertEqual(importedFollowUp.title, "Schedule the next visit")
+        XCTAssertEqual(importedFollowUp.details, "Book the 9-month appointment.")
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>()).first?.caregiverName,
+            "Caregiver 2"
+        )
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<HouseholdAttentionClaim>()).first?.caregiverIdentifier,
+            caregiverIdentifier
+        )
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<CaregiverHandoffNote>()).first?.body,
+            "The next visit can be booked online."
+        )
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<FamilyCaregiverIdentity>()).first?.displayName,
+            "Caregiver 2"
+        )
     }
 
     func testAppointmentQuestionListParsesAndStoresStructuredRows() {
@@ -8277,6 +8402,17 @@ final class SleepPredictionEngineTests: XCTestCase {
             relatedShoppingListID: shoppingList.id,
             dateTime: now.addingTimeInterval(1_800)
         )
+        let snoozeSuite = "TodayHomeSummarySnoozeTests-\(UUID().uuidString)"
+        let snoozeDefaults = try XCTUnwrap(UserDefaults(suiteName: snoozeSuite))
+        defer { snoozeDefaults.removePersistentDomain(forName: snoozeSuite) }
+        let reminderSourceKey = "\(HouseholdAttentionSourceKind.homeReminder.rawValue):\(reminder.id.uuidString.lowercased())"
+        let reminderWakeDate = now.addingTimeInterval(3_600)
+        HouseholdAttentionSnoozeStore.snooze(
+            sourceKey: reminderSourceKey,
+            until: reminderWakeDate,
+            now: now,
+            defaults: snoozeDefaults
+        )
         let ignoredList = HomeTodoList(householdID: otherHousehold.id, name: "Ignore")
         let ignoredItem = HomeTodoItem(
             householdID: otherHousehold.id,
@@ -8301,6 +8437,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             returnItems: [returnItem],
             returnPackages: [returnPackage],
             reminders: [reminder],
+            snoozeDefaults: snoozeDefaults,
             now: now,
             calendar: calendar
         )
@@ -8309,33 +8446,690 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(todos.countLabel, "4 open")
         XCTAssertEqual(todos.items.count, TodayHomeSummaryService.visibleItemLimit)
         XCTAssertEqual(todos.items.first?.title, "Assigned first")
-        XCTAssertEqual(todos.items.first?.route, .todoList(todoList.id))
+        XCTAssertEqual(todos.items.first?.route, .food(.todoList(todoList.id)))
         XCTAssertEqual(todos.remainderText, "+ 1 more task")
         XCTAssertTrue(todos.summary.contains("1 completed today"))
 
         let shopping = try XCTUnwrap(summary.sections.first { $0.category == .shopping })
         XCTAssertEqual(shopping.countLabel, "2 items")
-        XCTAssertEqual(shopping.items.first?.route, .shoppingList(shoppingList.id))
+        XCTAssertEqual(shopping.items.first?.route, .food(.shoppingList(shoppingList.id)))
         XCTAssertEqual(shopping.items.first?.badge, "1 high priority")
 
         let kitchen = try XCTUnwrap(summary.sections.first { $0.category == .kitchen })
-        XCTAssertEqual(kitchen.items.first?.route, .mealPrepItem(lowMealPrep.id))
+        XCTAssertEqual(kitchen.items.first?.route, .food(.mealPrepItem(lowMealPrep.id)))
         XCTAssertTrue(kitchen.summary.contains("1 used today"))
 
         let trips = try XCTUnwrap(summary.sections.first { $0.category == .trips })
-        XCTAssertEqual(trips.items.first?.route, .itineraryItem(trip.id, itinerary.id))
+        XCTAssertEqual(trips.items.first?.route, .food(.itineraryItem(trip.id, itinerary.id)))
         XCTAssertTrue(trips.summary.contains("1 itinerary item today"))
 
         let returns = try XCTUnwrap(summary.sections.first { $0.category == .returns })
         XCTAssertEqual(returns.items.first?.title, "Shoes")
-        XCTAssertEqual(returns.items.first?.route, .returnRequest(returnRequest.id))
+        XCTAssertEqual(returns.items.first?.route, .food(.returnRequest(returnRequest.id)))
         XCTAssertEqual(returns.items.first?.badge, "Overdue")
 
-        XCTAssertTrue(summary.attentionItems.contains { $0.route == .shoppingList(shoppingList.id) })
-        XCTAssertTrue(summary.attentionItems.contains { $0.route == .mealPrepItem(lowMealPrep.id) })
-        XCTAssertTrue(summary.attentionItems.contains { $0.route == .packingList(trip.id) })
-        XCTAssertTrue(summary.attentionItems.contains { $0.route == .returnRequest(returnRequest.id) })
+        XCTAssertFalse(summary.attentionItems.contains { $0.route == .food(.shoppingList(shoppingList.id)) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .food(.mealPrepItem(lowMealPrep.id)) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .food(.packingList(trip.id)) })
+        XCTAssertTrue(summary.attentionItems.contains { $0.route == .food(.returnRequest(returnRequest.id)) })
+        XCTAssertTrue(summary.allAttentionItems.allSatisfy {
+            $0.sourceKey != nil && $0.sourceLabel != nil && $0.dueLabel != nil
+        })
+        XCTAssertFalse(summary.allAttentionItems.contains { $0.sourceKey == reminderSourceKey })
+        let snoozedReminder = try XCTUnwrap(summary.snoozedAttentionItems.first {
+            $0.item.sourceKey == reminderSourceKey
+        })
+        XCTAssertEqual(snoozedReminder.until, reminderWakeDate)
         XCTAssertFalse(summary.sections.flatMap(\.items).contains { $0.title == "Other household" })
+    }
+
+    @MainActor
+    func testHouseholdAttentionAcknowledgementAndSingleCaregiverClaimAreIndependent() throws {
+        let suiteName = "HouseholdAttentionTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        PersistenceService.setFamilySyncMode(.sharedFamilySync, defaults: defaults)
+
+        let currentCaregiverID = UUID().uuidString
+        let secondCaregiverID = UUID().uuidString
+        let thirdCaregiverID = UUID().uuidString
+        defaults.set(currentCaregiverID, forKey: CaregiverIdentityService.stableCaregiverIdentifierKey)
+        defaults.set("Caregiver One", forKey: CaregiverIdentityService.currentCaregiverNameKey)
+
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Test Home")
+        let sharedProfile = CareProfile(name: "Sample Child", sharingScope: .family)
+        let privateProfile = CareProfile(name: "Sibling")
+        context.insert(household)
+        context.insert(sharedProfile)
+        context.insert(privateProfile)
+        try context.save()
+
+        let registeredCaregiver = try XCTUnwrap(
+            HouseholdAttentionService.registerCurrentFamilyCaregiver(
+                householdID: household.id,
+                context: context,
+                now: Date(timeIntervalSince1970: 900),
+                defaults: defaults
+            )
+        )
+        _ = HouseholdAttentionService.registerCurrentFamilyCaregiver(
+            householdID: household.id,
+            context: context,
+            now: Date(timeIntervalSince1970: 950),
+            defaults: defaults
+        )
+        XCTAssertEqual(registeredCaregiver.lastSeenAt, Date(timeIntervalSince1970: 950))
+        XCTAssertEqual(registeredCaregiver.updatedAt, Date(timeIntervalSince1970: 950))
+
+        let sourceUpdatedAt = Date(timeIntervalSince1970: 1_000)
+        let appointment = DoctorAppointment(
+            profileID: sharedProfile.id,
+            title: "Follow-up source"
+        )
+        let followUp = AppointmentFollowUp(
+            appointmentID: appointment.id,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            title: "Schedule lab visit",
+            updatedAt: sourceUpdatedAt
+        )
+        let unscopedAppointment = DoctorAppointment(title: "Legacy private appointment")
+        let unscopedFollowUp = AppointmentFollowUp(
+            appointmentID: unscopedAppointment.id,
+            householdID: household.id,
+            profileID: nil,
+            title: "Legacy private follow-up",
+            updatedAt: sourceUpdatedAt
+        )
+        context.insert(appointment)
+        context.insert(followUp)
+        context.insert(unscopedAppointment)
+        context.insert(unscopedFollowUp)
+        try context.save()
+        let sourceKey = followUp.attentionSourceKey
+        XCTAssertTrue(HouseholdAttentionService.acknowledge(
+            sourceKey: sourceKey,
+            sourceUpdatedAt: sourceUpdatedAt,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            context: context,
+            now: Date(timeIntervalSince1970: 1_100),
+            defaults: defaults
+        ))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>()).count, 1)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<HouseholdAttentionClaim>()).isEmpty)
+
+        XCTAssertTrue(HouseholdAttentionService.claim(
+            sourceKey: sourceKey,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            caregiverIdentifier: secondCaregiverID,
+            caregiverName: "Caregiver Two",
+            context: context,
+            now: Date(timeIntervalSince1970: 1_200),
+            defaults: defaults
+        ))
+        let unchangedClaim = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<HouseholdAttentionClaim>()).first
+        )
+        XCTAssertTrue(HouseholdAttentionService.setClaimIfNeeded(
+            sourceKey: sourceKey,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            currentClaim: unchangedClaim,
+            caregiverIdentifier: secondCaregiverID,
+            caregiverName: "Caregiver Two",
+            context: context,
+            now: Date(timeIntervalSince1970: 1_250),
+            defaults: defaults
+        ))
+        XCTAssertEqual(unchangedClaim.caregiverIdentifier, secondCaregiverID)
+        XCTAssertEqual(unchangedClaim.updatedAt, Date(timeIntervalSince1970: 1_200))
+        XCTAssertTrue(HouseholdAttentionService.claim(
+            sourceKey: sourceKey,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            caregiverIdentifier: thirdCaregiverID,
+            caregiverName: "Caregiver Three",
+            context: context,
+            now: Date(timeIntervalSince1970: 1_300),
+            defaults: defaults
+        ))
+        let claims = try context.fetch(FetchDescriptor<HouseholdAttentionClaim>())
+        XCTAssertEqual(claims.count, 1)
+        XCTAssertEqual(claims.first?.caregiverIdentifier, thirdCaregiverID)
+        XCTAssertEqual(claims.first?.caregiverName, "Caregiver Three")
+
+        XCTAssertTrue(HouseholdAttentionService.updateFollowUp(
+            followUp,
+            title: followUp.title,
+            details: followUp.details,
+            dueDate: followUp.dueDate,
+            context: context,
+            now: Date(timeIntervalSince1970: 1_350)
+        ))
+        XCTAssertEqual(followUp.updatedAt, sourceUpdatedAt)
+
+        XCTAssertFalse(HouseholdAttentionService.claim(
+            sourceKey: "routine:\(UUID().uuidString.lowercased())",
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            caregiverIdentifier: currentCaregiverID,
+            caregiverName: "Caregiver One",
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<HouseholdAttentionClaim>()).count, 1)
+
+        XCTAssertTrue(HouseholdAttentionService.setFollowUpCompleted(
+            followUp,
+            completed: true,
+            context: context,
+            now: Date(timeIntervalSince1970: 1_400),
+            defaults: defaults
+        ))
+        XCTAssertFalse(HouseholdAttentionService.claim(
+            sourceKey: sourceKey,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            caregiverIdentifier: currentCaregiverID,
+            caregiverName: "Caregiver One",
+            context: context,
+            defaults: defaults
+        ))
+
+        XCTAssertFalse(HouseholdAttentionService.acknowledge(
+            sourceKey: "private:\(UUID().uuidString)",
+            sourceUpdatedAt: sourceUpdatedAt,
+            householdID: household.id,
+            profileID: privateProfile.id,
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>()).count, 1)
+
+        let generalNote = try XCTUnwrap(HouseholdAttentionService.addHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: nil,
+            sourceTitle: nil,
+            body: "  Please check the packed bag.  ",
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertNil(generalNote.profileID)
+        XCTAssertNil(generalNote.sourceKey)
+        XCTAssertEqual(generalNote.body, "Please check the packed bag.")
+        XCTAssertNil(HouseholdAttentionService.addHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: nil,
+            sourceTitle: "Missing source",
+            body: "Must not be created",
+            context: context,
+            defaults: defaults
+        ))
+
+        let atomicallyAssignedFollowUp = try XCTUnwrap(HouseholdAttentionService.createFollowUp(
+            appointment: appointment,
+            householdID: household.id,
+            title: "Confirm results",
+            details: nil,
+            dueDate: nil,
+            assignedCaregiverIdentifier: secondCaregiverID,
+            assignedCaregiverName: "Caregiver Two",
+            context: context,
+            now: Date(timeIntervalSince1970: 1_450),
+            defaults: defaults
+        ))
+        let assignedClaimID = HouseholdAttentionService.deterministicID(
+            "claim",
+            atomicallyAssignedFollowUp.attentionSourceKey
+        )
+        let assignedClaimDescriptor = FetchDescriptor<HouseholdAttentionClaim>(
+            predicate: #Predicate { $0.id == assignedClaimID }
+        )
+        let assignedClaim = try XCTUnwrap(try context.fetch(assignedClaimDescriptor).first)
+        XCTAssertEqual(assignedClaim.caregiverIdentifier, secondCaregiverID)
+        XCTAssertEqual(assignedClaim.updatedAt, Date(timeIntervalSince1970: 1_450))
+
+        XCTAssertFalse(HouseholdAttentionService.acknowledge(
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceUpdatedAt: sourceUpdatedAt,
+            householdID: household.id,
+            profileID: nil,
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertFalse(HouseholdAttentionService.claim(
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            householdID: household.id,
+            profileID: nil,
+            caregiverIdentifier: currentCaregiverID,
+            caregiverName: "Caregiver One",
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertNil(HouseholdAttentionService.addHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceTitle: unscopedFollowUp.title,
+            body: "Must remain private.",
+            context: context,
+            defaults: defaults
+        ))
+
+        PersistenceService.setFamilySyncMode(.privateICloudSync, defaults: defaults)
+        XCTAssertNil(HouseholdAttentionService.addHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: nil,
+            sourceTitle: nil,
+            body: "Must not be created",
+            context: context,
+            defaults: defaults
+        ))
+    }
+
+    @MainActor
+    func testTodayNeedsAttentionShowsSharedCoordinationAndFamilyHandoff() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let household = Household(name: "Test Home")
+        let currentCaregiverID = UUID().uuidString
+        let otherCaregiverID = UUID().uuidString
+        let sharedProfile = CareProfile(name: "Sample Child", sharingScope: .family)
+        let privateProfile = CareProfile(name: "Sibling")
+        let appointmentID = UUID()
+        let sharedFollowUp = AppointmentFollowUp(
+            appointmentID: appointmentID,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            title: "Schedule lab visit",
+            dueDate: now.addingTimeInterval(-300),
+            createdAt: now.addingTimeInterval(-900),
+            updatedAt: now.addingTimeInterval(-600)
+        )
+        let privateFollowUp = AppointmentFollowUp(
+            appointmentID: UUID(),
+            householdID: household.id,
+            profileID: privateProfile.id,
+            title: "Private follow-up",
+            dueDate: now.addingTimeInterval(600),
+            createdAt: now.addingTimeInterval(-900),
+            updatedAt: now.addingTimeInterval(-600)
+        )
+        let completedSharedFollowUp = AppointmentFollowUp(
+            appointmentID: appointmentID,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            title: "Completed shared follow-up",
+            completedAt: now.addingTimeInterval(-50),
+            completedByCaregiverIdentifier: otherCaregiverID,
+            completedByCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-900),
+            updatedAt: now.addingTimeInterval(-50)
+        )
+        let acknowledgement = HouseholdAttentionAcknowledgement(
+            id: UUID(),
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceUpdatedAt: sharedFollowUp.updatedAt,
+            caregiverIdentifier: otherCaregiverID,
+            caregiverName: "Old Name",
+            acknowledgedAt: now.addingTimeInterval(-100),
+            updatedAt: now.addingTimeInterval(-100)
+        )
+        let thirdCaregiverID = UUID().uuidString
+        let thirdCaregiverAcknowledgement = HouseholdAttentionAcknowledgement(
+            id: UUID(),
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceUpdatedAt: sharedFollowUp.updatedAt,
+            caregiverIdentifier: thirdCaregiverID,
+            caregiverName: "Old Third Name",
+            acknowledgedAt: now.addingTimeInterval(-80),
+            updatedAt: now.addingTimeInterval(-80)
+        )
+        let claim = HouseholdAttentionClaim(
+            id: UUID(),
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            caregiverIdentifier: currentCaregiverID,
+            caregiverName: "Caregiver One",
+            updatedByCaregiverIdentifier: otherCaregiverID,
+            updatedByCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-90),
+            updatedAt: now.addingTimeInterval(-90)
+        )
+        let note = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: sharedFollowUp.title,
+            body: "The clinic asked us to call tomorrow.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-60),
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let privateNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: privateProfile.id,
+            sourceKey: privateFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: privateFollowUp.title,
+            body: "This must remain private.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-40),
+            updatedAt: now.addingTimeInterval(-40)
+        )
+        let currentCaregiverNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: sharedFollowUp.title,
+            body: "I will make the call.",
+            authorCaregiverIdentifier: currentCaregiverID,
+            authorCaregiverName: "Caregiver One",
+            createdAt: now.addingTimeInterval(-30),
+            updatedAt: now.addingTimeInterval(-30)
+        )
+        let olderNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: sharedFollowUp.title,
+            body: "Older shared note.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-300),
+            updatedAt: now.addingTimeInterval(-300)
+        )
+        let oldestNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: completedSharedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: completedSharedFollowUp.title,
+            body: "Oldest shared note.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-400),
+            updatedAt: now.addingTimeInterval(-400)
+        )
+        let missingSourceNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: "\(HouseholdAttentionSourceKind.trip.rawValue):\(UUID().uuidString.lowercased())",
+            sourceTitleSnapshot: "Deleted trip",
+            body: "Keep historical context without a dead link.",
+            authorCaregiverIdentifier: currentCaregiverID,
+            authorCaregiverName: "Caregiver One",
+            createdAt: now.addingTimeInterval(-500),
+            updatedAt: now.addingTimeInterval(-500)
+        )
+        let unscopedFollowUp = AppointmentFollowUp(
+            appointmentID: UUID(),
+            householdID: household.id,
+            profileID: nil,
+            title: "Legacy private follow-up",
+            dueDate: now,
+            updatedAt: now.addingTimeInterval(-20)
+        )
+        let unscopedNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: unscopedFollowUp.title,
+            body: "Must not enter the shared handoff.",
+            authorCaregiverIdentifier: otherCaregiverID,
+            authorCaregiverName: "Caregiver Two",
+            createdAt: now.addingTimeInterval(-10),
+            updatedAt: now.addingTimeInterval(-10)
+        )
+        let identities = [
+            FamilyCaregiverIdentity(
+                id: UUID(),
+                householdID: household.id,
+                caregiverIdentifier: currentCaregiverID,
+                displayName: "Caregiver One"
+            ),
+            FamilyCaregiverIdentity(
+                id: UUID(),
+                householdID: household.id,
+                caregiverIdentifier: otherCaregiverID,
+                displayName: "Caregiver Two"
+            ),
+            FamilyCaregiverIdentity(
+                id: UUID(),
+                householdID: household.id,
+                caregiverIdentifier: thirdCaregiverID,
+                displayName: "Caregiver Three"
+            )
+        ]
+
+        let summary = TodayHomeSummaryService.summary(
+            householdID: household.id,
+            currentCaregiverName: "Caregiver One",
+            todoLists: [],
+            todoItems: [],
+            shoppingLists: [],
+            shoppingItems: [],
+            inventoryItems: [],
+            mealPrepItems: [],
+            mealPrepUsages: [],
+            packingTrips: [],
+            packingItems: [],
+            itineraryItems: [],
+            returnRequests: [],
+            returnItems: [],
+            returnPackages: [],
+            reminders: [],
+            profiles: [sharedProfile, privateProfile],
+            appointmentFollowUps: [
+                sharedFollowUp,
+                privateFollowUp,
+                completedSharedFollowUp,
+                unscopedFollowUp
+            ],
+            acknowledgements: [acknowledgement, thirdCaregiverAcknowledgement],
+            claims: [claim],
+            handoffNotes: [
+                note,
+                privateNote,
+                currentCaregiverNote,
+                olderNote,
+                oldestNote,
+                missingSourceNote,
+                unscopedNote
+            ],
+            familyCaregiverIdentities: identities,
+            currentCaregiverIdentifier: currentCaregiverID,
+            familySyncEnabled: true,
+            handoffCheckpoint: now.addingTimeInterval(-120),
+            now: now
+        )
+
+        let sharedItem = try XCTUnwrap(summary.allAttentionItems.first {
+            $0.followUpID == sharedFollowUp.id
+        })
+        XCTAssertTrue(sharedItem.isFamilyShared)
+        XCTAssertEqual(sharedItem.sourceLabel, "Appointment")
+        XCTAssertTrue(sharedItem.dueLabel?.hasPrefix("Overdue") == true)
+        XCTAssertTrue(sharedItem.supportsClaim)
+        XCTAssertEqual(sharedItem.acknowledgedByNames, ["Caregiver Three", "Caregiver Two"])
+        XCTAssertFalse(sharedItem.currentCaregiverHasAcknowledged)
+        XCTAssertEqual(sharedItem.claimedCaregiverIdentifier, currentCaregiverID)
+        XCTAssertEqual(sharedItem.claimedCaregiverName, "Caregiver One")
+
+        let privateItem = try XCTUnwrap(summary.allAttentionItems.first {
+            $0.followUpID == privateFollowUp.id
+        })
+        XCTAssertFalse(privateItem.isFamilyShared)
+        XCTAssertTrue(privateItem.acknowledgedByNames.isEmpty)
+        XCTAssertNil(privateItem.claimedCaregiverIdentifier)
+
+        let unscopedItem = try XCTUnwrap(summary.allAttentionItems.first {
+            $0.followUpID == unscopedFollowUp.id
+        })
+        XCTAssertFalse(unscopedItem.isFamilyShared)
+
+        let handoff = try XCTUnwrap(summary.handoff)
+        XCTAssertEqual(handoff.activityCount, 5)
+        XCTAssertEqual(handoff.newNoteCount, 1)
+        XCTAssertEqual(handoff.recentActivities.count, 4)
+        XCTAssertTrue(handoff.recentActivities.contains { $0.text.hasPrefix("Caregiver Three saw") })
+        XCTAssertFalse(handoff.recentActivities.contains { $0.text.contains("Old Third Name") })
+        XCTAssertEqual(
+            handoff.recentNotes.map(\.body),
+            ["I will make the call.", "The clinic asked us to call tomorrow.", "Older shared note."]
+        )
+        XCTAssertEqual(handoff.notes.count, 5)
+        XCTAssertFalse(handoff.notes.contains { $0.body == "Must not enter the shared handoff." })
+        XCTAssertEqual(
+            handoff.notes.first { $0.id == note.id }?.sourceRoute,
+            .appointment(appointmentID, profileID: sharedProfile.id)
+        )
+        XCTAssertEqual(
+            handoff.notes.first { $0.id == oldestNote.id }?.sourceRoute,
+            .appointment(appointmentID, profileID: sharedProfile.id)
+        )
+        XCTAssertNil(handoff.notes.first { $0.id == missingSourceNote.id }?.sourceRoute)
+        XCTAssertEqual(handoff.needsAcknowledgementItemID, sharedItem.id)
+        XCTAssertEqual(handoff.nextUpItemID, sharedItem.id)
+        XCTAssertEqual(handoff.latestObservedActivityAt, now.addingTimeInterval(-50))
+    }
+
+    func testHouseholdAttentionSnoozeIsPersonalToItsDefaultsStore() throws {
+        let firstSuite = "HouseholdAttentionSnoozeTests-1-\(UUID().uuidString)"
+        let secondSuite = "HouseholdAttentionSnoozeTests-2-\(UUID().uuidString)"
+        let firstDefaults = try XCTUnwrap(UserDefaults(suiteName: firstSuite))
+        let secondDefaults = try XCTUnwrap(UserDefaults(suiteName: secondSuite))
+        defer {
+            firstDefaults.removePersistentDomain(forName: firstSuite)
+            secondDefaults.removePersistentDomain(forName: secondSuite)
+        }
+        let now = Date(timeIntervalSince1970: 2_000)
+        HouseholdAttentionSnoozeStore.snooze(
+            sourceKey: "routine:test",
+            until: now.addingTimeInterval(900),
+            now: now,
+            defaults: firstDefaults
+        )
+
+        XCTAssertTrue(HouseholdAttentionSnoozeStore.isSnoozed(
+            sourceKey: "routine:test",
+            now: now,
+            defaults: firstDefaults
+        ))
+        XCTAssertEqual(
+            HouseholdAttentionSnoozeStore.activeSnoozes(now: now, defaults: firstDefaults)["routine:test"],
+            now.addingTimeInterval(900)
+        )
+        XCTAssertFalse(HouseholdAttentionSnoozeStore.isSnoozed(
+            sourceKey: "routine:test",
+            now: now,
+            defaults: secondDefaults
+        ))
+        HouseholdAttentionSnoozeStore.clear(sourceKey: "routine:test", defaults: firstDefaults)
+        XCTAssertFalse(HouseholdAttentionSnoozeStore.isSnoozed(
+            sourceKey: "routine:test",
+            now: now,
+            defaults: firstDefaults
+        ))
+    }
+
+    func testCaregiverHandoffCheckpointOnlyMovesForward() throws {
+        let suiteName = "CaregiverHandoffCheckpointTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let caregiverIdentifier = UUID().uuidString
+        let later = Date(timeIntervalSince1970: 3_000)
+        let earlier = Date(timeIntervalSince1970: 2_000)
+
+        CaregiverHandoffCheckpointStore.markReviewed(
+            caregiverIdentifier: caregiverIdentifier,
+            at: later,
+            defaults: defaults
+        )
+        CaregiverHandoffCheckpointStore.markReviewed(
+            caregiverIdentifier: caregiverIdentifier,
+            at: earlier,
+            defaults: defaults
+        )
+
+        XCTAssertEqual(
+            CaregiverHandoffCheckpointStore.date(
+                caregiverIdentifier: caregiverIdentifier,
+                defaults: defaults
+            ),
+            later
+        )
+    }
+
+    @MainActor
+    func testDeletingAppointmentCascadesFollowUpsAndCoordinationRecords() async throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Test Home")
+        let profile = CareProfile(name: "Sample Child", sharingScope: .family)
+        let appointment = DoctorAppointment(profileID: profile.id, title: "Follow-up source")
+        let followUp = AppointmentFollowUp(
+            appointmentID: appointment.id,
+            householdID: household.id,
+            profileID: profile.id,
+            title: "Call clinic"
+        )
+        let sourceKey = followUp.attentionSourceKey
+        context.insert(household)
+        context.insert(profile)
+        context.insert(appointment)
+        context.insert(followUp)
+        context.insert(HouseholdAttentionAcknowledgement(
+            id: UUID(),
+            householdID: household.id,
+            profileID: profile.id,
+            sourceKey: sourceKey,
+            sourceUpdatedAt: followUp.updatedAt,
+            caregiverIdentifier: UUID().uuidString,
+            caregiverName: "Caregiver One"
+        ))
+        context.insert(HouseholdAttentionClaim(
+            id: UUID(),
+            householdID: household.id,
+            profileID: profile.id,
+            sourceKey: sourceKey,
+            caregiverIdentifier: UUID().uuidString,
+            caregiverName: "Caregiver Two",
+            updatedByCaregiverIdentifier: UUID().uuidString,
+            updatedByCaregiverName: "Caregiver One"
+        ))
+        context.insert(CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: profile.id,
+            sourceKey: sourceKey,
+            sourceTitleSnapshot: followUp.title,
+            body: "Call before noon.",
+            authorCaregiverIdentifier: UUID().uuidString,
+            authorCaregiverName: "Caregiver One"
+        ))
+        try context.save()
+
+        let didDelete = await HouseholdAttentionService.deleteAppointment(
+            appointment,
+            context: context
+        )
+        XCTAssertTrue(didDelete)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<DoctorAppointment>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<AppointmentFollowUp>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<HouseholdAttentionClaim>()).isEmpty)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<CaregiverHandoffNote>()).isEmpty)
     }
 
     @MainActor

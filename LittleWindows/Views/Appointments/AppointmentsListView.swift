@@ -80,13 +80,13 @@ struct AppointmentsListView: View {
         .appActionSheet(
             isPresented: $showingDeleteConfirmation,
             title: "Delete appointment?",
-            message: "This permanently removes the appointment and cancels its reminders.",
+            message: "This permanently removes the appointment, its follow-ups and handoff activity, and cancels its reminders.",
             systemImage: "calendar.badge.minus",
             tint: .red,
             options: appointmentPendingDelete.map { appointment in
                 [AppActionSheetOption(
                     title: "Delete Appointment",
-                    subtitle: "Remove the appointment and cancel its reminders.",
+                    subtitle: "Also remove its follow-ups and handoff activity.",
                     systemImage: "calendar.badge.minus",
                     tint: .red,
                     role: .destructive
@@ -134,11 +134,10 @@ struct AppointmentsListView: View {
     }
 
     private func delete(_ appointment: DoctorAppointment) async {
-        await NotificationManager.shared.cancelAppointmentReminders(
-            appointmentID: appointment.id
+        _ = await HouseholdAttentionService.deleteAppointment(
+            appointment,
+            context: modelContext
         )
-        modelContext.delete(appointment)
-        _ = PersistenceService.save(context: modelContext)
     }
 }
 

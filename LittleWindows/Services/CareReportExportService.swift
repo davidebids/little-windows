@@ -84,6 +84,7 @@ struct CareReport {
     var options: CareReportExportOptions
     var events: [CareEvent]
     var appointments: [DoctorAppointment]
+    var appointmentFollowUps: [AppointmentFollowUp] = []
     var milestones: [MilestoneEntry]
     var medications: [Medication] = []
     var medicationRegimens: [MedicationRegimen] = []
@@ -143,6 +144,16 @@ enum CareReportExportService {
                 sortBy: [SortDescriptor(\.startDate)]
             ))
             : []
+        let appointmentFollowUps: [AppointmentFollowUp]
+        if options.includeAppointments {
+            let appointmentIDs = Set(appointments.map(\.id))
+            appointmentFollowUps = try context.fetch(FetchDescriptor<AppointmentFollowUp>(
+                predicate: #Predicate { $0.profileID == profileID },
+                sortBy: [SortDescriptor(\.createdAt)]
+            )).filter { appointmentIDs.contains($0.appointmentID) }
+        } else {
+            appointmentFollowUps = []
+        }
         let milestones = options.includeMilestones
             ? try context.fetch(FetchDescriptor<MilestoneEntry>(
                 predicate: #Predicate {
@@ -170,6 +181,7 @@ enum CareReportExportService {
             options: normalizedOptions,
             events: events,
             appointments: appointments,
+            appointmentFollowUps: appointmentFollowUps,
             milestones: milestones,
             medications: medications,
             medicationRegimens: medicationRegimens,
@@ -229,7 +241,11 @@ enum CareReportExportService {
                     "Appointment",
                     appointment.appointmentType.displayName,
                     "",
-                    appointmentDetailsText(for: appointment, includeNotes: report.options.includeNotes),
+                    appointmentDetailsText(
+                        for: appointment,
+                        followUps: report.appointmentFollowUps.filter { $0.appointmentID == appointment.id },
+                        includeNotes: report.options.includeNotes
+                    ),
                     report.options.includeCaregiverNames ? (appointment.caregiverName ?? "") : "",
                     report.options.includeNotes ? (appointment.notes ?? "") : "",
                     "",
@@ -340,7 +356,11 @@ enum CareReportExportService {
                 for appointment in report.appointments {
                     drawCompactRecord(
                         title: "\(dateTimeFormatter.string(from: appointment.startDate)): \(appointment.title)",
-                        details: appointmentDetailsText(for: appointment, includeNotes: report.options.includeNotes),
+                        details: appointmentDetailsText(
+                            for: appointment,
+                            followUps: report.appointmentFollowUps.filter { $0.appointmentID == appointment.id },
+                            includeNotes: report.options.includeNotes
+                        ),
                         cursor: &cursor,
                         context: context
                     )
@@ -684,17 +704,35 @@ enum CareReportExportService {
         return compactJoined(parts)
     }
 
-    static func appointmentDetailsText(for appointment: DoctorAppointment, includeNotes: Bool) -> String {
-        compactJoined([
+    static func appointmentDetailsText(
+        for appointment: DoctorAppointment,
+        followUps: [AppointmentFollowUp] = [],
+        includeNotes: Bool
+    ) -> String {
+        var values = [
             appointment.doctorName.map { "Doctor: \($0)" },
             appointment.clinicName.map { "Clinic: \($0)" },
             appointment.locationName.map { "Location: \($0)" },
             appointment.questionsToAsk.map { "Questions: \($0)" },
             includeNotes ? appointment.visitSummary.map { "Visit summary: \($0)" } : nil,
-            includeNotes ? appointment.followUpInstructions.map { "Follow-up: \($0)" } : nil,
             includeNotes ? appointment.medicationsDiscussed.map { "Medications: \($0)" } : nil,
             includeNotes ? appointment.vaccinesGiven.map { "Vaccines: \($0)" } : nil
-        ])
+        ]
+        if !followUps.isEmpty {
+            let followUpText = followUps.map { followUp in
+                var detail = followUp.title
+                if let dueDate = followUp.dueDate {
+                    detail += " (due \(dueDate.formatted(date: .abbreviated, time: .shortened)))"
+                }
+                if followUp.isCompleted { detail += " [completed]" }
+                if includeNotes, let notes = followUp.details {
+                    detail += ": \(notes)"
+                }
+                return detail
+            }.joined(separator: "; ")
+            values.append("Follow-ups: \(followUpText)")
+        }
+        return compactJoined(values)
     }
 
     static func durationText(for event: CareEvent) -> String {

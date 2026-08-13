@@ -8,6 +8,10 @@ extension CareEvent: ProfileScopedRecord {}
 extension SleepPredictionRecord: ProfileScopedRecord {}
 extension MilestoneEntry: ProfileScopedRecord {}
 extension DoctorAppointment: ProfileScopedRecord {}
+extension AppointmentFollowUp: ProfileScopedRecord {}
+extension HouseholdAttentionAcknowledgement: ProfileScopedRecord {}
+extension HouseholdAttentionClaim: ProfileScopedRecord {}
+extension CaregiverHandoffNote: ProfileScopedRecord {}
 extension AgeGuideReadState: ProfileScopedRecord {}
 extension PuppyStageGuideReadState: ProfileScopedRecord {}
 

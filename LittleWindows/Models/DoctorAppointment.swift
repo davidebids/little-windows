@@ -172,7 +172,6 @@ final class DoctorAppointment {
     var notes: String?
     var questionsToAsk: String?
     var visitSummary: String?
-    var followUpInstructions: String?
     var medicationsDiscussed: String?
     var vaccinesGiven: String?
     var growthEntryID: UUID?
@@ -204,7 +203,6 @@ final class DoctorAppointment {
         notes: String? = nil,
         questionsToAsk: String? = nil,
         visitSummary: String? = nil,
-        followUpInstructions: String? = nil,
         medicationsDiscussed: String? = nil,
         vaccinesGiven: String? = nil,
         growthEntryID: UUID? = nil,
@@ -235,7 +233,6 @@ final class DoctorAppointment {
         self.notes = notes
         self.questionsToAsk = questionsToAsk
         self.visitSummary = visitSummary
-        self.followUpInstructions = followUpInstructions
         self.medicationsDiscussed = medicationsDiscussed
         self.vaccinesGiven = vaccinesGiven
         self.growthEntryID = growthEntryID

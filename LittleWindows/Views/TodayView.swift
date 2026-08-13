@@ -891,10 +891,11 @@ struct TodayView: View {
                 ) { summary in
                     TodayHomeSummaryView(
                         summary: summary,
-                        caregiverName: activeCaregiverName
-                    ) { command in
-                        deepLinkRouter.openFood(command)
-                    }
+                        householdID: householdID,
+                        caregiverName: activeCaregiverName,
+                        open: openTodayHomeRoute,
+                        openMedicationDose: deepLinkRouter.openMedicationDose
+                    )
                 }
             } else {
                 ContentUnavailableView(
@@ -1530,6 +1531,33 @@ struct TodayView: View {
             profileID: cachedRenderState.profileID,
             returningTo: .today
         )
+    }
+
+    private func openTodayHomeRoute(_ route: TodayHomeSummaryRoute) {
+        switch route {
+        case .food(let command):
+            deepLinkRouter.openFood(command)
+        case .appointment(let appointmentID, let profileID):
+            deepLinkRouter.openAppointment(appointmentID, profileID: profileID)
+        case .medications(let profileID):
+            deepLinkRouter.openMedications(profileID: profileID)
+        case .routines(let profileID):
+            deepLinkRouter.openRoutines(profileID: profileID)
+        case .plannedSolidMeal(let mealID, let profileID):
+            deepLinkRouter.openSolids(
+                .plannedSolidMeal(mealID),
+                profileID: profileID,
+                returningTo: .today
+            )
+        case .solidAllergen(let allergenID, let profileID):
+            deepLinkRouter.openSolids(
+                .solidAllergen(allergenID),
+                profileID: profileID,
+                returningTo: .today
+            )
+        case .todayCare:
+            deepLinkRouter.selectTodayCare()
+        }
     }
 
     private func solidsCommand(for route: FoodRoute) -> FoodRouteCommand? {
@@ -3983,6 +4011,11 @@ private struct TodayDisplayModePicker: View {
     }
 }
 
+private struct TodayHomeSummaryRefreshKey: Equatable {
+    var dataFingerprint: Int
+    var timeRevision: Int
+}
+
 private struct TodayHomeSummaryDataLoader<Content: View>: View {
     @Query private var todoLists: [HomeTodoList]
     @Query private var todoItems: [HomeTodoItem]
@@ -3998,6 +4031,27 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
     @Query private var returnItems: [ReturnItem]
     @Query private var returnPackages: [ReturnPackage]
     @Query private var reminders: [FoodReminder]
+    @Query private var profiles: [CareProfile]
+    @Query private var medications: [Medication]
+    @Query private var medicationRegimens: [MedicationRegimen]
+    @Query private var medicationPhases: [MedicationSchedulePhase]
+    @Query private var medicationDoseRecords: [MedicationDoseRecord]
+    @Query private var appointmentFollowUps: [AppointmentFollowUp]
+    @Query private var careRoutines: [CareRoutine]
+    @Query private var careRoutineRuns: [CareRoutineRun]
+    @Query private var plannedSolidMeals: [PlannedSolidMeal]
+    @Query private var solidAllergenProgress: [SolidAllergenProgress]
+    @Query private var acknowledgements: [HouseholdAttentionAcknowledgement]
+    @Query private var attentionClaims: [HouseholdAttentionClaim]
+    @Query private var handoffNotes: [CaregiverHandoffNote]
+    @Query private var familyCaregiverIdentities: [FamilyCaregiverIdentity]
+
+    @Environment(\.modelContext) private var modelContext
+    @AppStorage(PersistenceService.familySyncModeKey)
+    private var syncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
+
+    @State private var cachedSummary: TodayHomeSummary?
+    @State private var summaryTimeRevision = 0
 
     private let householdID: UUID
     private let currentCaregiverName: String
@@ -4012,7 +4066,12 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
         self.currentCaregiverName = currentCaregiverName
         self.content = content
         let todayStart = Calendar.current.startOfDay(for: Date())
+        let medicationRecordStart = Calendar.current.date(byAdding: .day, value: -2, to: todayStart)
+            ?? todayStart
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: todayStart)
+            ?? Date().addingTimeInterval(86_400)
         let upcomingTripState = PackingTripStatus.upcoming.rawValue
+        let activeRoutineState = CareRoutineRunState.active.rawValue
 
         var todoListDescriptor = FetchDescriptor<HomeTodoList>(
             predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
@@ -4113,10 +4172,167 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
         )
         reminderDescriptor.fetchLimit = 200
         _reminders = Query(reminderDescriptor)
+
+        var profileDescriptor = FetchDescriptor<CareProfile>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\CareProfile.createdAt)]
+        )
+        profileDescriptor.fetchLimit = 100
+        _profiles = Query(profileDescriptor)
+
+        var medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\Medication.updatedAt, order: .reverse)]
+        )
+        medicationDescriptor.fetchLimit = 500
+        _medications = Query(medicationDescriptor)
+
+        var regimenDescriptor = FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.isActive },
+            sortBy: [SortDescriptor(\MedicationRegimen.updatedAt, order: .reverse)]
+        )
+        regimenDescriptor.fetchLimit = 500
+        _medicationRegimens = Query(regimenDescriptor)
+
+        var phaseDescriptor = FetchDescriptor<MedicationSchedulePhase>(
+            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
+        )
+        phaseDescriptor.fetchLimit = 1_000
+        _medicationPhases = Query(phaseDescriptor)
+
+        var doseRecordDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.loggedAt >= medicationRecordStart },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        )
+        doseRecordDescriptor.fetchLimit = 1_500
+        _medicationDoseRecords = Query(doseRecordDescriptor)
+
+        var followUpDescriptor = FetchDescriptor<AppointmentFollowUp>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\AppointmentFollowUp.dueDate), SortDescriptor(\AppointmentFollowUp.updatedAt)]
+        )
+        followUpDescriptor.fetchLimit = 500
+        _appointmentFollowUps = Query(followUpDescriptor)
+
+        var careRoutineDescriptor = FetchDescriptor<CareRoutine>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\CareRoutine.sortOrder)]
+        )
+        careRoutineDescriptor.fetchLimit = 300
+        _careRoutines = Query(careRoutineDescriptor)
+
+        var routineRunDescriptor = FetchDescriptor<CareRoutineRun>(
+            predicate: #Predicate {
+                $0.stateRawValue == activeRoutineState || $0.startedAt >= todayStart
+            },
+            sortBy: [SortDescriptor(\CareRoutineRun.updatedAt, order: .reverse)]
+        )
+        routineRunDescriptor.fetchLimit = 500
+        _careRoutineRuns = Query(routineRunDescriptor)
+
+        var solidPlanDescriptor = FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate { $0.completedEventID == nil && $0.scheduledAt < dayEnd },
+            sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
+        )
+        solidPlanDescriptor.fetchLimit = 300
+        _plannedSolidMeals = Query(solidPlanDescriptor)
+
+        var allergenDescriptor = FetchDescriptor<SolidAllergenProgress>(
+            sortBy: [SortDescriptor(\SolidAllergenProgress.nextExposureDueAt)]
+        )
+        allergenDescriptor.fetchLimit = 500
+        _solidAllergenProgress = Query(allergenDescriptor)
+
+        var acknowledgementDescriptor = FetchDescriptor<HouseholdAttentionAcknowledgement>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\HouseholdAttentionAcknowledgement.updatedAt, order: .reverse)]
+        )
+        acknowledgementDescriptor.fetchLimit = 1_000
+        _acknowledgements = Query(acknowledgementDescriptor)
+
+        var claimDescriptor = FetchDescriptor<HouseholdAttentionClaim>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\HouseholdAttentionClaim.updatedAt, order: .reverse)]
+        )
+        claimDescriptor.fetchLimit = 500
+        _attentionClaims = Query(claimDescriptor)
+
+        var noteDescriptor = FetchDescriptor<CaregiverHandoffNote>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\CaregiverHandoffNote.createdAt, order: .reverse)]
+        )
+        noteDescriptor.fetchLimit = 200
+        _handoffNotes = Query(noteDescriptor)
+
+        var caregiverDescriptor = FetchDescriptor<FamilyCaregiverIdentity>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\FamilyCaregiverIdentity.displayName)]
+        )
+        caregiverDescriptor.fetchLimit = 50
+        _familyCaregiverIdentities = Query(caregiverDescriptor)
     }
 
-    var body: some View {
-        content(TodayHomeSummaryService.summary(
+    private func combineRevision<T>(
+        _ values: [T],
+        id: KeyPath<T, UUID>,
+        updatedAt: KeyPath<T, Date>,
+        into hasher: inout Hasher
+    ) {
+        hasher.combine(values.count)
+        for value in values {
+            hasher.combine(value[keyPath: id])
+            hasher.combine(value[keyPath: updatedAt])
+        }
+    }
+
+    private func dataFingerprint(caregiverIdentifier: String) -> Int {
+        var hasher = Hasher()
+        hasher.combine(householdID)
+        hasher.combine(currentCaregiverName)
+        hasher.combine(caregiverIdentifier)
+        hasher.combine(syncModeRawValue)
+        combineRevision(todoLists, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(todoItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(shoppingLists, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(shoppingItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(inventoryItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(mealPrepItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(mealPrepUsages, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(packingTrips, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(packingItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(itineraryItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(returnRequests, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(returnItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(returnPackages, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(reminders, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(profiles, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(medications, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(medicationRegimens, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(medicationPhases, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(medicationDoseRecords, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(appointmentFollowUps, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(careRoutines, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(careRoutineRuns, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(plannedSolidMeals, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(solidAllergenProgress, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(acknowledgements, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(attentionClaims, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(handoffNotes, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        combineRevision(familyCaregiverIdentities, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        hasher.combine(CaregiverHandoffCheckpointStore.date(
+            caregiverIdentifier: caregiverIdentifier
+        ))
+        return hasher.finalize()
+    }
+
+    private func makeSummary(
+        familySyncEnabled: Bool,
+        caregiverIdentifier: String,
+        now: Date
+    ) -> TodayHomeSummary {
+        // Keep this aggregation out of body: sheet and keyboard environment changes can
+        // invalidate the view even when none of the underlying household records changed.
+        TodayHomeSummaryService.summary(
             householdID: householdID,
             currentCaregiverName: currentCaregiverName,
             todoLists: todoLists,
@@ -4132,15 +4348,117 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
             returnRequests: returnRequests,
             returnItems: returnItems,
             returnPackages: returnPackages,
-            reminders: reminders
-        ))
+            reminders: reminders,
+            profiles: profiles,
+            medications: medications,
+            medicationRegimens: medicationRegimens,
+            medicationPhases: medicationPhases,
+            medicationDoseRecords: medicationDoseRecords,
+            appointmentFollowUps: appointmentFollowUps,
+            careRoutines: careRoutines,
+            careRoutineRuns: careRoutineRuns,
+            plannedSolidMeals: plannedSolidMeals,
+            solidAllergenProgress: solidAllergenProgress,
+            acknowledgements: acknowledgements,
+            claims: attentionClaims,
+            handoffNotes: handoffNotes,
+            familyCaregiverIdentities: familyCaregiverIdentities,
+            currentCaregiverIdentifier: caregiverIdentifier,
+            familySyncEnabled: familySyncEnabled,
+            handoffCheckpoint: CaregiverHandoffCheckpointStore.date(
+                caregiverIdentifier: caregiverIdentifier
+            ),
+            now: now
+        )
+    }
+
+    private func refreshSummary(
+        familySyncEnabled: Bool,
+        caregiverIdentifier: String,
+        now: Date = Date()
+    ) {
+        let nextSummary = makeSummary(
+            familySyncEnabled: familySyncEnabled,
+            caregiverIdentifier: caregiverIdentifier,
+            now: now
+        )
+        if cachedSummary != nextSummary {
+            cachedSummary = nextSummary
+        }
+    }
+
+    var body: some View {
+        let familySyncEnabled = FamilySyncMode(rawValue: syncModeRawValue) == .sharedFamilySync
+        let caregiverIdentifier = CaregiverIdentityService.stableCaregiverIdentifier()
+        let refreshKey = TodayHomeSummaryRefreshKey(
+            dataFingerprint: dataFingerprint(caregiverIdentifier: caregiverIdentifier),
+            timeRevision: summaryTimeRevision
+        )
+        Group {
+            if let cachedSummary {
+                content(cachedSummary)
+            } else {
+                ProgressView("Loading home…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppTheme.background)
+            }
+        }
+        .task(id: refreshKey) {
+            refreshSummary(
+                familySyncEnabled: familySyncEnabled,
+                caregiverIdentifier: caregiverIdentifier
+            )
+        }
+        .task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    return
+                }
+                summaryTimeRevision &+= 1
+            }
+        }
+        .task(id: familySyncEnabled) {
+            guard familySyncEnabled else { return }
+            _ = HouseholdAttentionService.registerCurrentFamilyCaregiver(
+                householdID: householdID,
+                context: modelContext
+            )
+        }
     }
 }
 
 private struct TodayHomeSummaryView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \FamilyCaregiverIdentity.displayName) private var familyCaregivers: [FamilyCaregiverIdentity]
+
     let summary: TodayHomeSummary
+    let householdID: UUID
     let caregiverName: String
-    let open: (FoodRouteCommand) -> Void
+    let open: (TodayHomeSummaryRoute) -> Void
+    let openMedicationDose: (MedicationDoseRouteCommand) -> Void
+
+    @State private var sessionSnoozes = [String: TodaySnoozedAttentionItem]()
+    @State private var unsnoozedSourceKeys = Set<String>()
+    @State private var attentionNow = Date()
+    @State private var isSnoozedExpanded = false
+    @State private var showingAllAttention = false
+    @State private var actionErrorMessage: String?
+
+    init(
+        summary: TodayHomeSummary,
+        householdID: UUID,
+        caregiverName: String,
+        open: @escaping (TodayHomeSummaryRoute) -> Void,
+        openMedicationDose: @escaping (MedicationDoseRouteCommand) -> Void
+    ) {
+        self.summary = summary
+        self.householdID = householdID
+        self.caregiverName = caregiverName
+        self.open = open
+        self.openMedicationDose = openMedicationDose
+    }
 
     private var greetingTitle: String {
         let name = caregiverName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4151,6 +4469,71 @@ private struct TodayHomeSummaryView: View {
             return "Welcome home"
         }
         return "Welcome, \(name)"
+    }
+
+    private var currentCaregiverIdentifier: String {
+        CaregiverIdentityService.stableCaregiverIdentifier()
+    }
+
+    private var visibleAttentionItems: [TodayHomeSummaryItem] {
+        Array(allVisibleAttentionItems.prefix(TodayHomeSummaryService.attentionItemLimit))
+    }
+
+    private var allVisibleAttentionItems: [TodayHomeSummaryItem] {
+        var itemsByID = Dictionary(
+            uniqueKeysWithValues: summary.allAttentionItems.map { ($0.id, $0) }
+        )
+        for snoozed in summary.snoozedAttentionItems where
+            unsnoozedSourceKeys.contains(snoozed.item.sourceKey ?? "") || snoozed.until <= attentionNow {
+            itemsByID[snoozed.item.id] = snoozed.item
+        }
+        let activeSessionSnoozeKeys = Set(sessionSnoozes.compactMap { sourceKey, snoozed in
+            snoozed.until > attentionNow ? sourceKey : nil
+        })
+        return itemsByID.values
+            .filter { item in
+                item.sourceKey.map { !activeSessionSnoozeKeys.contains($0) } ?? true
+            }
+            .sorted(by: attentionPrecedes)
+    }
+
+    private var visibleSnoozedAttentionItems: [TodaySnoozedAttentionItem] {
+        var itemsBySourceKey = [String: TodaySnoozedAttentionItem]()
+        let currentSourceKeys = Set(
+            summary.allAttentionItems.compactMap(\.sourceKey)
+                + summary.snoozedAttentionItems.compactMap { $0.item.sourceKey }
+        )
+        for snoozed in summary.snoozedAttentionItems {
+            guard let sourceKey = snoozed.item.sourceKey,
+                  snoozed.until > attentionNow,
+                  !unsnoozedSourceKeys.contains(sourceKey) else { continue }
+            itemsBySourceKey[sourceKey] = snoozed
+        }
+        for (sourceKey, snoozed) in sessionSnoozes where
+            snoozed.until > attentionNow && currentSourceKeys.contains(sourceKey) {
+            itemsBySourceKey[sourceKey] = snoozed
+        }
+        return itemsBySourceKey.values.sorted { $0.until < $1.until }
+    }
+
+    private var nextSnoozeWakeDate: Date? {
+        visibleSnoozedAttentionItems.map(\.until).min()
+    }
+
+    private func attentionPrecedes(
+        _ lhs: TodayHomeSummaryItem,
+        _ rhs: TodayHomeSummaryItem
+    ) -> Bool {
+        if lhs.urgency != rhs.urgency {
+            return lhs.urgency.rawValue > rhs.urgency.rawValue
+        }
+        let lhsDate = lhs.sortDate ?? .distantFuture
+        let rhsDate = rhs.sortDate ?? .distantFuture
+        return lhsDate == rhsDate ? lhs.id < rhs.id : lhsDate < rhsDate
+    }
+
+    private var scopedFamilyCaregivers: [FamilyCaregiverIdentity] {
+        familyCaregivers.filter { $0.householdID == householdID }
     }
 
     var body: some View {
@@ -4166,42 +4549,313 @@ private struct TodayHomeSummaryView: View {
                 }
             }
 
-            if !summary.attentionItems.isEmpty {
+            if !visibleAttentionItems.isEmpty {
                 Section {
-                    TodayHomeAttentionCard(items: summary.attentionItems, open: open)
+                    TodayHomeAttentionCard(
+                        householdID: householdID,
+                        items: visibleAttentionItems,
+                        caregivers: scopedFamilyCaregivers,
+                        currentCaregiverIdentifier: currentCaregiverIdentifier,
+                        open: open,
+                        acknowledge: acknowledge,
+                        claim: claim,
+                        takeResponsibility: takeResponsibility,
+                        clearClaim: clearClaim,
+                        complete: complete,
+                        snooze: snooze,
+                        medicationAction: performMedicationAction
+                    )
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 } header: {
-                    AppSectionHeader(title: "Needs attention", subtitle: "\(summary.attentionItems.count)")
+                    HStack {
+                        AppSectionHeader(title: "Needs attention", subtitle: "\(allVisibleAttentionItems.count)")
+                        Spacer()
+                        if allVisibleAttentionItems.count > visibleAttentionItems.count {
+                            Button("View all") { showingAllAttention = true }
+                                .font(.caption.weight(.semibold))
+                        }
+                    }
                 }
             }
 
-            ForEach(summary.sections) { section in
+            if !visibleSnoozedAttentionItems.isEmpty {
+                Section {
+                    if isSnoozedExpanded {
+                        TodaySnoozedAttentionCard(
+                            items: visibleSnoozedAttentionItems,
+                            open: open,
+                            unsnooze: unsnooze
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                } header: {
+                    Button {
+                        withAnimation(.snappy) {
+                            isSnoozedExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("Snoozed")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Spacer(minLength: 12)
+                            Text("\(visibleSnoozedAttentionItems.count)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: isSnoozedExpanded ? "chevron.down" : "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.horizontal, 4)
+                    }
+                    .buttonStyle(.plain)
+                    .textCase(nil)
+                    .accessibilityLabel("Snoozed items")
+                    .accessibilityValue(isSnoozedExpanded ? "Expanded" : "Collapsed")
+                }
+            }
+
+            if let handoff = summary.handoff {
+                Section {
+                    TodayCaregiverHandoffCard(
+                        householdID: householdID,
+                        handoff: handoff,
+                        items: allVisibleAttentionItems,
+                        currentCaregiverIdentifier: currentCaregiverIdentifier,
+                        acknowledge: acknowledge,
+                        open: open
+                    )
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } header: {
+                    AppSectionHeader(title: "Handoff", subtitle: "Family Sync")
+                }
+            }
+
+            ForEach(Array(summary.sections.enumerated()), id: \.element.id) { index, section in
                 Section {
                     TodayHomeSummaryCard(section: section, open: open)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                } header: {
+                    if index == 0 {
+                        AppSectionHeader(title: "Home & Planning")
+                    }
                 }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
+        .ignoresSafeArea(.keyboard)
         .accessibilityIdentifier("today.home.summary")
+        .onChange(of: visibleSnoozedAttentionItems.isEmpty) { _, isEmpty in
+            if isEmpty {
+                isSnoozedExpanded = false
+            }
+        }
+        .task(id: nextSnoozeWakeDate) {
+            guard let wakeDate = nextSnoozeWakeDate else { return }
+            let delay = wakeDate.timeIntervalSinceNow
+            if delay > 0 {
+                try? await Task.sleep(for: .seconds(delay))
+            }
+            guard !Task.isCancelled else { return }
+            let now = Date()
+            _ = HouseholdAttentionSnoozeStore.activeSnoozes(now: now)
+            attentionNow = now
+        }
+        .sheet(isPresented: $showingAllAttention) {
+            NavigationStack {
+                ScrollView {
+                    TodayHomeAttentionCard(
+                        householdID: householdID,
+                        items: allVisibleAttentionItems,
+                        caregivers: scopedFamilyCaregivers,
+                        currentCaregiverIdentifier: currentCaregiverIdentifier,
+                        open: { route in
+                            showingAllAttention = false
+                            open(route)
+                        },
+                        acknowledge: acknowledge,
+                        claim: claim,
+                        takeResponsibility: takeResponsibility,
+                        clearClaim: clearClaim,
+                        complete: complete,
+                        snooze: snooze,
+                        medicationAction: performMedicationAction
+                    )
+                    .padding()
+                }
+                .background(AppTheme.background)
+                .navigationTitle("Needs attention")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingAllAttention = false }
+                    }
+                }
+            }
+        }
+        .alert("Couldn't Complete Action", isPresented: Binding(
+            get: { actionErrorMessage != nil },
+            set: { if !$0 { actionErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionErrorMessage = nil }
+        } message: {
+            Text(actionErrorMessage ?? "Please try again.")
+        }
     }
+
+    private func acknowledge(_ item: TodayHomeSummaryItem) {
+        guard let sourceKey = item.sourceKey,
+              let sourceUpdatedAt = item.sourceUpdatedAt else { return }
+        guard HouseholdAttentionService.acknowledge(
+            sourceKey: sourceKey,
+            sourceUpdatedAt: sourceUpdatedAt,
+            householdID: householdID,
+            profileID: item.profileID,
+            context: modelContext
+        ) else {
+            actionErrorMessage = "This item couldn't be marked seen. Please try again."
+            return
+        }
+    }
+
+    private func claim(_ item: TodayHomeSummaryItem, _ caregiver: FamilyCaregiverIdentity) {
+        guard let sourceKey = item.sourceKey else { return }
+        guard HouseholdAttentionService.claim(
+            sourceKey: sourceKey,
+            householdID: householdID,
+            profileID: item.profileID,
+            caregiverIdentifier: caregiver.caregiverIdentifier,
+            caregiverName: caregiver.displayName,
+            context: modelContext
+        ) else {
+            actionErrorMessage = "Responsibility couldn't be assigned. Please try again."
+            return
+        }
+    }
+
+    private func takeResponsibility(_ item: TodayHomeSummaryItem) {
+        guard let sourceKey = item.sourceKey else { return }
+        guard HouseholdAttentionService.claim(
+            sourceKey: sourceKey,
+            householdID: householdID,
+            profileID: item.profileID,
+            caregiverIdentifier: currentCaregiverIdentifier,
+            caregiverName: CaregiverIdentityService.currentCaregiverName(),
+            context: modelContext
+        ) else {
+            actionErrorMessage = "Responsibility couldn't be assigned. Please try again."
+            return
+        }
+    }
+
+    private func clearClaim(_ item: TodayHomeSummaryItem) {
+        guard let sourceKey = item.sourceKey else { return }
+        guard HouseholdAttentionService.clearClaim(
+            sourceKey: sourceKey,
+            householdID: householdID,
+            profileID: item.profileID,
+            context: modelContext
+        ) else {
+            actionErrorMessage = "The assignment couldn't be cleared. Please try again."
+            return
+        }
+    }
+
+    private func complete(_ item: TodayHomeSummaryItem) {
+        guard let followUpID = item.followUpID else { return }
+        let descriptor = FetchDescriptor<AppointmentFollowUp>(
+            predicate: #Predicate { $0.id == followUpID }
+        )
+        guard let followUp = try? modelContext.fetch(descriptor).first else { return }
+        guard HouseholdAttentionService.setFollowUpCompleted(
+            followUp,
+            completed: true,
+            context: modelContext
+        ) else {
+            actionErrorMessage = "The follow-up couldn't be completed. Please try again."
+            return
+        }
+    }
+
+    private func snooze(_ item: TodayHomeSummaryItem, until date: Date) {
+        guard let sourceKey = item.sourceKey else { return }
+        HouseholdAttentionSnoozeStore.snooze(sourceKey: sourceKey, until: date)
+        sessionSnoozes[sourceKey] = TodaySnoozedAttentionItem(item: item, until: date)
+        unsnoozedSourceKeys.remove(sourceKey)
+        attentionNow = Date()
+    }
+
+    private func unsnooze(_ snoozed: TodaySnoozedAttentionItem) {
+        guard let sourceKey = snoozed.item.sourceKey else { return }
+        HouseholdAttentionSnoozeStore.clear(sourceKey: sourceKey)
+        sessionSnoozes.removeValue(forKey: sourceKey)
+        unsnoozedSourceKeys.insert(sourceKey)
+        attentionNow = Date()
+    }
+
+    private func performMedicationAction(
+        _ item: TodayHomeSummaryItem,
+        status: MedicationDoseStatus
+    ) {
+        guard let medication = item.medicationAttention else { return }
+        openMedicationDose(MedicationDoseRouteCommand(
+            profileID: medication.profileID,
+            medicationID: medication.medicationID,
+            regimenID: medication.regimenID,
+            phaseID: medication.phaseID,
+            occurrenceKey: medication.occurrenceKey,
+            scheduledAt: medication.scheduledAt,
+            doseAmount: medication.doseAmount,
+            doseUnit: medication.doseUnit,
+            status: status
+        ))
+    }
+
 }
 
 private struct TodayHomeAttentionCard: View {
+    let householdID: UUID
     let items: [TodayHomeSummaryItem]
-    let open: (FoodRouteCommand) -> Void
+    let caregivers: [FamilyCaregiverIdentity]
+    let currentCaregiverIdentifier: String
+    let open: (TodayHomeSummaryRoute) -> Void
+    let acknowledge: (TodayHomeSummaryItem) -> Void
+    let claim: (TodayHomeSummaryItem, FamilyCaregiverIdentity) -> Void
+    let takeResponsibility: (TodayHomeSummaryItem) -> Void
+    let clearClaim: (TodayHomeSummaryItem) -> Void
+    let complete: (TodayHomeSummaryItem) -> Void
+    let snooze: (TodayHomeSummaryItem, Date) -> Void
+    let medicationAction: (TodayHomeSummaryItem, MedicationDoseStatus) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 if index > 0 { Divider().padding(.leading, 50) }
-                TodayHomeSummaryRow(item: item) { open(item.route) }
+                TodayHomeAttentionRow(
+                    householdID: householdID,
+                    item: item,
+                    caregivers: caregivers,
+                    currentCaregiverIdentifier: currentCaregiverIdentifier,
+                    open: { open(item.route) },
+                    acknowledge: { acknowledge(item) },
+                    claim: { claim(item, $0) },
+                    takeResponsibility: { takeResponsibility(item) },
+                    clearClaim: { clearClaim(item) },
+                    complete: { complete(item) },
+                    snooze: { snooze(item, $0) },
+                    medicationAction: { medicationAction(item, $0) }
+                )
             }
         }
         .padding(.horizontal, 12)
@@ -4209,9 +4863,731 @@ private struct TodayHomeAttentionCard: View {
     }
 }
 
+private struct TodaySnoozedAttentionCard: View {
+    let items: [TodaySnoozedAttentionItem]
+    let open: (TodayHomeSummaryRoute) -> Void
+    let unsnooze: (TodaySnoozedAttentionItem) -> Void
+
+    private func snoozedForText(until date: Date, now: Date) -> String {
+        let totalMinutes = max(1, Int(ceil(date.timeIntervalSince(now) / 60)))
+        if totalMinutes < 60 {
+            return "Snoozed for \(totalMinutes) min"
+        }
+
+        let totalHours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if totalHours < 24 {
+            let duration = minutes == 0 ? "\(totalHours) hr" : "\(totalHours) hr \(minutes) min"
+            return "Snoozed for \(duration)"
+        }
+
+        let days = totalHours / 24
+        let hours = totalHours % 24
+        let dayLabel = "\(days) day\(days == 1 ? "" : "s")"
+        let duration = hours == 0 ? dayLabel : "\(dayLabel) \(hours) hr"
+        return "Snoozed for \(duration)"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, snoozed in
+                if index > 0 { Divider().padding(.leading, 50) }
+                HStack(spacing: 10) {
+                    Button { open(snoozed.item.route) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: snoozed.item.systemImage)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, height: 34)
+                                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(snoozed.item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                TimelineView(.periodic(from: .now, by: 60)) { context in
+                                    Text(snoozedForText(until: snoozed.until, now: context.date))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 4)
+
+                    Button("Unsnooze") { unsnooze(snoozed) }
+                        .font(.caption2.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                .padding(.vertical, 10)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(cornerRadius: 20)
+    }
+}
+
+private struct TodayHomeAttentionRow: View {
+    let householdID: UUID
+    let item: TodayHomeSummaryItem
+    let caregivers: [FamilyCaregiverIdentity]
+    let currentCaregiverIdentifier: String
+    let open: () -> Void
+    let acknowledge: () -> Void
+    let claim: (FamilyCaregiverIdentity) -> Void
+    let takeResponsibility: () -> Void
+    let clearClaim: () -> Void
+    let complete: () -> Void
+    let snooze: (Date) -> Void
+    let medicationAction: (MedicationDoseStatus) -> Void
+
+    @State private var showingHandoffNoteEditor = false
+
+    private var tint: Color {
+        switch item.urgency {
+        case .normal: item.category.tint
+        case .attention: .orange
+        case .urgent: .red
+        }
+    }
+
+    private var assignmentText: String? {
+        if item.isFamilyShared && item.supportsClaim {
+            if let claimed = item.claimedCaregiverName, !claimed.isEmpty {
+                return "Responsible: \(claimed)"
+            }
+            return "Unassigned"
+        }
+        return nil
+    }
+
+    private var acknowledgementText: String? {
+        guard !item.acknowledgedByNames.isEmpty else { return nil }
+        return "Seen by \(item.acknowledgedByNames.joined(separator: ", "))"
+    }
+
+    private var metadataText: String {
+        let source = item.sourceLabel ?? item.category.title
+        let owner = item.profileName ?? "Household"
+        let badgeAlreadyIdentifiesSource = item.badge?.localizedCaseInsensitiveCompare(source) == .orderedSame
+        return [badgeAlreadyIdentifiesSource ? nil : source, "Owner: \(owner)", item.dueLabel]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: open) {
+                HStack(spacing: 12) {
+                    Image(systemName: item.systemImage)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 36, height: 36)
+                        .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 11))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                            if let badge = item.badge {
+                                Text(badge)
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(tint)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(tint.opacity(0.1), in: Capsule())
+                            }
+                        }
+                        Text(item.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        Text(metadataText)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        if let assignmentText {
+                            Text(assignmentText)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.blue)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 8) {
+                if let acknowledgementText {
+                    HStack(spacing: 3) {
+                        Image(systemName: "eye.fill")
+                            .font(.caption2)
+                        Text(acknowledgementText)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.blue)
+                }
+
+                if item.medicationAttention != nil {
+                    Button("Taken") { medicationAction(.taken) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                    Button("Skipped") { medicationAction(.skipped) }
+                        .buttonStyle(.bordered)
+                } else if item.followUpID != nil {
+                    Button("Complete", systemImage: "checkmark") { complete() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                }
+
+                if item.isFamilyShared && !item.currentCaregiverHasAcknowledged {
+                    Button(action: acknowledge) {
+                        Label("Seen", systemImage: "eye.fill")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer(minLength: 0)
+
+                Button {
+                    snooze(Date().addingTimeInterval(60 * 60))
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text("Snooze 1h")
+                    }
+                    .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityLabel("Snooze \(item.title) for one hour")
+
+                Menu {
+                    Button("Snooze 1 hour", systemImage: "clock") {
+                        snooze(Date().addingTimeInterval(60 * 60))
+                    }
+                    Button("Snooze until tomorrow", systemImage: "sunrise.fill") {
+                        let tomorrow = Calendar.current.date(
+                            byAdding: .day,
+                            value: 1,
+                            to: Calendar.current.startOfDay(for: Date())
+                        ) ?? Date().addingTimeInterval(24 * 60 * 60)
+                        snooze(tomorrow.addingTimeInterval(8 * 60 * 60))
+                    }
+                    if item.isFamilyShared {
+                        Divider()
+                        if item.supportsClaim,
+                           item.claimedCaregiverIdentifier != currentCaregiverIdentifier {
+                            Button("Take responsibility", systemImage: "person.crop.circle.badge.checkmark") {
+                                takeResponsibility()
+                            }
+                        }
+                        if item.supportsClaim && !caregivers.isEmpty {
+                            Menu("Assign or reassign", systemImage: "person.badge.plus") {
+                                ForEach(caregivers) { caregiver in
+                                    Button(caregiver.displayName) { claim(caregiver) }
+                                }
+                            }
+                        }
+                        if item.supportsClaim && item.claimedCaregiverIdentifier != nil {
+                            Button("Clear assignment", systemImage: "person.badge.minus") {
+                                clearClaim()
+                            }
+                        }
+                        Button("Add handoff note", systemImage: "square.and.pencil") {
+                            showingHandoffNoteEditor = true
+                        }
+                    }
+                    Divider()
+                    Button("Open source", systemImage: "arrow.up.right") { open() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .frame(width: 32, height: 32)
+                }
+                .accessibilityLabel("More actions for \(item.title)")
+            }
+            .font(.caption.weight(.semibold))
+            .controlSize(.small)
+            .padding(.leading, 48)
+        }
+        .padding(.vertical, 10)
+        .sheet(isPresented: $showingHandoffNoteEditor) {
+            CaregiverHandoffNoteSheet(householdID: householdID, item: item)
+        }
+    }
+}
+
+private struct TodayCaregiverHandoffCard: View {
+    let householdID: UUID
+    let handoff: TodayCaregiverHandoffSummary
+    let items: [TodayHomeSummaryItem]
+    let currentCaregiverIdentifier: String
+    let acknowledge: (TodayHomeSummaryItem) -> Void
+    let open: (TodayHomeSummaryRoute) -> Void
+
+    @State private var showingHandoffNoteEditor = false
+    @State private var showingAllHandoffNotes = false
+    @State private var isVisible = false
+
+    private var needsAcknowledgement: TodayHomeSummaryItem? {
+        handoff.needsAcknowledgementItemID.flatMap { id in items.first { $0.id == id } }
+    }
+
+    private var nextUp: TodayHomeSummaryItem? {
+        handoff.nextUpItemID.flatMap { id in items.first { $0.id == id } }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if handoff.activityCount > 0 {
+                Label {
+                    Text("Since you last checked: \(handoff.activityCount) shared update\(handoff.activityCount == 1 ? "" : "s")")
+                } icon: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(.blue)
+                }
+                .font(.subheadline.weight(.semibold))
+            } else {
+                Label("No new shared updates since your last check", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            if !handoff.recentActivities.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Recent changes")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    ForEach(handoff.recentActivities) { activity in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 5))
+                                .foregroundStyle(.blue)
+                            Text(activity.text)
+                                .font(.caption)
+                            Spacer(minLength: 4)
+                            Text(activity.occurredAt, style: .relative)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+
+            if let item = needsAcknowledgement {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Needs your acknowledgement")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title).font(.subheadline.weight(.semibold))
+                            Text(item.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Mark seen") { acknowledge(item) }
+                            .font(.caption2.weight(.semibold))
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+            }
+
+            if let item = nextUp {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Next up for you")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Button { open(item.route) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title).font(.subheadline.weight(.semibold))
+                                Text(item.detail).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if !handoff.recentNotes.isEmpty {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Label("Recent handoff notes", systemImage: "text.bubble")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Text("\(handoff.notes.count)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.1), in: Capsule())
+                        Spacer()
+                        if handoff.notes.count > handoff.recentNotes.count {
+                            Button("View all") { showingAllHandoffNotes = true }
+                                .font(.caption2.weight(.semibold))
+                        }
+                    }
+                    ForEach(handoff.recentNotes) { note in
+                        TodayHandoffNoteRow(note: note, openSource: open)
+                    }
+                }
+            }
+
+            Button {
+                showingHandoffNoteEditor = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "square.and.pencil")
+                    Text("Add handoff note")
+                }
+                    .font(.caption2.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(cornerRadius: 20)
+        .sheet(isPresented: $showingHandoffNoteEditor) {
+            CaregiverHandoffNoteSheet(householdID: householdID, item: nil)
+        }
+        .sheet(isPresented: $showingAllHandoffNotes) {
+            NavigationStack {
+                List(handoff.notes) { note in
+                    TodayHandoffNoteRow(
+                        note: note,
+                        showsFullDate: true,
+                        openSource: { route in
+                            showingAllHandoffNotes = false
+                            open(route)
+                        }
+                    )
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        .listRowSeparator(.hidden)
+                }
+                .listStyle(.plain)
+                .navigationTitle("Handoff Notes")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingAllHandoffNotes = false }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            isVisible = true
+            markVisibleActivityReviewed()
+        }
+        .onDisappear {
+            isVisible = false
+        }
+        .onChange(of: handoff.latestObservedActivityAt) { _, _ in
+            guard isVisible else { return }
+            markVisibleActivityReviewed()
+        }
+    }
+
+    private func markVisibleActivityReviewed() {
+        guard let reviewedThrough = handoff.latestObservedActivityAt else { return }
+        CaregiverHandoffCheckpointStore.markReviewed(
+            caregiverIdentifier: currentCaregiverIdentifier,
+            at: reviewedThrough
+        )
+    }
+}
+
+private struct TodayHandoffNoteRow: View {
+    let note: TodayHandoffNoteSummary
+    var showsFullDate = false
+    var openSource: ((TodayHomeSummaryRoute) -> Void)?
+
+    private var authorInitial: String {
+        note.authorName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .first
+            .map { String($0).uppercased() } ?? "?"
+    }
+
+    private var staticRelativeCreatedAt: String {
+        note.createdAt.formatted(
+            .relative(presentation: .named, unitsStyle: .abbreviated)
+        )
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text(authorInitial)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.blue)
+                .frame(width: 26, height: 26)
+                .background(Color.blue.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(note.authorName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if showsFullDate {
+                        Text(note.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        // A formatted string stays static instead of installing
+                        // SwiftUI's live relative-date timer for every note row.
+                        Text(staticRelativeCreatedAt)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                if let sourceTitle = note.sourceTitle {
+                    if let sourceRoute = note.sourceRoute, let openSource {
+                        Button {
+                            openSource(sourceRoute)
+                        } label: {
+                            TodayHandoffSourceLabel(title: sourceTitle, isLink: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open linked item, \(sourceTitle)")
+                    } else {
+                        TodayHandoffSourceLabel(title: sourceTitle, isLink: false)
+                    }
+                }
+
+                Text(note.body)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TodayHandoffSourceLabel: View {
+    let title: String
+    let isLink: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isLink ? "link" : "doc.text")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(isLink ? Color.blue : Color.secondary)
+            Text(isLink ? "Linked to" : "Related to")
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .fontWeight(.semibold)
+                .foregroundStyle(isLink ? Color.primary : Color.secondary)
+            if isLink {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.blue)
+            }
+        }
+        .font(.caption2)
+        .lineLimit(1)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            (isLink ? Color.blue : Color.secondary).opacity(0.08),
+            in: Capsule()
+        )
+        .overlay {
+            Capsule()
+                .stroke(
+                    (isLink ? Color.blue : Color.secondary).opacity(0.12),
+                    lineWidth: 1
+                )
+        }
+        .contentShape(Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct CaregiverHandoffNoteSheet: View {
+    @Environment(\.modelContext) private var modelContext
+
+    let householdID: UUID
+    let item: TodayHomeSummaryItem?
+
+    var body: some View {
+        CaregiverHandoffNoteEditor(item: item) { body in
+            HouseholdAttentionService.addHandoffNote(
+                householdID: householdID,
+                profileID: item?.profileID,
+                sourceKey: item?.sourceKey,
+                sourceTitle: item?.title,
+                body: body,
+                context: modelContext
+            ) != nil
+        }
+    }
+}
+
+private struct CaregiverHandoffNoteEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let item: TodayHomeSummaryItem?
+    let save: (String) -> Bool
+
+    @State private var bodyText = ""
+    @State private var shouldFocusBody = false
+    @State private var showingSaveError = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Scope")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(item?.title ?? "Household handoff")
+                        .font(.subheadline)
+                }
+
+                ZStack(alignment: .topLeading) {
+                    HandoffNoteTextView(
+                        text: $bodyText,
+                        shouldBecomeFirstResponder: shouldFocusBody
+                    )
+
+                    if bodyText.isEmpty {
+                        Text("Short handoff note")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 10)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(height: 150)
+                .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.quaternary, lineWidth: 1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .background(AppTheme.background)
+            .task {
+                // Let the sheet complete its presentation before asking UIKit to
+                // install the keyboard. Doing both in one SwiftUI transaction
+                // triggers a second full layout pass for the sheet.
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                shouldFocusBody = true
+            }
+            .navigationTitle("Handoff Note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        if save(bodyText) {
+                            dismiss()
+                        } else {
+                            showingSaveError = true
+                        }
+                    }
+                    .disabled(bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .alert("Couldn't Add Note", isPresented: $showingSaveError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("The handoff note wasn't saved. Please try again.")
+            }
+        }
+    }
+}
+
+private struct HandoffNoteTextView: UIViewRepresentable {
+    @Binding var text: String
+    let shouldBecomeFirstResponder: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 5, bottom: 8, right: 5)
+        textView.textContainer.lineFragmentPadding = 4
+        textView.keyboardDismissMode = .interactive
+        textView.accessibilityLabel = "Short handoff note"
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if textView.text != text {
+            textView.text = text
+        }
+
+        guard shouldBecomeFirstResponder,
+              !context.coordinator.didRequestFirstResponder,
+              textView.window != nil else { return }
+
+        context.coordinator.didRequestFirstResponder = true
+        textView.becomeFirstResponder()
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        @Binding private var text: String
+        var didRequestFirstResponder = false
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text = textView.text
+        }
+    }
+}
+
 private struct TodayHomeSummaryCard: View {
     let section: TodayHomeSummarySection
-    let open: (FoodRouteCommand) -> Void
+    let open: (TodayHomeSummaryRoute) -> Void
 
     private var tint: Color { section.category.tint }
 
@@ -4349,6 +5725,10 @@ private extension TodayHomeSummaryCategory {
         case .kitchen: .green
         case .trips: .cyan
         case .returns: .orange
+        case .medications: .red
+        case .appointments: .indigo
+        case .routines: .purple
+        case .solids: .orange
         }
     }
 }

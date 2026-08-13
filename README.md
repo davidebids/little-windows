@@ -16,12 +16,12 @@ Returning users can choose **Restore from iCloud** to wait for data previously s
 
 ## App Areas
 
-- Today: a household overview for Home and Food, plus profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep day-ahead planning, and system integration refresh when a care profile is active.
+- Today: a household overview for Home and Food, a shared Needs Attention queue for urgent Home and care follow-ups with visible personal snoozes and one-tap restore, plus profile-scoped care logging, household and profile routines, active timers, customizable quick actions, current prediction, guided sleep day-ahead planning, and system integration refresh when a care profile is active.
 - Profiles: child, adult, and dog profiles with switching, colors, archival support, relationship-aware adult details, dog-specific details, optional profile photos, and private-by-default Family Sync opt-in.
 - History and Reports: day and list history, event editing, filtering, summaries, charts, prediction accuracy review for children, and adult health trends.
 - Medications: medication details, daily and complex schedules, taken/skipped history, as-needed interval and daily-limit guardrails, adherence summaries, supply/refill tracking, local reminders with optional follow-ups and notification logging actions, and an Apple Watch upcoming-dose card with Taken, Skipped, and 10-minute Snooze controls.
 - Milestones, Memories, and Solids: profile-scoped entries and age prompts, adult-appropriate memories and milestones, plus a child-only solids workspace for preparation, planning, allergens, recipes, and tracking.
-- Appointments and Visits: questions, notes, summaries, follow-up instructions, medications, vaccines, measurements, and reminders.
+- Appointments and Visits: questions, notes, summaries, individually due and completable follow-ups, medications, vaccines, measurements, and reminders.
 - Guides: monthly child age guides, source-backed Sleep Basics lessons, and puppy-stage guide content with read state and reminder support.
 - Food & Home: household to-do lists, shopping lists, trip itineraries and packing, store layouts and sections, shopping mode, recurring staples, inventory locations, meal prep tracking, return tracking, and reminders.
 - Night Light: full-screen low-light presets, color and shape controls, animated glow modes, ambient sounds, sleep timer, and keep-awake behavior.
