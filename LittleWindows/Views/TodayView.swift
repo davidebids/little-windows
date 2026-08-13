@@ -5352,10 +5352,26 @@ private struct TodayHandoffNoteRow: View {
                 }
 
                 if let sourceTitle = note.sourceTitle {
-                    Label(sourceTitle, systemImage: "link")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.blue)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Image(systemName: "link")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.blue)
+                        Text("Linked to")
+                            .foregroundStyle(.tertiary)
+                        Text(sourceTitle)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.08), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
 
                 Text(note.body)
