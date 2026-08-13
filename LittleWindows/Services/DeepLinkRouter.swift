@@ -325,6 +325,30 @@ final class DeepLinkRouter: ObservableObject {
         recordNavigationRequest(nil)
     }
 
+    func openMedications(profileID: UUID) {
+        lastRequestedURL = nil
+        pendingProfileID = profileID
+        pendingMedications = true
+        selectedTab = .milestones
+        recordNavigationRequest(nil)
+    }
+
+    func openAppointment(_ appointmentID: UUID, profileID: UUID?) {
+        lastRequestedURL = nil
+        if let profileID { pendingProfileID = profileID }
+        pendingAppointmentCommand = .detail(appointmentID)
+        selectedTab = .milestones
+        recordNavigationRequest(nil)
+    }
+
+    func openRoutines(profileID: UUID?) {
+        lastRequestedURL = nil
+        if let profileID { pendingProfileID = profileID }
+        pendingRoutineCommand = .list
+        selectedTab = .milestones
+        recordNavigationRequest(nil)
+    }
+
     func openSolids(
         _ command: FoodRouteCommand,
         profileID: UUID? = nil,

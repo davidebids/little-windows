@@ -1181,10 +1181,122 @@ final class MedicationScheduleEngineTests: XCTestCase {
         )
         let privateMedication = Medication(profileID: privateProfile.id, name: "Private Medication")
         let sharedMedication = Medication(profileID: sharedProfile.id, name: "Shared Medication")
+        let household = Household(name: "Test Home")
+        let privateAppointment = DoctorAppointment(
+            profileID: privateProfile.id,
+            title: "Private Visit",
+            startDate: Date()
+        )
+        let sharedAppointment = DoctorAppointment(
+            profileID: sharedProfile.id,
+            title: "Shared Visit",
+            startDate: Date()
+        )
+        let unscopedAppointment = DoctorAppointment(
+            title: "Unscoped Visit",
+            startDate: Date()
+        )
+        let privateFollowUp = AppointmentFollowUp(
+            appointmentID: privateAppointment.id,
+            householdID: household.id,
+            profileID: privateProfile.id,
+            title: "Private Follow-up"
+        )
+        let sharedFollowUp = AppointmentFollowUp(
+            appointmentID: sharedAppointment.id,
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            title: "Shared Follow-up"
+        )
+        let unscopedFollowUp = AppointmentFollowUp(
+            appointmentID: unscopedAppointment.id,
+            householdID: household.id,
+            profileID: nil,
+            title: "Unscoped Follow-up"
+        )
+        let privateAcknowledgement = HouseholdAttentionAcknowledgement(
+            id: UUID(),
+            householdID: household.id,
+            profileID: privateProfile.id,
+            sourceKey: privateFollowUp.attentionSourceKey,
+            sourceUpdatedAt: privateFollowUp.updatedAt,
+            caregiverIdentifier: UUID().uuidString,
+            caregiverName: "Caregiver One"
+        )
+        let sharedAcknowledgement = HouseholdAttentionAcknowledgement(
+            id: UUID(),
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            sourceUpdatedAt: sharedFollowUp.updatedAt,
+            caregiverIdentifier: UUID().uuidString,
+            caregiverName: "Caregiver Two"
+        )
+        let sharedClaim = HouseholdAttentionClaim(
+            id: HouseholdAttentionService.deterministicID("claim", sharedFollowUp.attentionSourceKey),
+            householdID: household.id,
+            profileID: sharedProfile.id,
+            sourceKey: sharedFollowUp.attentionSourceKey,
+            caregiverIdentifier: sharedAcknowledgement.caregiverIdentifier,
+            caregiverName: "Caregiver Two",
+            updatedByCaregiverIdentifier: sharedAcknowledgement.caregiverIdentifier,
+            updatedByCaregiverName: "Caregiver Two"
+        )
+        let unscopedAcknowledgement = HouseholdAttentionAcknowledgement(
+            id: UUID(),
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceUpdatedAt: unscopedFollowUp.updatedAt,
+            caregiverIdentifier: UUID().uuidString,
+            caregiverName: "Unscoped Caregiver"
+        )
+        let unscopedClaim = HouseholdAttentionClaim(
+            id: HouseholdAttentionService.deterministicID("claim", unscopedFollowUp.attentionSourceKey),
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            caregiverIdentifier: unscopedAcknowledgement.caregiverIdentifier,
+            caregiverName: "Unscoped Caregiver",
+            updatedByCaregiverIdentifier: unscopedAcknowledgement.caregiverIdentifier,
+            updatedByCaregiverName: "Unscoped Caregiver"
+        )
+        let unscopedHandoffNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: unscopedFollowUp.attentionSourceKey,
+            sourceTitleSnapshot: unscopedFollowUp.title,
+            body: "Must not be shared without a shared appointment.",
+            authorCaregiverIdentifier: unscopedAcknowledgement.caregiverIdentifier,
+            authorCaregiverName: "Unscoped Caregiver"
+        )
+        let generalHandoffNote = CaregiverHandoffNote(
+            householdID: household.id,
+            profileID: nil,
+            sourceKey: nil,
+            sourceTitleSnapshot: nil,
+            body: "Check the shared bag.",
+            authorCaregiverIdentifier: sharedAcknowledgement.caregiverIdentifier,
+            authorCaregiverName: "Caregiver Two"
+        )
         context.insert(privateProfile)
         context.insert(sharedProfile)
         context.insert(privateMedication)
         context.insert(sharedMedication)
+        context.insert(household)
+        context.insert(privateAppointment)
+        context.insert(sharedAppointment)
+        context.insert(unscopedAppointment)
+        context.insert(privateFollowUp)
+        context.insert(sharedFollowUp)
+        context.insert(unscopedFollowUp)
+        context.insert(privateAcknowledgement)
+        context.insert(sharedAcknowledgement)
+        context.insert(sharedClaim)
+        context.insert(unscopedAcknowledgement)
+        context.insert(unscopedClaim)
+        context.insert(unscopedHandoffNote)
+        context.insert(generalHandoffNote)
         try context.save()
 
         let familyData = try DataExportImportService.exportData(
@@ -1195,8 +1307,21 @@ final class MedicationScheduleEngineTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: familyData) as? [String: Any])
         let exportedProfiles = try XCTUnwrap(json["profiles"] as? [[String: Any]])
         let exportedMedications = try XCTUnwrap(json["medications"] as? [[String: Any]])
+        let exportedFollowUps = try XCTUnwrap(json["appointmentFollowUps"] as? [[String: Any]])
+        let exportedAcknowledgements = try XCTUnwrap(
+            json["attentionAcknowledgements"] as? [[String: Any]]
+        )
+        let exportedClaims = try XCTUnwrap(json["attentionClaims"] as? [[String: Any]])
+        let exportedHandoffNotes = try XCTUnwrap(json["caregiverHandoffNotes"] as? [[String: Any]])
         XCTAssertEqual(exportedProfiles.compactMap { $0["name"] as? String }, ["Shared Adult"])
         XCTAssertEqual(exportedMedications.compactMap { $0["name"] as? String }, ["Shared Medication"])
+        XCTAssertEqual(exportedFollowUps.compactMap { $0["title"] as? String }, ["Shared Follow-up"])
+        XCTAssertEqual(
+            exportedAcknowledgements.compactMap { $0["caregiverName"] as? String },
+            ["Caregiver Two"]
+        )
+        XCTAssertEqual(exportedClaims.compactMap { $0["caregiverName"] as? String }, ["Caregiver Two"])
+        XCTAssertEqual(exportedHandoffNotes.compactMap { $0["body"] as? String }, ["Check the shared bag."])
 
         try DataExportImportService.importData(
             familyData,
@@ -1207,8 +1332,19 @@ final class MedicationScheduleEngineTests: XCTestCase {
         )
         let restoredProfiles = try context.fetch(FetchDescriptor<CareProfile>())
         let restoredMedications = try context.fetch(FetchDescriptor<Medication>())
+        let restoredFollowUps = try context.fetch(FetchDescriptor<AppointmentFollowUp>())
+        let restoredAcknowledgements = try context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>())
+        let restoredClaims = try context.fetch(FetchDescriptor<HouseholdAttentionClaim>())
+        let restoredHandoffNotes = try context.fetch(FetchDescriptor<CaregiverHandoffNote>())
         XCTAssertEqual(Set(restoredProfiles.map(\.name)), Set(["Private Adult", "Shared Adult"]))
         XCTAssertEqual(Set(restoredMedications.map(\.name)), Set(["Private Medication", "Shared Medication"]))
+        XCTAssertEqual(Set(restoredFollowUps.map(\.title)), Set(["Private Follow-up", "Shared Follow-up"]))
+        XCTAssertEqual(
+            Set(restoredAcknowledgements.map(\.caregiverName)),
+            Set(["Caregiver One", "Caregiver Two"])
+        )
+        XCTAssertEqual(restoredClaims.map(\.caregiverName), ["Caregiver Two"])
+        XCTAssertEqual(restoredHandoffNotes.map(\.body), ["Check the shared bag."])
     }
 
     @MainActor

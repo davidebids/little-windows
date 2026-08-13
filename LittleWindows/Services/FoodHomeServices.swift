@@ -1504,6 +1504,10 @@ enum TodayHomeSummaryCategory: String, CaseIterable, Identifiable {
     case kitchen
     case trips
     case returns
+    case medications
+    case appointments
+    case routines
+    case solids
 
     var id: String { rawValue }
 
@@ -1514,6 +1518,10 @@ enum TodayHomeSummaryCategory: String, CaseIterable, Identifiable {
         case .kitchen: "Kitchen"
         case .trips: "Trips"
         case .returns: "Returns"
+        case .medications: "Medication"
+        case .appointments: "Appointment"
+        case .routines: "Routine"
+        case .solids: "Solids"
         }
     }
 
@@ -1524,18 +1532,44 @@ enum TodayHomeSummaryCategory: String, CaseIterable, Identifiable {
         case .kitchen: "takeoutbag.and.cup.and.straw.fill"
         case .trips: "suitcase.rolling.fill"
         case .returns: "shippingbox.fill"
+        case .medications: "pills.fill"
+        case .appointments: "calendar.badge.clock"
+        case .routines: "checklist"
+        case .solids: "carrot.fill"
         }
     }
 
-    var route: FoodRouteCommand {
+    var route: TodayHomeSummaryRoute {
         switch self {
-        case .todos: .todos
-        case .shopping: .shopping
-        case .kitchen: .mealPrep
-        case .trips: .trips
-        case .returns: .returns
+        case .todos: .food(.todos)
+        case .shopping: .food(.shopping)
+        case .kitchen: .food(.mealPrep)
+        case .trips: .food(.trips)
+        case .returns: .food(.returns)
+        case .medications, .appointments, .routines, .solids: .todayCare
         }
     }
+}
+
+enum TodayHomeSummaryRoute: Equatable {
+    case food(FoodRouteCommand)
+    case appointment(UUID, profileID: UUID?)
+    case medications(profileID: UUID)
+    case routines(profileID: UUID?)
+    case plannedSolidMeal(UUID, profileID: UUID)
+    case solidAllergen(String, profileID: UUID)
+    case todayCare
+}
+
+struct TodayMedicationAttention: Equatable {
+    var profileID: UUID
+    var medicationID: UUID
+    var regimenID: UUID
+    var phaseID: UUID?
+    var occurrenceKey: String
+    var scheduledAt: Date
+    var doseAmount: Double
+    var doseUnit: String
 }
 
 enum TodayHomeSummaryUrgency: Int, Equatable {
@@ -1552,8 +1586,60 @@ struct TodayHomeSummaryItem: Identifiable, Equatable {
     var badge: String?
     var systemImage: String
     var urgency: TodayHomeSummaryUrgency = .normal
-    var route: FoodRouteCommand
+    var route: TodayHomeSummaryRoute
     var sortDate: Date?
+    var sourceKey: String?
+    var sourceUpdatedAt: Date?
+    var profileID: UUID?
+    var profileName: String?
+    var sourceLabel: String?
+    var dueLabel: String?
+    var isFamilyShared: Bool = false
+    var acknowledgedByNames: [String] = []
+    var currentCaregiverHasAcknowledged: Bool = false
+    var claimedCaregiverIdentifier: String?
+    var claimedCaregiverName: String?
+    var supportsClaim: Bool = false
+    var followUpID: UUID?
+    var medicationAttention: TodayMedicationAttention?
+}
+
+struct TodaySnoozedAttentionItem: Identifiable, Equatable {
+    var item: TodayHomeSummaryItem
+    var until: Date
+
+    var id: String { item.id }
+}
+
+struct TodayHandoffNoteSummary: Identifiable, Equatable {
+    var id: UUID
+    var authorName: String
+    var body: String
+    var sourceTitle: String?
+    var createdAt: Date
+}
+
+struct TodayHandoffActivitySummary: Identifiable, Equatable {
+    var id: String
+    var text: String
+    var occurredAt: Date
+}
+
+struct TodayCaregiverHandoffSummary: Equatable {
+    var activityCount: Int
+    var newNoteCount: Int
+    var recentActivities: [TodayHandoffActivitySummary]
+    var recentNotes: [TodayHandoffNoteSummary]
+    var needsAcknowledgementItemID: String?
+    var nextUpItemID: String?
+    var latestObservedActivityAt: Date?
+
+    var isEmpty: Bool {
+        activityCount == 0
+            && recentNotes.isEmpty
+            && needsAcknowledgementItemID == nil
+            && nextUpItemID == nil
+    }
 }
 
 struct TodayHomeSummarySection: Identifiable, Equatable {
@@ -1568,10 +1654,16 @@ struct TodayHomeSummarySection: Identifiable, Equatable {
 
 struct TodayHomeSummary: Equatable {
     var attentionItems: [TodayHomeSummaryItem]
+    var allAttentionItems: [TodayHomeSummaryItem]
+    var snoozedAttentionItems: [TodaySnoozedAttentionItem]
     var sections: [TodayHomeSummarySection]
+    var handoff: TodayCaregiverHandoffSummary?
 
     var isQuiet: Bool {
-        attentionItems.isEmpty && sections.allSatisfy { $0.items.isEmpty }
+        attentionItems.isEmpty
+            && snoozedAttentionItems.isEmpty
+            && sections.allSatisfy { $0.items.isEmpty }
+            && (handoff?.isEmpty ?? true)
     }
 }
 
@@ -1597,6 +1689,24 @@ enum TodayHomeSummaryService {
         returnItems: [ReturnItem],
         returnPackages: [ReturnPackage],
         reminders: [FoodReminder],
+        profiles: [CareProfile] = [],
+        medications: [Medication] = [],
+        medicationRegimens: [MedicationRegimen] = [],
+        medicationPhases: [MedicationSchedulePhase] = [],
+        medicationDoseRecords: [MedicationDoseRecord] = [],
+        appointmentFollowUps: [AppointmentFollowUp] = [],
+        careRoutines: [CareRoutine] = [],
+        careRoutineRuns: [CareRoutineRun] = [],
+        plannedSolidMeals: [PlannedSolidMeal] = [],
+        solidAllergenProgress: [SolidAllergenProgress] = [],
+        acknowledgements: [HouseholdAttentionAcknowledgement] = [],
+        claims: [HouseholdAttentionClaim] = [],
+        handoffNotes: [CaregiverHandoffNote] = [],
+        familyCaregiverIdentities: [FamilyCaregiverIdentity] = [],
+        currentCaregiverIdentifier: String = "",
+        familySyncEnabled: Bool = false,
+        handoffCheckpoint: Date? = nil,
+        snoozeDefaults: UserDefaults = .standard,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> TodayHomeSummary {
@@ -1631,6 +1741,7 @@ enum TodayHomeSummaryService {
             trips: packingTrips,
             packingItems: packingItems,
             itineraryItems: itineraryItems,
+            now: now,
             dayStart: dayStart,
             dayEnd: dayEnd,
             calendar: calendar
@@ -1646,27 +1757,526 @@ enum TodayHomeSummaryService {
         let reminderAttention = reminderItems(
             householdID: householdID,
             reminders: reminders,
-            dayStart: dayStart,
+            now: now,
             dayEnd: dayEnd
         )
-        let attention = (reminderAttention + kitchenResult.attention + tripResult.attention + returnResult.attention)
+        let careAttention = careAttentionItems(
+            householdID: householdID,
+            profiles: profiles,
+            medications: medications,
+            medicationRegimens: medicationRegimens,
+            medicationPhases: medicationPhases,
+            medicationDoseRecords: medicationDoseRecords,
+            appointmentFollowUps: appointmentFollowUps,
+            careRoutines: careRoutines,
+            careRoutineRuns: careRoutineRuns,
+            plannedSolidMeals: plannedSolidMeals,
+            solidAllergenProgress: solidAllergenProgress,
+            now: now,
+            dayStart: dayStart,
+            dayEnd: dayEnd,
+            calendar: calendar
+        )
+        let allAttention = reminderAttention
+            + kitchenResult.attention
+            + tripResult.attention
+            + returnResult.attention
+            + careAttention
+        let coordinatedAttention = applyCollaboration(
+            to: allAttention,
+            profiles: profiles,
+            acknowledgements: acknowledgements,
+            claims: claims,
+            familyCaregiverIdentities: familyCaregiverIdentities,
+            currentCaregiverIdentifier: currentCaregiverIdentifier,
+            familySyncEnabled: familySyncEnabled
+        )
+        let sortedAttention = coordinatedAttention
             .sorted {
                 if $0.urgency != $1.urgency {
                     return $0.urgency.rawValue > $1.urgency.rawValue
                 }
                 return ($0.sortDate ?? .distantFuture) < ($1.sortDate ?? .distantFuture)
             }
+        let snoozes = HouseholdAttentionSnoozeStore.activeSnoozes(
+            now: now,
+            defaults: snoozeDefaults
+        )
+        let attention = sortedAttention.filter { item in
+            guard let sourceKey = item.sourceKey else { return true }
+            return snoozes[sourceKey] == nil
+        }
+        let snoozedAttention = sortedAttention.compactMap { item -> TodaySnoozedAttentionItem? in
+            guard let sourceKey = item.sourceKey,
+                  let until = snoozes[sourceKey] else { return nil }
+            return TodaySnoozedAttentionItem(item: item, until: until)
+        }.sorted { $0.until < $1.until }
+        let handoff = familySyncEnabled ? handoffSummary(
+            items: attention,
+            followUps: appointmentFollowUps,
+            acknowledgements: acknowledgements,
+            claims: claims,
+            notes: handoffNotes,
+            sharedProfileIDs: Set(profiles.filter { $0.sharingScope == .family }.map(\.id)),
+            caregiverNamesByIdentifier: Dictionary(
+                familyCaregiverIdentities.map { ($0.caregiverIdentifier, $0.displayName) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            currentCaregiverIdentifier: currentCaregiverIdentifier,
+            checkpoint: handoffCheckpoint ?? now.addingTimeInterval(-12 * 60 * 60)
+        ) : nil
 
         return TodayHomeSummary(
             attentionItems: Array(attention.prefix(attentionItemLimit)),
+            allAttentionItems: attention,
+            snoozedAttentionItems: snoozedAttention,
             sections: [
                 todoSection,
                 shoppingSection,
                 kitchenResult.section,
                 tripResult.section,
                 returnResult.section
-            ]
+            ],
+            handoff: handoff
         )
+    }
+
+    private static func careAttentionItems(
+        householdID: UUID,
+        profiles: [CareProfile],
+        medications: [Medication],
+        medicationRegimens: [MedicationRegimen],
+        medicationPhases: [MedicationSchedulePhase],
+        medicationDoseRecords: [MedicationDoseRecord],
+        appointmentFollowUps: [AppointmentFollowUp],
+        careRoutines: [CareRoutine],
+        careRoutineRuns: [CareRoutineRun],
+        plannedSolidMeals: [PlannedSolidMeal],
+        solidAllergenProgress: [SolidAllergenProgress],
+        now: Date,
+        dayStart: Date,
+        dayEnd: Date,
+        calendar: Calendar
+    ) -> [TodayHomeSummaryItem] {
+        let activeProfiles = profiles.filter { !$0.isArchived }
+        let profilesByID = Dictionary(uniqueKeysWithValues: activeProfiles.map { ($0.id, $0) })
+        var items = medicationAttentionItems(
+            profilesByID: profilesByID,
+            medications: medications,
+            regimens: medicationRegimens,
+            phases: medicationPhases,
+            records: medicationDoseRecords,
+            now: now
+        )
+        items.append(contentsOf: appointmentFollowUps.compactMap { followUp in
+            guard followUp.householdID == householdID,
+                  !followUp.isCompleted,
+                  followUp.profileID.map({ profilesByID[$0] != nil }) ?? true else {
+                return nil
+            }
+            let profile = followUp.profileID.flatMap { profilesByID[$0] }
+            let urgency = dueUrgency(followUp.dueDate, now: now, dayEnd: dayEnd)
+            let timing = followUp.dueDate.map { dueText($0, now: now, calendar: calendar) }
+                ?? "No due date"
+            return TodayHomeSummaryItem(
+                id: "attention-follow-up-\(followUp.id.uuidString)",
+                category: .appointments,
+                title: followUp.title,
+                detail: [timing, profile?.name].compactMap { $0 }.joined(separator: " · "),
+                badge: urgency == .urgent ? "Overdue" : "Follow-up",
+                systemImage: "checklist.checked",
+                urgency: urgency,
+                route: .appointment(followUp.appointmentID, profileID: followUp.profileID),
+                sortDate: followUp.dueDate ?? followUp.updatedAt,
+                sourceKey: followUp.attentionSourceKey,
+                sourceUpdatedAt: followUp.updatedAt,
+                profileID: followUp.profileID,
+                profileName: profile?.name,
+                sourceLabel: "Appointment",
+                dueLabel: timing,
+                supportsClaim: true,
+                followUpID: followUp.id
+            )
+        })
+        items.append(contentsOf: routineAttentionItems(
+            householdID: householdID,
+            profilesByID: profilesByID,
+            routines: careRoutines,
+            runs: careRoutineRuns,
+            now: now,
+            dayStart: dayStart,
+            dayEnd: dayEnd,
+            calendar: calendar
+        ))
+        items.append(contentsOf: plannedSolidMeals.compactMap { plan in
+            guard !plan.isCompleted,
+                  plan.scheduledAt < dayEnd,
+                  let profile = profilesByID[plan.profileID] else { return nil }
+            let overdue = plan.scheduledAt < now
+            return TodayHomeSummaryItem(
+                id: "attention-solids-plan-\(plan.id.uuidString)",
+                category: .solids,
+                title: plan.title,
+                detail: "\(dueText(plan.scheduledAt, now: now, calendar: calendar)) · \(profile.name)",
+                badge: overdue ? "Overdue" : "Planned meal",
+                systemImage: "fork.knife.circle.fill",
+                urgency: overdue ? .urgent : .attention,
+                route: .plannedSolidMeal(plan.id, profileID: plan.profileID),
+                sortDate: plan.scheduledAt,
+                sourceKey: "\(HouseholdAttentionSourceKind.plannedSolidMeal.rawValue):\(plan.id.uuidString.lowercased())",
+                sourceUpdatedAt: plan.updatedAt,
+                profileID: plan.profileID,
+                profileName: profile.name,
+                sourceLabel: "Planned Solids",
+                dueLabel: dueText(plan.scheduledAt, now: now, calendar: calendar)
+            )
+        })
+        items.append(contentsOf: solidAllergenProgress.compactMap { progress in
+            guard let dueDate = progress.nextExposureDueAt,
+                  dueDate < dayEnd,
+                  progress.status != .suspectedReaction,
+                  progress.status != .avoidPendingAdvice,
+                  let profile = profilesByID[progress.profileID],
+                  let allergen = SolidsAllergen(rawValue: progress.allergenID) else {
+                return nil
+            }
+            let overdue = dueDate < now
+            return TodayHomeSummaryItem(
+                id: "attention-allergen-\(progress.id.uuidString)",
+                category: .solids,
+                title: "\(allergen.displayName) follow-up",
+                detail: "\(dueText(dueDate, now: now, calendar: calendar)) · \(profile.name)",
+                badge: overdue ? "Overdue" : "Allergen",
+                systemImage: "checklist",
+                urgency: overdue ? .urgent : .attention,
+                route: .solidAllergen(progress.allergenID, profileID: progress.profileID),
+                sortDate: dueDate,
+                sourceKey: "\(HouseholdAttentionSourceKind.solidAllergen.rawValue):\(progress.id.uuidString.lowercased())",
+                sourceUpdatedAt: progress.updatedAt,
+                profileID: progress.profileID,
+                profileName: profile.name,
+                sourceLabel: "Allergen",
+                dueLabel: dueText(dueDate, now: now, calendar: calendar)
+            )
+        })
+        return items
+    }
+
+    private static func medicationAttentionItems(
+        profilesByID: [UUID: CareProfile],
+        medications: [Medication],
+        regimens: [MedicationRegimen],
+        phases: [MedicationSchedulePhase],
+        records: [MedicationDoseRecord],
+        now: Date
+    ) -> [TodayHomeSummaryItem] {
+        let medicationsByID = Dictionary(
+            uniqueKeysWithValues: medications.filter { !$0.isArchived }.map { ($0.id, $0) }
+        )
+        let phasesByRegimenID = Dictionary(grouping: phases, by: \.regimenID)
+        let phasesByID = Dictionary(uniqueKeysWithValues: phases.map { ($0.id, $0) })
+        let rangeStart = now.addingTimeInterval(-24 * 60 * 60)
+        let rangeEnd = now.addingTimeInterval(2 * 60 * 60)
+        return regimens.filter { $0.isActive }.flatMap { regimen -> [TodayHomeSummaryItem] in
+            guard let profileID = regimen.profileID,
+                  let profile = profilesByID[profileID],
+                  let medication = medicationsByID[regimen.medicationID] else { return [] }
+            let occurrences = MedicationScheduleEngine.unloggedOccurrences(
+                MedicationScheduleEngine.occurrences(
+                    regimen: regimen,
+                    phases: phasesByRegimenID[regimen.id] ?? [],
+                    from: rangeStart,
+                    through: rangeEnd
+                ),
+                records: records.filter { $0.regimenID == regimen.id }
+            ).filter {
+                !MedicationSnoozeStateStore.isSnoozed(occurrenceKey: $0.occurrenceKey, now: now)
+            }
+            return occurrences.map { occurrence in
+                let overdueSeconds = now.timeIntervalSince(occurrence.scheduledAt)
+                let urgency: TodayHomeSummaryUrgency = overdueSeconds > 30 * 60
+                    ? .urgent
+                    : (overdueSeconds >= 0 ? .attention : .normal)
+                let sourceUpdatedAt = max(
+                    max(medication.updatedAt, regimen.updatedAt),
+                    occurrence.phaseID.flatMap { phasesByID[$0]?.updatedAt } ?? .distantPast
+                )
+                return TodayHomeSummaryItem(
+                    id: "attention-medication-\(occurrence.occurrenceKey)",
+                    category: .medications,
+                    title: medication.name,
+                    detail: "\(dueText(occurrence.scheduledAt, now: now, calendar: .current)) · \(profile.name)",
+                    badge: overdueSeconds > 0 ? "Overdue" : "Due soon",
+                    systemImage: "pills.fill",
+                    urgency: urgency,
+                    route: .medications(profileID: profileID),
+                    sortDate: occurrence.scheduledAt,
+                    sourceKey: "\(HouseholdAttentionSourceKind.medicationDose.rawValue):\(occurrence.occurrenceKey)",
+                    sourceUpdatedAt: sourceUpdatedAt,
+                    profileID: profileID,
+                    profileName: profile.name,
+                    sourceLabel: "Medication",
+                    dueLabel: dueText(occurrence.scheduledAt, now: now, calendar: .current),
+                    medicationAttention: TodayMedicationAttention(
+                        profileID: profileID,
+                        medicationID: medication.id,
+                        regimenID: regimen.id,
+                        phaseID: occurrence.phaseID,
+                        occurrenceKey: occurrence.occurrenceKey,
+                        scheduledAt: occurrence.scheduledAt,
+                        doseAmount: occurrence.doseAmount,
+                        doseUnit: occurrence.doseUnit
+                    )
+                )
+            }
+        }
+    }
+
+    private static func routineAttentionItems(
+        householdID: UUID,
+        profilesByID: [UUID: CareProfile],
+        routines: [CareRoutine],
+        runs: [CareRoutineRun],
+        now: Date,
+        dayStart: Date,
+        dayEnd: Date,
+        calendar: Calendar
+    ) -> [TodayHomeSummaryItem] {
+        routines.compactMap { routine in
+            guard !routine.isArchived,
+                  (routine.householdID == householdID || routine.profileID.map({ profilesByID[$0] != nil }) == true) else {
+                return nil
+            }
+            let routineRuns = runs.filter { $0.routineID == routine.id }
+            let activeRun = routineRuns.first { $0.state == .active }
+            let completedToday = routineRuns.contains {
+                $0.state == .completed && $0.completedAt.map { $0 >= dayStart && $0 < dayEnd } == true
+            }
+            let dueDate = routine.reminderTimeMinutesAfterMidnight.flatMap {
+                calendar.date(byAdding: .minute, value: $0, to: dayStart)
+            }
+            let isDue = routine.reminderEnabled && dueDate.map { $0 <= now } == true && !completedToday
+            guard activeRun != nil || isDue else { return nil }
+            let profile = routine.profileID.flatMap { profilesByID[$0] }
+            let sourceDate = activeRun?.startedAt ?? dueDate ?? routine.updatedAt
+            let sourceKey = activeRun.map {
+                "\(HouseholdAttentionSourceKind.routine.rawValue):run:\($0.id.uuidString.lowercased())"
+            } ?? "\(HouseholdAttentionSourceKind.routine.rawValue):\(routine.id.uuidString.lowercased()):\(Int(dayStart.timeIntervalSince1970))"
+            return TodayHomeSummaryItem(
+                id: "attention-routine-\(routine.id.uuidString)",
+                category: .routines,
+                title: routine.title,
+                detail: [activeRun == nil ? "Routine is due" : "Routine is in progress", profile?.name ?? "Household"]
+                    .joined(separator: " · "),
+                badge: activeRun == nil ? "Due" : "In progress",
+                systemImage: routine.iconName,
+                urgency: activeRun == nil && dueDate.map { now.timeIntervalSince($0) > 60 * 60 } == true
+                    ? .urgent
+                    : .attention,
+                route: .routines(profileID: routine.profileID),
+                sortDate: sourceDate,
+                sourceKey: sourceKey,
+                sourceUpdatedAt: max(routine.updatedAt, activeRun?.updatedAt ?? .distantPast),
+                profileID: routine.profileID,
+                profileName: profile?.name,
+                sourceLabel: "Routine",
+                dueLabel: activeRun == nil
+                    ? dueDate.map { dueText($0, now: now, calendar: calendar) } ?? "Due now"
+                    : "In progress"
+            )
+        }
+    }
+
+    private static func applyCollaboration(
+        to items: [TodayHomeSummaryItem],
+        profiles: [CareProfile],
+        acknowledgements: [HouseholdAttentionAcknowledgement],
+        claims: [HouseholdAttentionClaim],
+        familyCaregiverIdentities: [FamilyCaregiverIdentity],
+        currentCaregiverIdentifier: String,
+        familySyncEnabled: Bool
+    ) -> [TodayHomeSummaryItem] {
+        let profilesByID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+        let acknowledgementsBySource = Dictionary(grouping: acknowledgements, by: \.sourceKey)
+        let caregiverNamesByIdentifier = Dictionary(
+            familyCaregiverIdentities.map { ($0.caregiverIdentifier, $0.displayName) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let claimsBySource = Dictionary(grouping: claims, by: \.sourceKey).compactMapValues {
+            $0.max { $0.updatedAt < $1.updatedAt }
+        }
+        return items.map { item in
+            var result = item
+            guard familySyncEnabled, let sourceKey = item.sourceKey else { return result }
+            let isShared = item.profileID.map {
+                profilesByID[$0]?.sharingScope == .family
+            } ?? true
+            guard isShared else { return result }
+            result.isFamilyShared = true
+            let sourceUpdatedAt = item.sourceUpdatedAt ?? .distantPast
+            let validAcknowledgements = (acknowledgementsBySource[sourceKey] ?? []).filter {
+                $0.sourceUpdatedAt >= sourceUpdatedAt
+            }
+            let latestAcknowledgementByCaregiver = Dictionary(
+                grouping: validAcknowledgements,
+                by: \.caregiverIdentifier
+            ).compactMapValues { values in
+                values.max { $0.updatedAt < $1.updatedAt }
+            }
+            result.acknowledgedByNames = latestAcknowledgementByCaregiver.values.map {
+                caregiverNamesByIdentifier[$0.caregiverIdentifier] ?? $0.caregiverName
+            }.sorted()
+            result.currentCaregiverHasAcknowledged = validAcknowledgements.contains {
+                $0.caregiverIdentifier == currentCaregiverIdentifier
+            }
+            if let claim = claimsBySource[sourceKey],
+               let identifier = claim.caregiverIdentifier,
+               !identifier.isEmpty {
+                result.claimedCaregiverIdentifier = identifier
+                result.claimedCaregiverName = caregiverNamesByIdentifier[identifier] ?? claim.caregiverName
+            }
+            return result
+        }
+    }
+
+    private static func handoffSummary(
+        items: [TodayHomeSummaryItem],
+        followUps: [AppointmentFollowUp],
+        acknowledgements: [HouseholdAttentionAcknowledgement],
+        claims: [HouseholdAttentionClaim],
+        notes: [CaregiverHandoffNote],
+        sharedProfileIDs: Set<UUID>,
+        caregiverNamesByIdentifier: [String: String],
+        currentCaregiverIdentifier: String,
+        checkpoint: Date
+    ) -> TodayCaregiverHandoffSummary {
+        let sharedOtherNotes = notes.filter {
+            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+                && $0.authorCaregiverIdentifier != currentCaregiverIdentifier
+        }
+        let sharedOtherAcknowledgements = acknowledgements.filter {
+            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+                && $0.caregiverIdentifier != currentCaregiverIdentifier
+        }
+        let sharedOtherClaims = claims.filter {
+            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+                && $0.updatedByCaregiverIdentifier != currentCaregiverIdentifier
+        }
+        let sharedOtherCompletions = followUps.filter {
+            ($0.profileID.map(sharedProfileIDs.contains) ?? true)
+                && $0.completedByCaregiverIdentifier.map {
+                    !$0.isEmpty && $0 != currentCaregiverIdentifier
+                } == true
+                && $0.completedAt != nil
+        }
+        let recentNotes = sharedOtherNotes.filter { $0.createdAt > checkpoint }
+            .sorted { $0.createdAt > $1.createdAt }
+        let acknowledgementUpdates = sharedOtherAcknowledgements.filter { $0.updatedAt > checkpoint }
+        let claimUpdates = sharedOtherClaims.filter { $0.updatedAt > checkpoint }
+        let completedFollowUps = sharedOtherCompletions.filter {
+            $0.completedAt.map { $0 > checkpoint } == true
+        }
+        let activeItemTitlesBySource = Dictionary(
+            items.compactMap { item in
+                item.sourceKey.map { ($0, item.title) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let recentActivities = (
+            acknowledgementUpdates.map { acknowledgement in
+                let caregiverName = caregiverNamesByIdentifier[acknowledgement.caregiverIdentifier]
+                    ?? acknowledgement.caregiverName
+                return TodayHandoffActivitySummary(
+                    id: "ack-\(acknowledgement.id.uuidString)",
+                    text: "\(caregiverName) saw \(activeItemTitlesBySource[acknowledgement.sourceKey] ?? "a shared item")",
+                    occurredAt: acknowledgement.updatedAt
+                )
+            }
+            + claimUpdates.map { claim in
+                let title = activeItemTitlesBySource[claim.sourceKey] ?? "a shared follow-up"
+                let updaterName = caregiverNamesByIdentifier[claim.updatedByCaregiverIdentifier]
+                    ?? claim.updatedByCaregiverName
+                let assignment = claim.caregiverIdentifier.flatMap {
+                    caregiverNamesByIdentifier[$0]
+                } ?? claim.caregiverName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let text = assignment.isEmpty
+                    ? "\(updaterName) cleared responsibility for \(title)"
+                    : "\(updaterName) assigned \(title) to \(assignment)"
+                return TodayHandoffActivitySummary(
+                    id: "claim-\(claim.id.uuidString)",
+                    text: text,
+                    occurredAt: claim.updatedAt
+                )
+            }
+            + completedFollowUps.compactMap { followUp in
+                guard let completedAt = followUp.completedAt else { return nil }
+                let caregiverName = followUp.completedByCaregiverIdentifier.flatMap {
+                    caregiverNamesByIdentifier[$0]
+                } ?? followUp.completedByCaregiverName ?? "A caregiver"
+                return TodayHandoffActivitySummary(
+                    id: "completed-\(followUp.id.uuidString)",
+                    text: "\(caregiverName) completed \(followUp.title)",
+                    occurredAt: completedAt
+                )
+            }
+        ).sorted { $0.occurredAt > $1.occurredAt }
+        let latestObservedActivityAt = (
+            sharedOtherNotes.map(\.createdAt)
+                + sharedOtherAcknowledgements.map(\.updatedAt)
+                + sharedOtherClaims.map(\.updatedAt)
+                + sharedOtherCompletions.compactMap(\.completedAt)
+        ).max()
+        let needsAcknowledgement = items.first {
+            $0.isFamilyShared && !$0.currentCaregiverHasAcknowledged
+        }
+        let nextUp = items.first {
+            $0.isFamilyShared
+                && $0.supportsClaim
+                && $0.claimedCaregiverIdentifier == currentCaregiverIdentifier
+        }
+        return TodayCaregiverHandoffSummary(
+            activityCount: recentNotes.count
+                + acknowledgementUpdates.count
+                + claimUpdates.count
+                + completedFollowUps.count,
+            newNoteCount: recentNotes.count,
+            recentActivities: Array(recentActivities.prefix(4)),
+            recentNotes: recentNotes.prefix(3).map {
+                TodayHandoffNoteSummary(
+                    id: $0.id,
+                    authorName: $0.authorCaregiverName,
+                    body: $0.body,
+                    sourceTitle: $0.sourceTitleSnapshot,
+                    createdAt: $0.createdAt
+                )
+            },
+            needsAcknowledgementItemID: needsAcknowledgement?.id,
+            nextUpItemID: nextUp?.id,
+            latestObservedActivityAt: latestObservedActivityAt
+        )
+    }
+
+    private static func dueUrgency(
+        _ dueDate: Date?,
+        now: Date,
+        dayEnd: Date
+    ) -> TodayHomeSummaryUrgency {
+        guard let dueDate else { return .normal }
+        if dueDate < now { return .urgent }
+        return dueDate < dayEnd ? .attention : .normal
+    }
+
+    private static func dueText(_ date: Date, now: Date, calendar: Calendar) -> String {
+        if date < now {
+            return "Overdue · \(date.formatted(date: .abbreviated, time: .shortened))"
+        }
+        if calendar.isDateInToday(date) {
+            return "Due today at \(date.formatted(date: .omitted, time: .shortened))"
+        }
+        if calendar.isDateInTomorrow(date) {
+            return "Due tomorrow at \(date.formatted(date: .omitted, time: .shortened))"
+        }
+        return "Due \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 
     private static func todoSummary(
@@ -1707,7 +2317,7 @@ enum TodayHomeSummaryService {
                 title: item.title,
                 detail: detail,
                 systemImage: "circle",
-                route: .todoList(item.todoListID),
+                route: .food(.todoList(item.todoListID)),
                 sortDate: item.updatedAt
             )
         }
@@ -1765,7 +2375,7 @@ enum TodayHomeSummaryService {
                 badge: highCount > 0 ? countText(highCount, singular: "high priority", plural: "high priority") : nil,
                 systemImage: "cart",
                 urgency: highCount > 0 ? .attention : .normal,
-                route: .shoppingList(list.id),
+                route: .food(.shoppingList(list.id)),
                 sortDate: list.updatedAt
             )
         }
@@ -1813,7 +2423,7 @@ enum TodayHomeSummaryService {
                 badge: item.servingsRemaining <= 2 ? "Low" : nil,
                 systemImage: "takeoutbag.and.cup.and.straw",
                 urgency: item.servingsRemaining <= 0 ? .urgent : (item.servingsRemaining <= 2 ? .attention : .normal),
-                route: .mealPrepItem(item.id),
+                route: .food(.mealPrepItem(item.id)),
                 sortDate: item.updatedAt
             )
         }
@@ -1827,7 +2437,7 @@ enum TodayHomeSummaryService {
                     badge: "Inventory",
                     systemImage: "cabinet",
                     urgency: .attention,
-                    route: .inventoryItem(item.id),
+                    route: .food(.inventoryItem(item.id)),
                     sortDate: item.updatedAt
                 )
             })
@@ -1844,8 +2454,29 @@ enum TodayHomeSummaryService {
                 badge: "Meal Prep",
                 systemImage: "exclamationmark.triangle.fill",
                 urgency: item.servingsRemaining <= 0 ? .urgent : .attention,
-                route: .mealPrepItem(item.id),
-                sortDate: item.updatedAt
+                route: .food(.mealPrepItem(item.id)),
+                sortDate: item.updatedAt,
+                sourceKey: "\(HouseholdAttentionSourceKind.mealPrep.rawValue):\(item.id.uuidString.lowercased())",
+                sourceUpdatedAt: item.updatedAt,
+                sourceLabel: "Meal Prep",
+                dueLabel: "Needs attention now"
+            )
+        }
+        let usedUpAttention = usedUpInventory.prefix(2).map { item in
+            TodayHomeSummaryItem(
+                id: "attention-inventory-\(item.id.uuidString)",
+                category: .kitchen,
+                title: "\(item.name) is used up",
+                detail: "Inventory needs review",
+                badge: "Inventory",
+                systemImage: "cabinet.fill",
+                urgency: .attention,
+                route: .food(.inventoryItem(item.id)),
+                sortDate: item.updatedAt,
+                sourceKey: "\(HouseholdAttentionSourceKind.inventory.rawValue):\(item.id.uuidString.lowercased())",
+                sourceUpdatedAt: item.updatedAt,
+                sourceLabel: "Inventory",
+                dueLabel: "Needs attention now"
             )
         }
 
@@ -1858,7 +2489,7 @@ enum TodayHomeSummaryService {
                 remainderText: remainderText(max(0, activePrep.count + usedUpInventory.count - visible.count), noun: "item"),
                 emptyMessage: "No meal prep or inventory items need attention."
             ),
-            Array(lowPrepAttention)
+            Array(lowPrepAttention + usedUpAttention)
         )
     }
 
@@ -1867,6 +2498,7 @@ enum TodayHomeSummaryService {
         trips: [PackingTrip],
         packingItems: [PackingItem],
         itineraryItems: [TripItineraryItem],
+        now: Date,
         dayStart: Date,
         dayEnd: Date,
         calendar: Calendar
@@ -1902,7 +2534,7 @@ enum TodayHomeSummaryService {
                 detail: "Today · \(activeTrips.first(where: { $0.id == item.tripID })?.title ?? "Trip itinerary")",
                 badge: item.kind.displayName,
                 systemImage: item.kind.systemImage,
-                route: .itineraryItem(item.tripID, item.id),
+                route: .food(.itineraryItem(item.tripID, item.id)),
                 sortDate: item.startDate ?? item.scheduledDay
             )
         }
@@ -1934,19 +2566,21 @@ enum TodayHomeSummaryService {
                 badge: isCurrent ? "Today" : nil,
                 systemImage: "suitcase.rolling",
                 urgency: isCurrent ? .attention : .normal,
-                route: .packingTrip(trip.id),
+                route: .food(.packingTrip(trip.id)),
                 sortDate: trip.startDate
             ))
         }
         let attention = activeTrips.compactMap { trip -> TodayHomeSummaryItem? in
             let tripItems = packingByTrip[trip.id] ?? []
+            let sourceUpdatedAt = tripItems.map(\.updatedAt).max()
+                .map { max(trip.updatedAt, $0) } ?? trip.updatedAt
             let neededEssentials = tripItems.filter { $0.state == .needed && $0.priority == .essential }.count
             let checkDate = [trip.finalCheckDate, trip.reminderDate].compactMap { $0 }.min()
             let startsSoon = trip.startDate < (calendar.date(byAdding: .day, value: 3, to: dayStart) ?? dayEnd)
             guard isBeforeEndOfDay(checkDate, dayEnd: dayEnd) || (startsSoon && neededEssentials > 0) else {
                 return nil
             }
-            let isOverdue = checkDate.map { $0 < dayStart } == true
+            let isOverdue = checkDate.map { $0 < now } == true
             let detail = neededEssentials > 0
                 ? countText(neededEssentials, singular: "essential item still needed", plural: "essential items still needed")
                 : "Trip check is due"
@@ -1958,8 +2592,12 @@ enum TodayHomeSummaryService {
                 badge: "Trip",
                 systemImage: "suitcase.rolling.fill",
                 urgency: isOverdue ? .urgent : .attention,
-                route: .packingList(trip.id),
-                sortDate: checkDate ?? trip.startDate
+                route: .food(.packingList(trip.id)),
+                sortDate: checkDate ?? trip.startDate,
+                sourceKey: "\(HouseholdAttentionSourceKind.trip.rawValue):\(trip.id.uuidString.lowercased())",
+                sourceUpdatedAt: sourceUpdatedAt,
+                sourceLabel: "Trip",
+                dueLabel: dueText(checkDate ?? trip.startDate, now: now, calendar: calendar)
             )
         }
         let todayCount = activeTrips.filter { $0.startDate < dayEnd && $0.endDate >= dayStart }.count
@@ -2018,13 +2656,19 @@ enum TodayHomeSummaryService {
                 badge: urgency == .urgent ? "Overdue" : (urgency == .attention ? "Due today" : nil),
                 systemImage: "shippingbox",
                 urgency: urgency,
-                route: .returnRequest(request.id),
+                route: .food(.returnRequest(request.id)),
                 sortDate: returnByDate ?? request.updatedAt
             )
         }
         let attention = active.compactMap { request, status, returnByDate -> TodayHomeSummaryItem? in
             guard let returnByDate, returnByDate < dayEnd else { return nil }
             let overdue = returnByDate < dayStart
+            let relatedUpdatedAt = (
+                (itemsByRequest[request.id] ?? []).map(\.updatedAt)
+                    + (packagesByRequest[request.id] ?? []).map(\.updatedAt)
+            ).max()
+            let sourceUpdatedAt = relatedUpdatedAt.map { max(request.updatedAt, $0) }
+                ?? request.updatedAt
             return TodayHomeSummaryItem(
                 id: "attention-return-\(request.id.uuidString)",
                 category: .returns,
@@ -2036,8 +2680,14 @@ enum TodayHomeSummaryService {
                 badge: overdue ? "Overdue" : "Due today",
                 systemImage: "shippingbox.fill",
                 urgency: overdue ? .urgent : .attention,
-                route: .returnRequest(request.id),
-                sortDate: returnByDate
+                route: .food(.returnRequest(request.id)),
+                sortDate: returnByDate,
+                sourceKey: "\(HouseholdAttentionSourceKind.returnRequest.rawValue):\(request.id.uuidString.lowercased())",
+                sourceUpdatedAt: sourceUpdatedAt,
+                sourceLabel: "Return",
+                dueLabel: overdue
+                    ? "Overdue · \(returnByDate.formatted(date: .abbreviated, time: .shortened))"
+                    : "Due today at \(returnByDate.formatted(date: .omitted, time: .shortened))"
             )
         }
         let dueSoonCount = active.filter { $0.2.map { $0 < dayEnd } ?? false }.count
@@ -2058,13 +2708,13 @@ enum TodayHomeSummaryService {
     private static func reminderItems(
         householdID: UUID,
         reminders: [FoodReminder],
-        dayStart: Date,
+        now: Date,
         dayEnd: Date
     ) -> [TodayHomeSummaryItem] {
         reminders.filter {
             $0.householdID == householdID && $0.isEnabled && $0.dateTime < dayEnd
         }.map { reminder in
-            let overdue = reminder.dateTime < dayStart
+            let overdue = reminder.dateTime < now
             let category = category(for: reminder)
             return TodayHomeSummaryItem(
                 id: "reminder-\(reminder.id.uuidString)",
@@ -2076,8 +2726,14 @@ enum TodayHomeSummaryService {
                 badge: overdue ? "Overdue" : "Today",
                 systemImage: "bell.badge.fill",
                 urgency: overdue ? .urgent : .attention,
-                route: route(for: reminder),
-                sortDate: reminder.dateTime
+                route: .food(route(for: reminder)),
+                sortDate: reminder.dateTime,
+                sourceKey: "\(HouseholdAttentionSourceKind.homeReminder.rawValue):\(reminder.id.uuidString.lowercased())",
+                sourceUpdatedAt: reminder.updatedAt,
+                sourceLabel: "Home Reminder",
+                dueLabel: overdue
+                    ? "Overdue · \(reminder.dateTime.formatted(date: .abbreviated, time: .shortened))"
+                    : "Due today at \(DateFormatting.time.string(from: reminder.dateTime))"
             )
         }
     }

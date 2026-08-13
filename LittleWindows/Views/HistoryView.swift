@@ -293,13 +293,13 @@ struct HistoryView: View {
         .appActionSheet(
             isPresented: $showingDeleteAppointmentConfirmation,
             title: "Delete appointment?",
-            message: "This permanently removes the appointment and cancels its reminders.",
+            message: "This permanently removes the appointment, its follow-ups and handoff activity, and cancels its reminders.",
             systemImage: "calendar.badge.minus",
             tint: .red,
             options: appointmentPendingDelete.map { appointment in
                 [AppActionSheetOption(
                     title: "Delete Appointment",
-                    subtitle: "Remove the appointment and cancel its reminders.",
+                    subtitle: "Also remove its follow-ups and handoff activity.",
                     systemImage: "calendar.badge.minus",
                     tint: .red,
                     role: .destructive
@@ -988,11 +988,10 @@ struct HistoryView: View {
 
     private func delete(_ appointment: DoctorAppointment) {
         Task {
-            await NotificationManager.shared.cancelAppointmentReminders(
-                appointmentID: appointment.id
-            )
-            modelContext.delete(appointment)
-            guard PersistenceService.save(context: modelContext) else { return }
+            guard await HouseholdAttentionService.deleteAppointment(
+                appointment,
+                context: modelContext
+            ) else { return }
             refreshDayData()
         }
     }

@@ -117,6 +117,8 @@
 		B0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */; };
 		B0000000000000000000006C /* Views/NightLight/NightLightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006C /* Views/NightLight/NightLightView.swift */; };
 		B0000000000000000000006D /* Models/DoctorAppointment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006D /* Models/DoctorAppointment.swift */; };
+		D30000000000000000000001 /* Models/HouseholdAttentionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000001 /* Models/HouseholdAttentionModels.swift */; };
+		D30000000000000000000002 /* Services/HouseholdAttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000002 /* Services/HouseholdAttentionService.swift */; };
 		B0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */; };
 		B0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */; };
 		B00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift */; };
@@ -379,6 +381,8 @@
 		F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightFullScreenView.swift; sourceTree = "<group>"; };
 		F0000000000000000000006C /* Views/NightLight/NightLightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightView.swift; sourceTree = "<group>"; };
 		F0000000000000000000006D /* Models/DoctorAppointment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/DoctorAppointment.swift; sourceTree = "<group>"; };
+		D40000000000000000000001 /* Models/HouseholdAttentionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/HouseholdAttentionModels.swift; sourceTree = "<group>"; };
+		D40000000000000000000002 /* Services/HouseholdAttentionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HouseholdAttentionService.swift; sourceTree = "<group>"; };
 		F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Appointments/AppointmentsListView.swift; sourceTree = "<group>"; };
 		F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Appointments/AppointmentDetailView.swift; sourceTree = "<group>"; };
 		F00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/AppointmentInsightsView.swift; sourceTree = "<group>"; };
@@ -561,6 +565,7 @@
 				F00000000000000000000058 /* Models/GrowthReferenceModels.swift */,
 				F00000000000000000000060 /* Models/NightLightModels.swift */,
 				F0000000000000000000006D /* Models/DoctorAppointment.swift */,
+				D40000000000000000000001 /* Models/HouseholdAttentionModels.swift */,
 				F00000000000000000000071 /* Models/AgeGuide.swift */,
 				F00000000000000000000078 /* Models/DogEventDetails.swift */,
 				F00000000000000000000079 /* Models/PuppyStageGuide.swift */,
@@ -572,6 +577,7 @@
 				E20000000000000000000001 /* Models/MedicationModels.swift */,
 				F00000000000000000000008 /* Services/DailySummaryService.swift */,
 				F00000000000000000000009 /* Services/DataExportImportService.swift */,
+				D40000000000000000000002 /* Services/HouseholdAttentionService.swift */,
 				F10000000000000000000002 /* Services/SolidFoodCatalogService.swift */,
 				C20000000000000000000002 /* Services/SolidsReferenceCatalog.swift */,
 				C20000000000000000000003 /* Services/SolidsTrackingService.swift */,
@@ -1051,6 +1057,7 @@
 				B00000000000000000000059 /* Models/GrowthReferenceModels.swift in Sources */,
 				B00000000000000000000060 /* Models/NightLightModels.swift in Sources */,
 				B0000000000000000000006D /* Models/DoctorAppointment.swift in Sources */,
+				D30000000000000000000001 /* Models/HouseholdAttentionModels.swift in Sources */,
 				B00000000000000000000071 /* Models/AgeGuide.swift in Sources */,
 				B00000000000000000000078 /* Models/DogEventDetails.swift in Sources */,
 				B00000000000000000000079 /* Models/PuppyStageGuide.swift in Sources */,
@@ -1062,6 +1069,7 @@
 				E10000000000000000000001 /* Models/MedicationModels.swift in Sources */,
 				B00000000000000000000008 /* Services/DailySummaryService.swift in Sources */,
 				B00000000000000000000009 /* Services/DataExportImportService.swift in Sources */,
+				D30000000000000000000002 /* Services/HouseholdAttentionService.swift in Sources */,
 				B10000000000000000000002 /* Services/SolidFoodCatalogService.swift in Sources */,
 				C10000000000000000000002 /* Services/SolidsReferenceCatalog.swift in Sources */,
 				C10000000000000000000003 /* Services/SolidsTrackingService.swift in Sources */,

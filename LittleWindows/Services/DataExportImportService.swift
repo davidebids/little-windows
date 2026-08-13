@@ -51,6 +51,11 @@ private struct BackupEnvelope: Codable {
     var predictionRecords: [PredictionRecordDTO]
     var milestones: [MilestoneDTO]?
     var appointments: [AppointmentDTO]?
+    var appointmentFollowUps: [AppointmentFollowUpDTO]?
+    var attentionAcknowledgements: [AttentionAcknowledgementDTO]?
+    var attentionClaims: [AttentionClaimDTO]?
+    var caregiverHandoffNotes: [CaregiverHandoffNoteDTO]?
+    var familyCaregiverIdentities: [FamilyCaregiverIdentityDTO]?
     var ageGuideReadStates: [AgeGuideReadStateDTO]?
     var puppyStageGuideReadStates: [PuppyStageGuideReadStateDTO]?
     var households: [HouseholdDTO]?
@@ -377,7 +382,6 @@ private struct AppointmentDTO: Codable {
     var notes: String?
     var questionsToAsk: String?
     var visitSummary: String?
-    var followUpInstructions: String?
     var medicationsDiscussed: String?
     var vaccinesGiven: String?
     var growthEntryID: UUID?
@@ -389,6 +393,71 @@ private struct AppointmentDTO: Codable {
     var updatedAt: Date
     var isCompleted: Bool
     var caregiverName: String?
+}
+
+private struct AppointmentFollowUpDTO: Codable {
+    var id: UUID
+    var appointmentID: UUID
+    var householdID: UUID
+    var profileID: UUID?
+    var title: String
+    var details: String?
+    var dueDate: Date?
+    var completedAt: Date?
+    var completedByCaregiverIdentifier: String?
+    var completedByCaregiverName: String?
+    var createdByCaregiverIdentifier: String?
+    var createdByCaregiverName: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct AttentionAcknowledgementDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var profileID: UUID?
+    var sourceKey: String
+    var sourceUpdatedAt: Date
+    var caregiverIdentifier: String
+    var caregiverName: String
+    var acknowledgedAt: Date
+    var updatedAt: Date
+}
+
+private struct AttentionClaimDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var profileID: UUID?
+    var sourceKey: String
+    var caregiverIdentifier: String?
+    var caregiverName: String?
+    var updatedByCaregiverIdentifier: String
+    var updatedByCaregiverName: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct CaregiverHandoffNoteDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var profileID: UUID?
+    var sourceKey: String?
+    var sourceTitleSnapshot: String?
+    var body: String
+    var authorCaregiverIdentifier: String
+    var authorCaregiverName: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct FamilyCaregiverIdentityDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var caregiverIdentifier: String
+    var displayName: String
+    var createdAt: Date
+    var updatedAt: Date
+    var lastSeenAt: Date
 }
 
 private struct AgeGuideReadStateDTO: Codable {
@@ -935,7 +1004,7 @@ enum CareDataExportProfileScope: Equatable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 26
+    private static let currentBackupVersion = 27
     private static let recoveryBackupLimit = 3
 
     static func exportData(
@@ -1224,7 +1293,6 @@ enum DataExportImportService {
                 notes: $0.notes,
                 questionsToAsk: $0.questionsToAsk,
                 visitSummary: $0.visitSummary,
-                followUpInstructions: $0.followUpInstructions,
                 medicationsDiscussed: $0.medicationsDiscussed,
                 vaccinesGiven: $0.vaccinesGiven,
                 growthEntryID: $0.growthEntryID,
@@ -1236,6 +1304,78 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt,
                 isCompleted: $0.isCompleted,
                 caregiverName: $0.caregiverName
+            )
+        }
+        let appointmentFollowUps = try context.fetch(FetchDescriptor<AppointmentFollowUp>()).map {
+            AppointmentFollowUpDTO(
+                id: $0.id,
+                appointmentID: $0.appointmentID,
+                householdID: $0.householdID,
+                profileID: $0.profileID,
+                title: $0.title,
+                details: $0.details,
+                dueDate: $0.dueDate,
+                completedAt: $0.completedAt,
+                completedByCaregiverIdentifier: $0.completedByCaregiverIdentifier,
+                completedByCaregiverName: $0.completedByCaregiverName,
+                createdByCaregiverIdentifier: $0.createdByCaregiverIdentifier,
+                createdByCaregiverName: $0.createdByCaregiverName,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let attentionAcknowledgements = try context.fetch(
+            FetchDescriptor<HouseholdAttentionAcknowledgement>()
+        ).map {
+            AttentionAcknowledgementDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                profileID: $0.profileID,
+                sourceKey: $0.sourceKey,
+                sourceUpdatedAt: $0.sourceUpdatedAt,
+                caregiverIdentifier: $0.caregiverIdentifier,
+                caregiverName: $0.caregiverName,
+                acknowledgedAt: $0.acknowledgedAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let attentionClaims = try context.fetch(FetchDescriptor<HouseholdAttentionClaim>()).map {
+            AttentionClaimDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                profileID: $0.profileID,
+                sourceKey: $0.sourceKey,
+                caregiverIdentifier: $0.caregiverIdentifier,
+                caregiverName: $0.caregiverName,
+                updatedByCaregiverIdentifier: $0.updatedByCaregiverIdentifier,
+                updatedByCaregiverName: $0.updatedByCaregiverName,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let caregiverHandoffNotes = try context.fetch(FetchDescriptor<CaregiverHandoffNote>()).map {
+            CaregiverHandoffNoteDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                profileID: $0.profileID,
+                sourceKey: $0.sourceKey,
+                sourceTitleSnapshot: $0.sourceTitleSnapshot,
+                body: $0.body,
+                authorCaregiverIdentifier: $0.authorCaregiverIdentifier,
+                authorCaregiverName: $0.authorCaregiverName,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let familyCaregiverIdentities = try context.fetch(FetchDescriptor<FamilyCaregiverIdentity>()).map {
+            FamilyCaregiverIdentityDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                caregiverIdentifier: $0.caregiverIdentifier,
+                displayName: $0.displayName,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt,
+                lastSeenAt: $0.lastSeenAt
             )
         }
         let ageGuideReadStates = try context.fetch(FetchDescriptor<AgeGuideReadState>()).map {
@@ -1842,6 +1982,11 @@ enum DataExportImportService {
             predictionRecords: records,
             milestones: milestones,
             appointments: appointments,
+            appointmentFollowUps: appointmentFollowUps,
+            attentionAcknowledgements: attentionAcknowledgements,
+            attentionClaims: attentionClaims,
+            caregiverHandoffNotes: caregiverHandoffNotes,
+            familyCaregiverIdentities: familyCaregiverIdentities,
             ageGuideReadStates: ageGuideReadStates,
             puppyStageGuideReadStates: puppyStageGuideReadStates,
             households: households,
@@ -1897,6 +2042,32 @@ enum DataExportImportService {
             envelope.predictionRecords.removeAll { $0.profileID.map(sharedProfileIDs.contains) != true }
             envelope.milestones = envelope.milestones?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.appointments = envelope.appointments?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            let sharedAppointmentIDs = Set((envelope.appointments ?? []).map(\.id))
+            envelope.appointmentFollowUps = envelope.appointmentFollowUps?.filter {
+                sharedAppointmentIDs.contains($0.appointmentID)
+                    && $0.profileID.map(sharedProfileIDs.contains) == true
+            }
+            let sharedFollowUpSourceKeys = Set((envelope.appointmentFollowUps ?? []).map {
+                "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):\($0.id.uuidString.lowercased())"
+            })
+            let appointmentFollowUpPrefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
+            let isIncludedAppointmentSource: (String?) -> Bool = { sourceKey in
+                guard let sourceKey, sourceKey.hasPrefix(appointmentFollowUpPrefix) else {
+                    return true
+                }
+                return sharedFollowUpSourceKeys.contains(sourceKey)
+            }
+            envelope.attentionAcknowledgements = envelope.attentionAcknowledgements?.filter {
+                ($0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true)
+                    && isIncludedAppointmentSource($0.sourceKey)
+            }
+            envelope.attentionClaims = envelope.attentionClaims?.filter {
+                sharedFollowUpSourceKeys.contains($0.sourceKey)
+            }
+            envelope.caregiverHandoffNotes = envelope.caregiverHandoffNotes?.filter {
+                ($0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true)
+                    && isIncludedAppointmentSource($0.sourceKey)
+            }
             envelope.ageGuideReadStates = envelope.ageGuideReadStates?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.puppyStageGuideReadStates = envelope.puppyStageGuideReadStates?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.tripTravelers = envelope.tripTravelers?.filter {
@@ -2438,7 +2609,6 @@ enum DataExportImportService {
                 notes: value.notes,
                 questionsToAsk: value.questionsToAsk,
                 visitSummary: value.visitSummary,
-                followUpInstructions: value.followUpInstructions,
                 medicationsDiscussed: value.medicationsDiscussed,
                 vaccinesGiven: value.vaccinesGiven,
                 growthEntryID: value.growthEntryID,
@@ -2452,6 +2622,76 @@ enum DataExportImportService {
                 caregiverName: value.caregiverName
             )
             context.insert(appointment)
+        }
+        for value in envelope.appointmentFollowUps ?? [] {
+            context.insert(AppointmentFollowUp(
+                id: value.id,
+                appointmentID: value.appointmentID,
+                householdID: value.householdID,
+                profileID: value.profileID,
+                title: value.title,
+                details: value.details,
+                dueDate: value.dueDate,
+                completedAt: value.completedAt,
+                completedByCaregiverIdentifier: value.completedByCaregiverIdentifier,
+                completedByCaregiverName: value.completedByCaregiverName,
+                createdByCaregiverIdentifier: value.createdByCaregiverIdentifier,
+                createdByCaregiverName: value.createdByCaregiverName,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.attentionAcknowledgements ?? [] {
+            context.insert(HouseholdAttentionAcknowledgement(
+                id: value.id,
+                householdID: value.householdID,
+                profileID: value.profileID,
+                sourceKey: value.sourceKey,
+                sourceUpdatedAt: value.sourceUpdatedAt,
+                caregiverIdentifier: value.caregiverIdentifier,
+                caregiverName: value.caregiverName,
+                acknowledgedAt: value.acknowledgedAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.attentionClaims ?? [] {
+            context.insert(HouseholdAttentionClaim(
+                id: value.id,
+                householdID: value.householdID,
+                profileID: value.profileID,
+                sourceKey: value.sourceKey,
+                caregiverIdentifier: value.caregiverIdentifier,
+                caregiverName: value.caregiverName,
+                updatedByCaregiverIdentifier: value.updatedByCaregiverIdentifier,
+                updatedByCaregiverName: value.updatedByCaregiverName,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.caregiverHandoffNotes ?? [] {
+            context.insert(CaregiverHandoffNote(
+                id: value.id,
+                householdID: value.householdID,
+                profileID: value.profileID,
+                sourceKey: value.sourceKey,
+                sourceTitleSnapshot: value.sourceTitleSnapshot,
+                body: value.body,
+                authorCaregiverIdentifier: value.authorCaregiverIdentifier,
+                authorCaregiverName: value.authorCaregiverName,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
+        for value in envelope.familyCaregiverIdentities ?? [] {
+            context.insert(FamilyCaregiverIdentity(
+                id: value.id,
+                householdID: value.householdID,
+                caregiverIdentifier: value.caregiverIdentifier,
+                displayName: value.displayName,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt,
+                lastSeenAt: value.lastSeenAt
+            ))
         }
         for value in envelope.ageGuideReadStates ?? [] {
             context.insert(AgeGuideReadState(
@@ -3011,6 +3251,19 @@ enum DataExportImportService {
         try deleteAll(CareRoutine.self, context: context) {
             $0.profileID.map(preservingProfileIDs.contains) != true
         }
+        try deleteAll(CaregiverHandoffNote.self, context: context) {
+            $0.profileID.map(preservingProfileIDs.contains) != true
+        }
+        try deleteAll(HouseholdAttentionClaim.self, context: context) {
+            $0.profileID.map(preservingProfileIDs.contains) != true
+        }
+        try deleteAll(HouseholdAttentionAcknowledgement.self, context: context) {
+            $0.profileID.map(preservingProfileIDs.contains) != true
+        }
+        try deleteAll(AppointmentFollowUp.self, context: context) {
+            $0.profileID.map(preservingProfileIDs.contains) != true
+        }
+        try deleteAll(FamilyCaregiverIdentity.self, context: context)
         try deleteAll(FoodReminder.self, context: context)
         try deleteAll(TripItineraryLink.self, context: context)
         try deleteAll(TripItineraryItem.self, context: context)
@@ -3148,6 +3401,18 @@ enum DataExportImportService {
             $0.profileID.map(excludedProfileIDs.contains) != true
         }
         envelope.appointments = envelope.appointments?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.appointmentFollowUps = envelope.appointmentFollowUps?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.attentionAcknowledgements = envelope.attentionAcknowledgements?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.attentionClaims = envelope.attentionClaims?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.caregiverHandoffNotes = envelope.caregiverHandoffNotes?.filter {
             $0.profileID.map(excludedProfileIDs.contains) != true
         }
         envelope.ageGuideReadStates = envelope.ageGuideReadStates?.filter {
@@ -3460,6 +3725,97 @@ enum DataExportImportService {
             envelope.predictionRecords.map(\.id)
         ]
         guard requiredCollections.allSatisfy({ Set($0).count == $0.count }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let appointmentFollowUps = envelope.appointmentFollowUps ?? []
+        let attentionAcknowledgements = envelope.attentionAcknowledgements ?? []
+        let attentionClaims = envelope.attentionClaims ?? []
+        let caregiverHandoffNotes = envelope.caregiverHandoffNotes ?? []
+        let familyCaregiverIdentities = envelope.familyCaregiverIdentities ?? []
+        let appointments = envelope.appointments ?? []
+        let appointmentsByID = Dictionary(
+            appointments.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let followUpsBySourceKey = Dictionary(
+            appointmentFollowUps.map {
+                ("\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):\($0.id.uuidString.lowercased())", $0)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let attentionHouseholdIDs = Set((envelope.households ?? []).map(\.id))
+        let acknowledgementKeys = attentionAcknowledgements.map {
+            "\($0.sourceKey)|\($0.caregiverIdentifier)"
+        }
+        let claimSourceKeys = attentionClaims.map(\.sourceKey)
+        let caregiverIdentityKeys = familyCaregiverIdentities.map {
+            "\($0.householdID.uuidString)|\($0.caregiverIdentifier)"
+        }
+        guard Set(appointments.map(\.id)).count == appointments.count,
+              Set(appointmentFollowUps.map(\.id)).count == appointmentFollowUps.count,
+              Set(attentionAcknowledgements.map(\.id)).count == attentionAcknowledgements.count,
+              Set(acknowledgementKeys).count == acknowledgementKeys.count,
+              Set(attentionClaims.map(\.id)).count == attentionClaims.count,
+              Set(claimSourceKeys).count == claimSourceKeys.count,
+              Set(caregiverHandoffNotes.map(\.id)).count == caregiverHandoffNotes.count,
+              Set(familyCaregiverIdentities.map(\.id)).count == familyCaregiverIdentities.count,
+              Set(caregiverIdentityKeys).count == caregiverIdentityKeys.count,
+              appointmentFollowUps.allSatisfy({
+                  guard let appointment = appointmentsByID[$0.appointmentID] else { return false }
+                  let completedIdentifier = $0.completedByCaregiverIdentifier?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  let completedName = $0.completedByCaregiverName?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  let createdIdentifier = $0.createdByCaregiverIdentifier?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  let createdName = $0.createdByCaregiverName?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  return appointment.profileID == $0.profileID
+                      && attentionHouseholdIDs.contains($0.householdID)
+                      && ($0.profileID.map(profileIDs.contains) ?? true)
+                      && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && (createdIdentifier.isEmpty == createdName.isEmpty)
+                      && (completedIdentifier.isEmpty == completedName.isEmpty)
+                      && (($0.completedAt == nil) == completedIdentifier.isEmpty)
+              }),
+              attentionAcknowledgements.allSatisfy({
+                  attentionHouseholdIDs.contains($0.householdID)
+                      && ($0.profileID.map(profileIDs.contains) ?? true)
+                      && !$0.sourceKey.isEmpty
+                      && !$0.caregiverIdentifier.isEmpty
+                      && !$0.caregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }),
+              attentionClaims.allSatisfy({
+                  let caregiverIdentifier = $0.caregiverIdentifier?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  let caregiverName = $0.caregiverName?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  guard let followUp = followUpsBySourceKey[$0.sourceKey] else { return false }
+                  return attentionHouseholdIDs.contains($0.householdID)
+                      && ($0.profileID.map(profileIDs.contains) ?? true)
+                      && followUp.householdID == $0.householdID
+                      && followUp.profileID == $0.profileID
+                      && (caregiverIdentifier.isEmpty == caregiverName.isEmpty)
+                      && !$0.updatedByCaregiverIdentifier.isEmpty
+                      && !$0.updatedByCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }),
+              caregiverHandoffNotes.allSatisfy({
+                  let sourceKey = $0.sourceKey?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  let sourceTitle = $0.sourceTitleSnapshot?
+                      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  return attentionHouseholdIDs.contains($0.householdID)
+                      && ($0.profileID.map(profileIDs.contains) ?? true)
+                      && (sourceKey.isEmpty == sourceTitle.isEmpty)
+                      && !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && !$0.authorCaregiverIdentifier.isEmpty
+                      && !$0.authorCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }),
+              familyCaregiverIdentities.allSatisfy({
+                  attentionHouseholdIDs.contains($0.householdID)
+                      && !$0.caregiverIdentifier.isEmpty
+                      && !$0.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let solidFoods = envelope.solidFoods ?? []

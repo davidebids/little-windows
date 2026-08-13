@@ -115,6 +115,14 @@ final class CareReportExportServiceTests: XCTestCase {
             visitSummary: "Growing steadily",
             caregiverName: "Caregiver A"
         )
+        let followUp = AppointmentFollowUp(
+            appointmentID: appointment.id,
+            householdID: UUID(),
+            profileID: profile.id,
+            title: "Schedule next visit",
+            details: "Use the patient portal",
+            dueDate: start.addingTimeInterval(3_600)
+        )
         let milestone = MilestoneEntry(
             profileID: profile.id,
             title: "First tooth",
@@ -137,13 +145,23 @@ final class CareReportExportServiceTests: XCTestCase {
             ),
             events: [],
             appointments: [appointment],
+            appointmentFollowUps: [followUp],
             milestones: [milestone],
             generatedAt: Date(timeIntervalSince1970: 0)
         ))
 
         XCTAssertTrue(csv.contains("\"Appointment\""))
         XCTAssertTrue(csv.contains("\"Wellness Check\""))
-        XCTAssertTrue(csv.contains("\"Doctor: Dr. Example; Visit summary: Growing steadily\""))
+        XCTAssertTrue(csv.contains("Doctor: Dr. Example; Visit summary: Growing steadily"))
+        XCTAssertTrue(csv.contains("Follow-ups: Schedule next visit"))
+        XCTAssertTrue(csv.contains("Use the patient portal"))
+        let detailsWithoutNotes = CareReportExportService.appointmentDetailsText(
+            for: appointment,
+            followUps: [followUp],
+            includeNotes: false
+        )
+        XCTAssertTrue(detailsWithoutNotes.contains("Schedule next visit"))
+        XCTAssertFalse(detailsWithoutNotes.contains("Use the patient portal"))
         XCTAssertTrue(csv.contains("\"Milestone\""))
         XCTAssertTrue(csv.contains("\"Growth\""))
         XCTAssertTrue(csv.contains("\"Approximate date\""))
