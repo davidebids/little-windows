@@ -5269,7 +5269,7 @@ private struct CaregiverHandoffNoteEditor: View {
     let save: (String) -> Bool
 
     @State private var bodyText = ""
-    @FocusState private var isBodyFocused: Bool
+    @State private var shouldFocusBody = false
 
     var body: some View {
         NavigationStack {
@@ -5282,18 +5282,38 @@ private struct CaregiverHandoffNoteEditor: View {
                         .font(.subheadline)
                 }
 
-                TextField("Short handoff note", text: $bodyText, axis: .vertical)
-                    .lineLimit(3...8)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($isBodyFocused)
+                ZStack(alignment: .topLeading) {
+                    HandoffNoteTextView(
+                        text: $bodyText,
+                        shouldBecomeFirstResponder: shouldFocusBody
+                    )
+
+                    if bodyText.isEmpty {
+                        Text("Short handoff note")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 10)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(height: 150)
+                .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.quaternary, lineWidth: 1)
+                }
 
                 Spacer(minLength: 0)
             }
             .padding()
             .background(AppTheme.background)
             .task {
-                await Task.yield()
-                isBodyFocused = true
+                // Let the sheet complete its presentation before asking UIKit to
+                // install the keyboard. Doing both in one SwiftUI transaction
+                // triggers a second full layout pass for the sheet.
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                shouldFocusBody = true
             }
             .navigationTitle("Handoff Note")
             .navigationBarTitleDisplayMode(.inline)
@@ -5308,6 +5328,54 @@ private struct CaregiverHandoffNoteEditor: View {
                     .disabled(bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+        }
+    }
+}
+
+private struct HandoffNoteTextView: UIViewRepresentable {
+    @Binding var text: String
+    let shouldBecomeFirstResponder: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 5, bottom: 8, right: 5)
+        textView.textContainer.lineFragmentPadding = 4
+        textView.keyboardDismissMode = .interactive
+        textView.accessibilityLabel = "Short handoff note"
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if textView.text != text {
+            textView.text = text
+        }
+
+        guard shouldBecomeFirstResponder,
+              !context.coordinator.didRequestFirstResponder,
+              textView.window != nil else { return }
+
+        context.coordinator.didRequestFirstResponder = true
+        textView.becomeFirstResponder()
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        @Binding private var text: String
+        var didRequestFirstResponder = false
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text = textView.text
         }
     }
 }
