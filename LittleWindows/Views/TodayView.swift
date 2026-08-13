@@ -5228,7 +5228,10 @@ private struct TodayCaregiverHandoffCard: View {
             Button {
                 showingHandoffNoteEditor = true
             } label: {
-                Label("Add handoff note", systemImage: "square.and.pencil")
+                HStack(spacing: 4) {
+                    Image(systemName: "square.and.pencil")
+                    Text("Add handoff note")
+                }
                     .font(.caption2.weight(.semibold))
             }
             .buttonStyle(.bordered)
