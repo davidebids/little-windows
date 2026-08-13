@@ -4958,7 +4958,8 @@ private struct TodayHomeAttentionRow: View {
     private var metadataText: String {
         let source = item.sourceLabel ?? item.category.title
         let owner = item.profileName ?? "Household"
-        return [source, "Owner: \(owner)", item.dueLabel]
+        let badgeAlreadyIdentifiesSource = item.badge?.localizedCaseInsensitiveCompare(source) == .orderedSame
+        return [badgeAlreadyIdentifiesSource ? nil : source, "Owner: \(owner)", item.dueLabel]
             .compactMap { $0 }
             .joined(separator: " · ")
     }
