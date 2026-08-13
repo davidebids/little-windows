@@ -5324,6 +5324,12 @@ private struct TodayHandoffNoteRow: View {
             .map { String($0).uppercased() } ?? "?"
     }
 
+    private var staticRelativeCreatedAt: String {
+        note.createdAt.formatted(
+            .relative(presentation: .named, unitsStyle: .abbreviated)
+        )
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             Text(authorInitial)
@@ -5345,7 +5351,9 @@ private struct TodayHandoffNoteRow: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     } else {
-                        Text(note.createdAt, style: .relative)
+                        // A formatted string stays static instead of installing
+                        // SwiftUI's live relative-date timer for every note row.
+                        Text(staticRelativeCreatedAt)
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
