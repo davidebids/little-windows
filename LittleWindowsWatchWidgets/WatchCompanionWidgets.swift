@@ -160,7 +160,7 @@ private struct WatchSleepWindowWidgetView: View {
                 }
             default:
                 VStack(alignment: .leading, spacing: 2) {
-                    Label("Next \(prediction.title)", systemImage: "moon.stars.fill")
+                    Label(prediction.nextDisplayTitle, systemImage: "moon.stars.fill")
                         .font(.caption2)
                     Text(prediction.expectedStart, style: .time)
                         .font(.headline)

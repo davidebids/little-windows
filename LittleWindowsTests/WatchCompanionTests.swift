@@ -3,6 +3,33 @@ import XCTest
 @testable import LittleWindows
 
 final class WatchCompanionTests: XCTestCase {
+    func testWatchPredictionTitleAddsNextOnlyOnce() {
+        let date = Date()
+
+        func prediction(title: String) -> WatchPredictionSnapshot {
+            WatchPredictionSnapshot(
+                title: title,
+                expectedStart: date,
+                windowStart: date,
+                windowEnd: date.addingTimeInterval(30 * 60),
+                confidenceLabel: "Good confidence"
+            )
+        }
+
+        XCTAssertEqual(
+            prediction(title: "Next sleep window").nextDisplayTitle,
+            "Next sleep window"
+        )
+        XCTAssertEqual(
+            prediction(title: "Nap").nextDisplayTitle,
+            "Next nap"
+        )
+        XCTAssertEqual(
+            prediction(title: "Bedtime").nextDisplayTitle,
+            "Next bedtime"
+        )
+    }
+
     @MainActor
     func testWatchStartsProfileScopedSleepTimer() async throws {
         let container = try makeInMemoryContainer()

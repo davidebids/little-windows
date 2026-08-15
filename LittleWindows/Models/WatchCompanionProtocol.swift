@@ -204,6 +204,18 @@ struct WatchPredictionSnapshot: Codable, Hashable, Sendable {
     var windowStart: Date
     var windowEnd: Date
     var confidenceLabel: String
+
+    var nextDisplayTitle: String {
+        let normalized = title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return "Next sleep window" }
+        let displayTitle = normalized.hasPrefix("next ")
+            ? normalized
+            : "next \(normalized)"
+        return displayTitle.prefix(1).uppercased()
+            + String(displayTitle.dropFirst())
+    }
 }
 
 struct WatchMetricSnapshot: Codable, Hashable, Identifiable, Sendable {

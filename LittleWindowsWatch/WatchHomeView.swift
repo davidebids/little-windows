@@ -1281,7 +1281,7 @@ private struct WatchPredictionCard: View {
                 .frame(width: 32, height: 32)
                 .background(Color.indigo.gradient, in: Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text("Next \(prediction.title)")
+                Text(prediction.nextDisplayTitle)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(prediction.expectedStart, style: .time)
