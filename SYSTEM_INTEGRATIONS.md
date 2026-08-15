@@ -10,6 +10,7 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - Quick Log widget: medium, backed by profile-scoped ranked smart actions, hidden-category preferences, and user-pinned actions from Today, plus an add-profile state when care tracking has not been set up.
 - Shopping List widget: small and medium, backed by the Food & Home shopping snapshot.
 - Food Quick Add widget: medium, opens grocery quick add, solids logging, and usual shopping lists in the app.
+- Night Light widget: small and Lock Screen families start the dim red 10-minute diaper-change preset with one tap; medium also offers nursing and soothing presets.
 - Live Activity with Lock Screen, Dynamic Island compact, Dynamic Island minimal, and Dynamic Island expanded presentations.
 - App Intents for timer control, quick logging, app navigation, and night-light presets.
 - App Shortcuts for repeat-last logging, solids and other high-frequency quick logging, timer control, and dog care.
@@ -353,7 +354,7 @@ Family Sync creates a CloudKit record-zone subscription for the shared family zo
 15. Start a Sleep or Nursing timer, then confirm Today, care routines, Smart Picks, and the Quick Log widget do not offer another start for that same event type. Confirm a different timer type remains available.
 16. Open Routines from Today or `littlewindows://routines`, create or edit a routine, verify the explicit **Done** button dismisses the manager, and confirm routine reminders schedule when enabled.
 17. Add a Control Center control and verify it opens the app and applies the intended action.
-18. Start diaper-change and soothing night-light presets from shortcuts or controls.
+18. Add the Night Light widget. From its small or Lock Screen presentation, tap once and confirm the app opens directly into the active dim red diaper-change light at low screen brightness. In the medium widget, also verify the nursing and soothing buttons start their matching presets. Repeat the diaper-change and soothing actions from shortcuts or Control Center controls.
 19. Create an appointment and verify selected reminder lead times.
 20. Enable monthly guide reminders and verify scheduling after guide state changes.
 21. Create a Food & Home reminder and verify it opens the relevant Food screen or item.

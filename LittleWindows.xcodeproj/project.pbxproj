@@ -103,6 +103,7 @@
 		B0000000000000000000005C /* Resources/GrowthCharts in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005B /* Resources/GrowthCharts */; };
 		B0000000000000000000005D /* Services/IntegrationCommandProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000039 /* Services/IntegrationCommandProcessor.swift */; };
 		B0000000000000000000005E /* FoodWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005E /* FoodWidgets.swift */; };
+		E80000000000000000000001 /* NightLightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* NightLightWidget.swift */; };
 		B00000000000000000000060 /* Models/NightLightModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000060 /* Models/NightLightModels.swift */; };
 		B00000000000000000000061 /* Services/NightLightPresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000061 /* Services/NightLightPresetService.swift */; };
 		B00000000000000000000062 /* Services/NightLightTimerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000062 /* Services/NightLightTimerService.swift */; };
@@ -367,6 +368,7 @@
 		F0000000000000000000005A /* Views/Insights/GrowthInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/GrowthInsightsView.swift; sourceTree = "<group>"; };
 		F0000000000000000000005B /* Resources/GrowthCharts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/GrowthCharts; sourceTree = "<group>"; };
 		F0000000000000000000005E /* FoodWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodWidgets.swift; sourceTree = "<group>"; };
+		E80000000000000000000002 /* NightLightWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NightLightWidget.swift; sourceTree = "<group>"; };
 		F00000000000000000000060 /* Models/NightLightModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/NightLightModels.swift; sourceTree = "<group>"; };
 		F00000000000000000000061 /* Services/NightLightPresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightPresetService.swift; sourceTree = "<group>"; };
 		F00000000000000000000062 /* Services/NightLightTimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightTimerService.swift; sourceTree = "<group>"; };
@@ -726,6 +728,7 @@
 				F00000000000000000000044 /* TodaySummaryWidget.swift */,
 				F00000000000000000000045 /* QuickLogWidget.swift */,
 				F0000000000000000000005E /* FoodWidgets.swift */,
+				E80000000000000000000002 /* NightLightWidget.swift */,
 				F00000000000000000000046 /* LittleWindowsLiveActivity.swift */,
 				F00000000000000000000054 /* LittleWindowsControls.swift */,
 				F00000000000000000000047 /* Info.plist */,
@@ -1188,6 +1191,7 @@
 				B00000000000000000000044 /* TodaySummaryWidget.swift in Sources */,
 				B00000000000000000000045 /* QuickLogWidget.swift in Sources */,
 				B0000000000000000000005E /* FoodWidgets.swift in Sources */,
+				E80000000000000000000001 /* NightLightWidget.swift in Sources */,
 				B00000000000000000000046 /* LittleWindowsLiveActivity.swift in Sources */,
 				B00000000000000000000055 /* LittleWindowsControls.swift in Sources */,
 				B00000000000000000000047 /* Models/SystemIntegrationSnapshots.swift in Sources */,

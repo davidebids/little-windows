@@ -120,6 +120,7 @@ Night Light turns the device screen into a configurable care surface:
 - Full-screen glow with selectable shapes.
 - Steady, candle, fireplace, shimmer, rainy-window, and starry-night modes.
 - Optional breathing animation, brightness/softness controls, ambient sound, volume, sleep timer, and keep-awake behavior.
+- A one-tap Home Screen or Lock Screen widget for the dim red diaper-change preset, with additional nursing and soothing actions in the medium widget.
 - Deep links, App Intents, App Shortcuts, and iOS 18 Control Center controls for common presets.
 
 ## Widgets, Live Activities, Shortcuts, And Deep Links
@@ -132,6 +133,7 @@ The WidgetKit extension includes:
 - Quick Log widget
 - Shopping List widget
 - Food Quick Add widget
+- Night Light widget
 
 Active timers synchronize to a Live Activity with Lock Screen and Dynamic Island presentations. App Intents, promoted App Shortcuts, deep links, and iOS 18 Control Center controls can start common timers, stop or resume timers, switch nursing sides, quick-log common events, open app destinations, and start night-light presets where that surface exposes them.
 

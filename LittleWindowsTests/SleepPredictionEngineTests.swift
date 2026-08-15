@@ -2744,6 +2744,21 @@ final class SleepPredictionEngineTests: XCTestCase {
         )
     }
 
+    func testNightLightLaunchIntentsUsePresetDeepLinks() {
+        XCTAssertEqual(
+            StartDiaperChangeLightIntent().destinationURL.absoluteString,
+            "littlewindows://night-light/diaper-change"
+        )
+        XCTAssertEqual(
+            StartNursingLightIntent().destinationURL.absoluteString,
+            "littlewindows://night-light/nursing"
+        )
+        XCTAssertEqual(
+            StartSoothingLightIntent().destinationURL.absoluteString,
+            "littlewindows://night-light/soothing"
+        )
+    }
+
     func testNightLightIncludesFullShapeCatalog() {
         XCTAssertGreaterThanOrEqual(NightLightShape.allCases.count, 30)
         XCTAssertTrue(NightLightShape.allCases.contains(.fullScreenGlow))
