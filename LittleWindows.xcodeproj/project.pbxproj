@@ -103,7 +103,6 @@
 		B0000000000000000000005C /* Resources/GrowthCharts in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005B /* Resources/GrowthCharts */; };
 		B0000000000000000000005D /* Services/IntegrationCommandProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000039 /* Services/IntegrationCommandProcessor.swift */; };
 		B0000000000000000000005E /* FoodWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000005E /* FoodWidgets.swift */; };
-		E80000000000000000000001 /* NightLightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* NightLightWidget.swift */; };
 		B00000000000000000000060 /* Models/NightLightModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000060 /* Models/NightLightModels.swift */; };
 		B00000000000000000000061 /* Services/NightLightPresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000061 /* Services/NightLightPresetService.swift */; };
 		B00000000000000000000062 /* Services/NightLightTimerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000062 /* Services/NightLightTimerService.swift */; };
@@ -118,8 +117,6 @@
 		B0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */; };
 		B0000000000000000000006C /* Views/NightLight/NightLightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006C /* Views/NightLight/NightLightView.swift */; };
 		B0000000000000000000006D /* Models/DoctorAppointment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006D /* Models/DoctorAppointment.swift */; };
-		D30000000000000000000001 /* Models/HouseholdAttentionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000001 /* Models/HouseholdAttentionModels.swift */; };
-		D30000000000000000000002 /* Services/HouseholdAttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000002 /* Services/HouseholdAttentionService.swift */; };
 		B0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */; };
 		B0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */; };
 		B00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift */; };
@@ -175,11 +172,14 @@
 		C10000000000000000000003 /* Services/SolidsTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Services/SolidsTrackingService.swift */; };
 		C10000000000000000000004 /* Views/Food/SolidsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* Views/Food/SolidsViews.swift */; };
 		C10000000000000000000005 /* SolidsFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* SolidsFeatureTests.swift */; };
+		D30000000000000000000001 /* Models/HouseholdAttentionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000001 /* Models/HouseholdAttentionModels.swift */; };
+		D30000000000000000000002 /* Services/HouseholdAttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000002 /* Services/HouseholdAttentionService.swift */; };
 		E10000000000000000000001 /* Models/MedicationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* Models/MedicationModels.swift */; };
 		E10000000000000000000002 /* Services/MedicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* Services/MedicationService.swift */; };
 		E10000000000000000000003 /* Views/Medications/MedicationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* Views/Medications/MedicationViews.swift */; };
 		E10000000000000000000004 /* Views/Health/AdultHealthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */; };
 		E10000000000000000000005 /* MedicationScheduleEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000005 /* MedicationScheduleEngineTests.swift */; };
+		E80000000000000000000001 /* NightLightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* NightLightWidget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -288,11 +288,14 @@
 		C20000000000000000000003 /* Services/SolidsTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SolidsTrackingService.swift; sourceTree = "<group>"; };
 		C20000000000000000000004 /* Views/Food/SolidsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Food/SolidsViews.swift; sourceTree = "<group>"; };
 		C20000000000000000000005 /* SolidsFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolidsFeatureTests.swift; sourceTree = "<group>"; };
+		D40000000000000000000001 /* Models/HouseholdAttentionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/HouseholdAttentionModels.swift; sourceTree = "<group>"; };
+		D40000000000000000000002 /* Services/HouseholdAttentionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HouseholdAttentionService.swift; sourceTree = "<group>"; };
 		E20000000000000000000001 /* Models/MedicationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/MedicationModels.swift; sourceTree = "<group>"; };
 		E20000000000000000000002 /* Services/MedicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/MedicationService.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* Views/Medications/MedicationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Medications/MedicationViews.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/AdultHealthViews.swift; sourceTree = "<group>"; };
 		E20000000000000000000005 /* MedicationScheduleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationScheduleEngineTests.swift; sourceTree = "<group>"; };
+		E80000000000000000000002 /* NightLightWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NightLightWidget.swift; sourceTree = "<group>"; };
 		F00000000000000000000001 /* LittleWindowsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsApp.swift; sourceTree = "<group>"; };
 		F00000000000000000000002 /* Models/BabyProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BabyProfile.swift; sourceTree = "<group>"; };
 		F00000000000000000000003 /* Models/BabyEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BabyEvent.swift; sourceTree = "<group>"; };
@@ -368,7 +371,6 @@
 		F0000000000000000000005A /* Views/Insights/GrowthInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/GrowthInsightsView.swift; sourceTree = "<group>"; };
 		F0000000000000000000005B /* Resources/GrowthCharts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/GrowthCharts; sourceTree = "<group>"; };
 		F0000000000000000000005E /* FoodWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodWidgets.swift; sourceTree = "<group>"; };
-		E80000000000000000000002 /* NightLightWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NightLightWidget.swift; sourceTree = "<group>"; };
 		F00000000000000000000060 /* Models/NightLightModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/NightLightModels.swift; sourceTree = "<group>"; };
 		F00000000000000000000061 /* Services/NightLightPresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightPresetService.swift; sourceTree = "<group>"; };
 		F00000000000000000000062 /* Services/NightLightTimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/NightLightTimerService.swift; sourceTree = "<group>"; };
@@ -383,8 +385,6 @@
 		F0000000000000000000006B /* Views/NightLight/NightLightFullScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightFullScreenView.swift; sourceTree = "<group>"; };
 		F0000000000000000000006C /* Views/NightLight/NightLightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/NightLight/NightLightView.swift; sourceTree = "<group>"; };
 		F0000000000000000000006D /* Models/DoctorAppointment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/DoctorAppointment.swift; sourceTree = "<group>"; };
-		D40000000000000000000001 /* Models/HouseholdAttentionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/HouseholdAttentionModels.swift; sourceTree = "<group>"; };
-		D40000000000000000000002 /* Services/HouseholdAttentionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/HouseholdAttentionService.swift; sourceTree = "<group>"; };
 		F0000000000000000000006E /* Views/Appointments/AppointmentsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Appointments/AppointmentsListView.swift; sourceTree = "<group>"; };
 		F0000000000000000000006F /* Views/Appointments/AppointmentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Appointments/AppointmentDetailView.swift; sourceTree = "<group>"; };
 		F00000000000000000000070 /* Views/Insights/AppointmentInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Insights/AppointmentInsightsView.swift; sourceTree = "<group>"; };
@@ -1252,7 +1252,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1262,7 +1262,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
 				PRODUCT_NAME = LittleWindowsWatch;
 				SDKROOT = watchos;
@@ -1281,7 +1281,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1291,7 +1291,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
 				PRODUCT_NAME = LittleWindowsWatch;
 				SDKROOT = watchos;
@@ -1310,11 +1310,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
 				PRODUCT_NAME = LittleWindowsWatchWidgets;
 				SDKROOT = watchos;
@@ -1333,11 +1333,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
 				PRODUCT_NAME = LittleWindowsWatchWidgets;
 				SDKROOT = watchos;
@@ -1513,13 +1513,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1538,13 +1538,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1592,11 +1592,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1612,11 +1612,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.1;
+				CURRENT_PROJECT_VERSION = 1.4.2;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

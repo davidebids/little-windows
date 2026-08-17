@@ -68,18 +68,25 @@ struct FoodHomeView: View {
             .toolbarBackground(AppTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: FoodRoute.reminders) {
                         Image(systemName: "bell.badge")
                     }
                     .accessibilityLabel("Food reminders")
-
+                }
+                if #available(iOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         router.presentSettings()
                     } label: {
                         Image(systemName: "gearshape.fill")
                     }
                     .accessibilityLabel("Settings")
+                }
+                if #available(iOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 }
             }
             .task {
@@ -1487,11 +1494,15 @@ private struct HomeTodoListsView: View {
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if lists.count > 1 {
+            if lists.count > 1 {
+                ToolbarItem(placement: .topBarTrailing) {
                     EditButton()
                 }
-
+                if #available(iOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingNewList = true
                 } label: {
@@ -4927,6 +4938,7 @@ private struct ReturnsHomeView: View {
 
     @State private var showingNewReturn = false
     @State private var returnPendingRemove: ReturnRequest?
+    @State private var showingCompletedReturns = false
 
     var body: some View {
         let itemsByReturnID = Dictionary(grouping: items, by: \.returnRequestID)
@@ -4958,6 +4970,14 @@ private struct ReturnsHomeView: View {
                         description: Text("Create a return request with its items, send-back details, photos, and drop-offs.")
                     )
                 }
+            } else if activeRequests.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "No active returns",
+                        systemImage: "checkmark.circle",
+                        description: Text("Completed returns are available from the More menu.")
+                    )
+                }
             } else {
                 ForEach(activeGroups) { group in
                     Section {
@@ -4982,37 +5002,29 @@ private struct ReturnsHomeView: View {
                         AppSectionHeader(title: group.title, subtitle: "\(group.requests.count)")
                     }
                 }
-
-                if !completedRequests.isEmpty {
-                    Section {
-                        ForEach(completedRequests) { request in
-                            Button {
-                                openReturn(request)
-                            } label: {
-                                ReturnSummaryRow(
-                                    status: statusByReturnID[request.id] ?? .completed,
-                                    items: itemsByReturnID[request.id] ?? [],
-                                    packages: packagesByReturnID[request.id] ?? []
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions {
-                                Button("Remove", role: .destructive) {
-                                    returnPendingRemove = request
-                                }
-                            }
-                        }
-                    } header: {
-                        AppSectionHeader(title: "Completed", subtitle: "\(completedRequests.count)")
-                    }
-                }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if !completedRequests.isEmpty {
+                    Menu {
+                        Button {
+                            showingCompletedReturns = true
+                        } label: {
+                            Label(
+                                "Completed Returns (\(completedRequests.count))",
+                                systemImage: "checkmark.circle"
+                            )
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More return options")
+                }
+
                 Button {
                     showingNewReturn = true
                 } label: {
@@ -5026,6 +5038,16 @@ private struct ReturnsHomeView: View {
                 ReturnCreateView(
                     household: household,
                     sortOrder: nextReturnSortOrder
+                )
+            }
+        }
+        .sheet(isPresented: $showingCompletedReturns) {
+            NavigationStack {
+                CompletedReturnsView(
+                    requests: completedRequests,
+                    itemsByReturnID: itemsByReturnID,
+                    packagesByReturnID: packagesByReturnID,
+                    photoAttachments: photoAttachments
                 )
             }
         }
@@ -5151,6 +5173,55 @@ private struct ReturnsHomeView: View {
             return "Return at \(firstPackage.displayName)"
         }
         return "Return"
+    }
+}
+
+private struct CompletedReturnsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let requests: [ReturnRequest]
+    let itemsByReturnID: [UUID: [ReturnItem]]
+    let packagesByReturnID: [UUID: [ReturnPackage]]
+    let photoAttachments: [PhotoAttachment]
+
+    var body: some View {
+        List {
+            if requests.isEmpty {
+                ContentUnavailableView(
+                    "No completed returns",
+                    systemImage: "checkmark.circle",
+                    description: Text("Returns appear here after they are completed.")
+                )
+            } else {
+                ForEach(requests) { request in
+                    NavigationLink {
+                        ReturnDetailView(
+                            request: request,
+                            items: itemsByReturnID[request.id] ?? [],
+                            packages: packagesByReturnID[request.id] ?? [],
+                            photoAttachments: photoAttachments
+                        )
+                    } label: {
+                        ReturnSummaryRow(
+                            status: .completed,
+                            items: itemsByReturnID[request.id] ?? [],
+                            packages: packagesByReturnID[request.id] ?? []
+                        )
+                    }
+                    .accessibilityIdentifier("returns.completed.row")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle("Completed Returns")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
     }
 }
 

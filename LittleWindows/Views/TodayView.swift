@@ -156,6 +156,7 @@ private struct TodayPreferenceRevision: Equatable {
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query private var allEvents: [CareEvent]
@@ -220,6 +221,39 @@ struct TodayView: View {
     @State private var localEventMutationCount = 0
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var profileService = ProfileService.shared
+
+    private var usesWideIPadLayout: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
+    }
+
+    private var todayContentHorizontalMargin: CGFloat {
+        usesWideIPadLayout ? 46 : 0
+    }
+
+    private var todayListContentHorizontalMargin: CGFloat? {
+        usesWideIPadLayout ? todayContentHorizontalMargin : nil
+    }
+
+    private var quickActionGridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(
+                .flexible(),
+                spacing: usesWideIPadLayout ? 14 : 8
+            ),
+            count: usesWideIPadLayout ? 5 : 3
+        )
+    }
+
+    private var quickActionGridSpacing: CGFloat {
+        usesWideIPadLayout ? 16 : 14
+    }
+
+    private var summaryGridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: 10),
+            count: usesWideIPadLayout ? 3 : 2
+        )
+    }
 
     init(profileID: UUID? = nil) {
         let calendar = Calendar.current
@@ -868,6 +902,11 @@ struct TodayView: View {
                 }
             }
                 .listStyle(.insetGrouped)
+                .contentMargins(
+                    .horizontal,
+                    todayListContentHorizontalMargin,
+                    for: .scrollContent
+                )
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.background)
         }
@@ -879,6 +918,7 @@ struct TodayView: View {
         VStack(spacing: 0) {
             if profile != nil {
                 TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
+                    .padding(.horizontal, todayContentHorizontalMargin)
                 Divider()
             }
 
@@ -906,6 +946,11 @@ struct TodayView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(AppTheme.background)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            AppTheme.background
+                .ignoresSafeArea()
         }
         .navigationTitle("Today")
         .navigationDestination(for: FoodRoute.self) { route in
@@ -1640,8 +1685,8 @@ struct TodayView: View {
                 }
 
                 LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
-                    spacing: 14
+                    columns: quickActionGridColumns,
+                    spacing: quickActionGridSpacing
                 ) {
                     if state.shows(.feed) {
                         QuickActionButton(
@@ -1784,8 +1829,8 @@ struct TodayView: View {
             VStack(spacing: 14) {
                 smartQuickActionsRow(state.smartQuickActions.filter { $0.id != "sleep" })
                 LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
-                    spacing: 14
+                    columns: quickActionGridColumns,
+                    spacing: quickActionGridSpacing
                 ) {
                     QuickActionButton(title: "Medications", icon: "pills.fill", color: .red) {
                         showingMedications = true
@@ -1882,8 +1927,8 @@ struct TodayView: View {
                 smartQuickActionsRow(state.smartQuickActions)
 
                 LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
-                    spacing: 14
+                    columns: quickActionGridColumns,
+                    spacing: quickActionGridSpacing
                 ) {
                     ForEach(TodayDogQuickActionCatalog.enabledTypes(in: state.visibleCareTypes)) { type in
                         dogQuickAction(type, state: state)
@@ -1984,62 +2029,24 @@ struct TodayView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                if usesWideIPadLayout {
+                    LazyVGrid(
+                        columns: Array(
+                            repeating: GridItem(.flexible(), spacing: 12),
+                            count: 4
+                        ),
+                        spacing: 12
+                    ) {
                         ForEach(visibleActions) { action in
-                            let tint = smartQuickActionColor(action.tintName)
-                            ZStack(alignment: .topTrailing) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: action.systemImage)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 30, height: 30)
-                                        .background(tint, in: Circle())
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(action.title)
-                                            .font(.subheadline.weight(.semibold))
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.82)
-                                        if let subtitle = action.subtitle {
-                                            Text(subtitle)
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.82)
-                                        }
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.trailing, 12)
-                                .frame(width: 136, height: 48)
-                                .background(
-                                    Color.primary.opacity(0.045),
-                                    in: RoundedRectangle(cornerRadius: 14)
-                                )
-                                .contentShape(RoundedRectangle(cornerRadius: 14))
-                                .onTapGesture {
-                                    performSmartQuickAction(action)
-                                }
-
-                                Button {
-                                    togglePinnedQuickAction(action)
-                                } label: {
-                                    Image(systemName: action.resolvedIsPinned ? "pin.fill" : "pin")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .foregroundStyle(action.resolvedIsPinned ? tint : .secondary)
-                                        .frame(width: 28, height: 28)
-                                        .background(.thinMaterial, in: Circle())
-                                        .contentShape(Circle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(
-                                    Text(action.resolvedIsPinned ? "Unpin \(action.title)" : "Pin \(action.title)")
-                                )
-                                .zIndex(1)
+                            smartQuickActionTile(action, fillsWidth: true)
+                        }
+                    }
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(visibleActions) { action in
+                                smartQuickActionTile(action, fillsWidth: false)
                             }
-                            .frame(width: 136, height: 48)
-                            .accessibilityElement(children: .contain)
                         }
                     }
                 }
@@ -2047,9 +2054,70 @@ struct TodayView: View {
         }
     }
 
+    private func smartQuickActionTile(
+        _ action: QuickLogActionSnapshot,
+        fillsWidth: Bool
+    ) -> some View {
+        let tint = smartQuickActionColor(action.tintName)
+        return ZStack(alignment: .topTrailing) {
+            HStack(spacing: 8) {
+                Image(systemName: action.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(tint, in: Circle())
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(action.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                    if let subtitle = action.subtitle {
+                        Text(subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.trailing, 12)
+            .frame(width: fillsWidth ? nil : 136, height: 48)
+            .frame(maxWidth: fillsWidth ? .infinity : nil)
+            .background(
+                Color.primary.opacity(0.045),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .onTapGesture {
+                performSmartQuickAction(action)
+            }
+
+            Button {
+                togglePinnedQuickAction(action)
+            } label: {
+                Image(systemName: action.resolvedIsPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(action.resolvedIsPinned ? tint : .secondary)
+                    .frame(width: 28, height: 28)
+                    .background(.thinMaterial, in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                Text(action.resolvedIsPinned ? "Unpin \(action.title)" : "Pin \(action.title)")
+            )
+            .zIndex(1)
+        }
+        .frame(width: fillsWidth ? nil : 136, height: 48)
+        .frame(maxWidth: fillsWidth ? .infinity : nil)
+        .accessibilityElement(children: .contain)
+    }
+
     private func dogTodaySummarySection(_ state: TodayRenderState) -> some View {
         Section {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+            LazyVGrid(columns: summaryGridColumns, spacing: 10) {
                 DogSummaryCard(title: "Last food", value: dogLastEventTitle(.food, state: state), icon: "fork.knife", color: .orange)
                 DogSummaryCard(title: "Last water", value: dogLastEventTitle(.water, state: state), icon: "drop.fill", color: .cyan)
                 DogSummaryCard(title: "Last pee", value: dogPottyTitle(.pee, state: state), icon: "pawprint.fill", color: .teal)
@@ -5144,6 +5212,7 @@ private struct TodayCaregiverHandoffCard: View {
 
     @State private var showingHandoffNoteEditor = false
     @State private var showingAllHandoffNotes = false
+    @State private var handoffNoteToEdit: TodayHandoffNoteSummary?
     @State private var isVisible = false
 
     private var needsAcknowledgement: TodayHomeSummaryItem? {
@@ -5251,7 +5320,13 @@ private struct TodayCaregiverHandoffCard: View {
                         }
                     }
                     ForEach(handoff.recentNotes) { note in
-                        TodayHandoffNoteRow(note: note, openSource: open)
+                        TodayHandoffNoteRow(
+                            note: note,
+                            openSource: open,
+                            edit: note.authorCaregiverIdentifier == currentCaregiverIdentifier
+                                ? { handoffNoteToEdit = note }
+                                : nil
+                        )
                     }
                 }
             }
@@ -5274,29 +5349,16 @@ private struct TodayCaregiverHandoffCard: View {
         .sheet(isPresented: $showingHandoffNoteEditor) {
             CaregiverHandoffNoteSheet(householdID: householdID, item: nil)
         }
+        .sheet(item: $handoffNoteToEdit) { note in
+            CaregiverHandoffNoteEditSheet(householdID: householdID, note: note)
+        }
         .sheet(isPresented: $showingAllHandoffNotes) {
-            NavigationStack {
-                List(handoff.notes) { note in
-                    TodayHandoffNoteRow(
-                        note: note,
-                        showsFullDate: true,
-                        openSource: { route in
-                            showingAllHandoffNotes = false
-                            open(route)
-                        }
-                    )
-                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                        .listRowSeparator(.hidden)
-                }
-                .listStyle(.plain)
-                .navigationTitle("Handoff Notes")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { showingAllHandoffNotes = false }
-                    }
-                }
-            }
+            TodayHandoffNotesSheet(
+                householdID: householdID,
+                notes: handoff.notes,
+                currentCaregiverIdentifier: currentCaregiverIdentifier,
+                open: open
+            )
         }
         .onAppear {
             isVisible = true
@@ -5324,6 +5386,7 @@ private struct TodayHandoffNoteRow: View {
     let note: TodayHandoffNoteSummary
     var showsFullDate = false
     var openSource: ((TodayHomeSummaryRoute) -> Void)?
+    var edit: (() -> Void)?
 
     private var authorInitial: String {
         note.authorName
@@ -5336,6 +5399,10 @@ private struct TodayHandoffNoteRow: View {
         note.createdAt.formatted(
             .relative(presentation: .named, unitsStyle: .abbreviated)
         )
+    }
+
+    private var wasEdited: Bool {
+        note.updatedAt > note.createdAt
     }
 
     var body: some View {
@@ -5364,6 +5431,21 @@ private struct TodayHandoffNoteRow: View {
                         Text(staticRelativeCreatedAt)
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
+                    }
+                    if wasEdited {
+                        Text("Edited")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let edit {
+                        Button(action: edit) {
+                            Image(systemName: "pencil")
+                                .font(.caption.weight(.semibold))
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit handoff note")
                     }
                 }
 
@@ -5394,7 +5476,49 @@ private struct TodayHandoffNoteRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: edit == nil ? .combine : .contain)
+    }
+}
+
+private struct TodayHandoffNotesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let householdID: UUID
+    let notes: [TodayHandoffNoteSummary]
+    let currentCaregiverIdentifier: String
+    let open: (TodayHomeSummaryRoute) -> Void
+
+    @State private var noteToEdit: TodayHandoffNoteSummary?
+
+    var body: some View {
+        NavigationStack {
+            List(notes) { note in
+                TodayHandoffNoteRow(
+                    note: note,
+                    showsFullDate: true,
+                    openSource: { route in
+                        dismiss()
+                        open(route)
+                    },
+                    edit: note.authorCaregiverIdentifier == currentCaregiverIdentifier
+                        ? { noteToEdit = note }
+                        : nil
+                )
+                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                .listRowSeparator(.hidden)
+            }
+            .listStyle(.plain)
+            .navigationTitle("Handoff Notes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .sheet(item: $noteToEdit) { note in
+            CaregiverHandoffNoteEditSheet(householdID: householdID, note: note)
+        }
     }
 }
 
@@ -5445,7 +5569,13 @@ private struct CaregiverHandoffNoteSheet: View {
     let item: TodayHomeSummaryItem?
 
     var body: some View {
-        CaregiverHandoffNoteEditor(item: item) { body in
+        CaregiverHandoffNoteEditor(
+            scopeTitle: item?.title ?? "Household handoff",
+            initialBody: "",
+            saveTitle: "Add",
+            saveErrorTitle: "Couldn't Add Note",
+            saveErrorMessage: "The handoff note wasn't saved. Please try again."
+        ) { body in
             HouseholdAttentionService.addHandoffNote(
                 householdID: householdID,
                 profileID: item?.profileID,
@@ -5458,14 +5588,57 @@ private struct CaregiverHandoffNoteSheet: View {
     }
 }
 
+private struct CaregiverHandoffNoteEditSheet: View {
+    @Environment(\.modelContext) private var modelContext
+
+    let householdID: UUID
+    let note: TodayHandoffNoteSummary
+
+    var body: some View {
+        CaregiverHandoffNoteEditor(
+            scopeTitle: note.sourceTitle ?? "Household handoff",
+            initialBody: note.body,
+            saveTitle: "Save",
+            saveErrorTitle: "Couldn't Save Changes",
+            saveErrorMessage: "The handoff note wasn't updated. Please try again."
+        ) { body in
+            HouseholdAttentionService.updateHandoffNote(
+                id: note.id,
+                householdID: householdID,
+                body: body,
+                context: modelContext
+            )
+        }
+    }
+}
+
 private struct CaregiverHandoffNoteEditor: View {
     @Environment(\.dismiss) private var dismiss
-    let item: TodayHomeSummaryItem?
+    let scopeTitle: String
+    let saveTitle: String
+    let saveErrorTitle: String
+    let saveErrorMessage: String
     let save: (String) -> Bool
 
-    @State private var bodyText = ""
+    @State private var bodyText: String
     @State private var shouldFocusBody = false
     @State private var showingSaveError = false
+
+    init(
+        scopeTitle: String,
+        initialBody: String,
+        saveTitle: String,
+        saveErrorTitle: String,
+        saveErrorMessage: String,
+        save: @escaping (String) -> Bool
+    ) {
+        self.scopeTitle = scopeTitle
+        self.saveTitle = saveTitle
+        self.saveErrorTitle = saveErrorTitle
+        self.saveErrorMessage = saveErrorMessage
+        self.save = save
+        _bodyText = State(initialValue: initialBody)
+    }
 
     var body: some View {
         NavigationStack {
@@ -5474,7 +5647,7 @@ private struct CaregiverHandoffNoteEditor: View {
                     Text("Scope")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(item?.title ?? "Household handoff")
+                    Text(scopeTitle)
                         .font(.subheadline)
                 }
 
@@ -5518,7 +5691,7 @@ private struct CaregiverHandoffNoteEditor: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
+                    Button(saveTitle) {
                         if save(bodyText) {
                             dismiss()
                         } else {
@@ -5528,10 +5701,10 @@ private struct CaregiverHandoffNoteEditor: View {
                     .disabled(bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .alert("Couldn't Add Note", isPresented: $showingSaveError) {
+            .alert(saveErrorTitle, isPresented: $showingSaveError) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("The handoff note wasn't saved. Please try again.")
+                Text(saveErrorMessage)
             }
         }
     }
@@ -5569,6 +5742,7 @@ private struct HandoffNoteTextView: UIViewRepresentable {
 
         context.coordinator.didRequestFirstResponder = true
         textView.becomeFirstResponder()
+        textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {

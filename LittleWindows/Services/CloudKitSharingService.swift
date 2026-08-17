@@ -28,21 +28,44 @@ enum FamilyShareCreationProgress: Equatable, Sendable {
     }
 }
 
+enum FamilyShareAcceptancePhase: String, Equatable {
+    case preparing
+    case accepting
+    case downloading
+    case completed
+    case failed
+
+    var isInProgress: Bool {
+        switch self {
+        case .preparing, .accepting, .downloading:
+            return true
+        case .completed, .failed:
+            return false
+        }
+    }
+
+    var isTerminal: Bool {
+        !isInProgress
+    }
+}
+
 @MainActor
 final class CloudKitSharingService {
     static let shared = CloudKitSharingService()
-    nonisolated static let foregroundTimerPollIntervalSeconds: TimeInterval = 5
-    nonisolated static let foregroundTimerInitialDelaySeconds: TimeInterval = 3
+    nonisolated static let foregroundTimerPollIntervalSeconds: TimeInterval = 1
     nonisolated static let foregroundTimerFailureRetrySeconds: TimeInterval = 30
+    nonisolated static let shareMembershipRefreshDebounceSeconds: TimeInterval = 0.35
     nonisolated static let familyEntityUploadBatchRecordLimit = 25
     nonisolated static let familyEntityUploadBatchByteLimit = 8 * 1_024 * 1_024
     nonisolated static let familySnapshotAssetByteLimit = 40 * 1_024 * 1_024
+    nonisolated static let localMutationAutomaticRetryLimit = 5
     nonisolated static let cloudKitRequestTimeoutSeconds: TimeInterval = 30
     nonisolated static let cloudKitResourceTimeoutSeconds: TimeInterval = 180
     nonisolated static let acceptanceStatusDidChangeNotification = Notification.Name(
         "CloudKitSharingService.acceptanceStatusDidChange"
     )
     nonisolated static let acceptanceStatusMessageKey = "familySync.acceptanceStatusMessage"
+    nonisolated static let acceptancePhaseKey = "familySync.acceptancePhase"
     nonisolated static let inactiveReasonKey = "familySync.inactiveReason"
     nonisolated static let inactiveEventIDKey = "familySync.inactiveEventID"
     nonisolated static let shareStateDidChangeNotification = Notification.Name(
@@ -52,11 +75,15 @@ final class CloudKitSharingService {
 
     private static var installedContainer: ModelContainer?
     private static var pendingAcceptedShareMetadata: CKShare.Metadata?
+    private static var acceptanceTask: Task<Void, Never>?
     private static var isApplyingRemoteDataset = false
 
     private var localMutationSyncTask: Task<Void, Never>?
     private var localMutationSyncRequested = false
     private var isSynchronizing = false
+    private var isRefreshingShareMembership = false
+    private var shareMembershipRefreshWaiters: [CheckedContinuation<Void, Never>] = []
+    private var shareMembershipRefreshTask: Task<Void, Never>?
     private var datasetExporter: FamilySyncDatasetExporter?
     private var verifiedPushSubscriptionID: String?
 
@@ -99,6 +126,7 @@ final class CloudKitSharingService {
         static let lastNotifiedDatasetChecksum = "familySync.lastNotifiedDatasetChecksum"
         static let pushSubscriptionID = "familySync.pushSubscriptionID"
         static let acceptanceStatusMessage = CloudKitSharingService.acceptanceStatusMessageKey
+        static let acceptancePhase = CloudKitSharingService.acceptancePhaseKey
         static let acceptanceStatusAt = "familySync.acceptanceStatusAt"
         static let lastError = "familySync.lastError"
         static let pendingUpload = "familySync.pendingUpload"
@@ -139,26 +167,48 @@ final class CloudKitSharingService {
     static func install(container: ModelContainer) {
         installedContainer = container
         shared.datasetExporter = FamilySyncDatasetExporter(modelContainer: container)
+        if pendingAcceptedShareMetadata == nil,
+           acceptanceTask == nil,
+           shared.storedAcceptancePhase?.isInProgress == true {
+            shared.recordAcceptance(
+                "Family share setup was interrupted. Open the invitation again to retry.",
+                phase: .failed
+            )
+        }
     }
 
     static func handleAcceptedShare(metadata: CKShare.Metadata) {
-        shared.recordAcceptance("Family share invite received. Accepting it now...")
+        guard acceptanceTask == nil else { return }
+        shared.recordAcceptance(
+            "Family share invite received. Preparing secure setup...",
+            phase: .preparing
+        )
         guard let container = installedContainer else {
             pendingAcceptedShareMetadata = metadata
-            shared.recordAcceptance("Family share invite received. Finishing setup after launch...")
             return
         }
-        Task { @MainActor in
+        acceptanceTask = Task { @MainActor in
+            shared.recordAcceptance(
+                "Accepting the Family Sync invitation...",
+                phase: .accepting
+            )
             do {
                 try await shared.acceptFamilyShare(
                     metadata: metadata,
                     context: container.mainContext
                 )
-                shared.recordAcceptance("Family share accepted. Shared family data is ready on this device.")
+                shared.recordAcceptance(
+                    "Family share accepted. Shared family data is ready on this device.",
+                    phase: .completed
+                )
             } catch {
                 shared.record(error: error)
-                shared.recordAcceptance("Family share invite failed: \(error.localizedDescription)")
+                shared.recordAcceptance(
+                    "Family share invite failed: \(error.localizedDescription)",
+                    phase: .failed
+                )
             }
+            acceptanceTask = nil
         }
     }
 
@@ -195,6 +245,10 @@ final class CloudKitSharingService {
                     context: container.mainContext,
                     reason: .remoteNotification
                 )
+                if shared.storedRole == .owner {
+                    await shared.refreshShareMembership()
+                    shared.postShareStateDidChange()
+                }
                 completion(changed ? .newData : .noData)
             } catch {
                 shared.record(error: error)
@@ -401,6 +455,19 @@ final class CloudKitSharingService {
 
     func refreshShareMembership() async {
         guard storedRole != .none else { return }
+        if isRefreshingShareMembership {
+            await withCheckedContinuation { continuation in
+                shareMembershipRefreshWaiters.append(continuation)
+            }
+            return
+        }
+        isRefreshingShareMembership = true
+        defer {
+            isRefreshingShareMembership = false
+            let waiters = shareMembershipRefreshWaiters
+            shareMembershipRefreshWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
         do {
             _ = try await existingShare()
             statusDefaults.removeObject(forKey: DefaultsKey.lastError)
@@ -425,6 +492,10 @@ final class CloudKitSharingService {
         guard let rootID = metadata.hierarchicalRootRecordID else {
             throw FamilySharingError.missingShare
         }
+        recordAcceptance(
+            "Invitation accepted. Downloading shared family data...",
+            phase: .downloading
+        )
         let root = try await fetchRootRecord(id: rootID, role: .participant)
         try requireCurrentSyncSchema(root)
 
@@ -511,13 +582,14 @@ final class CloudKitSharingService {
                 lastKnownChecksum: statusDefaults.string(forKey: DefaultsKey.lastDatasetChecksum),
                 pendingUpload: pendingUpload
             ) else {
-                // A five-second foreground check with no remote changes must
+                // A frequent foreground or push check with no remote changes must
                 // be completely silent. Updating sync timestamps here used to
                 // invalidate every `@AppStorage`-backed SwiftUI view on each
                 // poll, producing the repeating Today/timer scroll freeze.
                 if reason != .foregroundTimerPoll {
                     markSynced(uploaded: false, downloaded: false)
                 }
+                statusDefaults.removeObject(forKey: DefaultsKey.lastError)
                 return false
             }
             // The full record is fetched below only when its checksum changed.
@@ -531,6 +603,7 @@ final class CloudKitSharingService {
         defer { localPayload.removeTemporaryFile() }
         if remoteChecksum == localPayload.checksum {
             try await saveBaselineData(localPayload.data)
+            statusDefaults.removeObject(forKey: DefaultsKey.lastError)
             markSynced(uploaded: false, downloaded: false)
             return false
         }
@@ -647,7 +720,6 @@ final class CloudKitSharingService {
 
         localMutationSyncTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: .milliseconds(80))
             var busyRetryAttempt = 0
             while self.localMutationSyncRequested, !Task.isCancelled {
                 self.localMutationSyncRequested = false
@@ -670,7 +742,17 @@ final class CloudKitSharingService {
                     }
                 } catch {
                     self.record(error: error)
-                    break
+                    guard PersistenceService.familySyncMode(defaults: self.defaults) == .sharedFamilySync,
+                          self.statusDefaults.bool(forKey: DefaultsKey.pendingUpload),
+                          busyRetryAttempt < Self.localMutationAutomaticRetryLimit else {
+                        break
+                    }
+                    self.localMutationSyncRequested = true
+                    let delay = Self.localMutationBusyRetryDelaySeconds(
+                        attempt: busyRetryAttempt
+                    )
+                    busyRetryAttempt += 1
+                    try? await Task.sleep(for: .seconds(delay))
                 }
             }
             self.localMutationSyncTask = nil
@@ -706,6 +788,10 @@ final class CloudKitSharingService {
     nonisolated static func localMutationBusyRetryDelaySeconds(attempt: Int) -> TimeInterval {
         let boundedAttempt = min(max(0, attempt), 4)
         return min(30, 2 * pow(2, Double(boundedAttempt)))
+    }
+
+    nonisolated static func foregroundPollFailureRetryDelaySeconds(attempt: Int) -> TimeInterval {
+        localMutationBusyRetryDelaySeconds(attempt: attempt)
     }
 
     private func refreshTimerSurfaces(context: ModelContext) async {
@@ -804,10 +890,19 @@ final class CloudKitSharingService {
 
     func handleShareSheetDidSave() {
         statusDefaults.removeObject(forKey: DefaultsKey.lastError)
-        postShareStateDidChange()
-        Task { @MainActor in
-            _ = try? await existingShare()
-            postShareStateDidChange()
+        shareMembershipRefreshTask?.cancel()
+        shareMembershipRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(
+                    for: .seconds(Self.shareMembershipRefreshDebounceSeconds)
+                )
+            } catch {
+                return
+            }
+            await self.refreshShareMembership()
+            guard !Task.isCancelled else { return }
+            self.postShareStateDidChange()
         }
     }
 
@@ -859,6 +954,10 @@ final class CloudKitSharingService {
     }
 
     static var shareIconData: Data? {
+        cachedShareIconData
+    }
+
+    private static let cachedShareIconData: Data? = {
         let size = CGSize(width: 180, height: 180)
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { context in
@@ -893,7 +992,7 @@ final class CloudKitSharingService {
             ).stroke()
         }
         return image.pngData()
-    }
+    }()
 
     private var primaryCaregiverName: String? {
         let raw = defaults.string(forKey: "caregiverOne")?
@@ -955,6 +1054,7 @@ final class CloudKitSharingService {
             DefaultsKey.rootRecordName,
             DefaultsKey.shareRecordName,
             DefaultsKey.acceptanceStatusMessage,
+            DefaultsKey.acceptancePhase,
             DefaultsKey.acceptanceStatusAt,
             DefaultsKey.inactiveReason,
             DefaultsKey.inactiveEventID,
@@ -1759,9 +1859,18 @@ final class CloudKitSharingService {
         statusDefaults.set(error.localizedDescription, forKey: DefaultsKey.lastError)
     }
 
-    private func recordAcceptance(_ message: String) {
+    private var storedAcceptancePhase: FamilyShareAcceptancePhase? {
+        defaults.string(forKey: DefaultsKey.acceptancePhase)
+            .flatMap(FamilyShareAcceptancePhase.init(rawValue:))
+    }
+
+    private func recordAcceptance(
+        _ message: String,
+        phase: FamilyShareAcceptancePhase
+    ) {
         defaults.set(message, forKey: DefaultsKey.acceptanceStatusMessage)
         defaults.set(Date(), forKey: DefaultsKey.acceptanceStatusAt)
+        defaults.set(phase.rawValue, forKey: DefaultsKey.acceptancePhase)
         NotificationCenter.default.post(
             name: Self.acceptanceStatusDidChangeNotification,
             object: nil
@@ -1792,7 +1901,7 @@ enum FamilySyncReason: Equatable {
     case foregroundTimerPoll
 
     var usesLightweightRemoteCheck: Bool {
-        self == .launch || self == .foregroundTimerPoll
+        self == .launch || self == .remoteNotification || self == .foregroundTimerPoll
     }
 
     var requiresExplicitAccountCheck: Bool {

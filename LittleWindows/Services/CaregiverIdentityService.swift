@@ -137,6 +137,9 @@ enum CaregiverIdentityService {
               let rawValue = String(data: data, encoding: .utf8) else {
             return
         }
+        guard defaults.string(forKey: familySyncCaregiverNamesKey) != rawValue else {
+            return
+        }
         defaults.set(rawValue, forKey: familySyncCaregiverNamesKey)
     }
 

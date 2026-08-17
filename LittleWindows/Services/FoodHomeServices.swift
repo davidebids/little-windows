@@ -1613,11 +1613,13 @@ struct TodaySnoozedAttentionItem: Identifiable, Equatable {
 
 struct TodayHandoffNoteSummary: Identifiable, Equatable {
     var id: UUID
+    var authorCaregiverIdentifier: String
     var authorName: String
     var body: String
     var sourceTitle: String?
     var sourceRoute: TodayHomeSummaryRoute?
     var createdAt: Date
+    var updatedAt: Date
 }
 
 struct TodayHandoffActivitySummary: Identifiable, Equatable {
@@ -2206,9 +2208,9 @@ enum TodayHomeSummaryService {
                 } == true
                 && $0.completedAt != nil
         }
-        let newNotes = sharedOtherNotes.filter { $0.createdAt > checkpoint }
-            .sorted { $0.createdAt > $1.createdAt }
-        let recentNotes = sharedNotes.sorted { $0.createdAt > $1.createdAt }
+        let newNotes = sharedOtherNotes.filter { $0.updatedAt > checkpoint }
+            .sorted { $0.updatedAt > $1.updatedAt }
+        let recentNotes = sharedNotes.sorted { $0.updatedAt > $1.updatedAt }
         let acknowledgementUpdates = sharedOtherAcknowledgements.filter { $0.updatedAt > checkpoint }
         let claimUpdates = sharedOtherClaims.filter { $0.updatedAt > checkpoint }
         let completedFollowUps = sharedOtherCompletions.filter {
@@ -2259,7 +2261,7 @@ enum TodayHomeSummaryService {
             }
         ).sorted { $0.occurredAt > $1.occurredAt }
         let latestObservedActivityAt = (
-            sharedOtherNotes.map(\.createdAt)
+            sharedOtherNotes.map(\.updatedAt)
                 + sharedOtherAcknowledgements.map(\.updatedAt)
                 + sharedOtherClaims.map(\.updatedAt)
                 + sharedOtherCompletions.compactMap(\.completedAt)
@@ -2282,12 +2284,14 @@ enum TodayHomeSummaryService {
             notes: recentNotes.map {
                 TodayHandoffNoteSummary(
                     id: $0.id,
+                    authorCaregiverIdentifier: $0.authorCaregiverIdentifier,
                     authorName: caregiverNamesByIdentifier[$0.authorCaregiverIdentifier]
                         ?? $0.authorCaregiverName,
                     body: $0.body,
                     sourceTitle: $0.sourceTitleSnapshot,
                     sourceRoute: $0.sourceKey.flatMap { sourceRoutesByKey[$0] },
-                    createdAt: $0.createdAt
+                    createdAt: $0.createdAt,
+                    updatedAt: $0.updatedAt
                 )
             },
             needsAcknowledgementItemID: needsAcknowledgement?.id,

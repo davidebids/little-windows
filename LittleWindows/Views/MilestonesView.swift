@@ -1484,11 +1484,13 @@ struct MilestonesView: View {
             } label: {
                 Label("Capture a memory", systemImage: "plus.circle.fill")
                     .font(.headline)
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
             .buttonStyle(.borderedProminent)
-            .tint(MilestonePalette.accent)
+            .tint(MilestonePalette.prominentAction)
         }
         .padding(18)
         .background(
@@ -2826,6 +2828,7 @@ struct MilestoneDetailView: View {
 
 enum MilestonePalette {
     static let accent = Color(red: 0.72, green: 0.28, blue: 0.42)
+    static let prominentAction = Color(red: 0.58, green: 0.18, blue: 0.34)
     static let background = Color(uiColor: .systemGroupedBackground)
 }
 

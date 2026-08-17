@@ -307,14 +307,14 @@ struct FamilySyncSettingsView: View {
                 for: CloudKitSharingService.acceptanceStatusDidChangeNotification
             )
         ) { _ in
-            Task { await viewModel.refresh(force: true) }
+            Task { await viewModel.refresh(includeMembership: false) }
         }
         .onReceive(
             NotificationCenter.default.publisher(
                 for: CloudKitSharingService.shareStateDidChangeNotification
             )
         ) { _ in
-            Task { await viewModel.refresh(force: true) }
+            Task { await viewModel.refresh(includeMembership: false) }
         }
         .sheet(
             isPresented: Binding(

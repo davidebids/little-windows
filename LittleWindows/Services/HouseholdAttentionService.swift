@@ -505,6 +505,35 @@ enum HouseholdAttentionService {
         return note
     }
 
+    @discardableResult
+    static func updateHandoffNote(
+        id: UUID,
+        householdID: UUID,
+        body: String,
+        context: ModelContext,
+        now: Date = Date(),
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard PersistenceService.familySyncMode(defaults: defaults) == .sharedFamilySync else {
+            return false
+        }
+        let cleanedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedBody.isEmpty else { return false }
+        let descriptor = FetchDescriptor<CaregiverHandoffNote>(
+            predicate: #Predicate { $0.id == id && $0.householdID == householdID }
+        )
+        guard let note = try? context.fetch(descriptor).first,
+              note.authorCaregiverIdentifier == CaregiverIdentityService.stableCaregiverIdentifier(
+                defaults: defaults
+              ) else {
+            return false
+        }
+        guard note.body != cleanedBody else { return true }
+        note.body = cleanedBody
+        note.updatedAt = now
+        return PersistenceService.save(context: context)
+    }
+
     private static func deleteInteractions(sourceKey: String, context: ModelContext) {
         let acknowledgements = (try? context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>(
             predicate: #Predicate { $0.sourceKey == sourceKey }

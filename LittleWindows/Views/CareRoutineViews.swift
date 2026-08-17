@@ -502,6 +502,30 @@ private struct CareRoutineCompactRow: View {
     }
 }
 
+private struct CareRoutineReorderRow: View {
+    var routine: CareRoutine
+    var stepCount: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: routine.iconName)
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(color(named: routine.tintName).gradient, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(routine.title)
+                    .font(.subheadline.weight(.semibold))
+                Text("\(stepCount) step\(stepCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct CareRoutineManagerView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -523,6 +547,7 @@ struct CareRoutineManagerView: View {
     @State private var showingRoutineBuilder = false
     @State private var routineToEdit: CareRoutine?
     @State private var routinePendingDelete: CareRoutine?
+    @State private var editMode = EditMode.inactive
 
     var body: some View {
         List {
@@ -555,6 +580,14 @@ struct CareRoutineManagerView: View {
                         systemImage: "checklist",
                         description: Text("Add a template to start using routines from Today.")
                     )
+                } else if editMode.isEditing {
+                    ForEach(routines) { routine in
+                        CareRoutineReorderRow(
+                            routine: routine,
+                            stepCount: CareRoutineService.steps(for: routine, steps: steps).count
+                        )
+                    }
+                    .onMove(perform: moveRoutines)
                 } else {
                     ForEach(routines) { routine in
                         let activeRun = CareRoutineService.activeRun(for: routine, runs: runs)
@@ -640,16 +673,20 @@ struct CareRoutineManagerView: View {
                             }
                         }
                     }
-                    .onMove(perform: moveRoutines)
                 }
             } header: {
                 AppSectionHeader(title: "Saved")
             }
         }
+        .environment(\.editMode, $editMode)
         .navigationTitle("Routines")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                EditButton()
+            if !routines.isEmpty {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(editMode.isEditing ? "Done" : "Edit") {
+                        editMode = editMode.isEditing ? .inactive : .active
+                    }
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -658,10 +695,19 @@ struct CareRoutineManagerView: View {
                     Label("New Routine", systemImage: "plus")
                 }
             }
-            ToolbarItem(placement: .confirmationAction) {
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") {
+                    editMode = .inactive
                     dismiss()
                 }
+            }
+        }
+        .onChange(of: routines.isEmpty) { _, isEmpty in
+            if isEmpty {
+                editMode = .inactive
             }
         }
         .appActionSheet(

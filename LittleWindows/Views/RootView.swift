@@ -346,6 +346,8 @@ struct RootView: View {
     @State private var careProfilePresentationTask: Task<Void, Never>?
     @AppStorage(CloudKitSharingService.acceptanceStatusMessageKey)
     private var familySyncAcceptanceMessage = ""
+    @AppStorage(CloudKitSharingService.acceptancePhaseKey)
+    private var familySyncAcceptancePhaseRawValue = ""
     @AppStorage(PersistenceService.familySyncModeKey)
     private var familySyncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
     @AppStorage("familySync.lastPresentedAcceptanceStatusMessage")
@@ -367,6 +369,14 @@ struct RootView: View {
 
     private var experienceMode: AppExperienceMode {
         AppExperienceMode(hasActiveCareProfile: !activeProfileIDs.isEmpty)
+    }
+
+    private var familySyncAcceptancePhase: FamilyShareAcceptancePhase? {
+        FamilyShareAcceptancePhase(rawValue: familySyncAcceptancePhaseRawValue)
+    }
+
+    private var familySyncAcceptanceIsInProgress: Bool {
+        familySyncAcceptancePhase?.isInProgress == true
     }
 
     private var primaryTabs: some View {
@@ -436,6 +446,7 @@ struct RootView: View {
             isPresented: Binding(
                 get: {
                     guard hasCheckedInitialOnboardingState else { return false }
+                    guard !familySyncAcceptanceIsInProgress else { return false }
                     return FirstRunOnboarding.shouldPresent(
                         hasCompleted: hasCompletedInitialOnboarding,
                         profiles: profiles,
@@ -571,6 +582,9 @@ struct RootView: View {
         .onChange(of: familySyncInactiveEventID) { _, _ in
             presentFamilySyncAccessEndedStatusIfNeeded()
         }
+        .onChange(of: familySyncAcceptancePhaseRawValue) { _, _ in
+            presentFamilySyncAcceptanceStatusIfNeeded()
+        }
         .onChange(of: router.showingFamilySyncSettings) { _, isShowing in
             guard isShowing, !familySyncInactiveEventID.isEmpty else { return }
             lastPresentedFamilySyncInactiveEventID = familySyncInactiveEventID
@@ -652,6 +666,18 @@ struct RootView: View {
 
     var body: some View {
         tabsWithLifecycleWork
+            .overlay(alignment: .top) {
+                if familySyncAcceptanceIsInProgress {
+                    FamilySyncAcceptanceProgressBanner(
+                        message: familySyncAcceptanceMessage
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(10)
+                }
+            }
+            .animation(.snappy, value: familySyncAcceptanceIsInProgress)
             .task {
                 performInitialSetup()
             }
@@ -800,16 +826,7 @@ struct RootView: View {
     }
 
     private func pollFamilyTimerChangesWhileActive() async {
-        do {
-            try await Task.sleep(
-                for: .seconds(
-                    CloudKitSharingService.foregroundTimerInitialDelaySeconds
-                )
-            )
-        } catch {
-            return
-        }
-
+        var consecutiveFailureCount = 0
         while !Task.isCancelled,
               PersistenceService.familySyncMode() == .sharedFamilySync {
             let retryDelay: TimeInterval
@@ -817,9 +834,13 @@ struct RootView: View {
                 _ = try await CloudKitSharingService.shared.pollForForegroundTimerChanges(
                     context: modelContext
                 )
+                consecutiveFailureCount = 0
                 retryDelay = CloudKitSharingService.foregroundTimerPollIntervalSeconds
             } catch {
-                retryDelay = CloudKitSharingService.foregroundTimerFailureRetrySeconds
+                retryDelay = CloudKitSharingService.foregroundPollFailureRetryDelaySeconds(
+                    attempt: consecutiveFailureCount
+                )
+                consecutiveFailureCount += 1
             }
             do {
                 try await Task.sleep(for: .seconds(retryDelay))
@@ -848,7 +869,12 @@ struct RootView: View {
         if DebugSimulatorSmokeSeedService.canHandle(url), DebugSimulatorSmokeSeedService.isEnabled {
             DebugSimulatorSmokeSeedService.seedIfNeeded(context: modelContext)
             hasCompletedInitialOnboarding = true
-            router.selectTodayCare()
+            if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_MARKETING_START_MODE"] == "home" {
+                router.todayDisplayMode = .home
+                router.selectedTab = .today
+            } else {
+                router.selectTodayCare()
+            }
             return
         }
         #endif
@@ -959,6 +985,7 @@ struct RootView: View {
 
     private func presentFamilySyncAcceptanceStatusIfNeeded() {
         guard !familySyncAcceptanceMessage.isEmpty,
+              familySyncAcceptancePhase?.isTerminal != false,
               familySyncAcceptanceMessage != lastPresentedFamilySyncAcceptanceMessage else {
             return
         }
@@ -976,6 +1003,34 @@ struct RootView: View {
             return
         }
         showingFamilySyncAccessEndedStatus = true
+    }
+}
+
+private struct FamilySyncAcceptanceProgressBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .tint(AppTheme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Joining Family Sync")
+                    .font(.subheadline.weight(.semibold))
+                Text(message.isEmpty ? "Preparing your shared family data..." : message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(AppTheme.line, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("family-sync.acceptance-progress")
     }
 }
 
@@ -1895,7 +1950,14 @@ enum DebugSimulatorSmokeSeedService {
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
-        let childBirthDate = calendar.date(byAdding: .month, value: -5, to: today) ?? today
+        let isMarketingCapture = ProcessInfo.processInfo.environment[
+            "LITTLE_WINDOWS_MARKETING_CAPTURE"
+        ] == "1"
+        let childBirthDate = calendar.date(
+            byAdding: .month,
+            value: isMarketingCapture ? -8 : -5,
+            to: today
+        ) ?? today
         let dogBirthDate = calendar.date(byAdding: .month, value: -10, to: today) ?? today
 
         let child = fetchOrCreateProfile(
@@ -1930,6 +1992,9 @@ enum DebugSimulatorSmokeSeedService {
         seedAppointments(profile: child, today: today, context: context)
         seedMilestones(profile: child, today: today, context: context)
         seedFoodHome(today: today, context: context)
+        if isMarketingCapture {
+            seedMarketingShowcase(profile: child, today: today, now: now, context: context)
+        }
 
         _ = PersistenceService.save(context: context)
     }
@@ -2259,6 +2324,174 @@ enum DebugSimulatorSmokeSeedService {
             entry.notes = "Simulator smoke milestone."
             entry.caregiverName = "Sample Caregiver"
             entry.isFavorite = milestone.3
+        }
+    }
+
+    @MainActor
+    private static func seedMarketingShowcase(
+        profile: CareProfile,
+        today: Date,
+        now: Date,
+        context: ModelContext
+    ) {
+        let household = HouseholdService.ensureDefaultHousehold(context: context)
+        let calendar = Calendar.current
+
+        if let currentSleep = fetch(CareEvent.self, id: sleepEventID, context: context) {
+            currentSleep.startDate = today.addingTimeInterval(6 * 60)
+            currentSleep.endDate = today.addingTimeInterval(6.75 * 3_600)
+            currentSleep.updatedAt = now
+        }
+        let priorSleepIDs = [
+            "00000000-0000-0000-0000-000000000930",
+            "00000000-0000-0000-0000-000000000931",
+            "00000000-0000-0000-0000-000000000932",
+            "00000000-0000-0000-0000-000000000933",
+            "00000000-0000-0000-0000-000000000934",
+            "00000000-0000-0000-0000-000000000935"
+        ].compactMap(UUID.init(uuidString:))
+        for (index, id) in priorSleepIDs.enumerated() {
+            guard let day = calendar.date(byAdding: .day, value: -(index + 1), to: today),
+                  let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { continue }
+            upsertEvent(
+                id: id,
+                profile: profile,
+                type: .sleep,
+                startDate: day.addingTimeInterval(20 * 3_600),
+                endDate: nextDay.addingTimeInterval(6.5 * 3_600),
+                title: nil,
+                notes: "Night sleep.",
+                context: context
+            ) { event in
+                event.sleepKind = .nightSleep
+            }
+        }
+
+        let followUpID = UUID(uuidString: "00000000-0000-0000-0000-000000000910")!
+        let followUp = fetch(AppointmentFollowUp.self, id: followUpID, context: context)
+            ?? AppointmentFollowUp(
+                id: followUpID,
+                appointmentID: appointmentID,
+                householdID: household.id,
+                profileID: profile.id,
+                title: "Review checkup notes",
+                details: "Confirm the next visit and questions to bring.",
+                dueDate: now.addingTimeInterval(-75 * 60),
+                createdByCaregiverName: "Sample Caregiver",
+                createdAt: now.addingTimeInterval(-2 * 24 * 60 * 60),
+                updatedAt: now.addingTimeInterval(-75 * 60)
+            )
+        if followUp.modelContext == nil { context.insert(followUp) }
+        followUp.title = "Review checkup notes"
+        followUp.details = "Confirm the next visit and questions to bring."
+        followUp.dueDate = now.addingTimeInterval(-75 * 60)
+        followUp.completedAt = nil
+        followUp.updatedAt = now.addingTimeInterval(-75 * 60)
+
+        let medicationID = UUID(uuidString: "00000000-0000-0000-0000-000000000911")!
+        let medication = fetch(Medication.self, id: medicationID, context: context)
+            ?? Medication(
+                id: medicationID,
+                profileID: profile.id,
+                name: "Vitamin D",
+                form: .drops,
+                instructions: "Give with the morning feed.",
+                currentSupply: 12,
+                refillThreshold: 5,
+                createdAt: today.addingTimeInterval(-14 * 24 * 60 * 60),
+                updatedAt: now.addingTimeInterval(-45 * 60)
+            )
+        if medication.modelContext == nil { context.insert(medication) }
+        medication.profileID = profile.id
+        medication.name = "Vitamin D"
+        medication.isArchived = false
+        medication.updatedAt = now.addingTimeInterval(-45 * 60)
+
+        let dueTime = now.addingTimeInterval(-45 * 60)
+        let dueComponents = calendar.dateComponents([.hour, .minute], from: dueTime)
+        let regimenID = UUID(uuidString: "00000000-0000-0000-0000-000000000912")!
+        let regimen = fetch(MedicationRegimen.self, id: regimenID, context: context)
+            ?? MedicationRegimen(
+                id: regimenID,
+                profileID: profile.id,
+                medicationID: medicationID,
+                scheduleKind: .daily,
+                startDate: today.addingTimeInterval(-14 * 24 * 60 * 60),
+                doseAmount: 1,
+                doseUnit: "drop",
+                doseTimes: [MedicationDoseTime(
+                    hour: dueComponents.hour ?? 8,
+                    minute: dueComponents.minute ?? 0
+                )],
+                updatedAt: now.addingTimeInterval(-45 * 60)
+            )
+        if regimen.modelContext == nil { context.insert(regimen) }
+        regimen.profileID = profile.id
+        regimen.medicationID = medicationID
+        regimen.isActive = true
+        regimen.doseTimes = [MedicationDoseTime(
+            hour: dueComponents.hour ?? 8,
+            minute: dueComponents.minute ?? 0
+        )]
+        regimen.updatedAt = now.addingTimeInterval(-45 * 60)
+
+        let routineID = UUID(uuidString: "00000000-0000-0000-0000-000000000913")!
+        let nowComponents = calendar.dateComponents([.hour, .minute], from: now)
+        let currentMinutes = (nowComponents.hour ?? 12) * 60 + (nowComponents.minute ?? 0)
+        let routine = fetch(CareRoutine.self, id: routineID, context: context)
+            ?? CareRoutine(
+                id: routineID,
+                scope: .profile,
+                profileType: .child,
+                profileID: profile.id,
+                householdID: household.id,
+                title: "Evening wind-down",
+                notes: "Bath, book, bottle, and lights low.",
+                iconName: "moon.stars.fill",
+                tintName: "indigo",
+                createdAt: today.addingTimeInterval(-7 * 24 * 60 * 60),
+                updatedAt: now.addingTimeInterval(-2 * 60 * 60),
+                reminderEnabled: true,
+                reminderTimeMinutesAfterMidnight: max(0, currentMinutes - 2 * 60)
+            )
+        if routine.modelContext == nil { context.insert(routine) }
+        routine.profileID = profile.id
+        routine.householdID = household.id
+        routine.isArchived = false
+        routine.reminderEnabled = true
+        routine.reminderTimeMinutesAfterMidnight = max(0, currentMinutes - 2 * 60)
+        routine.updatedAt = now.addingTimeInterval(-2 * 60 * 60)
+
+        let reminderID = UUID(uuidString: "00000000-0000-0000-0000-000000000914")!
+        let reminder = fetch(FoodReminder.self, id: reminderID, context: context)
+            ?? FoodReminder(
+                id: reminderID,
+                householdID: household.id,
+                title: "Restock feeding essentials",
+                relatedShoppingListID: shoppingListID,
+                dateTime: now.addingTimeInterval(-20 * 60),
+                createdAt: today.addingTimeInterval(-24 * 60 * 60),
+                updatedAt: now.addingTimeInterval(-20 * 60)
+            )
+        if reminder.modelContext == nil { context.insert(reminder) }
+        reminder.householdID = household.id
+        reminder.title = "Restock feeding essentials"
+        reminder.relatedShoppingListID = shoppingListID
+        reminder.dateTime = now.addingTimeInterval(-20 * 60)
+        reminder.isEnabled = true
+        reminder.updatedAt = now.addingTimeInterval(-20 * 60)
+
+        if let inventory = fetch(InventoryItem.self, id: inventoryItemID, context: context) {
+            inventory.status = .usedUp
+            inventory.updatedAt = now.addingTimeInterval(-30 * 60)
+        }
+        if let mealPrep = fetch(MealPrepItem.self, id: mealPrepItemID, context: context) {
+            mealPrep.servingsRemaining = 1
+            mealPrep.updatedAt = now.addingTimeInterval(-35 * 60)
+        }
+        if let shoppingList = fetch(ShoppingList.self, id: shoppingListID, context: context) {
+            shoppingList.notes = "Fresh produce and weekly essentials."
+            shoppingList.updatedAt = now.addingTimeInterval(-10 * 60)
         }
     }
 

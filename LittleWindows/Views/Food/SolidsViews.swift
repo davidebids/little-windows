@@ -699,6 +699,29 @@ struct SolidsGuidedPathView: View {
     }
 
     private func suggestionRow(_ suggestion: SolidsGuidedMealSuggestion) -> some View {
+        Group {
+            if let destination = suggestion.primaryDestination {
+                Button {
+                    open(destination)
+                } label: {
+                    suggestionRowContent(suggestion, showsDisclosureIndicator: true)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(suggestion.recipe.map {
+                    "solids.guided.recipe.\($0.id)"
+                } ?? "solids.guided.food.\(suggestion.foods.first?.id ?? "unknown")")
+                .accessibilityHint("Opens preparation guidance for this meal.")
+            } else {
+                suggestionRowContent(suggestion, showsDisclosureIndicator: false)
+            }
+        }
+    }
+
+    private func suggestionRowContent(
+        _ suggestion: SolidsGuidedMealSuggestion,
+        showsDisclosureIndicator: Bool
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(suggestion.scheduledAt.formatted(.dateTime.weekday(.wide).month().day()))
@@ -707,16 +730,18 @@ struct SolidsGuidedPathView: View {
                 Label(suggestion.kind.displayName, systemImage: suggestion.kind.systemImage)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
+                Spacer()
+                if showsDisclosureIndicator {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
-            if let destination = suggestion.primaryDestination {
-                Button { open(destination) } label: {
+            if suggestion.primaryDestination != nil {
+                Group {
                     Text(suggestion.primaryDestinationTitle ?? "Meal guidance")
                         .font(.subheadline.weight(.semibold))
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(suggestion.recipe.map {
-                    "solids.guided.recipe.\($0.id)"
-                } ?? "solids.guided.food.\(suggestion.foods.first?.id ?? "unknown")")
             }
             Text(suggestion.foods.map(\.name).joined(separator: " • "))
                 .font(.caption)

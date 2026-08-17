@@ -902,12 +902,16 @@ final class SleepPredictionEngineTests: XCTestCase {
     func testFamilySyncUsesFastForegroundTimerPollingCadence() {
         XCTAssertEqual(
             CloudKitSharingService.foregroundTimerPollIntervalSeconds,
-            5
+            1
         )
-        XCTAssertEqual(CloudKitSharingService.foregroundTimerInitialDelaySeconds, 3)
         XCTAssertEqual(CloudKitSharingService.foregroundTimerFailureRetrySeconds, 30)
+        XCTAssertEqual(CloudKitSharingService.localMutationAutomaticRetryLimit, 5)
         XCTAssertEqual(
             (0...5).map(CloudKitSharingService.localMutationBusyRetryDelaySeconds),
+            [2, 4, 8, 16, 30, 30]
+        )
+        XCTAssertEqual(
+            (0...5).map(CloudKitSharingService.foregroundPollFailureRetryDelaySeconds),
             [2, 4, 8, 16, 30, 30]
         )
         XCTAssertTrue(CloudKitSharingService.foregroundPollNeedsDownload(
@@ -943,13 +947,18 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(FamilySyncReason.launch.usesLightweightRemoteCheck)
         XCTAssertTrue(FamilySyncReason.foregroundTimerPoll.usesLightweightRemoteCheck)
         XCTAssertFalse(FamilySyncReason.localMutation.usesLightweightRemoteCheck)
-        XCTAssertFalse(FamilySyncReason.remoteNotification.usesLightweightRemoteCheck)
+        XCTAssertTrue(FamilySyncReason.remoteNotification.usesLightweightRemoteCheck)
         XCTAssertTrue(FamilySyncReason.manual.requiresExplicitAccountCheck)
         XCTAssertFalse(FamilySyncReason.launch.requiresExplicitAccountCheck)
         XCTAssertFalse(FamilySyncReason.foregroundTimerPoll.requiresExplicitAccountCheck)
         XCTAssertTrue(FamilySyncReason.launch.ensuresPushSubscription)
         XCTAssertTrue(FamilySyncReason.manual.ensuresPushSubscription)
         XCTAssertFalse(FamilySyncReason.foregroundTimerPoll.ensuresPushSubscription)
+        XCTAssertTrue(FamilyShareAcceptancePhase.preparing.isInProgress)
+        XCTAssertTrue(FamilyShareAcceptancePhase.accepting.isInProgress)
+        XCTAssertTrue(FamilyShareAcceptancePhase.downloading.isInProgress)
+        XCTAssertTrue(FamilyShareAcceptancePhase.completed.isTerminal)
+        XCTAssertTrue(FamilyShareAcceptancePhase.failed.isTerminal)
     }
 
     @MainActor
@@ -8677,6 +8686,36 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertNil(generalNote.profileID)
         XCTAssertNil(generalNote.sourceKey)
         XCTAssertEqual(generalNote.body, "Please check the packed bag.")
+        let noteEditDate = Date(timeIntervalSince1970: 1_425)
+        XCTAssertTrue(HouseholdAttentionService.updateHandoffNote(
+            id: generalNote.id,
+            householdID: household.id,
+            body: "  Please check the packed diaper bag.  ",
+            context: context,
+            now: noteEditDate,
+            defaults: defaults
+        ))
+        XCTAssertEqual(generalNote.body, "Please check the packed diaper bag.")
+        XCTAssertEqual(generalNote.updatedAt, noteEditDate)
+
+        defaults.set(secondCaregiverID, forKey: CaregiverIdentityService.stableCaregiverIdentifierKey)
+        XCTAssertFalse(HouseholdAttentionService.updateHandoffNote(
+            id: generalNote.id,
+            householdID: household.id,
+            body: "Another caregiver must not overwrite this.",
+            context: context,
+            defaults: defaults
+        ))
+        XCTAssertEqual(generalNote.body, "Please check the packed diaper bag.")
+        defaults.set(currentCaregiverID, forKey: CaregiverIdentityService.stableCaregiverIdentifierKey)
+
+        XCTAssertFalse(HouseholdAttentionService.updateHandoffNote(
+            id: generalNote.id,
+            householdID: household.id,
+            body: "   ",
+            context: context,
+            defaults: defaults
+        ))
         XCTAssertNil(HouseholdAttentionService.addHandoffNote(
             householdID: household.id,
             profileID: nil,
@@ -8864,7 +8903,7 @@ final class SleepPredictionEngineTests: XCTestCase {
             authorCaregiverIdentifier: otherCaregiverID,
             authorCaregiverName: "Caregiver Two",
             createdAt: now.addingTimeInterval(-300),
-            updatedAt: now.addingTimeInterval(-300)
+            updatedAt: now.addingTimeInterval(-40)
         )
         let oldestNote = CaregiverHandoffNote(
             householdID: household.id,
@@ -8995,17 +9034,25 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertFalse(unscopedItem.isFamilyShared)
 
         let handoff = try XCTUnwrap(summary.handoff)
-        XCTAssertEqual(handoff.activityCount, 5)
-        XCTAssertEqual(handoff.newNoteCount, 1)
+        XCTAssertEqual(handoff.activityCount, 6)
+        XCTAssertEqual(handoff.newNoteCount, 2)
         XCTAssertEqual(handoff.recentActivities.count, 4)
         XCTAssertTrue(handoff.recentActivities.contains { $0.text.hasPrefix("Caregiver Three saw") })
         XCTAssertFalse(handoff.recentActivities.contains { $0.text.contains("Old Third Name") })
         XCTAssertEqual(
             handoff.recentNotes.map(\.body),
-            ["I will make the call.", "The clinic asked us to call tomorrow.", "Older shared note."]
+            ["I will make the call.", "Older shared note.", "The clinic asked us to call tomorrow."]
         )
         XCTAssertEqual(handoff.notes.count, 5)
         XCTAssertFalse(handoff.notes.contains { $0.body == "Must not enter the shared handoff." })
+        XCTAssertEqual(
+            handoff.notes.first { $0.id == currentCaregiverNote.id }?.authorCaregiverIdentifier,
+            currentCaregiverID
+        )
+        XCTAssertEqual(
+            handoff.notes.first { $0.id == currentCaregiverNote.id }?.updatedAt,
+            currentCaregiverNote.updatedAt
+        )
         XCTAssertEqual(
             handoff.notes.first { $0.id == note.id }?.sourceRoute,
             .appointment(appointmentID, profileID: sharedProfile.id)
@@ -9017,7 +9064,7 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertNil(handoff.notes.first { $0.id == missingSourceNote.id }?.sourceRoute)
         XCTAssertEqual(handoff.needsAcknowledgementItemID, sharedItem.id)
         XCTAssertEqual(handoff.nextUpItemID, sharedItem.id)
-        XCTAssertEqual(handoff.latestObservedActivityAt, now.addingTimeInterval(-50))
+        XCTAssertEqual(handoff.latestObservedActivityAt, now.addingTimeInterval(-40))
     }
 
     func testHouseholdAttentionSnoozeIsPersonalToItsDefaultsStore() throws {

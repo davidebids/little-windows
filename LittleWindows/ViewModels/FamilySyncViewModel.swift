@@ -65,11 +65,13 @@ final class FamilySyncViewModel: ObservableObject {
     private let statusService = SyncStatusService()
     private let sharingService = CloudKitSharingService.shared
 
-    func refresh(force: Bool = false) async {
+    func refresh(force: Bool = false, includeMembership: Bool = true) async {
         await statusService.refreshStatus(force: force)
         availability = statusService.availability
         state = sharingService.currentState(privateSyncAvailable: statusService.isICloudAvailable)
-        if state.role == .owner, state.syncMode == .sharedFamilySync {
+        if includeMembership,
+           state.role == .owner,
+           state.syncMode == .sharedFamilySync {
             await sharingService.refreshShareMembership()
             state = sharingService.currentState(
                 privateSyncAvailable: statusService.isICloudAvailable
@@ -123,7 +125,9 @@ final class FamilySyncViewModel: ObservableObject {
         defer { activeOperation = nil }
         do {
             presentedShare = try await sharingService.existingShare()
-            await refresh()
+            state = sharingService.currentState(
+                privateSyncAvailable: statusService.isICloudAvailable
+            )
         } catch {
             state.lastErrorMessage = error.localizedDescription
         }
@@ -142,7 +146,7 @@ final class FamilySyncViewModel: ObservableObject {
         }
         do {
             let changed = try await sharingService.syncNow(context: context, reason: .manual)
-            await refresh()
+            await refresh(includeMembership: false)
             syncStatusMessage = changed
                 ? "Shared family data is up to date."
                 : "No new family sync changes."

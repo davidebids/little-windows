@@ -1690,7 +1690,9 @@ final class NotificationManager: NSObject, ObservableObject {
     ) async {
         guard Self.familySyncActivityNotificationsEnabled(for: notification.category) else { return }
         let status = await getAuthorizationStatus()
-        authorizationStatus = status
+        if authorizationStatus != status {
+            authorizationStatus = status
+        }
         guard status == .authorized || status == .provisional || status == .ephemeral else {
             return
         }
@@ -1715,7 +1717,9 @@ final class NotificationManager: NSObject, ObservableObject {
         reason: FamilyShareInactiveReason
     ) async {
         let status = await getAuthorizationStatus()
-        authorizationStatus = status
+        if authorizationStatus != status {
+            authorizationStatus = status
+        }
         guard status == .authorized || status == .provisional || status == .ephemeral else {
             return
         }
