@@ -4,6 +4,11 @@ Little Windows is a local-first SwiftUI home organizer and optional care tracker
 
 The app is built around dense daily care workflows: quick logging, active timers, customizable Today actions, sleep planning, routines, reports, guides, appointments, Food & Home lists, and private or shared iCloud-backed data modes.
 
+## Support And Privacy
+
+- [Little Windows Support](SUPPORT.md)
+- [Little Windows Privacy Policy](PRIVACY.md)
+
 ## Run
 
 1. Open `LittleWindows.xcodeproj` in Xcode 15 or newer.

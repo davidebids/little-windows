@@ -295,6 +295,7 @@ struct SettingsView: View {
                 Text(dataMutationScope.dataSectionExplanation)
             }
 
+            SettingsSupportAndPrivacySection()
             SettingsBuildInfoFooter()
         }
         .scrollContentBackground(.hidden)
@@ -1409,6 +1410,206 @@ private struct MonthlyAgeGuideSettingsView: View {
         .background(AppTheme.background)
         .navigationTitle("Monthly Guides")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsSupportAndPrivacySection: View {
+    var body: some View {
+        Section("Help & Legal") {
+            NavigationLink {
+                BundledLegalDocumentView(document: .support)
+            } label: {
+                Label("Support", systemImage: "questionmark.circle.fill")
+            }
+            NavigationLink {
+                BundledLegalDocumentView(document: .privacyPolicy)
+            } label: {
+                Label("Privacy Policy", systemImage: "hand.raised.fill")
+            }
+        }
+    }
+}
+
+private enum BundledLegalDocument {
+    case support
+    case privacyPolicy
+
+    var resourceName: String {
+        switch self {
+        case .support: "SUPPORT"
+        case .privacyPolicy: "PRIVACY"
+        }
+    }
+
+    var navigationTitle: String {
+        switch self {
+        case .support: "Support"
+        case .privacyPolicy: "Privacy Policy"
+        }
+    }
+}
+
+private struct BundledLegalDocumentView: View {
+    let document: BundledLegalDocument
+    private let blocks: [LegalMarkdownBlock]?
+
+    init(document: BundledLegalDocument) {
+        self.document = document
+        blocks = LegalMarkdownParser.load(resourceName: document.resourceName)
+    }
+
+    var body: some View {
+        Group {
+            if let blocks {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(blocks) { block in
+                            LegalMarkdownBlockView(block: block)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                }
+            } else {
+                ContentUnavailableView(
+                    "Document Unavailable",
+                    systemImage: "doc.text.magnifyingglass",
+                    description: Text("This document could not be loaded from the app.")
+                )
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .navigationTitle(document.navigationTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .tint(AppTheme.accent)
+    }
+}
+
+private struct LegalMarkdownBlock: Identifiable {
+    enum Kind {
+        case heading(level: Int)
+        case paragraph
+        case bullet
+    }
+
+    let id = UUID()
+    let kind: Kind
+    let text: String
+}
+
+private enum LegalMarkdownParser {
+    static func load(resourceName: String, bundle: Bundle = .main) -> [LegalMarkdownBlock]? {
+        guard let url = bundle.url(forResource: resourceName, withExtension: "md"),
+              let markdown = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+        return parse(markdown)
+    }
+
+    static func parse(_ markdown: String) -> [LegalMarkdownBlock] {
+        var blocks = [LegalMarkdownBlock]()
+        var paragraphLines = [String]()
+
+        func appendParagraph() {
+            guard !paragraphLines.isEmpty else { return }
+            blocks.append(LegalMarkdownBlock(
+                kind: .paragraph,
+                text: paragraphLines.joined(separator: " ")
+            ))
+            paragraphLines.removeAll(keepingCapacity: true)
+        }
+
+        for line in markdown.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                appendParagraph()
+            } else if trimmed.hasPrefix("### ") {
+                appendParagraph()
+                blocks.append(LegalMarkdownBlock(
+                    kind: .heading(level: 3),
+                    text: String(trimmed.dropFirst(4))
+                ))
+            } else if trimmed.hasPrefix("## ") {
+                appendParagraph()
+                blocks.append(LegalMarkdownBlock(
+                    kind: .heading(level: 2),
+                    text: String(trimmed.dropFirst(3))
+                ))
+            } else if trimmed.hasPrefix("# ") {
+                appendParagraph()
+                blocks.append(LegalMarkdownBlock(
+                    kind: .heading(level: 1),
+                    text: String(trimmed.dropFirst(2))
+                ))
+            } else if trimmed.hasPrefix("- ") {
+                appendParagraph()
+                blocks.append(LegalMarkdownBlock(
+                    kind: .bullet,
+                    text: String(trimmed.dropFirst(2))
+                ))
+            } else if trimmed != "---" {
+                paragraphLines.append(trimmed)
+            }
+        }
+
+        appendParagraph()
+        return blocks
+    }
+}
+
+private struct LegalMarkdownBlockView: View {
+    let block: LegalMarkdownBlock
+
+    var body: some View {
+        switch block.kind {
+        case .heading(let level):
+            Text(inlineMarkdown(block.text))
+                .font(headingFont(level: level))
+                .foregroundStyle(.primary)
+                .padding(.top, level == 1 ? 0 : 8)
+                .accessibilityAddTraits(.isHeader)
+        case .paragraph:
+            Text(inlineMarkdown(block.text))
+                .font(.body)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        case .bullet:
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("•")
+                    .foregroundStyle(.secondary)
+                Text(inlineMarkdown(block.text))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.body)
+            .foregroundStyle(.primary)
+            .textSelection(.enabled)
+        }
+    }
+
+    private func headingFont(level: Int) -> Font {
+        switch level {
+        case 1: .title2.bold()
+        case 2: .title3.bold()
+        default: .headline
+        }
+    }
+
+    private func inlineMarkdown(_ value: String) -> AttributedString {
+        let localLinksRemoved = value
+            .replacingOccurrences(
+                of: "[Little Windows Privacy Policy](PRIVACY.md)",
+                with: "Little Windows Privacy Policy"
+            )
+            .replacingOccurrences(
+                of: "[Little Windows Support](SUPPORT.md)",
+                with: "Little Windows Support"
+            )
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return (try? AttributedString(markdown: localLinksRemoved, options: options))
+            ?? AttributedString(localLinksRemoved)
     }
 }
 

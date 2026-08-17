@@ -180,6 +180,8 @@
 		E10000000000000000000004 /* Views/Health/AdultHealthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */; };
 		E10000000000000000000005 /* MedicationScheduleEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000005 /* MedicationScheduleEngineTests.swift */; };
 		E80000000000000000000001 /* NightLightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* NightLightWidget.swift */; };
+		F90000000000000000000001 /* SUPPORT.md in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000011 /* SUPPORT.md */; };
+		F90000000000000000000002 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000012 /* PRIVACY.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -435,6 +437,8 @@
 		F20000000000000000000005 /* Models/TripItineraryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/TripItineraryModels.swift; sourceTree = "<group>"; };
 		F20000000000000000000006 /* Services/TripItineraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/TripItineraryService.swift; sourceTree = "<group>"; };
 		F20000000000000000000007 /* Views/Trips/TripItineraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Trips/TripItineraryViews.swift; sourceTree = "<group>"; };
+		F90000000000000000000011 /* SUPPORT.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SUPPORT.md; sourceTree = "<group>"; };
+		F90000000000000000000012 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -530,6 +534,8 @@
 		D00000000000000000000005 = {
 			isa = PBXGroup;
 			children = (
+				F90000000000000000000011 /* SUPPORT.md */,
+				F90000000000000000000012 /* PRIVACY.md */,
 				D00000000000000000000006 /* LittleWindows */,
 				D00000000000000000000027 /* LittleWindowsWidgets */,
 				A60000000000000000000001 /* LittleWindowsWatch */,
@@ -971,6 +977,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F90000000000000000000001 /* SUPPORT.md in Resources */,
+				F90000000000000000000002 /* PRIVACY.md in Resources */,
 				B0000000000000000000001D /* Assets.xcassets in Resources */,
 				B0000000000000000000005C /* Resources/GrowthCharts in Resources */,
 				B00000000000000000000074 /* Resources/AgeGuides in Resources */,
