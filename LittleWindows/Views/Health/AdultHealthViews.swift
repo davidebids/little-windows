@@ -195,17 +195,22 @@ private actor AdultHealthTrendWorker {
     }
 }
 
-private struct AdultHealthTrendSection: View {
-    @Environment(\.modelContext) private var modelContext
+private struct AdultHealthTrendRequest: Equatable {
     let profileID: UUID
     let metric: AdultHealthMetric
-    @State private var points: [AdultHealthChartPoint] = []
-    @State private var isLoading = true
+    let eventsRevision: Date?
+}
 
-    init(profileID: UUID, metric: AdultHealthMetric) {
-        self.profileID = profileID
-        self.metric = metric
-    }
+private struct AdultHealthTrendSnapshot {
+    let profileID: UUID
+    let metric: AdultHealthMetric
+    let points: [AdultHealthChartPoint]
+}
+
+private struct AdultHealthTrendSection: View {
+    let metric: AdultHealthMetric
+    let points: [AdultHealthChartPoint]
+    let isLoading: Bool
 
     var body: some View {
         let visiblePoints = points
@@ -239,14 +244,6 @@ private struct AdultHealthTrendSection: View {
                 .accessibilityIdentifier("adult-health.trend-loaded.\(metric.rawValue)")
             }
         }
-        .task(id: metric) {
-            isLoading = true
-            let worker = AdultHealthTrendWorker(modelContainer: modelContext.container)
-            let loadedPoints = await worker.points(profileID: profileID, metric: metric)
-            guard !Task.isCancelled else { return }
-            points = loadedPoints
-            isLoading = false
-        }
     }
 }
 
@@ -258,6 +255,9 @@ struct AdultHealthOverviewView: View {
     @State private var selectedMetric: AdultHealthMetric = .bloodPressure
     @State private var eventTypeToLog: EventType?
     @State private var latestValues: [AdultHealthLatestValue] = []
+    // Keep the result above the List row so iPad row recycling cannot restart
+    // the fetch and repeatedly restore the loading placeholder during layout.
+    @State private var trendSnapshot: AdultHealthTrendSnapshot?
 
     init(profile: CareProfile) {
         self.profile = profile
@@ -335,6 +335,9 @@ struct AdultHealthOverviewView: View {
                 return await worker.latestValues(profileID: profileID)
             }.value
         }
+        .task(id: trendRequest) {
+            await loadSelectedTrend(for: trendRequest)
+        }
     }
 
     private var healthEventTypes: Set<EventType> {
@@ -367,11 +370,49 @@ struct AdultHealthOverviewView: View {
                 ForEach(AdultHealthMetric.allCases) { Text($0.displayName).tag($0) }
             }
             .accessibilityIdentifier("adult-health.metric-picker")
-            AdultHealthTrendSection(profileID: profile.id, metric: selectedMetric)
-                .id(selectedMetric)
+            AdultHealthTrendSection(
+                metric: selectedMetric,
+                points: visibleTrendPoints,
+                isLoading: trendSnapshot?.profileID != profile.id ||
+                    trendSnapshot?.metric != selectedMetric
+            )
         } header: {
             AppSectionHeader(title: "Trends", subtitle: "Up to 365 recent entries")
         }
+    }
+
+    private var trendRequest: AdultHealthTrendRequest {
+        AdultHealthTrendRequest(
+            profileID: profile.id,
+            metric: selectedMetric,
+            eventsRevision: events.lazy.map(\.updatedAt).max()
+        )
+    }
+
+    private var visibleTrendPoints: [AdultHealthChartPoint] {
+        guard trendSnapshot?.profileID == profile.id,
+              trendSnapshot?.metric == selectedMetric else {
+            return []
+        }
+        return trendSnapshot?.points ?? []
+    }
+
+    private func loadSelectedTrend(for request: AdultHealthTrendRequest) async {
+        let worker = AdultHealthTrendWorker(modelContainer: modelContext.container)
+        let points = await worker.points(
+            profileID: request.profileID,
+            metric: request.metric
+        )
+        guard !Task.isCancelled,
+              profile.id == request.profileID,
+              selectedMetric == request.metric else {
+            return
+        }
+        trendSnapshot = AdultHealthTrendSnapshot(
+            profileID: request.profileID,
+            metric: request.metric,
+            points: points
+        )
     }
 
     @ViewBuilder
