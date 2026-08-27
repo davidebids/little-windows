@@ -237,6 +237,78 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertLessThan(typingDuration, 2.5, "Instructions typing took \(typingDuration)s")
     }
 
+    func testMedicationListOpensMedicationDetailWithoutBlocking() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-smoke",
+            additionalEnvironment: ["LITTLE_WINDOWS_MARKETING_CAPTURE": "1"]
+        )
+        launch(startURL: "littlewindows://medications")
+
+        XCTAssertTrue(app.navigationBars["Medications"].waitForExistence(timeout: 8))
+        let medication = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Vitamin D")
+        ).firstMatch
+        XCTAssertTrue(medication.waitForExistence(timeout: 4))
+
+        let navigationStartedAt = ContinuousClock.now
+        medication.tap()
+        XCTAssertTrue(app.navigationBars["Vitamin D"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            navigationStartedAt.duration(to: .now),
+            .seconds(4),
+            "Opening a medication from Medication List should not block the app."
+        )
+        XCTAssertTrue(app.staticTexts["Schedule"].exists)
+    }
+
+    func testProductionScaleMedicationHistoryLoadsWithoutBlockingDetail() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000103/today")
+        XCTAssertTrue(app.buttons["Sample Adult settings"].waitForExistence(timeout: 12))
+        launch(startURL: "littlewindows://medications")
+
+        XCTAssertTrue(app.navigationBars["Medications"].waitForExistence(timeout: 8))
+        let medication = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Sample Medication")
+        ).firstMatch
+        XCTAssertTrue(medication.waitForExistence(timeout: 4))
+
+        let navigationStartedAt = ContinuousClock.now
+        medication.tap()
+        XCTAssertTrue(app.navigationBars["Sample Medication"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            navigationStartedAt.duration(to: .now),
+            .seconds(4),
+            "Six thousand dose records must not block medication-detail navigation."
+        )
+
+        let historyStartedAt = ContinuousClock.now
+        let loadedHistory = app.descendants(matching: .any)["medication-detail.history-loaded"]
+        for _ in 0..<8 where !loadedHistory.exists {
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(loadedHistory.waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            historyStartedAt.duration(to: .now),
+            .seconds(10),
+            "Bounded medication history should load and become scrollable promptly."
+        )
+
+        let scrollStartedAt = ContinuousClock.now
+        app.swipeDown(velocity: .fast)
+        XCTAssertLessThan(
+            scrollStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Loaded medication history must not make the detail screen unresponsive."
+        )
+    }
+
     func testHouseholdOnlySetupAndCareDeepLinkPrompt() {
         continueAfterFailure = false
 
@@ -862,7 +934,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(summary.waitForExistence(timeout: 3))
         let healthLogStartedAt = ContinuousClock.now
         summary.tap()
-        XCTAssertTrue(app.navigationBars["Health Log"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.navigationBars["Reports"].waitForExistence(timeout: 4))
         XCTAssertTrue(
             app.descendants(matching: .any)["adult-health.overview"].exists
         )
@@ -870,6 +942,30 @@ final class UserVisibleFlowUITests: XCTestCase {
             healthLogStartedAt.duration(to: .now),
             .seconds(4),
             "Adult Care must fetch bounded overview data instead of materializing the full history."
+        )
+
+        let reportPeriodPicker = app.segmentedControls["adult-report.period-picker"]
+        XCTAssertTrue(reportPeriodPicker.waitForExistence(timeout: 3))
+        XCTAssertTrue(reportPeriodPicker.buttons["Week"].exists)
+        XCTAssertTrue(reportPeriodPicker.buttons["Month"].exists)
+        XCTAssertTrue(reportPeriodPicker.buttons["Year"].exists)
+
+        let annualSummaryStartedAt = ContinuousClock.now
+        reportPeriodPicker.buttons["Year"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["adult-report.medication-count"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["adult-report.pain-count"].exists
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["adult-report.blood-pressure-count"].exists
+        )
+        XCTAssertLessThan(
+            annualSummaryStartedAt.duration(to: .now),
+            .seconds(5),
+            "The annual medication, pain, and blood-pressure summary must load without blocking Reports."
         )
 
         let initialScrollStartedAt = ContinuousClock.now
@@ -880,13 +976,19 @@ final class UserVisibleFlowUITests: XCTestCase {
             "Adult Care should accept scrolling as soon as the health log opens."
         )
 
-        // Return to the top, then approach Trends in small steps. List laziness
-        // intentionally removes offscreen picker cells from the accessibility
-        // tree, so querying the control before it is near the viewport would
-        // test XCTest's snapshot behavior instead of app responsiveness.
+        // Return to the top, then explicitly load a secondary trend. Reports
+        // keeps this work collapsed until requested so medication, pain, and
+        // blood-pressure summaries do not perform a duplicate query at launch.
         for _ in 0..<3 {
             app.swipeDown(velocity: .fast)
         }
+        let additionalTrends = app.descendants(matching: .any)[
+            "adult-report.additional-trends-toggle"
+        ]
+        XCTAssertTrue(additionalTrends.waitForExistence(timeout: 3))
+        XCTAssertTrue(additionalTrends.isHittable)
+        additionalTrends.tap()
+
         let metricPicker = app.descendants(matching: .any)["adult-health.metric-picker"]
         for _ in 0..<8 where !(metricPicker.exists && metricPicker.isHittable) {
             app.swipeUp(velocity: .slow)
@@ -913,8 +1015,22 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertLessThan(
             postMetricScrollStartedAt.duration(to: .now),
             .seconds(3.5),
-            "Rendering a 365-point Adult Care trend must not block scrolling."
+            "Rendering a daily annual Adult Care trend must not block scrolling."
         )
+
+        let bloodPressureSection = app.descendants(matching: .any)[
+            "adult-report.blood-pressure"
+        ]
+        for _ in 0..<14 where !bloodPressureSection.exists {
+            let reportScrollStartedAt = ContinuousClock.now
+            app.swipeUp(velocity: .fast)
+            XCTAssertLessThan(
+                reportScrollStartedAt.duration(to: .now),
+                .seconds(3.5),
+                "Daily annual chart points must keep each Reports scroll responsive."
+            )
+        }
+        XCTAssertTrue(bloodPressureSection.waitForExistence(timeout: 4))
     }
 
     func testProductionScaleTodoEditorFocusesTitlePromptly() {

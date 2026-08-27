@@ -46,7 +46,7 @@ struct InsightsDashboardView: View {
     @ViewBuilder
     var body: some View {
         if let profile, profile.profileType == .adult {
-            AdultHealthOverviewView(profile: profile)
+            AdultHealthOverviewView(profile: profile, showsReportSummary: true)
         } else {
             standardDashboard
         }

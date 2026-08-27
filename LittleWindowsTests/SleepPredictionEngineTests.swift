@@ -4912,6 +4912,24 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testInsightsViewModelOffersAnnualReportRange() {
+        let calendar = Calendar.current
+        let now = calendar.date(
+            from: DateComponents(year: 2026, month: 8, day: 26, hour: 12)
+        )!
+        let viewModel = InsightsViewModel(now: now, calendar: calendar)
+
+        viewModel.selectedRange = .oneYear
+        let range = viewModel.selectedPeriodRange
+
+        XCTAssertEqual(InsightsDateRange.oneYear.title, "Year")
+        XCTAssertEqual(
+            calendar.dateComponents([.day], from: range.lowerBound, to: range.upperBound).day,
+            364
+        )
+    }
+
+    @MainActor
     func testInsightsViewModelCalculatesSleepPressureOnlyForWakeWindows() {
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: Date(timeIntervalSinceReferenceDate: 804_000_000))

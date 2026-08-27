@@ -99,6 +99,11 @@ private struct AdultHealthChartPoint: Identifiable, Sendable {
     }
 }
 
+private struct AdultHealthChartDayKey: Hashable {
+    let date: Date
+    let series: String
+}
+
 private struct AdultHealthLatestValue: Identifiable, Sendable {
     var title: String
     var value: String
@@ -159,6 +164,317 @@ private struct AdultHealthLatestValue: Identifiable, Sendable {
     }
 }
 
+private enum AdultHealthReportPeriod: String, CaseIterable, Identifiable, Sendable {
+    case week
+    case month
+    case year
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .week: "Week"
+        case .month: "Month"
+        case .year: "Year"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .week: "Past week"
+        case .month: "Past month"
+        case .year: "Past year"
+        }
+    }
+
+    func range(endingAt date: Date, calendar: Calendar = .current) -> ClosedRange<Date> {
+        let end = calendar.startOfDay(for: date)
+        let start: Date
+        switch self {
+        case .week:
+            start = calendar.date(byAdding: .day, value: -6, to: end) ?? end
+        case .month:
+            let priorMonth = calendar.date(byAdding: .month, value: -1, to: end) ?? end
+            start = calendar.date(byAdding: .day, value: 1, to: priorMonth) ?? priorMonth
+        case .year:
+            let priorYear = calendar.date(byAdding: .year, value: -1, to: end) ?? end
+            start = calendar.date(byAdding: .day, value: 1, to: priorYear) ?? priorYear
+        }
+        return start...end
+    }
+}
+
+private struct AdultMedicationReportRow: Identifiable, Sendable {
+    let id: UUID
+    let name: String
+    let strengthDescription: String?
+    let startedAt: Date
+    let endedAt: Date?
+    let trackedDayCount: Int
+    let takenCount: Int
+    let skippedCount: Int
+    let isCurrent: Bool
+}
+
+private struct AdultPainReportPoint: Identifiable, Sendable {
+    let id: UUID
+    let date: Date
+    let score: Int
+    let location: String?
+}
+
+private struct AdultBloodPressureReportReading: Identifiable, Sendable {
+    let id: UUID
+    let date: Date
+    let systolic: Int
+    let diastolic: Int
+}
+
+private struct AdultPainChartPoint: Identifiable, Sendable {
+    let date: Date
+    let score: Double
+
+    var id: Date { date }
+}
+
+private struct AdultBloodPressureChartPoint: Identifiable, Sendable {
+    let date: Date
+    let value: Double
+    let series: String
+
+    var id: String { "\(date.timeIntervalSinceReferenceDate)-\(series)" }
+}
+
+private struct AdultHealthReportSnapshot: Sendable {
+    let periodStart: Date
+    let periodEnd: Date
+    let medications: [AdultMedicationReportRow]
+    let painPoints: [AdultPainReportPoint]
+    let painChartPoints: [AdultPainChartPoint]
+    let bloodPressureReadings: [AdultBloodPressureReportReading]
+    let bloodPressureChartPoints: [AdultBloodPressureChartPoint]
+
+    var takenDoseCount: Int {
+        medications.reduce(0) { $0 + $1.takenCount }
+    }
+
+    var averagePain: Double? {
+        guard !painPoints.isEmpty else { return nil }
+        return Double(painPoints.reduce(0) { $0 + $1.score }) / Double(painPoints.count)
+    }
+
+    var averageSystolic: Int? {
+        guard !bloodPressureReadings.isEmpty else { return nil }
+        return Int(
+            (Double(bloodPressureReadings.reduce(0) { $0 + $1.systolic })
+                / Double(bloodPressureReadings.count)).rounded()
+        )
+    }
+
+    var averageDiastolic: Int? {
+        guard !bloodPressureReadings.isEmpty else { return nil }
+        return Int(
+            (Double(bloodPressureReadings.reduce(0) { $0 + $1.diastolic })
+                / Double(bloodPressureReadings.count)).rounded()
+        )
+    }
+}
+
+@ModelActor
+private actor AdultHealthReportWorker {
+    func snapshot(
+        profileID: UUID,
+        periodStart: Date,
+        periodEnd: Date,
+        now: Date
+    ) -> AdultHealthReportSnapshot {
+        let calendar = Calendar.current
+        let periodEndExclusive = calendar.startOfNextDay(for: periodEnd)
+
+        var medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\Medication.createdAt)]
+        )
+        medicationDescriptor.fetchLimit = 500
+        let medications = (try? modelContext.fetch(medicationDescriptor)) ?? []
+
+        var regimenDescriptor = FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationRegimen.startDate)]
+        )
+        regimenDescriptor.fetchLimit = 1_000
+        let regimens = (try? modelContext.fetch(regimenDescriptor)) ?? []
+
+        var doseDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate {
+                $0.profileID == profileID &&
+                    $0.loggedAt >= periodStart &&
+                    $0.loggedAt < periodEndExclusive
+            },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        )
+        // A full year at the editor's maximum 24 scheduled doses per day is
+        // below this boundary, while malformed imports cannot grow unbounded.
+        doseDescriptor.fetchLimit = 10_000
+        let doses = (try? modelContext.fetch(doseDescriptor)) ?? []
+
+        let regimensByMedicationID = Dictionary(grouping: regimens, by: \.medicationID)
+        let dosesByMedicationID = Dictionary(grouping: doses, by: \.medicationID)
+        let medicationRows = medications.compactMap { medication -> AdultMedicationReportRow? in
+            let medicationRegimens = regimensByMedicationID[medication.id] ?? []
+            let medicationDoses = dosesByMedicationID[medication.id] ?? []
+            let overlapsPeriod = medicationRegimens.contains { regimen in
+                regimen.startDate < periodEndExclusive &&
+                    (regimen.endDate == nil || regimen.endDate! >= periodStart)
+            }
+            let wasCreatedInPeriod = medication.createdAt >= periodStart &&
+                medication.createdAt < periodEndExclusive
+            guard !medication.isArchived || overlapsPeriod || wasCreatedInPeriod || !medicationDoses.isEmpty else {
+                return nil
+            }
+
+            let startedAt = medicationRegimens.map(\.startDate).min() ?? medication.createdAt
+            let isCurrent = !medication.isArchived && medicationRegimens.contains { regimen in
+                regimen.isActive && (regimen.endDate == nil || regimen.endDate! >= now)
+            }
+            let explicitEnd = medicationRegimens.compactMap(\.endDate).max()
+            let endedAt: Date? = if isCurrent {
+                nil
+            } else if let explicitEnd {
+                explicitEnd
+            } else if medication.isArchived {
+                medication.updatedAt
+            } else {
+                nil
+            }
+            let durationEnd = min(endedAt ?? now, now)
+            let trackedDayCount = max(
+                1,
+                (calendar.dateComponents(
+                    [.day],
+                    from: calendar.startOfDay(for: startedAt),
+                    to: calendar.startOfDay(for: max(durationEnd, startedAt))
+                ).day ?? 0) + 1
+            )
+            let strengthDescription = medication.strength.map {
+                "\($0.formatted(.number.precision(.fractionLength(0...2)))) \(medication.strengthUnit)"
+            }
+            return AdultMedicationReportRow(
+                id: medication.id,
+                name: medication.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "Medication"
+                    : medication.name,
+                strengthDescription: strengthDescription,
+                startedAt: startedAt,
+                endedAt: endedAt,
+                trackedDayCount: trackedDayCount,
+                takenCount: medicationDoses.count {
+                    MedicationDoseStatus(rawValue: $0.statusRawValue) == .taken
+                },
+                skippedCount: medicationDoses.count {
+                    MedicationDoseStatus(rawValue: $0.statusRawValue) == .skipped
+                },
+                isCurrent: isCurrent
+            )
+        }.sorted {
+            if $0.isCurrent != $1.isCurrent { return $0.isCurrent }
+            if $0.startedAt != $1.startedAt { return $0.startedAt > $1.startedAt }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+
+        let painRawValue = EventType.pain.rawValue
+        var painDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate {
+                $0.profileID == profileID &&
+                    $0.typeRawValue == painRawValue &&
+                    $0.startDate >= periodStart &&
+                    $0.startDate < periodEndExclusive
+            },
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+        )
+        painDescriptor.fetchLimit = 2_000
+        let painEvents: [CareEvent] = (try? modelContext.fetch(painDescriptor)) ?? []
+        let painPoints: [AdultPainReportPoint] = painEvents.compactMap { event in
+            let details = event.healthObservationDetails
+            guard let score = details.painScore else { return nil }
+            return AdultPainReportPoint(
+                id: event.id,
+                date: event.startDate,
+                score: score,
+                location: details.painLocation?.nilIfBlank
+            )
+        }
+        let painChartPoints = Dictionary(
+            grouping: painPoints,
+            by: { calendar.startOfDay(for: $0.date) }
+        ).map { date, points in
+            AdultPainChartPoint(
+                date: date,
+                score: Double(points.reduce(0) { $0 + $1.score }) / Double(points.count)
+            )
+        }.sorted { $0.date < $1.date }
+
+        let bloodPressureRawValue = EventType.bloodPressure.rawValue
+        var bloodPressureDescriptor = FetchDescriptor<CareEvent>(
+            predicate: #Predicate {
+                $0.profileID == profileID &&
+                    $0.typeRawValue == bloodPressureRawValue &&
+                    $0.startDate >= periodStart &&
+                    $0.startDate < periodEndExclusive
+            },
+            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+        )
+        bloodPressureDescriptor.fetchLimit = 2_000
+        let bloodPressureEvents: [CareEvent] =
+            (try? modelContext.fetch(bloodPressureDescriptor)) ?? []
+        let bloodPressureReadings: [AdultBloodPressureReportReading] =
+            bloodPressureEvents.compactMap { event in
+                let details = event.healthObservationDetails
+                guard let systolic = details.systolicBloodPressure,
+                      let diastolic = details.diastolicBloodPressure else { return nil }
+                return AdultBloodPressureReportReading(
+                    id: event.id,
+                    date: event.startDate,
+                    systolic: systolic,
+                    diastolic: diastolic
+                )
+            }
+        let bloodPressureChartPoints = Dictionary(
+            grouping: bloodPressureReadings,
+            by: { calendar.startOfDay(for: $0.date) }
+        ).flatMap { date, readings in
+            let count = Double(readings.count)
+            let averageSystolic = Double(readings.reduce(0) { $0 + $1.systolic }) / count
+            let averageDiastolic = Double(readings.reduce(0) { $0 + $1.diastolic }) / count
+            return [
+                AdultBloodPressureChartPoint(
+                    date: date,
+                    value: averageSystolic,
+                    series: "Systolic"
+                ),
+                AdultBloodPressureChartPoint(
+                    date: date,
+                    value: averageDiastolic,
+                    series: "Diastolic"
+                )
+            ]
+        }.sorted {
+            if $0.date != $1.date { return $0.date < $1.date }
+            return $0.series < $1.series
+        }
+
+        return AdultHealthReportSnapshot(
+            periodStart: periodStart,
+            periodEnd: periodEnd,
+            medications: medicationRows,
+            painPoints: painPoints,
+            painChartPoints: painChartPoints,
+            bloodPressureReadings: bloodPressureReadings,
+            bloodPressureChartPoints: bloodPressureChartPoints
+        )
+    }
+}
+
 @ModelActor
 private actor AdultHealthSummaryWorker {
     func latestValues(profileID: UUID) -> [AdultHealthLatestValue] {
@@ -179,32 +495,83 @@ private actor AdultHealthSummaryWorker {
 
 @ModelActor
 private actor AdultHealthTrendWorker {
-    func points(profileID: UUID, metric: AdultHealthMetric) -> [AdultHealthChartPoint] {
+    func points(
+        profileID: UUID,
+        metric: AdultHealthMetric,
+        periodStart: Date?,
+        periodEndExclusive: Date?
+    ) -> [AdultHealthChartPoint] {
         let typeRawValue = metric.eventType.rawValue
-        var descriptor = FetchDescriptor<CareEvent>(
-            predicate: #Predicate {
-                $0.profileID == profileID && $0.typeRawValue == typeRawValue
-            },
-            sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
-        )
-        descriptor.fetchLimit = 365
-        let events = (try? modelContext.fetch(descriptor)) ?? []
-        return events
+        let events: [CareEvent]
+        if let periodStart, let periodEndExclusive {
+            var descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate {
+                    $0.profileID == profileID &&
+                        $0.typeRawValue == typeRawValue &&
+                        $0.startDate >= periodStart &&
+                        $0.startDate < periodEndExclusive
+                },
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+            )
+            descriptor.fetchLimit = 2_000
+            events = (try? modelContext.fetch(descriptor)) ?? []
+        } else {
+            var descriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate {
+                    $0.profileID == profileID && $0.typeRawValue == typeRawValue
+                },
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+            )
+            descriptor.fetchLimit = 365
+            events = (try? modelContext.fetch(descriptor)) ?? []
+        }
+        let points = events
             .flatMap { AdultHealthChartPoint.make(from: $0, metric: metric) }
-            .sorted { $0.date < $1.date }
+        guard periodStart != nil else {
+            return points.sorted { $0.date < $1.date }
+        }
+
+        let calendar = Calendar.current
+        return Dictionary(grouping: points) { point in
+            AdultHealthChartDayKey(
+                date: calendar.startOfDay(for: point.date),
+                series: point.series
+            )
+        }.compactMap { key, dailyPoints in
+            guard let representative = dailyPoints.first else { return nil }
+            return AdultHealthChartPoint(
+                eventID: representative.eventID,
+                date: key.date,
+                value: dailyPoints.reduce(0) { $0 + $1.value } / Double(dailyPoints.count),
+                series: key.series
+            )
+        }.sorted {
+            if $0.date != $1.date { return $0.date < $1.date }
+            return $0.series < $1.series
+        }
     }
 }
 
 private struct AdultHealthTrendRequest: Equatable {
+    let isEnabled: Bool
     let profileID: UUID
     let metric: AdultHealthMetric
     let eventsRevision: Date?
+    let periodStart: Date?
+    let periodEndExclusive: Date?
 }
 
 private struct AdultHealthTrendSnapshot {
-    let profileID: UUID
-    let metric: AdultHealthMetric
+    let request: AdultHealthTrendRequest
     let points: [AdultHealthChartPoint]
+}
+
+private struct AdultHealthReportRequest: Equatable {
+    let profileID: UUID
+    let period: AdultHealthReportPeriod
+    let periodStart: Date
+    let periodEnd: Date
+    let eventsRevision: Date?
 }
 
 private struct AdultHealthTrendSection: View {
@@ -252,15 +619,21 @@ struct AdultHealthOverviewView: View {
     @Query private var events: [CareEvent]
     @Query private var symptomEvents: [CareEvent]
     let profile: CareProfile
+    let showsReportSummary: Bool
     @State private var selectedMetric: AdultHealthMetric = .bloodPressure
+    @State private var selectedReportPeriod: AdultHealthReportPeriod = .week
     @State private var eventTypeToLog: EventType?
     @State private var latestValues: [AdultHealthLatestValue] = []
+    @State private var reportSnapshot: AdultHealthReportSnapshot?
+    @State private var reportAnchorDate = Date()
+    @State private var showsAdditionalTrends = false
     // Keep the result above the List row so iPad row recycling cannot restart
     // the fetch and repeatedly restore the loading placeholder during layout.
     @State private var trendSnapshot: AdultHealthTrendSnapshot?
 
-    init(profile: CareProfile) {
+    init(profile: CareProfile, showsReportSummary: Bool = false) {
         self.profile = profile
+        self.showsReportSummary = showsReportSummary
         let profileID = profile.id
         let healthTypes = [
             EventType.symptom.rawValue,
@@ -297,10 +670,22 @@ struct AdultHealthOverviewView: View {
 
     var body: some View {
         List {
-            latestSection
-            trendSection
-            symptomsSection
-            recentSection
+            if showsReportSummary {
+                reportPeriodSection
+                reportOverviewSection
+                additionalTrendsSection
+            } else {
+                latestSection
+                trendSection
+            }
+            if showsReportSummary {
+                medicationReportSection
+                painReportSection
+                bloodPressureReportSection
+            } else {
+                symptomsSection
+                recentSection
+            }
             Section {
                 Label("Charts show the values entered and do not interpret whether a result is normal or concerning.", systemImage: "info.circle")
                     .font(.caption)
@@ -308,7 +693,7 @@ struct AdultHealthOverviewView: View {
             }
         }
         .accessibilityIdentifier("adult-health.overview")
-        .navigationTitle("Health Log")
+        .navigationTitle(showsReportSummary ? "Reports" : "Health Log")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Log", systemImage: "plus") {
@@ -328,6 +713,7 @@ struct AdultHealthOverviewView: View {
             }
         }
         .task(id: events.first?.updatedAt) {
+            guard !showsReportSummary else { return }
             let container = modelContext.container
             let profileID = profile.id
             latestValues = await Task.detached(priority: .userInitiated) {
@@ -338,11 +724,276 @@ struct AdultHealthOverviewView: View {
         .task(id: trendRequest) {
             await loadSelectedTrend(for: trendRequest)
         }
+        .task(id: reportRequest) {
+            await loadReport(for: reportRequest)
+        }
     }
 
     private var healthEventTypes: Set<EventType> {
         [.symptom, .bloodPressure, .heartRate, .oxygenSaturation,
          .respiratoryRate, .glucose, .temperature, .growth, .pain]
+    }
+
+    private var reportPeriodRange: ClosedRange<Date> {
+        selectedReportPeriod.range(endingAt: reportAnchorDate)
+    }
+
+    private var reportRequest: AdultHealthReportRequest {
+        AdultHealthReportRequest(
+            profileID: profile.id,
+            period: selectedReportPeriod,
+            periodStart: reportPeriodRange.lowerBound,
+            periodEnd: reportPeriodRange.upperBound,
+            eventsRevision: events.lazy.map(\.updatedAt).max()
+        )
+    }
+
+    private var reportPeriodSection: some View {
+        Section {
+            Picker("Summary period", selection: $selectedReportPeriod) {
+                ForEach(AdultHealthReportPeriod.allCases) { period in
+                    Text(period.title).tag(period)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("adult-report.period-picker")
+
+            Text(
+                "\(reportPeriodRange.lowerBound.formatted(date: .abbreviated, time: .omitted)) – \(reportPeriodRange.upperBound.formatted(date: .abbreviated, time: .omitted))"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+        } header: {
+            AppSectionHeader(
+                title: "Health summary",
+                subtitle: selectedReportPeriod.accessibilityLabel
+            )
+        }
+    }
+
+    private var reportOverviewSection: some View {
+        Section("At a glance") {
+            if let reportSnapshot {
+                LabeledContent("Medications tracked", value: "\(reportSnapshot.medications.count)")
+                    .accessibilityIdentifier("adult-report.medication-count")
+                LabeledContent("Doses taken", value: "\(reportSnapshot.takenDoseCount)")
+                LabeledContent("Pain entries", value: "\(reportSnapshot.painPoints.count)")
+                    .accessibilityIdentifier("adult-report.pain-count")
+                LabeledContent(
+                    "Blood pressure readings",
+                    value: "\(reportSnapshot.bloodPressureReadings.count)"
+                )
+                .accessibilityIdentifier("adult-report.blood-pressure-count")
+            } else {
+                ProgressView("Loading summary…")
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+
+    private var medicationReportSection: some View {
+        Section {
+            if let reportSnapshot {
+                if reportSnapshot.medications.isEmpty {
+                    ContentUnavailableView(
+                        "No medications in this period",
+                        systemImage: "pills",
+                        description: Text("Current medications and medications with activity in this period will appear here.")
+                    )
+                } else {
+                    ForEach(reportSnapshot.medications) { medication in
+                        medicationReportRow(medication)
+                    }
+                }
+            }
+        } header: {
+            AppSectionHeader(
+                title: "Medication history",
+                subtitle: "Schedule duration and recorded doses"
+            )
+        }
+        .accessibilityIdentifier("adult-report.medications")
+    }
+
+    private func medicationReportRow(_ medication: AdultMedicationReportRow) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "pills.fill")
+                .foregroundStyle(.red)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(medication.name)
+                        .font(.subheadline.weight(.semibold))
+                    if medication.isCurrent {
+                        Text("Current")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.green.opacity(0.12), in: Capsule())
+                    }
+                }
+                if let strengthDescription = medication.strengthDescription {
+                    Text(strengthDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(
+                    "Tracked for \(medication.trackedDayCount) \(medication.trackedDayCount == 1 ? "day" : "days") · started \(medication.startedAt.formatted(date: .abbreviated, time: .omitted))"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                if let endedAt = medication.endedAt, !medication.isCurrent {
+                    Text("Ended \(endedAt.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("\(medication.takenCount) taken · \(medication.skippedCount) skipped in this period")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var painReportSection: some View {
+        Section {
+            if let reportSnapshot {
+                if reportSnapshot.painPoints.isEmpty {
+                    ContentUnavailableView(
+                        "No pain entries",
+                        systemImage: "bolt.heart",
+                        description: Text("Pain scores logged in this period will appear here.")
+                    )
+                } else {
+                    LabeledContent(
+                        "Average score",
+                        value: reportSnapshot.averagePain.map {
+                            "\($0.formatted(.number.precision(.fractionLength(1))))/10"
+                        } ?? "–"
+                    )
+                    if let latest = reportSnapshot.painPoints.first {
+                        LabeledContent("Latest", value: "\(latest.score)/10")
+                    }
+                    Chart(reportSnapshot.painChartPoints) { point in
+                        LineMark(
+                            x: .value("Date", point.date),
+                            y: .value("Pain score", point.score)
+                        )
+                        .foregroundStyle(.orange)
+                        .interpolationMethod(.linear)
+                        if reportSnapshot.painChartPoints.count <= 120 {
+                            PointMark(
+                                x: .value("Date", point.date),
+                                y: .value("Pain score", point.score)
+                            )
+                            .foregroundStyle(.orange)
+                        }
+                    }
+                    .chartYScale(domain: 0...10)
+                    .frame(height: 190)
+
+                    ForEach(reportSnapshot.painPoints.prefix(8)) { point in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Pain \(point.score)/10")
+                                    .font(.subheadline.weight(.semibold))
+                                if let location = point.location {
+                                    Text(location)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Text(point.date.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        } header: {
+            AppSectionHeader(title: "Pain over time", subtitle: "Recorded scores from 0–10")
+        }
+        .accessibilityIdentifier("adult-report.pain")
+    }
+
+    private var bloodPressureReportSection: some View {
+        Section {
+            if let reportSnapshot {
+                if reportSnapshot.bloodPressureReadings.isEmpty {
+                    ContentUnavailableView(
+                        "No blood pressure readings",
+                        systemImage: "heart.text.square",
+                        description: Text("Blood pressure logged in this period will appear here.")
+                    )
+                } else {
+                    if let systolic = reportSnapshot.averageSystolic,
+                       let diastolic = reportSnapshot.averageDiastolic {
+                        LabeledContent("Period average", value: "\(systolic)/\(diastolic) mmHg")
+                    }
+                    if let latest = reportSnapshot.bloodPressureReadings.first {
+                        LabeledContent(
+                            "Latest",
+                            value: "\(latest.systolic)/\(latest.diastolic) mmHg"
+                        )
+                    }
+
+                    Chart(reportSnapshot.bloodPressureChartPoints) { point in
+                        LineMark(
+                            x: .value("Date", point.date),
+                            y: .value("mmHg", point.value)
+                        )
+                        .foregroundStyle(by: .value("Reading", point.series))
+                        if reportSnapshot.bloodPressureReadings.count <= 120 {
+                            PointMark(
+                                x: .value("Date", point.date),
+                                y: .value("mmHg", point.value)
+                            )
+                            .foregroundStyle(by: .value("Reading", point.series))
+                        }
+                    }
+                    .chartForegroundStyleScale([
+                        "Systolic": Color.red,
+                        "Diastolic": Color.blue
+                    ])
+                    .chartLegend(position: .bottom)
+                    .frame(height: 210)
+
+                    ForEach(reportSnapshot.bloodPressureReadings.prefix(12)) { reading in
+                        HStack {
+                            Text("\(reading.systolic)/\(reading.diastolic) mmHg")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(reading.date.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        } header: {
+            AppSectionHeader(
+                title: "Blood pressure history",
+                subtitle: "Systolic and diastolic readings"
+            )
+        }
+        .accessibilityIdentifier("adult-report.blood-pressure")
+    }
+
+    private func loadReport(for request: AdultHealthReportRequest) async {
+        guard showsReportSummary else { return }
+        reportSnapshot = nil
+        let worker = AdultHealthReportWorker(modelContainer: modelContext.container)
+        let snapshot = await worker.snapshot(
+            profileID: request.profileID,
+            periodStart: request.periodStart,
+            periodEnd: request.periodEnd,
+            now: reportAnchorDate
+        )
+        guard !Task.isCancelled, reportRequest == request else { return }
+        reportSnapshot = snapshot
     }
 
     @ViewBuilder
@@ -373,44 +1024,96 @@ struct AdultHealthOverviewView: View {
             AdultHealthTrendSection(
                 metric: selectedMetric,
                 points: visibleTrendPoints,
-                isLoading: trendSnapshot?.profileID != profile.id ||
-                    trendSnapshot?.metric != selectedMetric
+                isLoading: trendSnapshot?.request != trendRequest
             )
         } header: {
-            AppSectionHeader(title: "Trends", subtitle: "Up to 365 recent entries")
+            AppSectionHeader(
+                title: "Trends",
+                subtitle: showsReportSummary
+                    ? selectedReportPeriod.accessibilityLabel
+                    : "Up to 365 recent entries"
+            )
+        }
+    }
+
+    private var additionalTrendsSection: some View {
+        Section {
+            Button {
+                showsAdditionalTrends.toggle()
+            } label: {
+                HStack {
+                    Label(
+                        "Heart rate, oxygen, glucose, and more",
+                        systemImage: "chart.xyaxis.line"
+                    )
+                    Spacer()
+                    Image(systemName: showsAdditionalTrends ? "chevron.up" : "chevron.down")
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("adult-report.additional-trends-toggle")
+            .accessibilityValue(showsAdditionalTrends ? "Expanded" : "Collapsed")
+
+            if showsAdditionalTrends {
+                Picker("Metric", selection: $selectedMetric) {
+                    ForEach(AdultHealthMetric.allCases) { Text($0.displayName).tag($0) }
+                }
+                .accessibilityIdentifier("adult-health.metric-picker")
+                AdultHealthTrendSection(
+                    metric: selectedMetric,
+                    points: visibleTrendPoints,
+                    isLoading: trendSnapshot?.request != trendRequest
+                )
+            }
+        } header: {
+            AppSectionHeader(
+                title: "Other health trends",
+                subtitle: "Open to choose a metric"
+            )
         }
     }
 
     private var trendRequest: AdultHealthTrendRequest {
-        AdultHealthTrendRequest(
+        let period = reportPeriodRange
+        return AdultHealthTrendRequest(
+            isEnabled: !showsReportSummary || showsAdditionalTrends,
             profileID: profile.id,
             metric: selectedMetric,
-            eventsRevision: events.lazy.map(\.updatedAt).max()
+            eventsRevision: events.lazy.map(\.updatedAt).max(),
+            periodStart: showsReportSummary ? period.lowerBound : nil,
+            periodEndExclusive: showsReportSummary
+                ? Calendar.current.startOfNextDay(for: period.upperBound)
+                : nil
         )
     }
 
     private var visibleTrendPoints: [AdultHealthChartPoint] {
-        guard trendSnapshot?.profileID == profile.id,
-              trendSnapshot?.metric == selectedMetric else {
+        guard trendSnapshot?.request == trendRequest else {
             return []
         }
         return trendSnapshot?.points ?? []
     }
 
     private func loadSelectedTrend(for request: AdultHealthTrendRequest) async {
+        guard request.isEnabled else {
+            trendSnapshot = nil
+            return
+        }
         let worker = AdultHealthTrendWorker(modelContainer: modelContext.container)
         let points = await worker.points(
             profileID: request.profileID,
-            metric: request.metric
+            metric: request.metric,
+            periodStart: request.periodStart,
+            periodEndExclusive: request.periodEndExclusive
         )
         guard !Task.isCancelled,
-              profile.id == request.profileID,
-              selectedMetric == request.metric else {
+              trendRequest == request else {
             return
         }
         trendSnapshot = AdultHealthTrendSnapshot(
-            profileID: request.profileID,
-            metric: request.metric,
+            request: request,
             points: points
         )
     }

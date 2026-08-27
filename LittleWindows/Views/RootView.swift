@@ -2150,6 +2150,72 @@ enum DebugSimulatorSmokeSeedService {
             }
             context.insert(event)
         }
+
+        let medicationID = UUID(uuidString: "00000000-0000-0000-0000-000000000921")!
+        let regimenID = UUID(uuidString: "00000000-0000-0000-0000-000000000922")!
+        let medicationDoseRecordCount = 6_000
+        let medicationDoseIntervalHours = 6
+        let medicationStart = calendar.date(
+            byAdding: .hour,
+            value: -(medicationDoseRecordCount - 1) * medicationDoseIntervalHours,
+            to: now
+        ) ?? now
+        let medication = fetch(Medication.self, id: medicationID, context: context)
+            ?? Medication(
+                id: medicationID,
+                profileID: profile.id,
+                name: "Sample Medication",
+                strength: 10,
+                strengthUnit: "mg",
+                createdAt: medicationStart,
+                updatedAt: now
+            )
+        if medication.modelContext == nil { context.insert(medication) }
+
+        let regimen = fetch(MedicationRegimen.self, id: regimenID, context: context)
+            ?? MedicationRegimen(
+                id: regimenID,
+                profileID: profile.id,
+                medicationID: medication.id,
+                scheduleKind: .daily,
+                startDate: medicationStart,
+                doseAmount: 1,
+                doseUnit: "tablet",
+                doseTimes: [MedicationDoseTime(hour: 8, minute: 0)],
+                createdAt: medicationStart,
+                updatedAt: now
+            )
+        if regimen.modelContext == nil { context.insert(regimen) }
+
+        var doseCountDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.medicationID == medicationID }
+        )
+        doseCountDescriptor.fetchLimit = 1
+        if ((try? context.fetch(doseCountDescriptor)) ?? []).isEmpty {
+            for recordIndex in 0..<medicationDoseRecordCount {
+                let date = calendar.date(
+                    byAdding: .hour,
+                    value: -recordIndex * medicationDoseIntervalHours,
+                    to: now
+                ) ?? now
+                let status: MedicationDoseStatus = recordIndex.isMultiple(of: 10)
+                    ? .skipped
+                    : .taken
+                context.insert(MedicationDoseRecord(
+                    profileID: profile.id,
+                    medicationID: medication.id,
+                    regimenID: regimen.id,
+                    occurrenceKey: "performance-medication-\(recordIndex)",
+                    scheduledAt: date,
+                    status: status,
+                    loggedAt: date,
+                    takenAt: status == .taken ? date : nil,
+                    doseAmount: 1,
+                    doseUnit: "tablet",
+                    updatedAt: date
+                ))
+            }
+        }
     }
 
     @MainActor

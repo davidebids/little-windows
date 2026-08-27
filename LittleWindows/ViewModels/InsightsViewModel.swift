@@ -4,15 +4,17 @@ enum InsightsDateRange: String, CaseIterable, Identifiable {
     case sevenDays
     case fourteenDays
     case thirtyDays
+    case oneYear
     case custom
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .sevenDays: "7 days"
-        case .fourteenDays: "14 days"
-        case .thirtyDays: "30 days"
+        case .sevenDays: "Week"
+        case .fourteenDays: "2 weeks"
+        case .thirtyDays: "Month"
+        case .oneYear: "Year"
         case .custom: "Custom"
         }
     }
@@ -22,6 +24,7 @@ enum InsightsDateRange: String, CaseIterable, Identifiable {
         case .sevenDays: 7
         case .fourteenDays: 14
         case .thirtyDays: 30
+        case .oneYear: 365
         case .custom: nil
         }
     }

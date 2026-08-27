@@ -435,11 +435,88 @@ struct MedicationsView: View {
     }
 }
 
+private struct MedicationDoseHistoryRow: Identifiable, Sendable {
+    let id: UUID
+    let occurrenceKey: String?
+    let statusRawValue: String
+    let loggedAt: Date
+    let takenAt: Date?
+    let scheduledAt: Date?
+
+    var status: MedicationDoseStatus? {
+        MedicationDoseStatus(rawValue: statusRawValue)
+    }
+
+    var displayDate: Date {
+        takenAt ?? scheduledAt ?? loggedAt
+    }
+}
+
+private struct MedicationSupplyHistoryRow: Identifiable, Sendable {
+    let id: UUID
+    let adjustment: Double
+    let resultingSupply: Double?
+    let reasonRawValue: String
+    let notes: String
+    let loggedAt: Date
+
+    var reason: MedicationSupplyReason? {
+        MedicationSupplyReason(rawValue: reasonRawValue)
+    }
+}
+
+private struct MedicationHistorySnapshot: Sendable {
+    let doseRecords: [MedicationDoseHistoryRow]
+    let supplyLogs: [MedicationSupplyHistoryRow]
+}
+
+@ModelActor
+private actor MedicationHistoryWorker {
+    func snapshot(medicationID: UUID) -> MedicationHistorySnapshot {
+        var doseDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.medicationID == medicationID },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        )
+        // Keep the fetch bounded while retaining the prior 30-day adherence
+        // headroom for schedules restored from older or external backups.
+        doseDescriptor.fetchLimit = 750
+        let doseRecords = ((try? modelContext.fetch(doseDescriptor)) ?? []).map {
+            MedicationDoseHistoryRow(
+                id: $0.id,
+                occurrenceKey: $0.occurrenceKey,
+                statusRawValue: $0.statusRawValue,
+                loggedAt: $0.loggedAt,
+                takenAt: $0.takenAt,
+                scheduledAt: $0.scheduledAt
+            )
+        }
+
+        var supplyDescriptor = FetchDescriptor<MedicationSupplyLog>(
+            predicate: #Predicate { $0.medicationID == medicationID },
+            sortBy: [SortDescriptor(\MedicationSupplyLog.loggedAt, order: .reverse)]
+        )
+        supplyDescriptor.fetchLimit = 30
+        let supplyLogs = ((try? modelContext.fetch(supplyDescriptor)) ?? []).map {
+            MedicationSupplyHistoryRow(
+                id: $0.id,
+                adjustment: $0.adjustment,
+                resultingSupply: $0.resultingSupply,
+                reasonRawValue: $0.reasonRawValue,
+                notes: $0.notes,
+                loggedAt: $0.loggedAt
+            )
+        }
+
+        return MedicationHistorySnapshot(
+            doseRecords: doseRecords,
+            supplyLogs: supplyLogs
+        )
+    }
+}
+
 private struct MedicationDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query private var allDoseRecords: [MedicationDoseRecord]
-    @Query private var allSupplyLogs: [MedicationSupplyLog]
     let profile: CareProfile
     let medication: Medication
     let regimens: [MedicationRegimen]
@@ -449,50 +526,22 @@ private struct MedicationDetailView: View {
     @State private var supply = 0.0
     @State private var supplyReason: MedicationSupplyReason = .correction
     @State private var supplyNotes = ""
-    @State private var doseRecordToDelete: MedicationDoseRecord?
+    @State private var records: [MedicationDoseHistoryRow] = []
+    @State private var supplyLogs: [MedicationSupplyHistoryRow] = []
+    @State private var isLoadingHistory = true
+    @State private var historyRevision = 0
+    @State private var doseRecordToDelete: MedicationDoseHistoryRow?
     @State private var showingArchiveConfirmation = false
 
-    init(
-        profile: CareProfile,
-        medication: Medication,
-        regimens: [MedicationRegimen],
-        phases: [MedicationSchedulePhase]
-    ) {
-        self.profile = profile
-        self.medication = medication
-        self.regimens = regimens
-        self.phases = phases
-        let medicationID = medication.id
-        var doseDescriptor = FetchDescriptor<MedicationDoseRecord>(
-            predicate: #Predicate { $0.medicationID == medicationID },
-            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
-        )
-        // The UI shows 30 rows and adherence covers at most 30 days. The editor
-        // caps schedules at 24 doses/day, so 750 retains the whole adherence
-        // window plus headroom without faulting years of history.
-        doseDescriptor.fetchLimit = 750
-        _allDoseRecords = Query(doseDescriptor)
-
-        var supplyDescriptor = FetchDescriptor<MedicationSupplyLog>(
-            predicate: #Predicate { $0.medicationID == medicationID },
-            sortBy: [SortDescriptor(\MedicationSupplyLog.loggedAt, order: .reverse)]
-        )
-        supplyDescriptor.fetchLimit = 30
-        _allSupplyLogs = Query(supplyDescriptor)
-    }
-
     private var activeRegimen: MedicationRegimen? { regimens.first { $0.isActive } }
-
-    private var records: [MedicationDoseRecord] { allDoseRecords }
-
-    private var supplyLogs: [MedicationSupplyLog] { allSupplyLogs }
 
     private var scheduleCalendar: Calendar {
         MedicationScheduleDate.currentCalendar()
     }
 
     private var adherence: MedicationAdherenceSummary? {
-        guard let regimen = activeRegimen,
+        guard !isLoadingHistory,
+              let regimen = activeRegimen,
               regimen.scheduleKind.isScheduled else { return nil }
         let start = scheduleCalendar.date(byAdding: .day, value: -30, to: Date()) ?? Date()
         let occurrences = MedicationScheduleEngine.occurrences(
@@ -502,7 +551,23 @@ private struct MedicationDetailView: View {
             through: Date(),
             calendar: scheduleCalendar
         )
-        return MedicationScheduleEngine.adherence(occurrences: occurrences, records: records)
+        let recordsByKey = Dictionary(
+            records.compactMap { record -> (String, MedicationDoseStatus)? in
+                guard let occurrenceKey = record.occurrenceKey,
+                      let status = record.status else { return nil }
+                return (occurrenceKey, status)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let expected = occurrences.filter { $0.scheduledAt <= Date() }
+        let taken = expected.filter { recordsByKey[$0.occurrenceKey] == .taken }.count
+        let skipped = expected.filter { recordsByKey[$0.occurrenceKey] == .skipped }.count
+        return MedicationAdherenceSummary(
+            scheduledCount: expected.count,
+            takenCount: taken,
+            skippedCount: skipped,
+            missedCount: max(expected.count - taken - skipped, 0)
+        )
     }
 
     var body: some View {
@@ -512,8 +577,14 @@ private struct MedicationDetailView: View {
                 if let strength = medication.strengthDescription {
                     LabeledContent("Strength", value: strength)
                 }
-                LabeledContent("Form", value: medication.form.displayName)
-                LabeledContent("Route", value: medication.route.displayName)
+                LabeledContent(
+                    "Form",
+                    value: MedicationForm(rawValue: medication.formRawValue)?.displayName ?? "Other"
+                )
+                LabeledContent(
+                    "Route",
+                    value: MedicationRoute(rawValue: medication.routeRawValue)?.displayName ?? "Other"
+                )
                 if !medication.reasonForTaking.isEmpty {
                     LabeledContent("For", value: medication.reasonForTaking)
                 }
@@ -534,8 +605,14 @@ private struct MedicationDetailView: View {
                             "Follow-up reminder",
                             value: regimen.followUpRemindersEnabled ? "After 30 minutes" : "Off"
                         )
-                        LabeledContent("When traveling", value: regimen.timeZoneBehavior.displayName)
-                        if regimen.timeZoneBehavior == .fixedTimeZone,
+                        let timeZoneBehavior = MedicationTimeZoneBehavior(
+                            rawValue: regimen.timeZoneBehaviorRawValue
+                        )
+                        LabeledContent(
+                            "When traveling",
+                            value: timeZoneBehavior?.displayName ?? "Not specified"
+                        )
+                        if timeZoneBehavior == .fixedTimeZone,
                            let identifier = regimen.timeZoneIdentifier,
                            let timeZone = TimeZone(identifier: identifier) {
                             LabeledContent(
@@ -569,23 +646,31 @@ private struct MedicationDetailView: View {
                 }
             }
             supplyHistorySection
+            if isLoadingHistory && records.isEmpty && supplyLogs.isEmpty {
+                Section("History") {
+                    ProgressView("Loading medication history…")
+                }
+            }
             if !records.isEmpty {
-                Section("Dose history") {
+                Section {
                     ForEach(records.prefix(30)) { record in
                         HStack {
-                            Label(record.status.displayName, systemImage: record.status == .taken ? "checkmark.circle.fill" : "minus.circle")
+                            Label(
+                                record.status?.displayName ?? "Unknown status",
+                                systemImage: record.status == .taken
+                                    ? "checkmark.circle.fill"
+                                    : "minus.circle"
+                            )
                                 .foregroundStyle(record.status == .taken ? .green : .secondary)
                             Spacer()
-                            Text((record.takenAt ?? record.scheduledAt ?? record.loggedAt).formatted(date: .abbreviated, time: .shortened))
+                            Text(record.displayDate.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Menu("Dose actions", systemImage: "ellipsis.circle") {
                                 Button(record.status == .taken ? "Change to Skipped" : "Change to Taken") {
-                                    MedicationService.updateDoseRecordStatus(
+                                    updateDoseRecord(
                                         record,
-                                        medication: medication,
-                                        status: record.status == .taken ? .skipped : .taken,
-                                        context: modelContext
+                                        status: record.status == .taken ? .skipped : .taken
                                     )
                                 }
                                 Button("Delete Dose", role: .destructive) {
@@ -595,6 +680,9 @@ private struct MedicationDetailView: View {
                             .labelStyle(.iconOnly)
                         }
                     }
+                } header: {
+                    Text("Dose history")
+                        .accessibilityIdentifier("medication-detail.history-loaded")
                 }
             }
             Section {
@@ -643,11 +731,7 @@ private struct MedicationDetailView: View {
                     tint: .red,
                     role: .destructive
                 ) {
-                    MedicationService.deleteDoseRecord(
-                        record,
-                        medication: medication,
-                        context: modelContext
-                    )
+                    deleteDoseRecord(record)
                     doseRecordToDelete = nil
                 }]
             } ?? [],
@@ -676,6 +760,9 @@ private struct MedicationDetailView: View {
                 }
             ]
         )
+        .task(id: historyRevision) {
+            await loadHistory()
+        }
     }
 
     @ViewBuilder
@@ -689,10 +776,10 @@ private struct MedicationDetailView: View {
         }
     }
 
-    private func supplyLogRow(_ log: MedicationSupplyLog) -> some View {
+    private func supplyLogRow(_ log: MedicationSupplyHistoryRow) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(log.reason.displayName)
+                Text(log.reason?.displayName ?? "Supply update")
                     .font(.subheadline.weight(.semibold))
                 Text(log.loggedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
@@ -771,6 +858,56 @@ private struct MedicationDetailView: View {
             context: modelContext
         )
         showingSupplyEditor = false
+        historyRevision += 1
+    }
+
+    private func loadHistory() async {
+        isLoadingHistory = true
+        let requestedMedicationID = medication.id
+        let worker = MedicationHistoryWorker(modelContainer: modelContext.container)
+        let snapshot = await worker.snapshot(medicationID: requestedMedicationID)
+        guard !Task.isCancelled, medication.id == requestedMedicationID else { return }
+        records = snapshot.doseRecords
+        supplyLogs = snapshot.supplyLogs
+        isLoadingHistory = false
+    }
+
+    private func updateDoseRecord(
+        _ row: MedicationDoseHistoryRow,
+        status: MedicationDoseStatus
+    ) {
+        guard let record = doseRecord(id: row.id) else {
+            historyRevision += 1
+            return
+        }
+        MedicationService.updateDoseRecordStatus(
+            record,
+            medication: medication,
+            status: status,
+            context: modelContext
+        )
+        historyRevision += 1
+    }
+
+    private func deleteDoseRecord(_ row: MedicationDoseHistoryRow) {
+        guard let record = doseRecord(id: row.id) else {
+            historyRevision += 1
+            return
+        }
+        MedicationService.deleteDoseRecord(
+            record,
+            medication: medication,
+            context: modelContext
+        )
+        historyRevision += 1
+    }
+
+    private func doseRecord(id: UUID) -> MedicationDoseRecord? {
+        var descriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+        return (try? modelContext.fetch(descriptor))?.first
     }
 
     private func signedSupplyAdjustment(_ value: Double) -> String {
