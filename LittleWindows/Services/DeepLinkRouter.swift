@@ -235,9 +235,9 @@ struct MedicationDoseRouteCommand: Equatable, Hashable, Identifiable {
     var scheduledAt: Date
     var doseAmount: Double
     var doseUnit: String
-    var status: MedicationDoseStatus
+    var status: MedicationDoseStatus?
 
-    var id: String { "\(occurrenceKey)|\(status.rawValue)" }
+    var id: String { "\(occurrenceKey)|\(status?.rawValue ?? "details")" }
 }
 
 enum NightLightCommand: Equatable {
@@ -274,6 +274,7 @@ final class DeepLinkRouter: ObservableObject {
     @Published var pendingPuppyGuideCommand: PuppyGuideRouteCommand?
     @Published var pendingRoutineCommand: RoutineRouteCommand?
     @Published var pendingMedications = false
+    @Published var pendingMedicationDetailID: UUID?
     @Published var pendingMedicationDoseCommand: MedicationDoseRouteCommand?
     @Published var pendingSolidsCommand: FoodRouteCommand?
     @Published var pendingSolidsOrigin: SolidsNavigationOrigin?
@@ -328,6 +329,15 @@ final class DeepLinkRouter: ObservableObject {
     func openMedications(profileID: UUID) {
         lastRequestedURL = nil
         pendingProfileID = profileID
+        pendingMedications = true
+        selectedTab = .milestones
+        recordNavigationRequest(nil)
+    }
+
+    func openMedication(_ medicationID: UUID, profileID: UUID) {
+        lastRequestedURL = nil
+        pendingProfileID = profileID
+        pendingMedicationDetailID = medicationID
         pendingMedications = true
         selectedTab = .milestones
         recordNavigationRequest(nil)
@@ -730,6 +740,7 @@ final class DeepLinkRouter: ObservableObject {
         if pendingPuppyGuideCommand != nil { pendingPuppyGuideCommand = nil }
         if pendingRoutineCommand != nil { pendingRoutineCommand = nil }
         if pendingMedications { pendingMedications = false }
+        if pendingMedicationDetailID != nil { pendingMedicationDetailID = nil }
         if pendingMedicationDoseCommand != nil { pendingMedicationDoseCommand = nil }
         if pendingSolidsCommand != nil { pendingSolidsCommand = nil }
         if pendingSolidsOrigin != nil { pendingSolidsOrigin = nil }

@@ -362,7 +362,7 @@ enum HouseholdAttentionService {
             sourceKey: sourceKey,
             context: context
         ) else { return false }
-        guard isClaimableFollowUp(
+        guard isClaimableAttentionSource(
             sourceKey: sourceKey,
             householdID: householdID,
             profileID: profileID,
@@ -397,6 +397,13 @@ enum HouseholdAttentionService {
                 updatedAt: now
             ))
         }
+        updateRefillAssignmentIfNeeded(
+            sourceKey: sourceKey,
+            caregiverIdentifier: cleanedCaregiverIdentifier.nilIfBlank,
+            caregiverName: cleanedCaregiverName.nilIfBlank,
+            now: now,
+            context: context
+        )
         return PersistenceService.save(context: context)
     }
 
@@ -534,7 +541,7 @@ enum HouseholdAttentionService {
         return PersistenceService.save(context: context)
     }
 
-    private static func deleteInteractions(sourceKey: String, context: ModelContext) {
+    static func deleteInteractions(sourceKey: String, context: ModelContext) {
         let acknowledgements = (try? context.fetch(FetchDescriptor<HouseholdAttentionAcknowledgement>(
             predicate: #Predicate { $0.sourceKey == sourceKey }
         ))) ?? []
@@ -554,24 +561,56 @@ enum HouseholdAttentionService {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    private static func isClaimableFollowUp(
+    private static func isClaimableAttentionSource(
         sourceKey: String,
         householdID: UUID,
         profileID: UUID?,
         context: ModelContext
     ) -> Bool {
-        let prefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
-        guard sourceKey.hasPrefix(prefix),
-              let followUpID = UUID(uuidString: String(sourceKey.dropFirst(prefix.count))) else {
-            return false
+        let followUpPrefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
+        if sourceKey.hasPrefix(followUpPrefix),
+           let followUpID = UUID(uuidString: String(sourceKey.dropFirst(followUpPrefix.count))) {
+            let descriptor = FetchDescriptor<AppointmentFollowUp>(
+                predicate: #Predicate { $0.id == followUpID }
+            )
+            guard let followUp = try? context.fetch(descriptor).first else { return false }
+            return followUp.householdID == householdID
+                && followUp.profileID == profileID
+                && !followUp.isCompleted
         }
-        let descriptor = FetchDescriptor<AppointmentFollowUp>(
-            predicate: #Predicate { $0.id == followUpID }
+        let refillPrefix = "\(HouseholdAttentionSourceKind.medicationRefill.rawValue):"
+        if sourceKey.hasPrefix(refillPrefix),
+           let refillID = UUID(uuidString: String(sourceKey.dropFirst(refillPrefix.count))) {
+            let descriptor = FetchDescriptor<MedicationRefillTask>(
+                predicate: #Predicate { $0.id == refillID }
+            )
+            guard let refill = try? context.fetch(descriptor).first else { return false }
+            return refill.householdID == householdID
+                && refill.profileID == profileID
+                && refill.isOpen
+        }
+        return false
+    }
+
+    private static func updateRefillAssignmentIfNeeded(
+        sourceKey: String,
+        caregiverIdentifier: String?,
+        caregiverName: String?,
+        now: Date,
+        context: ModelContext
+    ) {
+        let prefix = "\(HouseholdAttentionSourceKind.medicationRefill.rawValue):"
+        guard sourceKey.hasPrefix(prefix),
+              let refillID = UUID(uuidString: String(sourceKey.dropFirst(prefix.count))) else {
+            return
+        }
+        let descriptor = FetchDescriptor<MedicationRefillTask>(
+            predicate: #Predicate { $0.id == refillID }
         )
-        guard let followUp = try? context.fetch(descriptor).first else { return false }
-        return followUp.householdID == householdID
-            && followUp.profileID == profileID
-            && !followUp.isCompleted
+        guard let refill = try? context.fetch(descriptor).first else { return }
+        refill.assignedCaregiverIdentifier = caregiverIdentifier
+        refill.assignedCaregiverName = caregiverName
+        refill.updatedAt = now
     }
 
     private static func isShareEligible(
@@ -595,6 +634,21 @@ enum HouseholdAttentionService {
                   followUp.householdID == householdID,
                   let followUpProfileID = followUp.profileID,
                   followUpProfileID == profileID else {
+                return false
+            }
+        }
+        let refillPrefix = "\(HouseholdAttentionSourceKind.medicationRefill.rawValue):"
+        if let sourceKey, sourceKey.hasPrefix(refillPrefix) {
+            guard let refillID = UUID(uuidString: String(sourceKey.dropFirst(refillPrefix.count))) else {
+                return false
+            }
+            let descriptor = FetchDescriptor<MedicationRefillTask>(
+                predicate: #Predicate { $0.id == refillID }
+            )
+            guard let refill = try? context.fetch(descriptor).first,
+                  refill.householdID == householdID,
+                  let refillProfileID = refill.profileID,
+                  refillProfileID == profileID else {
                 return false
             }
         }

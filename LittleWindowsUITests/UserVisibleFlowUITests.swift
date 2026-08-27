@@ -979,12 +979,12 @@ final class UserVisibleFlowUITests: XCTestCase {
         // Return to the top, then explicitly load a secondary trend. Reports
         // keeps this work collapsed until requested so medication, pain, and
         // blood-pressure summaries do not perform a duplicate query at launch.
-        for _ in 0..<3 {
-            app.swipeDown(velocity: .fast)
-        }
         let additionalTrends = app.descendants(matching: .any)[
             "adult-report.additional-trends-toggle"
         ]
+        for _ in 0..<8 where !(additionalTrends.exists && additionalTrends.isHittable) {
+            app.swipeDown(velocity: .fast)
+        }
         XCTAssertTrue(additionalTrends.waitForExistence(timeout: 3))
         XCTAssertTrue(additionalTrends.isHittable)
         additionalTrends.tap()

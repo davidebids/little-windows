@@ -50,10 +50,25 @@ struct MedicationAdherenceSummary: Equatable {
     var takenCount: Int
     var skippedCount: Int
     var missedCount: Int
+    var heldCount: Int = 0
+    var refusedCount: Int = 0
+    var unableCount: Int = 0
+    var recordedMissedCount: Int = 0
+    var lateCount: Int = 0
+    var differentAmountCount: Int = 0
+    var takenExceptionCount: Int = 0
 
     var completionRate: Double? {
         guard scheduledCount > 0 else { return nil }
         return Double(takenCount) / Double(scheduledCount)
+    }
+
+    var recordedNotTakenCount: Int {
+        skippedCount + heldCount + refusedCount + unableCount + recordedMissedCount
+    }
+
+    var exceptionCount: Int {
+        recordedNotTakenCount + missedCount + takenExceptionCount
     }
 }
 
@@ -74,6 +89,13 @@ enum MedicationSnoozeStateStore {
     ) -> Bool {
         let entries = activeEntries(now: now, defaults: defaults)
         return entries[occurrenceKey].map { $0 > now.timeIntervalSince1970 } ?? false
+    }
+
+    static func activeOccurrenceKeys(
+        now: Date = Date(),
+        defaults: UserDefaults = .standard
+    ) -> Set<String> {
+        Set(activeEntries(now: now, defaults: defaults).keys)
     }
 
     static func markSnoozed(
@@ -164,9 +186,10 @@ enum MedicationScheduleEngine {
         phases: [MedicationSchedulePhase],
         from rangeStart: Date,
         through rangeEnd: Date,
-        calendar sourceCalendar: Calendar = MedicationScheduleDate.currentCalendar()
+        calendar sourceCalendar: Calendar = MedicationScheduleDate.currentCalendar(),
+        includeInactive: Bool = false
     ) -> [MedicationOccurrence] {
-        guard regimen.isActive,
+        guard (includeInactive || regimen.isActive),
               regimen.scheduleKind.isScheduled,
               rangeStart <= rangeEnd else { return [] }
 
@@ -256,6 +279,168 @@ enum MedicationScheduleEngine {
         return result.sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
+    static func versionedOccurrences(
+        medicationID: UUID,
+        regimens: [MedicationRegimen],
+        phases: [MedicationSchedulePhase],
+        revisions: [MedicationPlanRevision],
+        from rangeStart: Date,
+        through rangeEnd: Date,
+        calendar: Calendar = MedicationScheduleDate.currentCalendar()
+    ) -> [MedicationOccurrence] {
+        guard rangeStart <= rangeEnd else { return [] }
+        let medicationRegimens = regimens.filter { $0.medicationID == medicationID }
+        let regimensByID = Dictionary(
+            uniqueKeysWithValues: medicationRegimens.map { ($0.id, $0) }
+        )
+        func effectiveBoundary(for revision: MedicationPlanRevision) -> Date {
+            guard calendar.isDate(revision.effectiveFrom, inSameDayAs: revision.changedAt) else {
+                return revision.effectiveFrom
+            }
+            return max(revision.effectiveFrom, revision.changedAt)
+        }
+        let allLifecycleRevisionEntries = revisions
+            .filter {
+                $0.medicationID == medicationID && $0.changeKind != .confirmedCurrent
+            }
+            .map { revision in
+                (revision: revision, boundary: effectiveBoundary(for: revision))
+            }
+            .sorted {
+                if $0.boundary != $1.boundary {
+                    return $0.boundary < $1.boundary
+                }
+                if $0.revision.changedAt != $1.revision.changedAt {
+                    return $0.revision.changedAt < $1.revision.changedAt
+                }
+                return $0.revision.id.uuidString < $1.revision.id.uuidString
+            }
+        let allLifecycleRevisions = allLifecycleRevisionEntries.map(\.revision)
+        let effectiveBoundariesByRevisionID = Dictionary(
+            uniqueKeysWithValues: allLifecycleRevisionEntries.map { ($0.revision.id, $0.boundary) }
+        )
+
+        // Family Sync can preserve two concurrent plan-edit audit branches while
+        // conflict resolution leaves only one regimen active. Reconstruct the
+        // branch leading to that authoritative regimen so the abandoned branch
+        // remains auditable without creating duplicate expected doses.
+        var terminalRegimenIDs = Set(
+            medicationRegimens.filter(\.isActive).map(\.id)
+        )
+        if terminalRegimenIDs.isEmpty,
+           let stoppedRevision = allLifecycleRevisions.last(where: { $0.changeKind == .stopped }),
+           let stoppedRegimenID = stoppedRevision.priorRegimenID ?? stoppedRevision.regimenID {
+            terminalRegimenIDs.insert(stoppedRegimenID)
+        }
+        if terminalRegimenIDs.isEmpty,
+           let latestRegimenID = allLifecycleRevisions.reversed().compactMap(\.regimenID).first {
+            terminalRegimenIDs.insert(latestRegimenID)
+        }
+
+        var branchRegimenIDs = terminalRegimenIDs
+        var selectedUpdateRevisionIDs = Set<UUID>()
+        var pendingRegimenIDs = Array(terminalRegimenIDs)
+        let updateRevisionsByRegimenID = Dictionary(
+            grouping: allLifecycleRevisions.filter { revision in
+                revision.changeKind == .updated && revision.regimenID != nil
+            },
+            by: { $0.regimenID! }
+        )
+        while let regimenID = pendingRegimenIDs.popLast() {
+            guard let revision = updateRevisionsByRegimenID[regimenID]?.last else { continue }
+            selectedUpdateRevisionIDs.insert(revision.id)
+            if let priorRegimenID = revision.priorRegimenID,
+               branchRegimenIDs.insert(priorRegimenID).inserted {
+                pendingRegimenIDs.append(priorRegimenID)
+            }
+        }
+
+        let lifecycleRevisions = allLifecycleRevisions.filter { revision in
+            switch revision.changeKind {
+            case .updated:
+                selectedUpdateRevisionIDs.contains(revision.id)
+            case .added, .restored:
+                revision.regimenID.map(branchRegimenIDs.contains) ?? false
+            case .stopped:
+                (revision.priorRegimenID ?? revision.regimenID)
+                    .map(branchRegimenIDs.contains) ?? false
+            case .confirmedCurrent:
+                false
+            }
+        }
+
+        struct Interval {
+            var regimenID: UUID
+            var start: Date
+            var end: Date
+        }
+        var activeStarts = [UUID: Date]()
+        var intervals = [Interval]()
+
+        func close(_ regimenID: UUID, at end: Date) {
+            guard let start = activeStarts.removeValue(forKey: regimenID), start < end else { return }
+            intervals.append(Interval(regimenID: regimenID, start: start, end: end))
+        }
+
+        for revision in lifecycleRevisions {
+            guard let boundary = effectiveBoundariesByRevisionID[revision.id] else { continue }
+            switch revision.changeKind {
+            case .added, .restored:
+                if let regimenID = revision.regimenID, regimensByID[regimenID] != nil {
+                    if activeStarts[regimenID] != nil { close(regimenID, at: boundary) }
+                    activeStarts[regimenID] = boundary
+                }
+            case .updated:
+                if let priorRegimenID = revision.priorRegimenID {
+                    close(priorRegimenID, at: boundary)
+                }
+                if let regimenID = revision.regimenID, regimensByID[regimenID] != nil {
+                    activeStarts[regimenID] = boundary
+                }
+            case .stopped:
+                if let regimenID = revision.priorRegimenID ?? revision.regimenID {
+                    close(regimenID, at: boundary)
+                }
+            case .confirmedCurrent:
+                break
+            }
+        }
+        activeStarts.forEach { regimenID, start in
+            guard start <= rangeEnd else { return }
+            intervals.append(Interval(
+                regimenID: regimenID,
+                start: start,
+                end: rangeEnd.addingTimeInterval(0.001)
+            ))
+        }
+
+        if allLifecycleRevisions.isEmpty {
+            intervals = medicationRegimens.compactMap { regimen in
+                let end = regimen.isActive
+                    ? rangeEnd.addingTimeInterval(0.001)
+                    : regimen.updatedAt
+                guard regimen.startDate < end else { return nil }
+                return Interval(regimenID: regimen.id, start: regimen.startDate, end: end)
+            }
+        }
+
+        let phasesByRegimenID = Dictionary(grouping: phases, by: \.regimenID)
+        return intervals.flatMap { interval -> [MedicationOccurrence] in
+            guard let regimen = regimensByID[interval.regimenID] else { return [] }
+            let start = max(rangeStart, interval.start)
+            let endExclusive = min(rangeEnd.addingTimeInterval(0.001), interval.end)
+            guard start < endExclusive else { return [] }
+            return occurrences(
+                regimen: regimen,
+                phases: phasesByRegimenID[regimen.id] ?? [],
+                from: start,
+                through: endExclusive.addingTimeInterval(-0.001),
+                calendar: calendar,
+                includeInactive: true
+            )
+        }.sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
     static func adherence(
         occurrences: [MedicationOccurrence],
         records: [MedicationDoseRecord],
@@ -270,13 +455,23 @@ enum MedicationScheduleEngine {
                 first.loggedAt >= second.loggedAt ? first : second
             }
         )
-        let taken = expected.filter { recordsByKey[$0.occurrenceKey]?.status == .taken }.count
-        let skipped = expected.filter { recordsByKey[$0.occurrenceKey]?.status == .skipped }.count
+        let expectedRecords = expected.compactMap { recordsByKey[$0.occurrenceKey] }
+        let taken = expectedRecords.count { $0.status == .taken }
+        let skipped = expectedRecords.count { $0.status == .skipped }
         return MedicationAdherenceSummary(
             scheduledCount: expected.count,
             takenCount: taken,
             skippedCount: skipped,
-            missedCount: max(expected.count - taken - skipped, 0)
+            missedCount: max(expected.count - expectedRecords.count, 0),
+            heldCount: expectedRecords.count { $0.status == .held },
+            refusedCount: expectedRecords.count { $0.status == .refused },
+            unableCount: expectedRecords.count { $0.status == .unable },
+            recordedMissedCount: expectedRecords.count { $0.status == .missed },
+            lateCount: expectedRecords.count { $0.status == .taken && $0.timing == .late },
+            differentAmountCount: expectedRecords.count { $0.hasDifferentActualAmount },
+            takenExceptionCount: expectedRecords.count {
+                $0.status == .taken && ($0.timing == .late || $0.hasDifferentActualAmount)
+            }
         )
     }
 
@@ -294,23 +489,27 @@ enum MedicationScheduleEngine {
         at date: Date = Date(),
         calendar: Calendar = MedicationScheduleDate.currentCalendar()
     ) -> MedicationAsNeededDecision {
-        let taken = records
-            .filter {
-                $0.regimenID == regimen.id
-                    && $0.status == .taken
-                    && ($0.takenAt ?? $0.loggedAt) <= date
+        var latestTakenAt: Date?
+        var todayCount = 0
+        for record in records {
+            let actualTime = record.takenAt ?? record.loggedAt
+            guard record.regimenID == regimen.id,
+                  record.status == .taken,
+                  actualTime <= date else { continue }
+            if latestTakenAt.map({ actualTime > $0 }) ?? true {
+                latestTakenAt = actualTime
             }
-            .sorted { ($0.takenAt ?? $0.loggedAt) > ($1.takenAt ?? $1.loggedAt) }
+            if calendar.isDate(actualTime, inSameDayAs: date) {
+                todayCount += 1
+            }
+        }
         if let maximum = regimen.maximumDosesPerDay {
-            let todayCount = taken.filter {
-                calendar.isDate($0.takenAt ?? $0.loggedAt, inSameDayAs: date)
-            }.count
             if todayCount >= maximum {
                 return .dailyLimitReached(maximum)
             }
         }
         if let minimumHours = regimen.minimumHoursBetweenDoses,
-           let last = taken.first.map({ $0.takenAt ?? $0.loggedAt }) {
+           let last = latestTakenAt {
             let next = last.addingTimeInterval(minimumHours * 60 * 60)
             if date < next { return .waitUntil(next) }
         }
@@ -417,6 +616,11 @@ enum MedicationService {
         pharmacy: String,
         currentSupply: Double?,
         refillThreshold: Double?,
+        refillLeadDays: Int = 7,
+        prescriptionNumber: String = "",
+        fillQuantity: Double? = nil,
+        refillsRemaining: Int? = nil,
+        prescriptionExpirationDate: Date? = nil,
         context: ModelContext
     ) -> Medication {
         let normalizedCurrentSupply = currentSupply.map { max($0, 0) }
@@ -432,7 +636,12 @@ enum MedicationService {
             prescriber: prescriber,
             pharmacy: pharmacy,
             currentSupply: normalizedCurrentSupply,
-            refillThreshold: refillThreshold.map { max($0, 0) }
+            refillThreshold: refillThreshold.map { max($0, 0) },
+            refillLeadDays: max(refillLeadDays, 0),
+            prescriptionNumber: prescriptionNumber.trimmingCharacters(in: .whitespacesAndNewlines),
+            fillQuantity: fillQuantity.map { max($0, 0) },
+            refillsRemaining: refillsRemaining.map { max($0, 0) },
+            prescriptionExpirationDate: prescriptionExpirationDate
         )
         context.insert(medication)
         if let normalizedCurrentSupply {
@@ -467,9 +676,16 @@ enum MedicationService {
         followUpRemindersEnabled: Bool,
         timeZoneBehavior: MedicationTimeZoneBehavior,
         phases: [(durationDays: Int?, doseAmount: Double)],
+        changeContext: MedicationPlanChangeContext? = nil,
         context: ModelContext
     ) -> MedicationRegimen? {
         guard let profileID = medication.profileID else { return nil }
+        let now = Date()
+        var planContext = changeContext ?? MedicationPlanChangeContext(
+            effectiveFrom: startDate,
+            source: .caregiver
+        )
+        planContext.effectiveFrom = normalizedPlanEffectiveDate(planContext.effectiveFrom)
         let scheduleCalendar = MedicationScheduleDate.currentCalendar()
         let anchorTimeZoneIdentifier = scheduleCalendar.timeZone.identifier
         let regimen = MedicationRegimen(
@@ -503,8 +719,9 @@ enum MedicationService {
             timeZoneIdentifier: anchorTimeZoneIdentifier
         )
         context.insert(regimen)
+        var createdPhases = [MedicationSchedulePhase]()
         for (index, phase) in phases.enumerated() {
-            context.insert(MedicationSchedulePhase(
+            let createdPhase = MedicationSchedulePhase(
                 profileID: profileID,
                 regimenID: regimen.id,
                 sequence: index,
@@ -512,15 +729,40 @@ enum MedicationService {
                 doseAmount: phase.doseAmount,
                 doseUnit: doseUnit,
                 doseTimes: doseTimes
-            ))
+            )
+            context.insert(createdPhase)
+            createdPhases.append(createdPhase)
         }
-        medication.updatedAt = Date()
+        medication.isConfirmedCurrent = planContext.confirmsCurrent
+        if planContext.confirmsCurrent { medication.lastReviewedAt = now }
+        medication.updatedAt = now
+        let afterSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: regimen,
+            phases: createdPhases
+        )
+        context.insert(MedicationPlanRevision(
+            profileID: profileID,
+            medicationID: medication.id,
+            regimenID: regimen.id,
+            changeKind: .added,
+            source: planContext.source,
+            effectiveFrom: planContext.effectiveFrom,
+            changedAt: now,
+            appointmentID: planContext.appointmentID,
+            reconciliationID: planContext.reconciliationID,
+            notes: planContext.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            afterSnapshot: afterSnapshot,
+            createdAt: now,
+            updatedAt: now
+        ))
         if PersistenceService.save(context: context) {
             SystemIntegrationReconciler.requestReconciliation()
         }
         return regimen
     }
 
+    @discardableResult
     static func updateMedication(
         medication: Medication,
         regimen: MedicationRegimen,
@@ -535,6 +777,11 @@ enum MedicationService {
         pharmacy: String,
         currentSupply: Double?,
         refillThreshold: Double?,
+        refillLeadDays: Int = 7,
+        prescriptionNumber: String = "",
+        fillQuantity: Double? = nil,
+        refillsRemaining: Int? = nil,
+        prescriptionExpirationDate: Date? = nil,
         scheduleKind: MedicationScheduleKind,
         startDate: Date,
         endDate: Date?,
@@ -551,12 +798,29 @@ enum MedicationService {
         followUpRemindersEnabled: Bool,
         timeZoneBehavior: MedicationTimeZoneBehavior,
         phases: [(durationDays: Int?, doseAmount: Double)],
+        changeContext: MedicationPlanChangeContext? = nil,
         context: ModelContext
-    ) {
+    ) -> MedicationRegimen? {
         guard let profileID = medication.profileID,
               regimen.profileID == profileID,
-              regimen.medicationID == medication.id else { return }
+              regimen.medicationID == medication.id else { return nil }
         let now = Date()
+        var planContext = changeContext ?? MedicationPlanChangeContext(
+            effectiveFrom: startDate,
+            source: .caregiver
+        )
+        planContext.effectiveFrom = normalizedPlanEffectiveDate(planContext.effectiveFrom)
+        guard planContext.effectiveFrom >= latestActivationDate(
+            regimenID: regimen.id,
+            fallback: regimen.startDate,
+            context: context
+        ) else { return nil }
+        let priorPhases = phasesForRegimen(regimen.id, context: context)
+        let beforeSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: regimen,
+            phases: priorPhases
+        )
         medication.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         medication.form = form
         medication.strength = strength
@@ -581,55 +845,99 @@ enum MedicationService {
         }
         medication.currentSupply = normalizedCurrentSupply
         medication.refillThreshold = refillThreshold.map { max($0, 0) }
+        medication.refillLeadDays = max(refillLeadDays, 0)
+        medication.prescriptionNumber = prescriptionNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        medication.fillQuantity = fillQuantity.map { max($0, 0) }
+        medication.refillsRemaining = refillsRemaining.map { max($0, 0) }
+        medication.prescriptionExpirationDate = prescriptionExpirationDate
+        medication.isConfirmedCurrent = planContext.confirmsCurrent
+        if planContext.confirmsCurrent { medication.lastReviewedAt = now }
         medication.updatedAt = now
 
         let scheduleCalendar = MedicationScheduleDate.currentCalendar()
         let anchorTimeZoneIdentifier = regimen.timeZoneIdentifier ?? scheduleCalendar.timeZone.identifier
-        regimen.scheduleKind = scheduleKind
-        regimen.startDate = MedicationScheduleDate.storedDate(
-            for: startDate,
-            anchorTimeZoneIdentifier: anchorTimeZoneIdentifier,
-            calendar: scheduleCalendar
-        )
-        regimen.endDate = endDate.map {
-            MedicationScheduleDate.storedDate(
-                for: $0,
+        regimen.isActive = false
+        regimen.updatedAt = now
+        let newRegimen = MedicationRegimen(
+            profileID: profileID,
+            medicationID: medication.id,
+            scheduleKind: scheduleKind,
+            startDate: MedicationScheduleDate.storedDate(
+                for: startDate,
                 anchorTimeZoneIdentifier: anchorTimeZoneIdentifier,
                 calendar: scheduleCalendar
-            )
-        }
-        regimen.doseAmount = doseAmount
-        regimen.doseUnit = doseUnit
-        regimen.doseTimes = scheduleKind == .asNeeded ? [] : doseTimes
-        regimen.weekdayMask = weekdayMask
-        regimen.intervalDays = max(intervalDays, 1)
-        regimen.cycleOnDays = max(cycleOnDays, 1)
-        regimen.cycleOffDays = max(cycleOffDays, 0)
-        regimen.minimumHoursBetweenDoses = minimumHoursBetweenDoses
-        regimen.maximumDosesPerDay = maximumDosesPerDay
-        regimen.remindersEnabled = remindersEnabled
-        regimen.followUpRemindersEnabled = remindersEnabled && followUpRemindersEnabled
-        regimen.timeZoneBehavior = timeZoneBehavior
-        regimen.timeZoneIdentifier = anchorTimeZoneIdentifier
-        regimen.updatedAt = now
-
-        for phase in phasesForRegimen(regimen.id, context: context) {
-            context.delete(phase)
-        }
+            ),
+            endDate: endDate.map {
+                MedicationScheduleDate.storedDate(
+                    for: $0,
+                    anchorTimeZoneIdentifier: anchorTimeZoneIdentifier,
+                    calendar: scheduleCalendar
+                )
+            },
+            doseAmount: doseAmount,
+            doseUnit: doseUnit,
+            doseTimes: scheduleKind == .asNeeded ? [] : doseTimes,
+            weekdayMask: weekdayMask,
+            intervalDays: max(intervalDays, 1),
+            cycleOnDays: max(cycleOnDays, 1),
+            cycleOffDays: max(cycleOffDays, 0),
+            minimumHoursBetweenDoses: minimumHoursBetweenDoses,
+            maximumDosesPerDay: maximumDosesPerDay,
+            remindersEnabled: remindersEnabled,
+            followUpRemindersEnabled: remindersEnabled && followUpRemindersEnabled,
+            timeZoneBehavior: timeZoneBehavior,
+            timeZoneIdentifier: anchorTimeZoneIdentifier,
+            createdAt: now,
+            updatedAt: now
+        )
+        context.insert(newRegimen)
+        var createdPhases = [MedicationSchedulePhase]()
         for (index, phase) in phases.enumerated() {
-            context.insert(MedicationSchedulePhase(
+            let createdPhase = MedicationSchedulePhase(
                 profileID: profileID,
-                regimenID: regimen.id,
+                regimenID: newRegimen.id,
                 sequence: index,
                 durationDays: phase.durationDays,
                 doseAmount: phase.doseAmount,
                 doseUnit: doseUnit,
                 doseTimes: doseTimes
-            ))
+            )
+            context.insert(createdPhase)
+            createdPhases.append(createdPhase)
         }
+        let afterSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: newRegimen,
+            phases: createdPhases
+        )
+        context.insert(MedicationPlanRevision(
+            profileID: profileID,
+            medicationID: medication.id,
+            priorRegimenID: regimen.id,
+            regimenID: newRegimen.id,
+            changeKind: .updated,
+            source: planContext.source,
+            effectiveFrom: planContext.effectiveFrom,
+            changedAt: now,
+            appointmentID: planContext.appointmentID,
+            reconciliationID: planContext.reconciliationID,
+            notes: planContext.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            beforeSnapshot: beforeSnapshot,
+            afterSnapshot: afterSnapshot,
+            createdAt: now,
+            updatedAt: now
+        ))
         if PersistenceService.save(context: context) {
             SystemIntegrationReconciler.requestReconciliation()
+            // The notification cleanup can outlive this model context (notably
+            // during app teardown and in-memory test stores), so capture only
+            // the value rather than retaining the SwiftData model instance.
+            let priorRegimenID = regimen.id
+            MedicationSnoozeStateStore.clear(regimenID: priorRegimenID)
+            Task { await MedicationNotificationScheduler.cancel(regimenID: priorRegimenID) }
+            return newRegimen
         }
+        return nil
     }
 
     static func resolveScheduledDose(
@@ -677,19 +985,33 @@ enum MedicationService {
                 regimen.id == regimenID
                     && regimen.profileID == profileID
                     && regimen.medicationID == medicationID
-                    && regimen.isActive
             }
         )
         regimenDescriptor.fetchLimit = 1
         guard let regimen = (try? context.fetch(regimenDescriptor))?.first,
               regimen.scheduleKind.isScheduled else {
-            return .rejected("This reminder no longer matches an active medication schedule.")
+            return .rejected("This reminder no longer matches a medication schedule.")
         }
 
-        let phases = phasesForRegimen(regimen.id, context: context)
-        let occurrence = MedicationScheduleEngine.occurrences(
-            regimen: regimen,
+        let medicationRegimens = (try? context.fetch(FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.medicationID == medicationID
+            }
+        ))) ?? []
+        let regimenIDs = Set(medicationRegimens.map(\.id))
+        let phases = (try? context.fetch(FetchDescriptor<MedicationSchedulePhase>(
+            predicate: #Predicate { regimenIDs.contains($0.regimenID) }
+        ))) ?? []
+        let revisions = (try? context.fetch(FetchDescriptor<MedicationPlanRevision>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.medicationID == medicationID
+            }
+        ))) ?? []
+        let occurrence = MedicationScheduleEngine.versionedOccurrences(
+            medicationID: medicationID,
+            regimens: medicationRegimens,
             phases: phases,
+            revisions: revisions,
             from: reference.scheduledAt.addingTimeInterval(-1),
             through: reference.scheduledAt.addingTimeInterval(1)
         ).first {
@@ -724,6 +1046,11 @@ enum MedicationService {
         _ reference: MedicationScheduledDoseReference,
         status: MedicationDoseStatus,
         at date: Date = Date(),
+        takenAt: Date? = nil,
+        actualDoseAmount: Double? = nil,
+        timing: MedicationDoseTiming? = nil,
+        reason: MedicationDoseReason? = nil,
+        notes: String = "",
         context: ModelContext
     ) -> MedicationScheduledDoseMutationResult {
         switch resolveScheduledDose(reference, context: context) {
@@ -742,6 +1069,11 @@ enum MedicationService {
                 occurrence: occurrence,
                 status: status,
                 at: date,
+                takenAt: takenAt,
+                actualDoseAmount: actualDoseAmount,
+                timing: timing,
+                reason: reason,
+                notes: notes,
                 context: context
             ) != nil else {
                 return .rejected("This dose could not be saved. Please try again.")
@@ -757,6 +1089,10 @@ enum MedicationService {
         occurrence: MedicationOccurrence? = nil,
         status: MedicationDoseStatus,
         at date: Date = Date(),
+        takenAt: Date? = nil,
+        actualDoseAmount: Double? = nil,
+        timing: MedicationDoseTiming? = nil,
+        reason: MedicationDoseReason? = nil,
         notes: String = "",
         context: ModelContext
     ) -> MedicationDoseRecord? {
@@ -784,7 +1120,7 @@ enum MedicationService {
         if let matchingRecord {
             return matchingRecord.status == status ? matchingRecord : nil
         }
-        let record = matchingRecord ?? MedicationDoseRecord(
+        let record = MedicationDoseRecord(
             profileID: profileID,
             medicationID: medication.id,
             regimenID: regimen.id,
@@ -797,15 +1133,24 @@ enum MedicationService {
             doseUnit: occurrence?.doseUnit ?? regimen.doseUnit,
             notes: notes
         )
-        if matchingRecord == nil { context.insert(record) }
-        apply(
-            status: status,
+        context.insert(record)
+        guard apply(
+            entry: MedicationDoseEntry(
+                status: status,
+                takenAt: takenAt,
+                actualDoseAmount: actualDoseAmount,
+                timing: timing,
+                reason: reason,
+                notes: notes
+            ),
             to: record,
             medication: medication,
             at: date,
-            notes: notes,
             context: context
-        )
+        ) else {
+            context.delete(record)
+            return nil
+        }
         let regimenID = regimen.id
         guard PersistenceService.save(context: context) else { return nil }
         SystemIntegrationReconciler.requestReconciliation()
@@ -831,18 +1176,48 @@ enum MedicationService {
         guard let profileID = medication.profileID,
               record.profileID == profileID,
               record.medicationID == medication.id else { return }
-        apply(
-            status: status,
+        _ = apply(
+            entry: MedicationDoseEntry(
+                status: status,
+                takenAt: status == .taken ? date : nil,
+                actualDoseAmount: status == .taken ? record.doseAmount : nil,
+                timing: nil,
+                reason: nil,
+                notes: record.notes
+            ),
             to: record,
             medication: medication,
             at: date,
-            notes: record.notes,
             context: context
         )
         if PersistenceService.save(context: context) {
             SystemIntegrationReconciler.requestReconciliation()
             cancelNotification(for: record)
         }
+    }
+
+    @discardableResult
+    static func updateDoseRecord(
+        _ record: MedicationDoseRecord,
+        medication: Medication,
+        entry: MedicationDoseEntry,
+        at date: Date = Date(),
+        context: ModelContext
+    ) -> Bool {
+        guard let profileID = medication.profileID,
+              record.profileID == profileID,
+              record.medicationID == medication.id,
+              apply(
+                  entry: entry,
+                  to: record,
+                  medication: medication,
+                  at: date,
+                  context: context
+              ) else { return false }
+        guard PersistenceService.save(context: context) else { return false }
+        SystemIntegrationReconciler.requestReconciliation()
+        cancelNotification(for: record)
+        return true
     }
 
     static func deleteDoseRecord(
@@ -920,20 +1295,417 @@ enum MedicationService {
         }
     }
 
+    static func supplyProjection(
+        medication: Medication,
+        doseRecords: [MedicationDoseRecord],
+        now: Date = Date(),
+        lookbackDays: Int = 60,
+        calendar: Calendar = .current
+    ) -> MedicationSupplyProjection? {
+        supplyProjections(
+            medications: [medication],
+            doseRecords: doseRecords,
+            now: now,
+            lookbackDays: lookbackDays,
+            calendar: calendar
+        )[medication.id]
+    }
+
+    /// Calculates projections for a screen's medication collection in one pass
+    /// through dose history. This avoids rescanning the same 60-day history for
+    /// every medication on Home and trip surfaces.
+    static func supplyProjections(
+        medications: [Medication],
+        doseRecords: [MedicationDoseRecord],
+        now: Date = Date(),
+        lookbackDays: Int = 60,
+        calendar: Calendar = .current
+    ) -> [UUID: MedicationSupplyProjection] {
+        let safeLookbackDays = max(lookbackDays, 1)
+        let lookbackStart = calendar.date(
+            byAdding: .day,
+            value: -safeLookbackDays,
+            to: now
+        ) ?? now.addingTimeInterval(-Double(safeLookbackDays) * 86_400)
+        let supplyByMedicationID = Dictionary(
+            medications.compactMap { medication -> (UUID, Double)? in
+                guard let currentSupply = medication.currentSupply,
+                      currentSupply.isFinite,
+                      currentSupply >= 0 else { return nil }
+                return (medication.id, currentSupply)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        guard !supplyByMedicationID.isEmpty else { return [:] }
+
+        var usageByMedicationID = [UUID: MedicationSupplyUsage]()
+        usageByMedicationID.reserveCapacity(supplyByMedicationID.count)
+        for record in doseRecords {
+            guard supplyByMedicationID[record.medicationID] != nil,
+                  record.status == .taken,
+                  let amount = record.effectiveActualDoseAmount,
+                  amount.isFinite,
+                  amount > 0 else { continue }
+            let date = record.takenAt ?? record.scheduledAt ?? record.loggedAt
+            guard date >= lookbackStart, date <= now else { continue }
+            if var usage = usageByMedicationID[record.medicationID] {
+                usage.firstDate = min(usage.firstDate, date)
+                usage.consumed += amount
+                usage.doseCount += 1
+                usageByMedicationID[record.medicationID] = usage
+            } else {
+                usageByMedicationID[record.medicationID] = MedicationSupplyUsage(
+                    firstDate: date,
+                    consumed: amount,
+                    doseCount: 1
+                )
+            }
+        }
+
+        var projections = [UUID: MedicationSupplyProjection]()
+        projections.reserveCapacity(usageByMedicationID.count)
+        for (medicationID, usage) in usageByMedicationID {
+            guard let currentSupply = supplyByMedicationID[medicationID],
+                  let projection = makeSupplyProjection(
+                      currentSupply: currentSupply,
+                      usage: usage,
+                      now: now,
+                      calendar: calendar
+                  ) else { continue }
+            projections[medicationID] = projection
+        }
+        return projections
+    }
+
+    private struct MedicationSupplyUsage {
+        var firstDate: Date
+        var consumed: Double
+        var doseCount: Int
+    }
+
+    private static func makeSupplyProjection(
+        currentSupply: Double,
+        usage: MedicationSupplyUsage,
+        now: Date,
+        calendar: Calendar
+    ) -> MedicationSupplyProjection? {
+        let firstDay = calendar.startOfDay(for: usage.firstDate)
+        let currentDay = calendar.startOfDay(for: now)
+        let observedDayCount = max(
+            1,
+            (calendar.dateComponents([.day], from: firstDay, to: currentDay).day ?? 0) + 1
+        )
+        let averageDailyUse = usage.consumed / Double(observedDayCount)
+        guard averageDailyUse.isFinite, averageDailyUse > 0 else { return nil }
+        let estimatedDaysRemaining = currentSupply / averageDailyUse
+        let estimatedRunOutDate = now.addingTimeInterval(estimatedDaysRemaining * 86_400)
+        let confidence: MedicationSupplyProjectionConfidence = if usage.doseCount < 3
+            || observedDayCount < 3 {
+            .limited
+        } else if observedDayCount < 7 {
+            .developing
+        } else {
+            .established
+        }
+        return MedicationSupplyProjection(
+            estimatedRunOutDate: estimatedRunOutDate,
+            estimatedDaysRemaining: estimatedDaysRemaining,
+            averageDailyUse: averageDailyUse,
+            observedDoseCount: usage.doseCount,
+            observedDayCount: observedDayCount,
+            confidence: confidence
+        )
+    }
+
+    static func tripSupplyRisk(
+        projection: MedicationSupplyProjection,
+        trip: PackingTrip,
+        calendar: Calendar = .current
+    ) -> MedicationTripSupplyRisk? {
+        let tripStart = calendar.startOfDay(for: trip.startDate)
+        let tripEndExclusive = calendar.date(
+            byAdding: .day,
+            value: 1,
+            to: calendar.startOfDay(for: trip.endDate)
+        ) ?? trip.endDate.addingTimeInterval(86_400)
+        if projection.estimatedRunOutDate < tripStart {
+            return .beforeTrip(runOutDate: projection.estimatedRunOutDate)
+        }
+        if projection.estimatedRunOutDate < tripEndExclusive {
+            return .duringTrip(runOutDate: projection.estimatedRunOutDate)
+        }
+        return nil
+    }
+
+    @discardableResult
+    static func createRefillTask(
+        medication: Medication,
+        householdID: UUID,
+        dueDate: Date?,
+        fillQuantity: Double?,
+        assignedCaregiverIdentifier: String? = nil,
+        assignedCaregiverName: String? = nil,
+        notes: String = "",
+        context: ModelContext,
+        now: Date = Date()
+    ) -> MedicationRefillTask? {
+        guard let profileID = medication.profileID, !medication.isArchived else { return nil }
+        var householdDescriptor = FetchDescriptor<Household>(
+            predicate: #Predicate { $0.id == householdID }
+        )
+        householdDescriptor.fetchLimit = 1
+        guard (try? context.fetch(householdDescriptor))?.first != nil else { return nil }
+        let medicationID = medication.id
+        let pickedUpStatus = MedicationRefillStatus.pickedUp.rawValue
+        let cancelledStatus = MedicationRefillStatus.cancelled.rawValue
+        var openTaskDescriptor = FetchDescriptor<MedicationRefillTask>(
+            predicate: #Predicate {
+                $0.medicationID == medicationID
+                    && $0.statusRawValue != pickedUpStatus
+                    && $0.statusRawValue != cancelledStatus
+            }
+        )
+        openTaskDescriptor.fetchLimit = 1
+        guard ((try? context.fetch(openTaskDescriptor)) ?? []).isEmpty else { return nil }
+        let normalizedFillQuantity = fillQuantity.map { max($0, 0) }
+        guard normalizedFillQuantity.map({ $0 > 0 }) ?? true else { return nil }
+        let assignedIdentifier = assignedCaregiverIdentifier?.nilIfBlank
+        let assignedName = assignedCaregiverName?.nilIfBlank
+        guard (assignedIdentifier == nil) == (assignedName == nil) else { return nil }
+        let task = MedicationRefillTask(
+            householdID: householdID,
+            profileID: profileID,
+            medicationID: medication.id,
+            dueDate: dueDate,
+            fillQuantity: normalizedFillQuantity,
+            prescriptionNumberSnapshot: medication.prescriptionNumber,
+            pharmacySnapshot: medication.pharmacy,
+            notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            assignedCaregiverIdentifier: assignedIdentifier,
+            assignedCaregiverName: assignedName,
+            createdAt: now,
+            updatedAt: now
+        )
+        context.insert(task)
+        guard PersistenceService.save(context: context) else { return nil }
+        SystemIntegrationReconciler.requestReconciliation()
+        return task
+    }
+
+    @discardableResult
+    static func updateRefillTask(
+        _ task: MedicationRefillTask,
+        medication: Medication,
+        dueDate: Date?,
+        fillQuantity: Double?,
+        assignedCaregiverIdentifier: String?,
+        assignedCaregiverName: String?,
+        notes: String,
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Bool {
+        guard task.profileID == medication.profileID,
+              task.medicationID == medication.id,
+              task.isOpen else { return false }
+        let normalizedFillQuantity = fillQuantity.map { max($0, 0) }
+        guard normalizedFillQuantity.map({ $0 > 0 }) ?? true else { return false }
+        let assignedIdentifier = assignedCaregiverIdentifier?.nilIfBlank
+        let assignedName = assignedCaregiverName?.nilIfBlank
+        guard (assignedIdentifier == nil) == (assignedName == nil) else { return false }
+        task.dueDate = dueDate
+        task.fillQuantity = normalizedFillQuantity
+        task.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.assignedCaregiverIdentifier = assignedIdentifier
+        task.assignedCaregiverName = assignedName
+        task.prescriptionNumberSnapshot = medication.prescriptionNumber
+        task.pharmacySnapshot = medication.pharmacy
+        task.updatedAt = now
+        let saved = PersistenceService.save(context: context)
+        if saved {
+            SystemIntegrationReconciler.requestReconciliation()
+        }
+        return saved
+    }
+
+    @discardableResult
+    static func setRefillStatus(
+        _ task: MedicationRefillTask,
+        medication: Medication,
+        status: MedicationRefillStatus,
+        context: ModelContext,
+        now: Date = Date(),
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard task.profileID == medication.profileID,
+              task.medicationID == medication.id,
+              canTransitionRefill(from: task.status, to: status) else { return false }
+        if task.status == status { return true }
+        switch status {
+        case .needsRequest:
+            task.requestedAt = nil
+            task.readyForPickupAt = nil
+        case .requested:
+            task.requestedAt = task.requestedAt ?? now
+            task.readyForPickupAt = nil
+        case .readyForPickup:
+            task.requestedAt = task.requestedAt ?? now
+            task.readyForPickupAt = now
+        case .pickedUp:
+            guard let profileID = medication.profileID else { return false }
+            let quantity = task.fillQuantity ?? medication.fillQuantity
+            guard let quantity, quantity.isFinite, quantity > 0 else { return false }
+            let oldSupply = medication.currentSupply ?? 0
+            let newSupply = oldSupply + quantity
+            medication.currentSupply = newSupply
+            if let refillsRemaining = medication.refillsRemaining, refillsRemaining > 0 {
+                medication.refillsRemaining = refillsRemaining - 1
+            }
+            medication.updatedAt = now
+            context.insert(MedicationSupplyLog(
+                id: HouseholdAttentionService.deterministicID(
+                    "medication-refill-pickup",
+                    task.id.uuidString.lowercased()
+                ),
+                profileID: profileID,
+                medicationID: medication.id,
+                adjustment: quantity,
+                resultingSupply: newSupply,
+                reason: .refill,
+                notes: "Picked up refill.",
+                loggedAt: now
+            ))
+            task.pickedUpAt = now
+            task.completedByCaregiverIdentifier = CaregiverIdentityService.stableCaregiverIdentifier(
+                defaults: defaults
+            )
+            task.completedByCaregiverName = CaregiverIdentityService.currentCaregiverName(
+                defaults: defaults
+            )
+        case .cancelled:
+            task.cancelledAt = now
+            task.completedByCaregiverIdentifier = CaregiverIdentityService.stableCaregiverIdentifier(
+                defaults: defaults
+            )
+            task.completedByCaregiverName = CaregiverIdentityService.currentCaregiverName(
+                defaults: defaults
+            )
+        }
+        task.status = status
+        task.updatedAt = now
+        guard PersistenceService.save(context: context) else { return false }
+        if !status.isOpen {
+            HouseholdAttentionSnoozeStore.clear(
+                sourceKey: task.attentionSourceKey,
+                defaults: defaults
+            )
+            HouseholdAttentionService.deleteInteractions(
+                sourceKey: task.attentionSourceKey,
+                context: context
+            )
+            _ = PersistenceService.save(context: context)
+        }
+        SystemIntegrationReconciler.requestReconciliation()
+        return true
+    }
+
+    private static func canTransitionRefill(
+        from current: MedicationRefillStatus,
+        to next: MedicationRefillStatus
+    ) -> Bool {
+        if current == next { return true }
+        return switch (current, next) {
+        case (.needsRequest, .requested),
+             (.needsRequest, .cancelled),
+             (.requested, .needsRequest),
+             (.requested, .readyForPickup),
+             (.requested, .cancelled),
+             (.readyForPickup, .requested),
+             (.readyForPickup, .pickedUp),
+             (.readyForPickup, .cancelled): true
+        default: false
+        }
+    }
+
+    @discardableResult
     static func archive(
         medication: Medication,
         regimens: [MedicationRegimen],
+        changeContext: MedicationPlanChangeContext? = nil,
         context: ModelContext
-    ) {
-        guard let profileID = medication.profileID else { return }
+    ) -> Bool {
+        guard let profileID = medication.profileID else { return false }
+        let now = Date()
+        var planContext = changeContext ?? MedicationPlanChangeContext(
+            effectiveFrom: now,
+            source: .caregiver
+        )
+        planContext.effectiveFrom = normalizedPlanEffectiveDate(planContext.effectiveFrom)
+        let currentRegimen = regimens.first {
+            $0.profileID == profileID && $0.medicationID == medication.id && $0.isActive
+        }
+        if let currentRegimen {
+            guard planContext.effectiveFrom >= latestActivationDate(
+                regimenID: currentRegimen.id,
+                fallback: currentRegimen.startDate,
+                context: context
+            ) else { return false }
+        }
+        let currentPhases = currentRegimen.map {
+            phasesForRegimen($0.id, context: context)
+        } ?? []
+        let beforeSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: currentRegimen,
+            phases: currentPhases
+        )
         medication.isArchived = true
-        medication.updatedAt = Date()
+        medication.isConfirmedCurrent = false
+        medication.updatedAt = now
         let medicationRegimens = regimens.filter {
             $0.profileID == profileID && $0.medicationID == medication.id
         }
-        medicationRegimens.forEach { $0.isActive = false; $0.updatedAt = Date() }
+        medicationRegimens.forEach { $0.isActive = false; $0.updatedAt = now }
         let regimenIDs = medicationRegimens.map(\.id)
-        if PersistenceService.save(context: context) {
+        let medicationID = medication.id
+        let openRefillTasks = ((try? context.fetch(FetchDescriptor<MedicationRefillTask>(
+            predicate: #Predicate { $0.medicationID == medicationID }
+        ))) ?? []).filter(\.isOpen)
+        openRefillTasks.forEach { task in
+            task.status = .cancelled
+            task.cancelledAt = now
+            task.completedByCaregiverIdentifier = CaregiverIdentityService.stableCaregiverIdentifier()
+            task.completedByCaregiverName = CaregiverIdentityService.currentCaregiverName()
+            task.updatedAt = now
+            HouseholdAttentionService.deleteInteractions(
+                sourceKey: task.attentionSourceKey,
+                context: context
+            )
+            HouseholdAttentionSnoozeStore.clear(sourceKey: task.attentionSourceKey)
+        }
+        let afterSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: currentRegimen,
+            phases: currentPhases
+        )
+        context.insert(MedicationPlanRevision(
+            profileID: profileID,
+            medicationID: medication.id,
+            priorRegimenID: currentRegimen?.id,
+            regimenID: currentRegimen?.id,
+            changeKind: .stopped,
+            source: planContext.source,
+            effectiveFrom: planContext.effectiveFrom,
+            changedAt: now,
+            appointmentID: planContext.appointmentID,
+            reconciliationID: planContext.reconciliationID,
+            notes: planContext.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            beforeSnapshot: beforeSnapshot,
+            afterSnapshot: afterSnapshot,
+            createdAt: now,
+            updatedAt: now
+        ))
+        let saved = PersistenceService.save(context: context)
+        if saved {
             SystemIntegrationReconciler.requestReconciliation()
             Task {
                 for regimenID in regimenIDs {
@@ -941,27 +1713,210 @@ enum MedicationService {
                 }
             }
         }
+        return saved
     }
 
+    @discardableResult
     static func restore(
         medication: Medication,
         regimens: [MedicationRegimen],
+        changeContext: MedicationPlanChangeContext? = nil,
         context: ModelContext
-    ) {
-        guard let profileID = medication.profileID else { return }
-        medication.isArchived = false
-        medication.updatedAt = Date()
-        if let latestRegimen = regimens
+    ) -> Bool {
+        guard let profileID = medication.profileID else { return false }
+        let now = Date()
+        var planContext = changeContext ?? MedicationPlanChangeContext(
+            effectiveFrom: now,
+            source: .caregiver
+        )
+        planContext.effectiveFrom = normalizedPlanEffectiveDate(planContext.effectiveFrom)
+        let latestRegimen = regimens
             .filter({
                 $0.profileID == profileID && $0.medicationID == medication.id
             })
-            .max(by: { $0.updatedAt < $1.updatedAt }) {
+            .max(by: { $0.updatedAt < $1.updatedAt })
+        let latestPhases = latestRegimen.map {
+            phasesForRegimen($0.id, context: context)
+        } ?? []
+        let beforeSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: latestRegimen,
+            phases: latestPhases
+        )
+        medication.isArchived = false
+        medication.isConfirmedCurrent = planContext.confirmsCurrent
+        if planContext.confirmsCurrent { medication.lastReviewedAt = now }
+        medication.updatedAt = now
+        if let latestRegimen {
             latestRegimen.isActive = true
-            latestRegimen.updatedAt = Date()
+            latestRegimen.updatedAt = now
         }
-        if PersistenceService.save(context: context) {
+        let afterSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: latestRegimen,
+            phases: latestPhases
+        )
+        context.insert(MedicationPlanRevision(
+            profileID: profileID,
+            medicationID: medication.id,
+            regimenID: latestRegimen?.id,
+            changeKind: .restored,
+            source: planContext.source,
+            effectiveFrom: planContext.effectiveFrom,
+            changedAt: now,
+            appointmentID: planContext.appointmentID,
+            reconciliationID: planContext.reconciliationID,
+            notes: planContext.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            beforeSnapshot: beforeSnapshot,
+            afterSnapshot: afterSnapshot,
+            createdAt: now,
+            updatedAt: now
+        ))
+        let saved = PersistenceService.save(context: context)
+        if saved {
             SystemIntegrationReconciler.requestReconciliation()
         }
+        return saved
+    }
+
+    @discardableResult
+    static func confirmCurrent(
+        medication: Medication,
+        regimens: [MedicationRegimen],
+        changeContext: MedicationPlanChangeContext,
+        context: ModelContext
+    ) -> Bool {
+        guard let profileID = medication.profileID, !medication.isArchived else { return false }
+        let now = Date()
+        var changeContext = changeContext
+        changeContext.effectiveFrom = normalizedPlanEffectiveDate(changeContext.effectiveFrom)
+        let activeRegimen = regimens.first {
+            $0.profileID == profileID && $0.medicationID == medication.id && $0.isActive
+        }
+        let phases = activeRegimen.map {
+            phasesForRegimen($0.id, context: context)
+        } ?? []
+        let snapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: activeRegimen,
+            phases: phases
+        )
+        medication.isConfirmedCurrent = true
+        medication.lastReviewedAt = now
+        medication.updatedAt = now
+        let confirmedSnapshot = MedicationPlanSnapshot(
+            medication: medication,
+            regimen: activeRegimen,
+            phases: phases
+        )
+        context.insert(MedicationPlanRevision(
+            profileID: profileID,
+            medicationID: medication.id,
+            priorRegimenID: activeRegimen?.id,
+            regimenID: activeRegimen?.id,
+            changeKind: .confirmedCurrent,
+            source: changeContext.source,
+            effectiveFrom: changeContext.effectiveFrom,
+            changedAt: now,
+            appointmentID: changeContext.appointmentID,
+            reconciliationID: changeContext.reconciliationID,
+            notes: changeContext.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            beforeSnapshot: snapshot,
+            afterSnapshot: confirmedSnapshot,
+            createdAt: now,
+            updatedAt: now
+        ))
+        let saved = PersistenceService.save(context: context)
+        if saved {
+            SystemIntegrationReconciler.requestReconciliation()
+        }
+        return saved
+    }
+
+    @discardableResult
+    static func completeReconciliation(
+        id: UUID = UUID(),
+        profileID: UUID,
+        source: MedicationPlanChangeSource,
+        effectiveFrom: Date,
+        appointmentID: UUID? = nil,
+        notes: String = "",
+        reviewedMedicationIDs: [UUID],
+        context: ModelContext
+    ) -> MedicationReconciliation? {
+        let effectiveFrom = normalizedPlanEffectiveDate(effectiveFrom)
+        let uniqueReviewedIDs = Set(reviewedMedicationIDs)
+        guard uniqueReviewedIDs.count == reviewedMedicationIDs.count else { return nil }
+        let medications = (try? context.fetch(FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.profileID == profileID }
+        ))) ?? []
+        let profileMedicationIDs = Set(medications.map(\.id))
+        let activeMedicationIDs = Set(medications.filter { !$0.isArchived }.map(\.id))
+        guard uniqueReviewedIDs.isSubset(of: profileMedicationIDs),
+              activeMedicationIDs.isSubset(of: uniqueReviewedIDs) else { return nil }
+        let linkedRevisions = (try? context.fetch(FetchDescriptor<MedicationPlanRevision>(
+            predicate: #Predicate { $0.reconciliationID == id }
+        ))) ?? []
+        let revisedMedicationIDs = Set(linkedRevisions.compactMap { revision in
+            revision.profileID == profileID ? revision.medicationID : nil
+        })
+        guard uniqueReviewedIDs.isSubset(of: revisedMedicationIDs),
+              linkedRevisions.allSatisfy({ revision in
+                  revision.profileID == profileID
+                      && revision.source == source
+                      && revision.effectiveFrom == effectiveFrom
+                      && revision.appointmentID == appointmentID
+              }) else { return nil }
+        var existingDescriptor = FetchDescriptor<MedicationReconciliation>(
+            predicate: #Predicate { $0.id == id }
+        )
+        existingDescriptor.fetchLimit = 1
+        guard ((try? context.fetch(existingDescriptor)) ?? []).isEmpty else { return nil }
+        let now = Date()
+        let reconciliation = MedicationReconciliation(
+            id: id,
+            profileID: profileID,
+            appointmentID: appointmentID,
+            source: source,
+            effectiveFrom: effectiveFrom,
+            completedAt: now,
+            notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            reviewedMedicationIDs: reviewedMedicationIDs,
+            createdAt: now,
+            updatedAt: now
+        )
+        context.insert(reconciliation)
+        guard PersistenceService.save(context: context) else { return nil }
+        SystemIntegrationReconciler.requestReconciliation()
+        return reconciliation
+    }
+
+    @discardableResult
+    static func abandonReconciliation(
+        id: UUID,
+        context: ModelContext
+    ) -> Bool {
+        var reconciliationDescriptor = FetchDescriptor<MedicationReconciliation>(
+            predicate: #Predicate { $0.id == id }
+        )
+        reconciliationDescriptor.fetchLimit = 1
+        if ((try? context.fetch(reconciliationDescriptor)) ?? []).first != nil {
+            return true
+        }
+        let revisions = (try? context.fetch(FetchDescriptor<MedicationPlanRevision>(
+            predicate: #Predicate { $0.reconciliationID == id }
+        ))) ?? []
+        guard !revisions.isEmpty else { return true }
+        let now = Date()
+        revisions.forEach {
+            $0.reconciliationID = nil
+            $0.updatedAt = now
+        }
+        let saved = PersistenceService.save(context: context)
+        if saved {
+            SystemIntegrationReconciler.requestReconciliation()
+        }
+        return saved
     }
 
     static func phasesForRegimen(
@@ -985,35 +1940,71 @@ enum MedicationService {
         return (try? context.fetch(descriptor)) ?? []
     }
 
+    @discardableResult
     private static func apply(
-        status: MedicationDoseStatus,
+        entry: MedicationDoseEntry,
         to record: MedicationDoseRecord,
         medication: Medication,
         at date: Date,
-        notes: String,
         context: ModelContext
-    ) {
+    ) -> Bool {
         guard let profileID = medication.profileID,
               record.profileID == profileID,
-              record.medicationID == medication.id else { return }
-        let wasTaken = record.status == .taken
-        record.status = status
+              record.medicationID == medication.id else { return false }
+
+        if entry.status == .missed, entry.reason == nil { return false }
+        if entry.status == .taken,
+           let takenAt = entry.takenAt,
+           takenAt > date { return false }
+
+        let normalizedActualAmount: Double?
+        if entry.status == .taken {
+            let value = entry.actualDoseAmount ?? record.doseAmount
+            guard value.isFinite, value > 0 else { return false }
+            normalizedActualAmount = value
+        } else {
+            normalizedActualAmount = nil
+        }
+
+        let normalizedReason: MedicationDoseReason? = switch entry.status {
+        case .taken, .skipped: nil
+        case .held: entry.reason ?? .perClinicianInstruction
+        case .refused: .refused
+        case .unable: .unableToTake
+        case .missed: entry.reason
+        }
+
+        record.status = entry.status
         record.loggedAt = date
-        record.takenAt = status == .taken ? date : nil
-        record.notes = notes
+        record.takenAt = entry.status == .taken ? (entry.takenAt ?? date) : nil
+        record.actualDoseAmount = normalizedActualAmount
+        record.timing = entry.status == .taken
+            ? (entry.timing ?? inferredTiming(actualTime: record.takenAt ?? date, scheduledAt: record.scheduledAt))
+            : nil
+        record.reason = normalizedReason
+        record.notes = entry.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         record.updatedAt = date
 
-        if status == .taken {
+        reconcileSupply(
+            for: record,
+            medication: medication,
+            actualDoseAmount: normalizedActualAmount,
+            context: context
+        )
+
+        if entry.status == .taken {
+            let actualTime = record.takenAt ?? date
+            let actualAmount = normalizedActualAmount ?? record.doseAmount
             if record.careEventID == nil {
                 let event = CareEvent(
                     profileID: profileID,
                     type: .medicine,
-                    startDate: date,
-                    endDate: date,
+                    startDate: actualTime,
+                    endDate: actualTime,
                     startTimeZoneIdentifier: CareTimeZoneSettings.effectiveIdentifier(),
                     endTimeZoneIdentifier: CareTimeZoneSettings.effectiveIdentifier(),
                     caregiverName: record.caregiverName,
-                    notes: notes.nilIfEmpty
+                    notes: record.notes.nilIfEmpty
                 )
                 var profileDescriptor = FetchDescriptor<CareProfile>(
                     predicate: #Predicate { $0.id == profileID }
@@ -1021,36 +2012,91 @@ enum MedicationService {
                 profileDescriptor.fetchLimit = 1
                 event.profileTypeSnapshot = (try? context.fetch(profileDescriptor))?.first?.profileType
                 event.medicineName = medication.name
-                event.dose = record.doseAmount
+                event.dose = actualAmount
                 event.doseUnit = record.doseUnit
                 context.insert(event)
                 record.careEventID = event.id
-            }
-            if !wasTaken, let currentSupply = medication.currentSupply {
-                let deducted = min(max(currentSupply, 0), record.doseAmount)
-                record.supplyAdjustmentApplied = -deducted
-                medication.currentSupply = max(currentSupply - deducted, 0)
-                context.insert(MedicationSupplyLog(
-                    profileID: profileID,
-                    medicationID: medication.id,
-                    doseRecordID: record.id,
-                    adjustment: -deducted,
-                    resultingSupply: medication.currentSupply,
-                    reason: .dose
-                ))
+            } else if let eventID = record.careEventID {
+                var descriptor = FetchDescriptor<CareEvent>(
+                    predicate: #Predicate { $0.id == eventID }
+                )
+                descriptor.fetchLimit = 1
+                if let event = (try? context.fetch(descriptor))?.first {
+                    event.startDate = actualTime
+                    event.endDate = actualTime
+                    event.medicineName = medication.name
+                    event.dose = actualAmount
+                    event.doseUnit = record.doseUnit
+                    event.notes = record.notes.nilIfEmpty
+                    event.updatedAt = date
+                }
             }
         } else {
             deleteMirror(for: record, context: context)
-            if wasTaken {
-                refundSupplyIfNeeded(
-                    for: record,
-                    medication: medication,
-                    note: "Dose changed from taken to skipped.",
-                    context: context
-                )
-            }
         }
         medication.updatedAt = date
+        return true
+    }
+
+    private static func normalizedPlanEffectiveDate(_ date: Date) -> Date {
+        MedicationScheduleDate.currentCalendar().startOfDay(for: date)
+    }
+
+    private static func latestActivationDate(
+        regimenID: UUID,
+        fallback: Date,
+        context: ModelContext
+    ) -> Date {
+        let revisions = (try? context.fetch(FetchDescriptor<MedicationPlanRevision>(
+            predicate: #Predicate { $0.regimenID == regimenID }
+        ))) ?? []
+        return revisions.compactMap { revision -> Date? in
+            switch revision.changeKind {
+            case .added, .updated, .restored: revision.effectiveFrom
+            case .stopped, .confirmedCurrent: nil
+            }
+        }.max() ?? normalizedPlanEffectiveDate(fallback)
+    }
+
+    private static func inferredTiming(
+        actualTime: Date,
+        scheduledAt: Date?
+    ) -> MedicationDoseTiming? {
+        guard let scheduledAt else { return nil }
+        return actualTime.timeIntervalSince(scheduledAt) >= 30 * 60 ? .late : .onSchedule
+    }
+
+    private static func reconcileSupply(
+        for record: MedicationDoseRecord,
+        medication: Medication,
+        actualDoseAmount: Double?,
+        context: ModelContext
+    ) {
+        guard let profileID = medication.profileID else { return }
+        guard let currentSupply = medication.currentSupply else {
+            record.supplyAdjustmentApplied = 0
+            return
+        }
+        let previouslyDeducted = max(-record.supplyAdjustmentApplied, 0)
+        let availableBeforeThisDose = max(currentSupply + previouslyDeducted, 0)
+        let newlyDeducted = actualDoseAmount.map {
+            min(availableBeforeThisDose, max($0, 0))
+        } ?? 0
+        let adjustment = previouslyDeducted - newlyDeducted
+        record.supplyAdjustmentApplied = -newlyDeducted
+        medication.currentSupply = max(currentSupply + adjustment, 0)
+        guard abs(adjustment) > 0.000_001 else { return }
+        context.insert(MedicationSupplyLog(
+            profileID: profileID,
+            medicationID: medication.id,
+            doseRecordID: record.id,
+            adjustment: adjustment,
+            resultingSupply: medication.currentSupply,
+            reason: .dose,
+            notes: previouslyDeducted > 0
+                ? "Dose outcome or actual amount updated."
+                : "Dose recorded."
+        ))
     }
 
     private static func deleteMirror(

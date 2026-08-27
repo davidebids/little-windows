@@ -88,6 +88,8 @@ struct CareReport {
     var milestones: [MilestoneEntry]
     var medications: [Medication] = []
     var medicationRegimens: [MedicationRegimen] = []
+    var medicationDoseRecords: [MedicationDoseRecord] = []
+    var medicationNamesByID: [UUID: String] = [:]
     var generatedAt: Date
 }
 
@@ -123,7 +125,7 @@ enum CareReportExportService {
         // event's recorded local calendar day.
         let eventFetchLowerBound = lowerBound.addingTimeInterval(-30 * 60 * 60)
         let eventFetchUpperBound = upperBound.addingTimeInterval(30 * 60 * 60)
-        let events = try context.fetch(FetchDescriptor<CareEvent>(
+        var events = try context.fetch(FetchDescriptor<CareEvent>(
             predicate: #Predicate {
                 $0.profileID == profileID &&
                     $0.startDate >= eventFetchLowerBound &&
@@ -164,14 +166,35 @@ enum CareReportExportService {
                 sortBy: [SortDescriptor(\.date)]
             ))
             : []
-        let medications = try context.fetch(FetchDescriptor<Medication>(
-            predicate: #Predicate { $0.profileID == profileID && !$0.isArchived },
+        let allMedications = try context.fetch(FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.profileID == profileID },
             sortBy: [SortDescriptor(\.name)]
         ))
+        let medications = allMedications.filter { !$0.isArchived }
         let medicationRegimens = try context.fetch(FetchDescriptor<MedicationRegimen>(
             predicate: #Predicate { $0.profileID == profileID && $0.isActive },
             sortBy: [SortDescriptor(\.createdAt)]
         ))
+        // Taken doses cannot be logged before their actual time. Non-taken
+        // outcomes may be entered shortly before a scheduled dose, so include
+        // one day of lead-in and apply the exact meaningful-date filter below.
+        // There is intentionally no upper loggedAt bound because users can
+        // backfill an older dose after the report period ends.
+        let medicationFetchLowerBound = lowerBound.addingTimeInterval(-86_400)
+        let medicationDoseRecords = try context.fetch(FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.loggedAt >= medicationFetchLowerBound
+            },
+            sortBy: [SortDescriptor(\.loggedAt)]
+        )).map { record in
+            (record: record, date: medicationDoseReportDate(record))
+        }.filter {
+            $0.date >= lowerBound && $0.date < upperBound
+        }.sorted {
+            $0.date < $1.date
+        }.map(\.record)
+        let mirroredEventIDs = Set(medicationDoseRecords.compactMap(\.careEventID))
+        events.removeAll { mirroredEventIDs.contains($0.id) }
 
         var normalizedOptions = options
         normalizedOptions.startDate = range.lowerBound
@@ -185,6 +208,10 @@ enum CareReportExportService {
             milestones: milestones,
             medications: medications,
             medicationRegimens: medicationRegimens,
+            medicationDoseRecords: medicationDoseRecords,
+            medicationNamesByID: Dictionary(
+                uniqueKeysWithValues: allMedications.map { ($0.id, $0.name) }
+            ),
             generatedAt: now
         )
     }
@@ -227,6 +254,25 @@ enum CareReportExportService {
                 report.options.includeNotes ? (event.notes ?? "") : "",
                 event.startTimeZone.identifier,
                 event.endDate == nil ? "" : event.endTimeZone.identifier
+            ])
+        }
+        rows += report.medicationDoseRecords.map { record in
+            let date = medicationDoseReportDate(record)
+            return (date, [
+                report.profile.name,
+                report.profile.profileType.displayName,
+                dateFormatter.string(from: date),
+                timeFormatter.string(from: date),
+                "",
+                "",
+                "Medication Dose",
+                record.outcomeDisplayName,
+                medicationDoseAmountText(record),
+                medicationDoseDetails(record, report: report),
+                report.options.includeCaregiverNames ? record.caregiverName : "",
+                report.options.includeNotes ? record.notes : "",
+                "",
+                ""
             ])
         }
         if report.options.includeAppointments {
@@ -336,7 +382,21 @@ enum CareReportExportService {
                 }
             }
 
-            if report.events.isEmpty {
+            if !report.medicationDoseRecords.isEmpty {
+                drawSection("Medication Dose Outcomes", cursor: &cursor, context: context)
+                for record in report.medicationDoseRecords {
+                    let date = medicationDoseReportDate(record)
+                    let medicationName = report.medicationNamesByID[record.medicationID] ?? "Medication"
+                    drawCompactRecord(
+                        title: "\(dateTimeFormatter.string(from: date)): \(medicationName) — \(record.outcomeDisplayName)",
+                        details: medicationDoseDetails(record, report: report, includePrivateFields: true),
+                        cursor: &cursor,
+                        context: context
+                    )
+                }
+            }
+
+            if report.events.isEmpty && report.medicationDoseRecords.isEmpty {
                 drawSection("Care Logs", cursor: &cursor, context: context)
                 drawEmptyState("No care events were logged in this date range.", cursor: &cursor, context: context)
             }
@@ -681,7 +741,20 @@ enum CareReportExportService {
             medication.strengthDescription.map { "Strength: \($0)" },
             "Form: \(medication.form.displayName)",
             "Route: \(medication.route.displayName)",
-            medication.reasonForTaking.nilIfBlank.map { "For: \($0)" }
+            medication.reasonForTaking.nilIfBlank.map { "For: \($0)" },
+            medication.isConfirmedCurrent ? "Plan status: Confirmed current" : "Plan status: Needs review",
+            medication.lastReviewedAt.map {
+                "Last reviewed: \($0.formatted(date: .abbreviated, time: .omitted))"
+            },
+            medication.prescriptionNumber.nilIfBlank.map { "Prescription: \($0)" },
+            medication.fillQuantity.map {
+                "Fill quantity: \($0.formatted(.number.precision(.fractionLength(0...2))))"
+            },
+            medication.refillsRemaining.map { "Refills remaining: \($0)" },
+            medication.prescriptionExpirationDate.map {
+                "Prescription expires: \($0.formatted(date: .abbreviated, time: .omitted))"
+            },
+            "Refill lead time: \(medication.refillLeadDays) days"
         ].compactMap { $0 }
         if let regimen {
             parts.append("Schedule: \(regimen.scheduleSummary)")
@@ -701,6 +774,57 @@ enum CareReportExportService {
         parts.appendIfPresent(medication.instructions.nilIfBlank.map { "Instructions: \($0)" })
         parts.appendIfPresent(medication.prescriber.nilIfBlank.map { "Prescriber: \($0)" })
         parts.appendIfPresent(medication.pharmacy.nilIfBlank.map { "Pharmacy: \($0)" })
+        return compactJoined(parts)
+    }
+
+    static func medicationDoseReportDate(_ record: MedicationDoseRecord) -> Date {
+        if record.status == .taken {
+            return record.takenAt ?? record.loggedAt
+        }
+        return record.scheduledAt ?? record.loggedAt
+    }
+
+    static func medicationDoseAmountText(_ record: MedicationDoseRecord) -> String {
+        let amount = record.status == .taken
+            ? (record.effectiveActualDoseAmount ?? record.doseAmount)
+            : record.doseAmount
+        let suffix = record.status == .taken ? "" : " scheduled"
+        return "\(amount.formatted(.number.precision(.fractionLength(0...2)))) \(record.doseUnit)\(suffix)"
+    }
+
+    static func medicationDoseDetails(
+        _ record: MedicationDoseRecord,
+        report: CareReport,
+        includePrivateFields: Bool = false
+    ) -> String {
+        let medicationName = report.medicationNamesByID[record.medicationID] ?? "Medication"
+        var parts = ["Medication: \(medicationName)", "Outcome: \(record.outcomeDisplayName)"]
+        if let scheduledAt = record.scheduledAt {
+            parts.append("Scheduled: \(dateTimeFormatter.string(from: scheduledAt))")
+        }
+        if record.status == .taken, let takenAt = record.takenAt {
+            parts.append("Actual time: \(dateTimeFormatter.string(from: takenAt))")
+        }
+        if record.hasDifferentActualAmount,
+           let actualAmount = record.effectiveActualDoseAmount {
+            parts.append(
+                "Actual amount: \(actualAmount.formatted(.number.precision(.fractionLength(0...2)))) \(record.doseUnit)"
+            )
+            parts.append(
+                "Scheduled amount: \(record.doseAmount.formatted(.number.precision(.fractionLength(0...2)))) \(record.doseUnit)"
+            )
+        }
+        if let reason = record.reason {
+            parts.append("Reason: \(reason.displayName)")
+        }
+        if includePrivateFields, report.options.includeCaregiverNames,
+           !record.caregiverName.isEmpty {
+            parts.append("Caregiver: \(record.caregiverName)")
+        }
+        if includePrivateFields, report.options.includeNotes,
+           !record.notes.isEmpty {
+            parts.append("Notes: \(record.notes)")
+        }
         return compactJoined(parts)
     }
 
@@ -757,6 +881,22 @@ enum CareReportExportService {
             ("Milestones", "\(report.milestones.count)"),
             ("Current medications", "\(report.medications.count)")
         ]
+        if !report.medicationDoseRecords.isEmpty {
+            rows.append(("Medication doses", "\(report.medicationDoseRecords.count)"))
+            let outcomeCounts = Dictionary(
+                grouping: report.medicationDoseRecords,
+                by: \.status
+            ).mapValues(\.count)
+            for status in MedicationDoseStatus.allCases where outcomeCounts[status, default: 0] > 0 {
+                rows.append((status.displayName, "\(outcomeCounts[status, default: 0])"))
+            }
+            let lateCount = report.medicationDoseRecords.count { $0.timing == .late }
+            if lateCount > 0 { rows.append(("Taken late", "\(lateCount)")) }
+            let differentAmountCount = report.medicationDoseRecords.filter(\.hasDifferentActualAmount).count
+            if differentAmountCount > 0 {
+                rows.append(("Different amount taken", "\(differentAmountCount)"))
+            }
+        }
         let sleepMinutes = report.events
             .filter { $0.type == .sleep }
             .reduce(0.0) { total, event in
@@ -803,9 +943,21 @@ enum CareReportExportService {
             "Covers \(rangeText) for \(report.profile.name), with \(sentenceList(includedRecords))."
         ]
 
-        if report.events.isEmpty {
+        if report.events.isEmpty && report.medicationDoseRecords.isEmpty {
             highlights.append("No care events were logged for this profile in the selected range.")
             return highlights
+        }
+
+        if !report.medicationDoseRecords.isEmpty {
+            let outcomeCounts = Dictionary(
+                grouping: report.medicationDoseRecords,
+                by: \.status
+            ).mapValues(\.count)
+            let outcomes = MedicationDoseStatus.allCases.compactMap { status in
+                let count = outcomeCounts[status, default: 0]
+                return count > 0 ? "\(status.displayName) \(count)" : nil
+            }
+            highlights.append("Medication outcomes: \(outcomes.joined(separator: ", ")).")
         }
 
         let counts = Dictionary(grouping: report.events, by: \.type).mapValues(\.count)

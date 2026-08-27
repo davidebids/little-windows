@@ -3,6 +3,7 @@ import SwiftData
 
 enum HouseholdAttentionSourceKind: String, Codable, CaseIterable {
     case medicationDose
+    case medicationRefill
     case appointmentFollowUp
     case routine
     case inventory

@@ -213,6 +213,16 @@ private struct AdultMedicationReportRow: Identifiable, Sendable {
     let trackedDayCount: Int
     let takenCount: Int
     let skippedCount: Int
+    let heldCount: Int
+    let refusedCount: Int
+    let unableCount: Int
+    let missedCount: Int
+    let lateCount: Int
+    let differentAmountCount: Int
+    let exceptionCount: Int
+    let missedReasonSummary: String?
+    let lastReviewedAt: Date?
+    let isConfirmedCurrent: Bool
     let isCurrent: Bool
 }
 
@@ -256,6 +266,14 @@ private struct AdultHealthReportSnapshot: Sendable {
 
     var takenDoseCount: Int {
         medications.reduce(0) { $0 + $1.takenCount }
+    }
+
+    var doseExceptionCount: Int {
+        medications.reduce(0) { $0 + $1.exceptionCount }
+    }
+
+    var medicationsNeedingReviewCount: Int {
+        medications.count { $0.isCurrent && !$0.isConfirmedCurrent }
     }
 
     var averagePain: Double? {
@@ -305,18 +323,21 @@ private actor AdultHealthReportWorker {
         regimenDescriptor.fetchLimit = 1_000
         let regimens = (try? modelContext.fetch(regimenDescriptor)) ?? []
 
-        var doseDescriptor = FetchDescriptor<MedicationDoseRecord>(
+        let doseFetchLowerBound = periodStart.addingTimeInterval(-86_400)
+        let doseDescriptor = FetchDescriptor<MedicationDoseRecord>(
             predicate: #Predicate {
-                $0.profileID == profileID &&
-                    $0.loggedAt >= periodStart &&
-                    $0.loggedAt < periodEndExclusive
+                $0.profileID == profileID && $0.loggedAt >= doseFetchLowerBound
             },
             sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
         )
-        // A full year at the editor's maximum 24 scheduled doses per day is
-        // below this boundary, while malformed imports cannot grow unbounded.
-        doseDescriptor.fetchLimit = 10_000
-        let doses = (try? modelContext.fetch(doseDescriptor)) ?? []
+        // Filter by the dose's meaningful time below: actual time when taken,
+        // scheduled time for other outcomes, and logged time for legacy data.
+        let doses = ((try? modelContext.fetch(doseDescriptor)) ?? []).filter { dose in
+            let reportDate = dose.status == .taken
+                ? (dose.takenAt ?? dose.scheduledAt ?? dose.loggedAt)
+                : (dose.scheduledAt ?? dose.loggedAt)
+            return reportDate >= periodStart && reportDate < periodEndExclusive
+        }
 
         let regimensByMedicationID = Dictionary(grouping: regimens, by: \.medicationID)
         let dosesByMedicationID = Dictionary(grouping: doses, by: \.medicationID)
@@ -359,6 +380,15 @@ private actor AdultHealthReportWorker {
             let strengthDescription = medication.strength.map {
                 "\($0.formatted(.number.precision(.fractionLength(0...2)))) \(medication.strengthUnit)"
             }
+            let missedReasons = medicationDoses.compactMap { dose -> MedicationDoseReason? in
+                guard MedicationDoseStatus(rawValue: dose.statusRawValue) == .missed else { return nil }
+                return dose.reasonRawValue.flatMap(MedicationDoseReason.init(rawValue:))
+            }
+            let missedReasonCounts = Dictionary(grouping: missedReasons, by: { $0 })
+            let missedReasonSummary = MedicationDoseReason.allCases.compactMap { reason -> String? in
+                guard let count = missedReasonCounts[reason]?.count, count > 0 else { return nil }
+                return "\(count) \(reason.displayName.lowercased())"
+            }.joined(separator: " · ")
             return AdultMedicationReportRow(
                 id: medication.id,
                 name: medication.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -374,6 +404,41 @@ private actor AdultHealthReportWorker {
                 skippedCount: medicationDoses.count {
                     MedicationDoseStatus(rawValue: $0.statusRawValue) == .skipped
                 },
+                heldCount: medicationDoses.count {
+                    MedicationDoseStatus(rawValue: $0.statusRawValue) == .held
+                },
+                refusedCount: medicationDoses.count {
+                    MedicationDoseStatus(rawValue: $0.statusRawValue) == .refused
+                },
+                unableCount: medicationDoses.count {
+                    MedicationDoseStatus(rawValue: $0.statusRawValue) == .unable
+                },
+                missedCount: medicationDoses.count {
+                    MedicationDoseStatus(rawValue: $0.statusRawValue) == .missed
+                },
+                lateCount: medicationDoses.count {
+                    MedicationDoseStatus(rawValue: $0.statusRawValue) == .taken
+                        && MedicationDoseTiming(rawValue: $0.timingRawValue ?? "") == .late
+                },
+                differentAmountCount: medicationDoses.count {
+                    guard MedicationDoseStatus(rawValue: $0.statusRawValue) == .taken,
+                          let actualDoseAmount = $0.actualDoseAmount else { return false }
+                    return abs(actualDoseAmount - $0.doseAmount) > 0.000_001
+                },
+                exceptionCount: medicationDoses.count { dose in
+                    guard let status = MedicationDoseStatus(rawValue: dose.statusRawValue) else {
+                        return false
+                    }
+                    if status != .taken { return true }
+                    if MedicationDoseTiming(rawValue: dose.timingRawValue ?? "") == .late {
+                        return true
+                    }
+                    guard let actualDoseAmount = dose.actualDoseAmount else { return false }
+                    return abs(actualDoseAmount - dose.doseAmount) > 0.000_001
+                },
+                missedReasonSummary: missedReasonSummary.isEmpty ? nil : missedReasonSummary,
+                lastReviewedAt: medication.lastReviewedAt,
+                isConfirmedCurrent: medication.isConfirmedCurrent,
                 isCurrent: isCurrent
             )
         }.sorted {
@@ -778,6 +843,11 @@ struct AdultHealthOverviewView: View {
                 LabeledContent("Medications tracked", value: "\(reportSnapshot.medications.count)")
                     .accessibilityIdentifier("adult-report.medication-count")
                 LabeledContent("Doses taken", value: "\(reportSnapshot.takenDoseCount)")
+                LabeledContent("Dose exceptions", value: "\(reportSnapshot.doseExceptionCount)")
+                LabeledContent(
+                    "Medication plans needing review",
+                    value: "\(reportSnapshot.medicationsNeedingReviewCount)"
+                )
                 LabeledContent("Pain entries", value: "\(reportSnapshot.painPoints.count)")
                     .accessibilityIdentifier("adult-report.pain-count")
                 LabeledContent(
@@ -839,6 +909,21 @@ struct AdultHealthOverviewView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if medication.isCurrent {
+                    Label(
+                        medication.isConfirmedCurrent ? "Confirmed current" : "Needs review",
+                        systemImage: medication.isConfirmedCurrent
+                            ? "checkmark.seal.fill"
+                            : "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(medication.isConfirmedCurrent ? .green : .orange)
+                }
+                if let lastReviewedAt = medication.lastReviewedAt {
+                    Text("Last reviewed \(lastReviewedAt.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text(
                     "Tracked for \(medication.trackedDayCount) \(medication.trackedDayCount == 1 ? "day" : "days") · started \(medication.startedAt.formatted(date: .abbreviated, time: .omitted))"
                 )
@@ -849,12 +934,31 @@ struct AdultHealthOverviewView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("\(medication.takenCount) taken · \(medication.skippedCount) skipped in this period")
+                Text(medicationOutcomeSummary(medication))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
+                if let missedReasonSummary = medication.missedReasonSummary {
+                    Text("Missed reasons: \(missedReasonSummary)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 3)
+    }
+
+    private func medicationOutcomeSummary(_ medication: AdultMedicationReportRow) -> String {
+        var parts = ["\(medication.takenCount) taken"]
+        if medication.lateCount > 0 { parts.append("\(medication.lateCount) late") }
+        if medication.differentAmountCount > 0 {
+            parts.append("\(medication.differentAmountCount) different amount")
+        }
+        if medication.heldCount > 0 { parts.append("\(medication.heldCount) held") }
+        if medication.refusedCount > 0 { parts.append("\(medication.refusedCount) refused") }
+        if medication.unableCount > 0 { parts.append("\(medication.unableCount) unable") }
+        if medication.missedCount > 0 { parts.append("\(medication.missedCount) missed") }
+        if medication.skippedCount > 0 { parts.append("\(medication.skippedCount) skipped") }
+        return parts.joined(separator: " · ") + " in this period"
     }
 
     private var painReportSection: some View {

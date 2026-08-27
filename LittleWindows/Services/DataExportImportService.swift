@@ -87,6 +87,9 @@ private struct BackupEnvelope: Codable {
     var medications: [MedicationDTO]?
     var medicationRegimens: [MedicationRegimenDTO]?
     var medicationSchedulePhases: [MedicationSchedulePhaseDTO]?
+    var medicationPlanRevisions: [MedicationPlanRevisionDTO]?
+    var medicationReconciliations: [MedicationReconciliationDTO]?
+    var medicationRefillTasks: [MedicationRefillTaskDTO]?
     var medicationDoseRecords: [MedicationDoseRecordDTO]?
     var medicationSupplyLogs: [MedicationSupplyLogDTO]?
 }
@@ -918,7 +921,14 @@ private struct MedicationDTO: Codable {
     var pharmacy: String
     var currentSupply: Double?
     var refillThreshold: Double?
+    var refillLeadDays: Int?
+    var prescriptionNumber: String?
+    var fillQuantity: Double?
+    var refillsRemaining: Int?
+    var prescriptionExpirationDate: Date?
     var isArchived: Bool
+    var lastReviewedAt: Date?
+    var isConfirmedCurrent: Bool?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -963,6 +973,67 @@ private struct MedicationSchedulePhaseDTO: Codable {
     var updatedAt: Date
 }
 
+private struct MedicationPlanRevisionDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var medicationID: UUID
+    var priorRegimenID: UUID?
+    var regimenID: UUID?
+    var changeKindRawValue: String
+    var sourceRawValue: String
+    var effectiveFrom: Date
+    var changedAt: Date
+    var changedByIdentifier: String
+    var changedByName: String
+    var appointmentID: UUID?
+    var reconciliationID: UUID?
+    var notes: String
+    var beforeSnapshotData: Data?
+    var afterSnapshotData: Data?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct MedicationReconciliationDTO: Codable {
+    var id: UUID
+    var profileID: UUID?
+    var appointmentID: UUID?
+    var sourceRawValue: String
+    var effectiveFrom: Date
+    var completedAt: Date
+    var reviewerIdentifier: String
+    var reviewerName: String
+    var notes: String
+    var reviewedMedicationIDsData: Data?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+private struct MedicationRefillTaskDTO: Codable {
+    var id: UUID
+    var householdID: UUID
+    var profileID: UUID?
+    var medicationID: UUID
+    var statusRawValue: String
+    var dueDate: Date?
+    var fillQuantity: Double?
+    var prescriptionNumberSnapshot: String
+    var pharmacySnapshot: String
+    var notes: String
+    var requestedAt: Date?
+    var readyForPickupAt: Date?
+    var pickedUpAt: Date?
+    var cancelledAt: Date?
+    var createdByCaregiverIdentifier: String
+    var createdByCaregiverName: String
+    var assignedCaregiverIdentifier: String?
+    var assignedCaregiverName: String?
+    var completedByCaregiverIdentifier: String?
+    var completedByCaregiverName: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 private struct MedicationDoseRecordDTO: Codable {
     var id: UUID
     var profileID: UUID?
@@ -974,6 +1045,9 @@ private struct MedicationDoseRecordDTO: Codable {
     var statusRawValue: String
     var loggedAt: Date
     var takenAt: Date?
+    var actualDoseAmount: Double?
+    var timingRawValue: String?
+    var reasonRawValue: String?
     var doseAmount: Double
     var doseUnit: String
     var supplyAdjustmentApplied: Double
@@ -1004,7 +1078,7 @@ enum CareDataExportProfileScope: Equatable {
 }
 
 enum DataExportImportService {
-    private static let currentBackupVersion = 27
+    private static let currentBackupVersion = 30
     private static let recoveryBackupLimit = 3
 
     static func exportData(
@@ -1862,7 +1936,14 @@ enum DataExportImportService {
                 pharmacy: $0.pharmacy,
                 currentSupply: $0.currentSupply,
                 refillThreshold: $0.refillThreshold,
+                refillLeadDays: $0.refillLeadDays,
+                prescriptionNumber: $0.prescriptionNumber,
+                fillQuantity: $0.fillQuantity,
+                refillsRemaining: $0.refillsRemaining,
+                prescriptionExpirationDate: $0.prescriptionExpirationDate,
                 isArchived: $0.isArchived,
+                lastReviewedAt: $0.lastReviewedAt,
+                isConfirmedCurrent: $0.isConfirmedCurrent,
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt
             )
@@ -1909,6 +1990,70 @@ enum DataExportImportService {
                 updatedAt: $0.updatedAt
             )
         }
+        let medicationPlanRevisions = try context.fetch(FetchDescriptor<MedicationPlanRevision>()).map {
+            MedicationPlanRevisionDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                medicationID: $0.medicationID,
+                priorRegimenID: $0.priorRegimenID,
+                regimenID: $0.regimenID,
+                changeKindRawValue: $0.changeKindRawValue,
+                sourceRawValue: $0.sourceRawValue,
+                effectiveFrom: $0.effectiveFrom,
+                changedAt: $0.changedAt,
+                changedByIdentifier: $0.changedByIdentifier,
+                changedByName: $0.changedByName,
+                appointmentID: $0.appointmentID,
+                reconciliationID: $0.reconciliationID,
+                notes: $0.notes,
+                beforeSnapshotData: $0.beforeSnapshotData,
+                afterSnapshotData: $0.afterSnapshotData,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let medicationReconciliations = try context.fetch(FetchDescriptor<MedicationReconciliation>()).map {
+            MedicationReconciliationDTO(
+                id: $0.id,
+                profileID: $0.profileID,
+                appointmentID: $0.appointmentID,
+                sourceRawValue: $0.sourceRawValue,
+                effectiveFrom: $0.effectiveFrom,
+                completedAt: $0.completedAt,
+                reviewerIdentifier: $0.reviewerIdentifier,
+                reviewerName: $0.reviewerName,
+                notes: $0.notes,
+                reviewedMedicationIDsData: $0.reviewedMedicationIDsData,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
+        let medicationRefillTasks = try context.fetch(FetchDescriptor<MedicationRefillTask>()).map {
+            MedicationRefillTaskDTO(
+                id: $0.id,
+                householdID: $0.householdID,
+                profileID: $0.profileID,
+                medicationID: $0.medicationID,
+                statusRawValue: $0.statusRawValue,
+                dueDate: $0.dueDate,
+                fillQuantity: $0.fillQuantity,
+                prescriptionNumberSnapshot: $0.prescriptionNumberSnapshot,
+                pharmacySnapshot: $0.pharmacySnapshot,
+                notes: $0.notes,
+                requestedAt: $0.requestedAt,
+                readyForPickupAt: $0.readyForPickupAt,
+                pickedUpAt: $0.pickedUpAt,
+                cancelledAt: $0.cancelledAt,
+                createdByCaregiverIdentifier: $0.createdByCaregiverIdentifier,
+                createdByCaregiverName: $0.createdByCaregiverName,
+                assignedCaregiverIdentifier: $0.assignedCaregiverIdentifier,
+                assignedCaregiverName: $0.assignedCaregiverName,
+                completedByCaregiverIdentifier: $0.completedByCaregiverIdentifier,
+                completedByCaregiverName: $0.completedByCaregiverName,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
+            )
+        }
         let medicationDoseRecords = try context.fetch(FetchDescriptor<MedicationDoseRecord>()).map {
             MedicationDoseRecordDTO(
                 id: $0.id,
@@ -1921,6 +2066,9 @@ enum DataExportImportService {
                 statusRawValue: $0.statusRawValue,
                 loggedAt: $0.loggedAt,
                 takenAt: $0.takenAt,
+                actualDoseAmount: $0.actualDoseAmount,
+                timingRawValue: $0.timingRawValue,
+                reasonRawValue: $0.reasonRawValue,
                 doseAmount: $0.doseAmount,
                 doseUnit: $0.doseUnit,
                 supplyAdjustmentApplied: $0.supplyAdjustmentApplied,
@@ -2018,6 +2166,9 @@ enum DataExportImportService {
             medications: medications,
             medicationRegimens: medicationRegimens,
             medicationSchedulePhases: medicationSchedulePhases,
+            medicationPlanRevisions: medicationPlanRevisions,
+            medicationReconciliations: medicationReconciliations,
+            medicationRefillTasks: medicationRefillTasks,
             medicationDoseRecords: medicationDoseRecords,
             medicationSupplyLogs: medicationSupplyLogs
         )
@@ -2050,23 +2201,35 @@ enum DataExportImportService {
             let sharedFollowUpSourceKeys = Set((envelope.appointmentFollowUps ?? []).map {
                 "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):\($0.id.uuidString.lowercased())"
             })
-            let appointmentFollowUpPrefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
-            let isIncludedAppointmentSource: (String?) -> Bool = { sourceKey in
-                guard let sourceKey, sourceKey.hasPrefix(appointmentFollowUpPrefix) else {
-                    return true
+            let sharedRefillSourceKeys: Set<String> = Set(
+                (envelope.medicationRefillTasks ?? []).compactMap { task -> String? in
+                guard task.profileID.map(sharedProfileIDs.contains) == true else { return nil }
+                return "\(HouseholdAttentionSourceKind.medicationRefill.rawValue):\(task.id.uuidString.lowercased())"
                 }
-                return sharedFollowUpSourceKeys.contains(sourceKey)
+            )
+            let appointmentFollowUpPrefix = "\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):"
+            let medicationRefillPrefix = "\(HouseholdAttentionSourceKind.medicationRefill.rawValue):"
+            let isIncludedClaimableSource: (String?) -> Bool = { sourceKey in
+                guard let sourceKey else { return true }
+                if sourceKey.hasPrefix(appointmentFollowUpPrefix) {
+                    return sharedFollowUpSourceKeys.contains(sourceKey)
+                }
+                if sourceKey.hasPrefix(medicationRefillPrefix) {
+                    return sharedRefillSourceKeys.contains(sourceKey)
+                }
+                return true
             }
             envelope.attentionAcknowledgements = envelope.attentionAcknowledgements?.filter {
                 ($0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true)
-                    && isIncludedAppointmentSource($0.sourceKey)
+                    && isIncludedClaimableSource($0.sourceKey)
             }
             envelope.attentionClaims = envelope.attentionClaims?.filter {
                 sharedFollowUpSourceKeys.contains($0.sourceKey)
+                    || sharedRefillSourceKeys.contains($0.sourceKey)
             }
             envelope.caregiverHandoffNotes = envelope.caregiverHandoffNotes?.filter {
                 ($0.profileID == nil || $0.profileID.map(sharedProfileIDs.contains) == true)
-                    && isIncludedAppointmentSource($0.sourceKey)
+                    && isIncludedClaimableSource($0.sourceKey)
             }
             envelope.ageGuideReadStates = envelope.ageGuideReadStates?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.puppyStageGuideReadStates = envelope.puppyStageGuideReadStates?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
@@ -2094,6 +2257,9 @@ enum DataExportImportService {
             envelope.medications = envelope.medications?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.medicationRegimens = envelope.medicationRegimens?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.medicationSchedulePhases = envelope.medicationSchedulePhases?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.medicationPlanRevisions = envelope.medicationPlanRevisions?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.medicationReconciliations = envelope.medicationReconciliations?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
+            envelope.medicationRefillTasks = envelope.medicationRefillTasks?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.medicationDoseRecords = envelope.medicationDoseRecords?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
             envelope.medicationSupplyLogs = envelope.medicationSupplyLogs?.filter { $0.profileID.map(sharedProfileIDs.contains) == true }
         }
@@ -2453,7 +2619,14 @@ enum DataExportImportService {
                 pharmacy: value.pharmacy,
                 currentSupply: value.currentSupply,
                 refillThreshold: value.refillThreshold,
+                refillLeadDays: value.refillLeadDays ?? 7,
+                prescriptionNumber: value.prescriptionNumber ?? "",
+                fillQuantity: value.fillQuantity,
+                refillsRemaining: value.refillsRemaining,
+                prescriptionExpirationDate: value.prescriptionExpirationDate,
                 isArchived: value.isArchived,
+                lastReviewedAt: value.lastReviewedAt,
+                isConfirmedCurrent: value.isConfirmedCurrent ?? false,
                 createdAt: value.createdAt,
                 updatedAt: value.updatedAt
             ))
@@ -2506,6 +2679,89 @@ enum DataExportImportService {
             phase.doseTimesData = value.doseTimesData
             context.insert(phase)
         }
+        for value in envelope.medicationPlanRevisions ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID,
+                  let afterSnapshotData = value.afterSnapshotData,
+                  let afterSnapshot = try? JSONDecoder().decode(
+                      MedicationPlanSnapshot.self,
+                      from: afterSnapshotData
+                  ) else { continue }
+            let beforeSnapshot = value.beforeSnapshotData.flatMap {
+                try? JSONDecoder().decode(MedicationPlanSnapshot.self, from: $0)
+            }
+            let revision = MedicationPlanRevision(
+                id: value.id,
+                profileID: profileID,
+                medicationID: value.medicationID,
+                priorRegimenID: value.priorRegimenID,
+                regimenID: value.regimenID,
+                changeKind: MedicationPlanChangeKind(rawValue: value.changeKindRawValue) ?? .updated,
+                source: MedicationPlanChangeSource(rawValue: value.sourceRawValue) ?? .caregiver,
+                effectiveFrom: value.effectiveFrom,
+                changedAt: value.changedAt,
+                changedByIdentifier: value.changedByIdentifier,
+                changedByName: value.changedByName,
+                appointmentID: value.appointmentID,
+                reconciliationID: value.reconciliationID,
+                notes: value.notes,
+                beforeSnapshot: beforeSnapshot,
+                afterSnapshot: afterSnapshot,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+            revision.beforeSnapshotData = value.beforeSnapshotData
+            revision.afterSnapshotData = value.afterSnapshotData
+            context.insert(revision)
+        }
+        for value in envelope.medicationReconciliations ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID else { continue }
+            let reviewedMedicationIDs = value.reviewedMedicationIDsData.flatMap {
+                try? JSONDecoder().decode([UUID].self, from: $0)
+            } ?? []
+            let reconciliation = MedicationReconciliation(
+                id: value.id,
+                profileID: profileID,
+                appointmentID: value.appointmentID,
+                source: MedicationPlanChangeSource(rawValue: value.sourceRawValue) ?? .caregiver,
+                effectiveFrom: value.effectiveFrom,
+                completedAt: value.completedAt,
+                reviewerIdentifier: value.reviewerIdentifier,
+                reviewerName: value.reviewerName,
+                notes: value.notes,
+                reviewedMedicationIDs: reviewedMedicationIDs,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+            reconciliation.reviewedMedicationIDsData = value.reviewedMedicationIDsData
+            context.insert(reconciliation)
+        }
+        for value in envelope.medicationRefillTasks ?? [] {
+            guard let profileID = value.profileID ?? fallbackProfileID else { continue }
+            context.insert(MedicationRefillTask(
+                id: value.id,
+                householdID: value.householdID,
+                profileID: profileID,
+                medicationID: value.medicationID,
+                status: MedicationRefillStatus(rawValue: value.statusRawValue) ?? .needsRequest,
+                dueDate: value.dueDate,
+                fillQuantity: value.fillQuantity,
+                prescriptionNumberSnapshot: value.prescriptionNumberSnapshot,
+                pharmacySnapshot: value.pharmacySnapshot,
+                notes: value.notes,
+                requestedAt: value.requestedAt,
+                readyForPickupAt: value.readyForPickupAt,
+                pickedUpAt: value.pickedUpAt,
+                cancelledAt: value.cancelledAt,
+                createdByCaregiverIdentifier: value.createdByCaregiverIdentifier,
+                createdByCaregiverName: value.createdByCaregiverName,
+                assignedCaregiverIdentifier: value.assignedCaregiverIdentifier,
+                assignedCaregiverName: value.assignedCaregiverName,
+                completedByCaregiverIdentifier: value.completedByCaregiverIdentifier,
+                completedByCaregiverName: value.completedByCaregiverName,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            ))
+        }
         for value in envelope.medicationDoseRecords ?? [] {
             guard let profileID = value.profileID ?? fallbackProfileID else { continue }
             context.insert(MedicationDoseRecord(
@@ -2519,6 +2775,9 @@ enum DataExportImportService {
                 status: MedicationDoseStatus(rawValue: value.statusRawValue) ?? .taken,
                 loggedAt: value.loggedAt,
                 takenAt: value.takenAt,
+                actualDoseAmount: value.actualDoseAmount,
+                timing: value.timingRawValue.flatMap(MedicationDoseTiming.init(rawValue:)),
+                reason: value.reasonRawValue.flatMap(MedicationDoseReason.init(rawValue:)),
                 doseAmount: value.doseAmount,
                 doseUnit: value.doseUnit,
                 supplyAdjustmentApplied: value.supplyAdjustmentApplied,
@@ -3307,6 +3566,9 @@ enum DataExportImportService {
         try deleteAll(PredictionFactor.self, context: context)
         try deleteAllProfileScoped(MedicationSupplyLog.self, context: context, preservingProfileIDs: preservingProfileIDs)
         try deleteAllProfileScoped(MedicationDoseRecord.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(MedicationPlanRevision.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(MedicationReconciliation.self, context: context, preservingProfileIDs: preservingProfileIDs)
+        try deleteAllProfileScoped(MedicationRefillTask.self, context: context, preservingProfileIDs: preservingProfileIDs)
         try deleteAllProfileScoped(MedicationSchedulePhase.self, context: context, preservingProfileIDs: preservingProfileIDs)
         try deleteAllProfileScoped(MedicationRegimen.self, context: context, preservingProfileIDs: preservingProfileIDs)
         try deleteAllProfileScoped(Medication.self, context: context, preservingProfileIDs: preservingProfileIDs)
@@ -3333,7 +3595,32 @@ enum DataExportImportService {
         guard let records = envelope.medicationDoseRecords else { return }
         var recordsWithoutOccurrence = [MedicationDoseRecordDTO]()
         var grouped = [String: [MedicationDoseRecordDTO]]()
-        for record in records {
+        var discardedCareEventIDs = Set<UUID>()
+        var discardedDoseRecordIDs = Set<UUID>()
+
+        func normalized(_ value: MedicationDoseRecordDTO) -> MedicationDoseRecordDTO {
+            var record = value
+            switch MedicationDoseStatus(rawValue: record.statusRawValue) {
+            case .taken:
+                // Older backups treated loggedAt as the effective taken time.
+                record.takenAt = record.takenAt ?? record.loggedAt
+                record.reasonRawValue = nil
+            case .skipped, .held, .refused, .unable, .missed:
+                if let careEventID = record.careEventID {
+                    discardedCareEventIDs.insert(careEventID)
+                }
+                record.takenAt = nil
+                record.actualDoseAmount = nil
+                record.timingRawValue = nil
+                record.careEventID = nil
+            case nil:
+                break
+            }
+            return record
+        }
+
+        for value in records {
+            let record = normalized(value)
             if let occurrenceKey = record.occurrenceKey {
                 grouped[occurrenceKey, default: []].append(record)
             } else {
@@ -3341,8 +3628,6 @@ enum DataExportImportService {
             }
         }
 
-        var discardedCareEventIDs = Set<UUID>()
-        var discardedDoseRecordIDs = Set<UUID>()
         let scheduledRecords = grouped.values.compactMap { candidates -> MedicationDoseRecordDTO? in
             guard let winner = candidates.max(by: { first, second in
                 if first.updatedAt != second.updatedAt {
@@ -3355,10 +3640,6 @@ enum DataExportImportService {
                 if let careEventID = candidate.careEventID {
                     discardedCareEventIDs.insert(careEventID)
                 }
-            }
-            if MedicationDoseStatus(rawValue: winner.statusRawValue) == .skipped,
-               let careEventID = winner.careEventID {
-                discardedCareEventIDs.insert(careEventID)
             }
             return winner
         }
@@ -3459,6 +3740,15 @@ enum DataExportImportService {
             $0.profileID.map(excludedProfileIDs.contains) != true
         }
         envelope.medicationSchedulePhases = envelope.medicationSchedulePhases?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medicationPlanRevisions = envelope.medicationPlanRevisions?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medicationReconciliations = envelope.medicationReconciliations?.filter {
+            $0.profileID.map(excludedProfileIDs.contains) != true
+        }
+        envelope.medicationRefillTasks = envelope.medicationRefillTasks?.filter {
             $0.profileID.map(excludedProfileIDs.contains) != true
         }
         envelope.medicationDoseRecords = envelope.medicationDoseRecords?.filter {
@@ -3610,7 +3900,16 @@ enum DataExportImportService {
                 .union(localRecords.keys)
                 .union(remoteRecords.keys)
             let values = allIDs.compactMap { id -> [String: Any]? in
-                mergedRecord(
+                if key == "medicationRefillTasks" {
+                    return mergedMedicationRefillTask(
+                        base: baseRecords[id],
+                        local: localRecords[id],
+                        remote: remoteRecords[id],
+                        localChangedAt: localChangedAt,
+                        remoteChangedAt: remoteChangedAt
+                    )
+                }
+                return mergedRecord(
                     base: baseRecords[id],
                     local: localRecords[id],
                     remote: remoteRecords[id],
@@ -3621,6 +3920,9 @@ enum DataExportImportService {
             .sorted { stringValue($0["id"]) < stringValue($1["id"]) }
             merged[key] = values
         }
+
+        normalizeMedicationRegimenActivity(in: &merged)
+        normalizeMedicationRefillTasks(in: &merged)
 
         merged["version"] = max(
             currentBackupVersion,
@@ -3732,6 +4034,7 @@ enum DataExportImportService {
         let attentionClaims = envelope.attentionClaims ?? []
         let caregiverHandoffNotes = envelope.caregiverHandoffNotes ?? []
         let familyCaregiverIdentities = envelope.familyCaregiverIdentities ?? []
+        let medicationRefillTasksForAttention = envelope.medicationRefillTasks ?? []
         let appointments = envelope.appointments ?? []
         let appointmentsByID = Dictionary(
             appointments.map { ($0.id, $0) },
@@ -3740,6 +4043,12 @@ enum DataExportImportService {
         let followUpsBySourceKey = Dictionary(
             appointmentFollowUps.map {
                 ("\(HouseholdAttentionSourceKind.appointmentFollowUp.rawValue):\($0.id.uuidString.lowercased())", $0)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let refillTasksBySourceKey = Dictionary(
+            medicationRefillTasksForAttention.map {
+                ("\(HouseholdAttentionSourceKind.medicationRefill.rawValue):\($0.id.uuidString.lowercased())", $0)
             },
             uniquingKeysWith: { first, _ in first }
         )
@@ -3790,11 +4099,21 @@ enum DataExportImportService {
                       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                   let caregiverName = $0.caregiverName?
                       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                  guard let followUp = followUpsBySourceKey[$0.sourceKey] else { return false }
+                  let sourceMatches: Bool
+                  if let followUp = followUpsBySourceKey[$0.sourceKey] {
+                      sourceMatches = followUp.householdID == $0.householdID
+                          && followUp.profileID == $0.profileID
+                          && followUp.completedAt == nil
+                  } else if let refill = refillTasksBySourceKey[$0.sourceKey] {
+                      sourceMatches = refill.householdID == $0.householdID
+                          && refill.profileID == $0.profileID
+                          && MedicationRefillStatus(rawValue: refill.statusRawValue)?.isOpen == true
+                  } else {
+                      return false
+                  }
                   return attentionHouseholdIDs.contains($0.householdID)
                       && ($0.profileID.map(profileIDs.contains) ?? true)
-                      && followUp.householdID == $0.householdID
-                      && followUp.profileID == $0.profileID
+                      && sourceMatches
                       && (caregiverIdentifier.isEmpty == caregiverName.isEmpty)
                       && !$0.updatedByCaregiverIdentifier.isEmpty
                       && !$0.updatedByCaregiverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -4007,8 +4326,12 @@ enum DataExportImportService {
         let medications = envelope.medications ?? []
         let regimens = envelope.medicationRegimens ?? []
         let phases = envelope.medicationSchedulePhases ?? []
+        let planRevisions = envelope.medicationPlanRevisions ?? []
+        let reconciliations = envelope.medicationReconciliations ?? []
+        let refillTasks = envelope.medicationRefillTasks ?? []
         let doseRecords = envelope.medicationDoseRecords ?? []
         let supplyLogs = envelope.medicationSupplyLogs ?? []
+        let householdIDs = Set((envelope.households ?? []).map(\.id))
         let medicationIDs = Set(medications.map(\.id))
         let regimenIDs = Set(regimens.map(\.id))
         let phaseIDs = Set(phases.map(\.id))
@@ -4096,9 +4419,19 @@ enum DataExportImportService {
                 return regimenPhases.isEmpty
             }
         }
+        let openRefillTasksAreUnique = Dictionary(grouping: refillTasks, by: \.medicationID)
+            .values
+            .allSatisfy { tasks in
+                tasks.filter {
+                    MedicationRefillStatus(rawValue: $0.statusRawValue)?.isOpen == true
+                }.count <= 1
+            }
         guard medicationIDs.count == medications.count,
               regimenIDs.count == regimens.count,
               phaseIDs.count == phases.count,
+              Set(planRevisions.map(\.id)).count == planRevisions.count,
+              Set(reconciliations.map(\.id)).count == reconciliations.count,
+              Set(refillTasks.map(\.id)).count == refillTasks.count,
               Set(doseRecords.map(\.id)).count == doseRecords.count,
               Set(occurrenceKeys).count == occurrenceKeys.count,
               Set(supplyLogs.map(\.id)).count == supplyLogs.count,
@@ -4107,6 +4440,7 @@ enum DataExportImportService {
               regimenDoseTimesAreValid,
               phaseDoseTimesAreValid,
               phaseStructuresAreValid,
+              openRefillTasksAreUnique,
               medications.allSatisfy({
                   $0.profileID.map(profileIDs.contains) == true
                       && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -4115,6 +4449,10 @@ enum DataExportImportService {
                       && ($0.strength.map { $0 > 0 } ?? true)
                       && ($0.currentSupply.map { $0 >= 0 } ?? true)
                       && ($0.refillThreshold.map { $0 >= 0 } ?? true)
+                      && ($0.refillLeadDays.map { $0 >= 0 && $0 <= 60 } ?? true)
+                      && ($0.fillQuantity.map { $0.isFinite && $0 > 0 } ?? true)
+                      && ($0.refillsRemaining.map { $0 >= 0 } ?? true)
+                      && !($0.isConfirmedCurrent == true && $0.lastReviewedAt == nil)
               }),
               regimens.allSatisfy({ regimen in
                   let kind = MedicationScheduleKind(rawValue: regimen.scheduleKindRawValue)
@@ -4150,8 +4488,128 @@ enum DataExportImportService {
                       && $0.sequence >= 0
                       && ($0.durationDays.map { $0 > 0 } ?? true)
               }),
+              planRevisions.allSatisfy({ revision in
+                  let referencedRegimenIDs = [revision.priorRegimenID, revision.regimenID]
+                      .compactMap { $0 }
+                  guard revision.profileID.map(profileIDs.contains) == true,
+                        medicationIDs.contains(revision.medicationID),
+                        revision.profileID == medicationProfileIDs[revision.medicationID],
+                        MedicationPlanChangeKind(rawValue: revision.changeKindRawValue) != nil,
+                        MedicationPlanChangeSource(rawValue: revision.sourceRawValue) != nil,
+                        referencedRegimenIDs.allSatisfy({ regimenID in
+                            regimensByID[regimenID]?.medicationID == revision.medicationID
+                                && regimensByID[regimenID]?.profileID == revision.profileID
+                        }),
+                        revision.appointmentID.map({ appointmentID in
+                            appointmentsByID[appointmentID]?.profileID == revision.profileID
+                        }) ?? true,
+                        let afterSnapshotData = revision.afterSnapshotData,
+                        let afterSnapshot = try? JSONDecoder().decode(
+                            MedicationPlanSnapshot.self,
+                            from: afterSnapshotData
+                        ),
+                        afterSnapshot.regimenID == revision.regimenID else { return false }
+                  let beforeSnapshotIsValid = revision.beforeSnapshotData.map {
+                      (try? JSONDecoder().decode(MedicationPlanSnapshot.self, from: $0)) != nil
+                  } ?? true
+                  return beforeSnapshotIsValid
+              }),
+              reconciliations.allSatisfy({ reconciliation in
+                  guard reconciliation.profileID.map(profileIDs.contains) == true,
+                        let source = MedicationPlanChangeSource(
+                            rawValue: reconciliation.sourceRawValue
+                        ),
+                        reconciliation.appointmentID.map({ appointmentID in
+                            appointmentsByID[appointmentID]?.profileID == reconciliation.profileID
+                        }) ?? true else {
+                      return false
+                  }
+                  let reviewedIDs = reconciliation.reviewedMedicationIDsData.flatMap {
+                      try? JSONDecoder().decode([UUID].self, from: $0)
+                  } ?? []
+                  let linkedRevisions = planRevisions.filter {
+                      $0.reconciliationID == reconciliation.id
+                  }
+                  return Set(reviewedIDs).count == reviewedIDs.count
+                      && reviewedIDs.allSatisfy {
+                          medicationProfileIDs[$0] == reconciliation.profileID
+                      }
+                      && Set(linkedRevisions.map(\.medicationID)) == Set(reviewedIDs)
+                      && linkedRevisions.allSatisfy {
+                          $0.profileID == reconciliation.profileID
+                              && $0.sourceRawValue == source.rawValue
+                              && $0.effectiveFrom == reconciliation.effectiveFrom
+                              && $0.appointmentID == reconciliation.appointmentID
+                      }
+              }),
+              refillTasks.allSatisfy({ task in
+                  guard task.profileID.map(profileIDs.contains) == true,
+                        householdIDs.contains(task.householdID),
+                        medicationIDs.contains(task.medicationID),
+                        task.profileID == medicationProfileIDs[task.medicationID],
+                        let status = MedicationRefillStatus(rawValue: task.statusRawValue),
+                        task.fillQuantity.map({ $0.isFinite && $0 > 0 }) ?? true,
+                        (task.assignedCaregiverIdentifier == nil)
+                            == (task.assignedCaregiverName == nil),
+                        (task.completedByCaregiverIdentifier == nil)
+                            == (task.completedByCaregiverName == nil) else {
+                      return false
+                  }
+                  return switch status {
+                  case .needsRequest:
+                      task.requestedAt == nil
+                          && task.readyForPickupAt == nil
+                          && task.pickedUpAt == nil
+                          && task.cancelledAt == nil
+                          && task.completedByCaregiverIdentifier == nil
+                  case .requested:
+                      task.requestedAt != nil
+                          && task.readyForPickupAt == nil
+                          && task.pickedUpAt == nil
+                          && task.cancelledAt == nil
+                          && task.completedByCaregiverIdentifier == nil
+                  case .readyForPickup:
+                      task.requestedAt != nil
+                          && task.readyForPickupAt.map { readyAt in
+                              task.requestedAt.map { $0 <= readyAt } == true
+                          } == true
+                          && task.pickedUpAt == nil
+                          && task.cancelledAt == nil
+                          && task.completedByCaregiverIdentifier == nil
+                  case .pickedUp:
+                      task.requestedAt != nil
+                          && task.readyForPickupAt.map { readyAt in
+                              task.requestedAt.map { $0 <= readyAt } == true
+                                  && task.pickedUpAt.map { readyAt <= $0 } == true
+                          } == true
+                          && task.cancelledAt == nil
+                          && task.completedByCaregiverIdentifier != nil
+                          && (task.fillQuantity ?? medicationsByID[task.medicationID]?.fillQuantity) != nil
+                  case .cancelled:
+                      task.cancelledAt != nil
+                          && task.pickedUpAt == nil
+                          && task.completedByCaregiverIdentifier != nil
+                          && (task.requestedAt.map { requestedAt in
+                              task.cancelledAt.map { requestedAt <= $0 } == true
+                          } ?? true)
+                          && (task.readyForPickupAt.map { readyAt in
+                              task.requestedAt.map { $0 <= readyAt } == true
+                                  && task.cancelledAt.map { readyAt <= $0 } == true
+                          } ?? true)
+                  }
+              }),
               doseRecords.allSatisfy({ doseRecord in
-                  doseRecord.profileID.map(profileIDs.contains) == true
+                  let status = MedicationDoseStatus(rawValue: doseRecord.statusRawValue)
+                  let reason = doseRecord.reasonRawValue.flatMap(MedicationDoseReason.init(rawValue:))
+                  let outcomeDetailsAreValid: Bool = switch status {
+                  case .taken, .skipped: reason == nil
+                  case .held: reason == .perClinicianInstruction
+                  case .refused: reason == .refused
+                  case .unable: reason == .unableToTake
+                  case .missed: reason != nil
+                  case nil: false
+                  }
+                  return doseRecord.profileID.map(profileIDs.contains) == true
                       && medicationIDs.contains(doseRecord.medicationID)
                       && doseRecord.profileID == medicationProfileIDs[doseRecord.medicationID]
                       && (doseRecord.regimenID.map(regimenIDs.contains) ?? true)
@@ -4172,9 +4630,20 @@ enum DataExportImportService {
                       } ?? true)
                       && doseRecord.doseAmount > 0
                       && !doseRecord.doseUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                      && MedicationDoseStatus(rawValue: doseRecord.statusRawValue) != nil
+                      && status != nil
+                      && (doseRecord.actualDoseAmount.map { $0.isFinite && $0 > 0 } ?? true)
+                      && (doseRecord.timingRawValue.map { MedicationDoseTiming(rawValue: $0) != nil } ?? true)
+                      && (doseRecord.reasonRawValue.map { MedicationDoseReason(rawValue: $0) != nil } ?? true)
+                      && (status == .taken
+                          ? (doseRecord.takenAt != nil
+                              && doseRecord.takenAt.map { $0 <= doseRecord.loggedAt } == true)
+                          : (doseRecord.takenAt == nil
+                              && doseRecord.actualDoseAmount == nil
+                              && doseRecord.timingRawValue == nil
+                              && doseRecord.careEventID == nil))
+                      && outcomeDetailsAreValid
                       && doseRecord.supplyAdjustmentApplied <= 0
-                      && doseRecord.supplyAdjustmentApplied >= -doseRecord.doseAmount
+                      && doseRecord.supplyAdjustmentApplied >= -(doseRecord.actualDoseAmount ?? doseRecord.doseAmount)
               }),
               supplyLogs.allSatisfy({ supplyLog in
                   supplyLog.profileID.map(profileIDs.contains) == true
@@ -4193,7 +4662,6 @@ enum DataExportImportService {
         let tripTravelers = envelope.tripTravelers ?? []
         let packingBags = envelope.packingBags ?? []
         let packingItems = envelope.packingItems ?? []
-        let householdIDs = Set((envelope.households ?? []).map(\.id))
         let homeTodoLists = envelope.homeTodoLists ?? []
         let homeTodoItems = envelope.homeTodoItems ?? []
         let homeTodoListIDs = Set(homeTodoLists.map(\.id))
@@ -4445,6 +4913,107 @@ enum DataExportImportService {
             result[id] = record
         }
         return result
+    }
+
+    private static func normalizeMedicationRegimenActivity(in object: inout [String: Any]) {
+        guard var regimens = object["medicationRegimens"] as? [[String: Any]] else { return }
+        let archivedMedicationIDs = Set(
+            (object["medications"] as? [[String: Any]] ?? []).compactMap { medication in
+                (medication["isArchived"] as? Bool) == true
+                    ? stringValue(medication["id"])
+                    : nil
+            }
+        )
+        let indexesByMedicationID = Dictionary(
+            grouping: regimens.indices,
+            by: { stringValue(regimens[$0]["medicationID"]) }
+        )
+        for (medicationID, indexes) in indexesByMedicationID {
+            let activeIndexes = indexes.filter { (regimens[$0]["isActive"] as? Bool) == true }
+            if archivedMedicationIDs.contains(medicationID) {
+                activeIndexes.forEach { regimens[$0]["isActive"] = false }
+                continue
+            }
+            guard activeIndexes.count > 1 else { continue }
+            let winner = activeIndexes.max { first, second in
+                let firstDate = recordDate(regimens[first])
+                let secondDate = recordDate(regimens[second])
+                if firstDate != secondDate { return firstDate < secondDate }
+                return stringValue(regimens[first]["id"]) < stringValue(regimens[second]["id"])
+            }
+            for index in activeIndexes where index != winner {
+                regimens[index]["isActive"] = false
+            }
+        }
+        object["medicationRegimens"] = regimens
+    }
+
+    private static func normalizeMedicationRefillTasks(in object: inout [String: Any]) {
+        guard var tasks = object["medicationRefillTasks"] as? [[String: Any]] else { return }
+        let indexesByMedicationID = Dictionary(
+            grouping: tasks.indices,
+            by: { stringValue(tasks[$0]["medicationID"]) }
+        )
+        for indexes in indexesByMedicationID.values {
+            let openIndexes = indexes.filter { index in
+                guard let status = tasks[index]["statusRawValue"] as? String else { return false }
+                return MedicationRefillStatus(rawValue: status)?.isOpen == true
+            }
+            guard openIndexes.count > 1,
+                  let winner = openIndexes.max(by: { first, second in
+                      let firstDate = recordDate(tasks[first])
+                      let secondDate = recordDate(tasks[second])
+                      if firstDate != secondDate { return firstDate < secondDate }
+                      return stringValue(tasks[first]["id"]) < stringValue(tasks[second]["id"])
+                  }) else { continue }
+            let resolutionDate = ISO8601DateFormatter().string(from: recordDate(tasks[winner]))
+            for index in openIndexes where index != winner {
+                tasks[index]["statusRawValue"] = MedicationRefillStatus.cancelled.rawValue
+                tasks[index]["cancelledAt"] = resolutionDate
+                tasks[index]["completedByCaregiverIdentifier"] = "family-sync"
+                tasks[index]["completedByCaregiverName"] = "Family Sync"
+                tasks[index]["updatedAt"] = resolutionDate
+            }
+        }
+        object["medicationRefillTasks"] = tasks
+
+        let openSourceKeys = Set(tasks.compactMap { task -> String? in
+            guard let rawStatus = task["statusRawValue"] as? String,
+                  MedicationRefillStatus(rawValue: rawStatus)?.isOpen == true else { return nil }
+            return "\(HouseholdAttentionSourceKind.medicationRefill.rawValue):\(stringValue(task["id"]).lowercased())"
+        })
+        let refillPrefix = "\(HouseholdAttentionSourceKind.medicationRefill.rawValue):"
+        if let claims = object["attentionClaims"] as? [[String: Any]] {
+            object["attentionClaims"] = claims.filter { claim in
+                let sourceKey = stringValue(claim["sourceKey"])
+                return !sourceKey.hasPrefix(refillPrefix) || openSourceKeys.contains(sourceKey)
+            }
+        }
+    }
+
+    private static func mergedMedicationRefillTask(
+        base: [String: Any]?,
+        local: [String: Any]?,
+        remote: [String: Any]?,
+        localChangedAt: Date?,
+        remoteChangedAt: Date?
+    ) -> [String: Any]? {
+        if let local, let remote {
+            let localPickedUp = stringValue(local["statusRawValue"])
+                == MedicationRefillStatus.pickedUp.rawValue
+            let remotePickedUp = stringValue(remote["statusRawValue"])
+                == MedicationRefillStatus.pickedUp.rawValue
+            if localPickedUp != remotePickedUp {
+                return localPickedUp ? local : remote
+            }
+        }
+        return mergedRecord(
+            base: base,
+            local: local,
+            remote: remote,
+            localChangedAt: localChangedAt,
+            remoteChangedAt: remoteChangedAt
+        )
     }
 
     private static func mergedRecord(

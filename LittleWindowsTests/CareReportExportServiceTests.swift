@@ -494,6 +494,155 @@ final class CareReportExportServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testReportExportsRichMedicationOutcomesWithoutDuplicatingTimelineMirror() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(profileID: profile.id, name: "Test Medication")
+        let regimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduleKind: .asNeeded,
+            startDate: Date(timeIntervalSince1970: 0),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        context.insert(profile)
+        context.insert(medication)
+        context.insert(regimen)
+        try context.save()
+
+        let takenAt = Date(timeIntervalSince1970: 3_600)
+        _ = try XCTUnwrap(MedicationService.recordDose(
+            medication: medication,
+            regimen: regimen,
+            status: .taken,
+            at: takenAt,
+            takenAt: takenAt,
+            actualDoseAmount: 0.5,
+            timing: .late,
+            notes: "Actual dose note",
+            context: context
+        ))
+        let missed = MedicationDoseRecord(
+            profileID: profile.id,
+            medicationID: medication.id,
+            regimenID: regimen.id,
+            scheduledAt: Date(timeIntervalSince1970: 7_200),
+            status: .missed,
+            loggedAt: Date(timeIntervalSince1970: 7_500),
+            reason: .away,
+            doseAmount: 1,
+            doseUnit: "tablet",
+            caregiverName: "Test Caregiver",
+            notes: "Missed dose note"
+        )
+        context.insert(missed)
+        try context.save()
+
+        let report = try CareReportExportService.makeReport(
+            profile: profile,
+            options: CareReportExportOptions(
+                startDate: Date(timeIntervalSince1970: 0),
+                endDate: Date(timeIntervalSince1970: 0),
+                includeNotes: true,
+                includeCaregiverNames: true,
+                includeAppointments: false,
+                includeMilestones: false
+            ),
+            context: context,
+            calendar: Calendar(identifier: .gregorian),
+            now: Date(timeIntervalSince1970: 8_000)
+        )
+        XCTAssertTrue(report.events.isEmpty)
+        XCTAssertEqual(report.medicationDoseRecords.count, 2)
+
+        let csv = CareReportExportService.csvString(for: report)
+        XCTAssertTrue(csv.contains("Taken late, different amount"))
+        XCTAssertTrue(csv.contains("Missed"))
+        XCTAssertTrue(csv.contains("Reason: Away from home"))
+        XCTAssertTrue(csv.contains("Actual dose note"))
+        XCTAssertTrue(csv.contains("Test Caregiver"))
+        XCTAssertEqual(csv.components(separatedBy: "\"Medication Dose\"").count - 1, 2)
+    }
+
+    @MainActor
+    func testMedicationReportRangeUsesActualOrScheduledDoseTimeForBackfilledRecords() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(profileID: profile.id, name: "Test Medication")
+        context.insert(profile)
+        context.insert(medication)
+        let selectedDay = Date(timeIntervalSince1970: 10 * 86_400)
+        let nextDay = selectedDay.addingTimeInterval(86_400)
+        let backfilledTaken = MedicationDoseRecord(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduledAt: selectedDay.addingTimeInterval(8 * 60 * 60),
+            status: .taken,
+            loggedAt: nextDay.addingTimeInterval(10 * 60 * 60),
+            takenAt: selectedDay.addingTimeInterval(9 * 60 * 60),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        let backfilledMissed = MedicationDoseRecord(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduledAt: selectedDay.addingTimeInterval(12 * 60 * 60),
+            status: .missed,
+            loggedAt: nextDay.addingTimeInterval(11 * 60 * 60),
+            reason: .away,
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        let takenOnNextDay = MedicationDoseRecord(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduledAt: selectedDay.addingTimeInterval(18 * 60 * 60),
+            status: .taken,
+            loggedAt: nextDay.addingTimeInterval(20 * 60 * 60),
+            takenAt: nextDay.addingTimeInterval(19 * 60 * 60),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        context.insert(backfilledTaken)
+        context.insert(backfilledMissed)
+        context.insert(takenOnNextDay)
+        try context.save()
+        var reportCalendar = Calendar(identifier: .gregorian)
+        reportCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        let report = try CareReportExportService.makeReport(
+            profile: profile,
+            options: CareReportExportOptions(
+                startDate: selectedDay,
+                endDate: selectedDay,
+                includeNotes: true,
+                includeCaregiverNames: true,
+                includeAppointments: false,
+                includeMilestones: false
+            ),
+            context: context,
+            calendar: reportCalendar,
+            now: nextDay
+        )
+
+        XCTAssertEqual(
+            Set(report.medicationDoseRecords.map(\.id)),
+            Set([backfilledTaken.id, backfilledMissed.id])
+        )
+    }
+
+    @MainActor
     func testDefaultFilenameNormalizesReversedCustomDates() throws {
         let profile = CareProfile(
             profileType: .child,

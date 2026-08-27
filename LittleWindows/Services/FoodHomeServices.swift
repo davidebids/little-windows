@@ -1555,6 +1555,7 @@ enum TodayHomeSummaryRoute: Equatable {
     case food(FoodRouteCommand)
     case appointment(UUID, profileID: UUID?)
     case medications(profileID: UUID)
+    case medication(UUID, profileID: UUID)
     case routines(profileID: UUID?)
     case plannedSolidMeal(UUID, profileID: UUID)
     case solidAllergen(String, profileID: UUID)
@@ -1601,6 +1602,8 @@ struct TodayHomeSummaryItem: Identifiable, Equatable {
     var claimedCaregiverName: String?
     var supportsClaim: Bool = false
     var followUpID: UUID?
+    var refillTaskID: UUID?
+    var completionLabel: String?
     var medicationAttention: TodayMedicationAttention?
 }
 
@@ -1701,6 +1704,7 @@ enum TodayHomeSummaryService {
         medicationRegimens: [MedicationRegimen] = [],
         medicationPhases: [MedicationSchedulePhase] = [],
         medicationDoseRecords: [MedicationDoseRecord] = [],
+        medicationRefillTasks: [MedicationRefillTask] = [],
         appointmentFollowUps: [AppointmentFollowUp] = [],
         careRoutines: [CareRoutine] = [],
         careRoutineRuns: [CareRoutineRun] = [],
@@ -1774,6 +1778,7 @@ enum TodayHomeSummaryService {
             medicationRegimens: medicationRegimens,
             medicationPhases: medicationPhases,
             medicationDoseRecords: medicationDoseRecords,
+            medicationRefillTasks: medicationRefillTasks,
             appointmentFollowUps: appointmentFollowUps,
             careRoutines: careRoutines,
             careRoutineRuns: careRoutineRuns,
@@ -1843,6 +1848,7 @@ enum TodayHomeSummaryService {
                 returnRequests: returnRequests,
                 reminders: reminders,
                 medicationRegimens: medicationRegimens,
+                medicationRefillTasks: medicationRefillTasks,
                 appointmentFollowUps: appointmentFollowUps,
                 careRoutines: careRoutines,
                 careRoutineRuns: careRoutineRuns,
@@ -1873,6 +1879,7 @@ enum TodayHomeSummaryService {
         medicationRegimens: [MedicationRegimen],
         medicationPhases: [MedicationSchedulePhase],
         medicationDoseRecords: [MedicationDoseRecord],
+        medicationRefillTasks: [MedicationRefillTask],
         appointmentFollowUps: [AppointmentFollowUp],
         careRoutines: [CareRoutine],
         careRoutineRuns: [CareRoutineRun],
@@ -1893,6 +1900,109 @@ enum TodayHomeSummaryService {
             records: medicationDoseRecords,
             now: now
         )
+        let medicationIDsWithOpenRefills = Set(
+            medicationRefillTasks.filter(\.isOpen).map(\.medicationID)
+        )
+        let supplyProjections = MedicationService.supplyProjections(
+            medications: medications,
+            doseRecords: medicationDoseRecords,
+            now: now,
+            calendar: calendar
+        )
+        let medicationsByID = Dictionary(
+            uniqueKeysWithValues: medications.map { ($0.id, $0) }
+        )
+        items.append(contentsOf: medications.compactMap { medication in
+            guard !medication.isArchived,
+                  !medicationIDsWithOpenRefills.contains(medication.id),
+                  let profileID = medication.profileID,
+                  let profile = profilesByID[profileID] else { return nil }
+            let projection = supplyProjections[medication.id]
+            let projectedPlanningDate = projection.flatMap {
+                calendar.date(
+                    byAdding: .day,
+                    value: -medication.refillLeadDays,
+                    to: $0.estimatedRunOutDate
+                )
+            }
+            let planningDate: Date
+            if medication.needsRefill {
+                planningDate = min(projectedPlanningDate ?? now, now)
+            } else if let projectedPlanningDate {
+                planningDate = projectedPlanningDate
+            } else {
+                return nil
+            }
+            guard planningDate < dayEnd else { return nil }
+            let renewalNeeded = medication.refillsRemaining == 0
+                || medication.prescriptionExpirationDate.map { $0 < now } == true
+            let detail = projection.map {
+                "Estimated run-out \($0.estimatedRunOutDate.formatted(date: .abbreviated, time: .omitted)) · \(profile.name)"
+            } ?? "Supply is at or below the refill alert · \(profile.name)"
+            return TodayHomeSummaryItem(
+                id: "attention-refill-plan-\(medication.id.uuidString)",
+                category: .medications,
+                title: renewalNeeded
+                    ? "Renew prescription for \(medication.name)"
+                    : "Start refill for \(medication.name)",
+                detail: detail,
+                badge: renewalNeeded ? "Renewal" : "Refill due",
+                systemImage: renewalNeeded
+                    ? "doc.badge.clock.fill"
+                    : "calendar.badge.exclamationmark",
+                urgency: planningDate <= now ? .attention : .normal,
+                route: .medication(medication.id, profileID: profileID),
+                sortDate: planningDate,
+                sourceUpdatedAt: medication.updatedAt,
+                profileID: profileID,
+                profileName: profile.name,
+                sourceLabel: renewalNeeded ? "Prescription renewal" : "Medication refill",
+                dueLabel: dueText(planningDate, now: now, calendar: calendar)
+            )
+        })
+        items.append(contentsOf: medicationRefillTasks.compactMap { task in
+            guard task.householdID == householdID,
+                  task.isOpen,
+                  let profileID = task.profileID,
+                  let profile = profilesByID[profileID],
+                  let medication = medicationsByID[task.medicationID],
+                  !medication.isArchived else { return nil }
+            let urgency = task.status == .readyForPickup
+                ? TodayHomeSummaryUrgency.attention
+                : dueUrgency(task.dueDate, now: now, dayEnd: dayEnd)
+            let timing = task.dueDate.map { dueText($0, now: now, calendar: calendar) }
+                ?? "No due date"
+            let actionLabel: String = switch task.status {
+            case .needsRequest: "Mark requested"
+            case .requested: "Ready for pickup"
+            case .readyForPickup: "Picked up"
+            case .pickedUp, .cancelled: "Complete"
+            }
+            return TodayHomeSummaryItem(
+                id: "attention-refill-\(task.id.uuidString)",
+                category: .medications,
+                title: "Refill \(medication.name)",
+                detail: "\(task.status.displayName) · \(profile.name)",
+                badge: task.status == .readyForPickup ? "Pickup" : "Refill",
+                systemImage: task.status == .readyForPickup
+                    ? "bag.badge.checkmark.fill"
+                    : "pills.circle.fill",
+                urgency: urgency,
+                route: .medication(medication.id, profileID: profileID),
+                sortDate: task.dueDate ?? task.updatedAt,
+                sourceKey: task.attentionSourceKey,
+                sourceUpdatedAt: task.updatedAt,
+                profileID: profileID,
+                profileName: profile.name,
+                sourceLabel: "Medication refill",
+                dueLabel: timing,
+                claimedCaregiverIdentifier: task.assignedCaregiverIdentifier,
+                claimedCaregiverName: task.assignedCaregiverName,
+                supportsClaim: true,
+                refillTaskID: task.id,
+                completionLabel: actionLabel
+            )
+        })
         items.append(contentsOf: appointmentFollowUps.compactMap { followUp in
             guard followUp.householdID == householdID,
                   !followUp.isCompleted,
@@ -2000,6 +2110,12 @@ enum TodayHomeSummaryService {
         )
         let phasesByRegimenID = Dictionary(grouping: phases, by: \.regimenID)
         let phasesByID = Dictionary(uniqueKeysWithValues: phases.map { ($0.id, $0) })
+        var recordsByRegimenID = [UUID: [MedicationDoseRecord]]()
+        for record in records {
+            guard let regimenID = record.regimenID else { continue }
+            recordsByRegimenID[regimenID, default: []].append(record)
+        }
+        let snoozedOccurrenceKeys = MedicationSnoozeStateStore.activeOccurrenceKeys(now: now)
         let rangeStart = now.addingTimeInterval(-24 * 60 * 60)
         let rangeEnd = now.addingTimeInterval(2 * 60 * 60)
         return regimens.filter { $0.isActive }.flatMap { regimen -> [TodayHomeSummaryItem] in
@@ -2013,9 +2129,9 @@ enum TodayHomeSummaryService {
                     from: rangeStart,
                     through: rangeEnd
                 ),
-                records: records.filter { $0.regimenID == regimen.id }
+                records: recordsByRegimenID[regimen.id] ?? []
             ).filter {
-                !MedicationSnoozeStateStore.isSnoozed(occurrenceKey: $0.occurrenceKey, now: now)
+                !snoozedOccurrenceKeys.contains($0.occurrenceKey)
             }
             return occurrences.map { occurrence in
                 let overdueSeconds = now.timeIntervalSince(occurrence.scheduledAt)
@@ -2311,6 +2427,7 @@ enum TodayHomeSummaryService {
         returnRequests: [ReturnRequest],
         reminders: [FoodReminder],
         medicationRegimens: [MedicationRegimen],
+        medicationRefillTasks: [MedicationRefillTask],
         appointmentFollowUps: [AppointmentFollowUp],
         careRoutines: [CareRoutine],
         careRoutineRuns: [CareRoutineRun],
@@ -2355,6 +2472,18 @@ enum TodayHomeSummaryService {
                       let profileID = medicationRegimens.first(where: { $0.id == regimenID })?.profileID,
                       sharedProfileIDs.contains(profileID) else { continue }
                 routes[sourceKey] = .medications(profileID: profileID)
+
+            case .medicationRefill:
+                guard let refillID = UUID(uuidString: value),
+                      let refillTask = medicationRefillTasks.first(where: {
+                          $0.id == refillID && $0.householdID == householdID
+                      }),
+                      let profileID = refillTask.profileID,
+                      sharedProfileIDs.contains(profileID) else { continue }
+                routes[sourceKey] = .medication(
+                    refillTask.medicationID,
+                    profileID: profileID
+                )
 
             case .routine:
                 let components = value.split(separator: ":")

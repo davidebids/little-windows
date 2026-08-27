@@ -28,6 +28,7 @@ struct AppointmentDetailView: View {
     @State private var followUpToEdit: AppointmentFollowUp?
     @State private var followUpPendingDeletion: AppointmentFollowUp?
     @State private var showingNewFollowUp = false
+    @State private var showingMedicationReconciliation = false
     @State private var hasLoadedVisitJournalDrafts = false
     @State private var pendingVisitJournalSave: Task<Void, Never>?
     @State private var actionErrorMessage: String?
@@ -362,6 +363,18 @@ struct AppointmentDetailView: View {
         .sheet(isPresented: $showingNewFollowUp) {
             followUpEditor(followUp: nil)
         }
+        .sheet(isPresented: $showingMedicationReconciliation) {
+            if let profile {
+                NavigationStack {
+                    MedicationReconciliationView(
+                        profile: profile,
+                        appointmentID: appointment.id,
+                        defaultSource: appointmentReconciliationSource,
+                        defaultEffectiveFrom: appointment.startDate
+                    )
+                }
+            }
+        }
         .sheet(item: $followUpToEdit) { followUp in
             followUpEditor(followUp: followUp)
         }
@@ -469,7 +482,19 @@ struct AppointmentDetailView: View {
                 } label: {
                     Label("Review or add medications", systemImage: "pills.fill")
                 }
+                Button("Reconcile after this visit", systemImage: "checkmark.seal.fill") {
+                    showingMedicationReconciliation = true
+                }
             }
+        }
+    }
+
+    private var appointmentReconciliationSource: MedicationPlanChangeSource {
+        switch appointment.appointmentType {
+        case .urgentCare, .procedure:
+            .dischargePaperwork
+        default:
+            .clinician
         }
     }
 

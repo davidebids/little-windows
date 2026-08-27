@@ -41,6 +41,12 @@ struct PackingTripDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            TripMedicationSupplyBanner(
+                trip: trip,
+                travelers: allTravelers.filter { $0.tripID == trip.id },
+                profiles: profiles
+            )
+
             Picker("Trip workspace", selection: workspaceSelection) {
                 ForEach(TripDetailWorkspace.allCases) { value in
                     Text(value.title).tag(value)
@@ -81,6 +87,112 @@ struct PackingTripDetailView: View {
                     shoppingItems: shoppingItems
                 )
             }
+        }
+    }
+}
+
+private struct TripMedicationSupplyWarning: Identifiable {
+    let medication: Medication
+    let profileName: String
+    let risk: MedicationTripSupplyRisk
+
+    var id: UUID { medication.id }
+}
+
+private struct TripMedicationSupplyBanner: View {
+    @Query private var medications: [Medication]
+    @Query private var doseRecords: [MedicationDoseRecord]
+
+    let trip: PackingTrip
+    let travelers: [TripTraveler]
+    let profiles: [CareProfile]
+
+    init(trip: PackingTrip, travelers: [TripTraveler], profiles: [CareProfile]) {
+        self.trip = trip
+        self.travelers = travelers
+        self.profiles = profiles
+        let travelerProfileIDs = Set(travelers.compactMap(\.profileID).map(Optional.some))
+        var medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate {
+                !$0.isArchived &&
+                    travelerProfileIDs.contains($0.profileID)
+            },
+            sortBy: [SortDescriptor(\Medication.name)]
+        )
+        medicationDescriptor.fetchLimit = 500
+        _medications = Query(medicationDescriptor)
+        let lookbackStart = Date().addingTimeInterval(-60 * 86_400)
+        var doseDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate {
+                $0.loggedAt >= lookbackStart &&
+                    travelerProfileIDs.contains($0.profileID)
+            },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        )
+        doseDescriptor.fetchLimit = 10_000
+        _doseRecords = Query(doseDescriptor)
+    }
+
+    private var warnings: [TripMedicationSupplyWarning] {
+        let profileIDs = Set(travelers.compactMap(\.profileID))
+        let profileNames = Dictionary(
+            profiles.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let travelerMedications = medications.filter { medication in
+            medication.profileID.map(profileIDs.contains) == true
+        }
+        let projections = MedicationService.supplyProjections(
+            medications: travelerMedications,
+            doseRecords: doseRecords
+        )
+        return travelerMedications.compactMap { medication in
+            guard let profileID = medication.profileID,
+                  let projection = projections[medication.id],
+                  let risk = MedicationService.tripSupplyRisk(
+                      projection: projection,
+                      trip: trip
+                  ) else { return nil }
+            return TripMedicationSupplyWarning(
+                medication: medication,
+                profileName: profileNames[profileID] ?? "Traveler",
+                risk: risk
+            )
+        }
+    }
+
+    var body: some View {
+        let warnings = warnings
+        if !warnings.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Label("Medication supply check", systemImage: "pills.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                ForEach(warnings.prefix(3)) { warning in
+                    Text(warningText(warning))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if warnings.count > 3 {
+                    Text("+ \(warnings.count - 3) more medication warnings")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color.orange.opacity(0.1))
+            .accessibilityIdentifier("trip.medication-supply-warning")
+        }
+    }
+
+    private func warningText(_ warning: TripMedicationSupplyWarning) -> String {
+        switch warning.risk {
+        case .beforeTrip(let runOutDate):
+            "\(warning.medication.name) for \(warning.profileName) may run out before the trip (\(runOutDate.formatted(date: .abbreviated, time: .omitted)))."
+        case .duringTrip(let runOutDate):
+            "\(warning.medication.name) for \(warning.profileName) will run out during the trip (\(runOutDate.formatted(date: .abbreviated, time: .omitted)))."
         }
     }
 }

@@ -1586,6 +1586,8 @@ struct TodayView: View {
             deepLinkRouter.openAppointment(appointmentID, profileID: profileID)
         case .medications(let profileID):
             deepLinkRouter.openMedications(profileID: profileID)
+        case .medication(let medicationID, let profileID):
+            deepLinkRouter.openMedication(medicationID, profileID: profileID)
         case .routines(let profileID):
             deepLinkRouter.openRoutines(profileID: profileID)
         case .plannedSolidMeal(let mealID, let profileID):
@@ -4104,6 +4106,7 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
     @Query private var medicationRegimens: [MedicationRegimen]
     @Query private var medicationPhases: [MedicationSchedulePhase]
     @Query private var medicationDoseRecords: [MedicationDoseRecord]
+    @Query private var medicationRefillTasks: [MedicationRefillTask]
     @Query private var appointmentFollowUps: [AppointmentFollowUp]
     @Query private var careRoutines: [CareRoutine]
     @Query private var careRoutineRuns: [CareRoutineRun]
@@ -4134,7 +4137,7 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
         self.currentCaregiverName = currentCaregiverName
         self.content = content
         let todayStart = Calendar.current.startOfDay(for: Date())
-        let medicationRecordStart = Calendar.current.date(byAdding: .day, value: -2, to: todayStart)
+        let medicationRecordStart = Calendar.current.date(byAdding: .day, value: -60, to: todayStart)
             ?? todayStart
         let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: todayStart)
             ?? Date().addingTimeInterval(86_400)
@@ -4270,10 +4273,17 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
 
         var doseRecordDescriptor = FetchDescriptor<MedicationDoseRecord>(
             predicate: #Predicate { $0.loggedAt >= medicationRecordStart },
-            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+            sortBy: [SortDescriptor(\MedicationDoseRecord.updatedAt, order: .reverse)]
         )
-        doseRecordDescriptor.fetchLimit = 1_500
+        doseRecordDescriptor.fetchLimit = 10_000
         _medicationDoseRecords = Query(doseRecordDescriptor)
+
+        var refillTaskDescriptor = FetchDescriptor<MedicationRefillTask>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\MedicationRefillTask.updatedAt, order: .reverse)]
+        )
+        refillTaskDescriptor.fetchLimit = 500
+        _medicationRefillTasks = Query(refillTaskDescriptor)
 
         var followUpDescriptor = FetchDescriptor<AppointmentFollowUp>(
             predicate: #Predicate { $0.householdID == householdID },
@@ -4353,6 +4363,18 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
         }
     }
 
+    private func combineLatestRevision<T>(
+        _ values: [T],
+        id: KeyPath<T, UUID>,
+        updatedAt: KeyPath<T, Date>,
+        into hasher: inout Hasher
+    ) {
+        hasher.combine(values.count)
+        guard let latest = values.first else { return }
+        hasher.combine(latest[keyPath: id])
+        hasher.combine(latest[keyPath: updatedAt])
+    }
+
     private func dataFingerprint(caregiverIdentifier: String) -> Int {
         var hasher = Hasher()
         hasher.combine(householdID)
@@ -4377,7 +4399,16 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
         combineRevision(medications, id: \.id, updatedAt: \.updatedAt, into: &hasher)
         combineRevision(medicationRegimens, id: \.id, updatedAt: \.updatedAt, into: &hasher)
         combineRevision(medicationPhases, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(medicationDoseRecords, id: \.id, updatedAt: \.updatedAt, into: &hasher)
+        // This query is sorted by updatedAt descending, so count plus the newest
+        // mutation detects inserts, edits, and deletes without hashing up to
+        // 10,000 records on every unrelated view invalidation.
+        combineLatestRevision(
+            medicationDoseRecords,
+            id: \.id,
+            updatedAt: \.updatedAt,
+            into: &hasher
+        )
+        combineRevision(medicationRefillTasks, id: \.id, updatedAt: \.updatedAt, into: &hasher)
         combineRevision(appointmentFollowUps, id: \.id, updatedAt: \.updatedAt, into: &hasher)
         combineRevision(careRoutines, id: \.id, updatedAt: \.updatedAt, into: &hasher)
         combineRevision(careRoutineRuns, id: \.id, updatedAt: \.updatedAt, into: &hasher)
@@ -4422,6 +4453,7 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
             medicationRegimens: medicationRegimens,
             medicationPhases: medicationPhases,
             medicationDoseRecords: medicationDoseRecords,
+            medicationRefillTasks: medicationRefillTasks,
             appointmentFollowUps: appointmentFollowUps,
             careRoutines: careRoutines,
             careRoutineRuns: careRoutineRuns,
@@ -4513,6 +4545,7 @@ private struct TodayHomeSummaryView: View {
     @State private var isSnoozedExpanded = false
     @State private var showingAllAttention = false
     @State private var actionErrorMessage: String?
+    @State private var refillTaskPendingPickupID: UUID?
 
     init(
         summary: TodayHomeSummary,
@@ -4780,6 +4813,28 @@ private struct TodayHomeSummaryView: View {
         } message: {
             Text(actionErrorMessage ?? "Please try again.")
         }
+        .appActionSheet(
+            isPresented: Binding(
+                get: { refillTaskPendingPickupID != nil },
+                set: { if !$0 { refillTaskPendingPickupID = nil } }
+            ),
+            title: "Mark refill picked up?",
+            message: "This adds the fill quantity to medication supply and reduces remaining refills by one.",
+            systemImage: "bag.badge.checkmark.fill",
+            tint: .green,
+            options: refillTaskPendingPickupID.map { refillTaskID in
+                [AppActionSheetOption(
+                    title: "Confirm Pickup",
+                    subtitle: "Record the fill and close the refill task.",
+                    systemImage: "checkmark.circle.fill",
+                    tint: .green
+                ) {
+                    refillTaskPendingPickupID = nil
+                    completeRefillTask(refillTaskID, pickupConfirmed: true)
+                }]
+            } ?? [],
+            cancelAction: { refillTaskPendingPickupID = nil }
+        )
     }
 
     private func acknowledge(_ item: TodayHomeSummaryItem) {
@@ -4841,6 +4896,10 @@ private struct TodayHomeSummaryView: View {
     }
 
     private func complete(_ item: TodayHomeSummaryItem) {
+        if let refillTaskID = item.refillTaskID {
+            completeRefillTask(refillTaskID)
+            return
+        }
         guard let followUpID = item.followUpID else { return }
         let descriptor = FetchDescriptor<AppointmentFollowUp>(
             predicate: #Predicate { $0.id == followUpID }
@@ -4852,6 +4911,42 @@ private struct TodayHomeSummaryView: View {
             context: modelContext
         ) else {
             actionErrorMessage = "The follow-up couldn't be completed. Please try again."
+            return
+        }
+    }
+
+    private func completeRefillTask(
+        _ refillTaskID: UUID,
+        pickupConfirmed: Bool = false
+    ) {
+        let taskDescriptor = FetchDescriptor<MedicationRefillTask>(
+            predicate: #Predicate { $0.id == refillTaskID }
+        )
+        guard let task = try? modelContext.fetch(taskDescriptor).first else { return }
+        let medicationID = task.medicationID
+        let medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.id == medicationID }
+        )
+        guard let medication = try? modelContext.fetch(medicationDescriptor).first else { return }
+        if task.status == .readyForPickup, !pickupConfirmed {
+            refillTaskPendingPickupID = refillTaskID
+            return
+        }
+        let nextStatus: MedicationRefillStatus = switch task.status {
+        case .needsRequest: .requested
+        case .requested: .readyForPickup
+        case .readyForPickup: .pickedUp
+        case .pickedUp, .cancelled: task.status
+        }
+        guard MedicationService.setRefillStatus(
+            task,
+            medication: medication,
+            status: nextStatus,
+            context: modelContext
+        ) else {
+            actionErrorMessage = nextStatus == .pickedUp
+                ? "Add a fill quantity in Medications before completing pickup."
+                : "The refill task couldn't be updated."
             return
         }
     }
@@ -4874,7 +4969,7 @@ private struct TodayHomeSummaryView: View {
 
     private func performMedicationAction(
         _ item: TodayHomeSummaryItem,
-        status: MedicationDoseStatus
+        status: MedicationDoseStatus?
     ) {
         guard let medication = item.medicationAttention else { return }
         openMedicationDose(MedicationDoseRouteCommand(
@@ -4904,7 +4999,7 @@ private struct TodayHomeAttentionCard: View {
     let clearClaim: (TodayHomeSummaryItem) -> Void
     let complete: (TodayHomeSummaryItem) -> Void
     let snooze: (TodayHomeSummaryItem, Date) -> Void
-    let medicationAction: (TodayHomeSummaryItem, MedicationDoseStatus) -> Void
+    let medicationAction: (TodayHomeSummaryItem, MedicationDoseStatus?) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -5013,7 +5108,7 @@ private struct TodayHomeAttentionRow: View {
     let clearClaim: () -> Void
     let complete: () -> Void
     let snooze: (Date) -> Void
-    let medicationAction: (MedicationDoseStatus) -> Void
+    let medicationAction: (MedicationDoseStatus?) -> Void
 
     @State private var showingHandoffNoteEditor = false
 
@@ -5026,10 +5121,12 @@ private struct TodayHomeAttentionRow: View {
     }
 
     private var assignmentText: String? {
+        if item.supportsClaim,
+           let claimed = item.claimedCaregiverName,
+           !claimed.isEmpty {
+            return "Responsible: \(claimed)"
+        }
         if item.isFamilyShared && item.supportsClaim {
-            if let claimed = item.claimedCaregiverName, !claimed.isEmpty {
-                return "Responsible: \(claimed)"
-            }
             return "Unassigned"
         }
         return nil
@@ -5040,13 +5137,30 @@ private struct TodayHomeAttentionRow: View {
         return "Seen by \(item.acknowledgedByNames.joined(separator: ", "))"
     }
 
-    private var metadataText: String {
-        let source = item.sourceLabel ?? item.category.title
-        let owner = item.profileName ?? "Household"
-        let badgeAlreadyIdentifiesSource = item.badge?.localizedCaseInsensitiveCompare(source) == .orderedSame
-        return [badgeAlreadyIdentifiesSource ? nil : source, "Owner: \(owner)", item.dueLabel]
-            .compactMap { $0 }
-            .joined(separator: " · ")
+    private var supportingText: String? {
+        var seen = Set<String>()
+        var fragments = [String]()
+        let badgeKey = item.badge.map(normalizedMetadataKey)
+
+        func appendUniqueFragments(from value: String?) {
+            guard let value else { return }
+            for fragment in value.components(separatedBy: " · ") {
+                let trimmed = fragment.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                let key = normalizedMetadataKey(trimmed)
+                guard key != badgeKey, seen.insert(key).inserted else { continue }
+                fragments.append(trimmed)
+            }
+        }
+
+        appendUniqueFragments(from: item.detail)
+        appendUniqueFragments(from: item.profileName)
+        appendUniqueFragments(from: item.dueLabel)
+        return fragments.isEmpty ? nil : fragments.joined(separator: " · ")
+    }
+
+    private func normalizedMetadataKey(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     var body: some View {
@@ -5074,13 +5188,12 @@ private struct TodayHomeAttentionRow: View {
                                     .background(tint.opacity(0.1), in: Capsule())
                             }
                         }
-                        Text(item.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                        Text(metadataText)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
+                        if let supportingText {
+                            Text(supportingText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
                         if let assignmentText {
                             Text(assignmentText)
                                 .font(.caption2.weight(.medium))
@@ -5114,10 +5227,12 @@ private struct TodayHomeAttentionRow: View {
                     Button("Taken") { medicationAction(.taken) }
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
-                    Button("Skipped") { medicationAction(.skipped) }
+                    Button("Other…") { medicationAction(nil) }
                         .buttonStyle(.bordered)
-                } else if item.followUpID != nil {
-                    Button("Complete", systemImage: "checkmark") { complete() }
+                } else if item.followUpID != nil || item.refillTaskID != nil {
+                    Button(item.completionLabel ?? "Complete", systemImage: "checkmark") {
+                        complete()
+                    }
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
                 }

@@ -382,6 +382,65 @@ final class MedicationScheduleEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testAdherenceSeparatesDoseOutcomesAndTakenExceptions() throws {
+        let regimen = makeRegimen(kind: .daily)
+        let profileID = try XCTUnwrap(regimen.profileID)
+        let occurrences = MedicationScheduleEngine.occurrences(
+            regimen: regimen,
+            phases: [],
+            from: date(1),
+            through: date(7, hour: 23),
+            calendar: calendar
+        )
+        XCTAssertEqual(occurrences.count, 7)
+
+        let outcomes: [(MedicationDoseStatus, MedicationDoseTiming?, Double?, MedicationDoseReason?)] = [
+            (.taken, .late, 0.5, nil),
+            (.held, nil, nil, .perClinicianInstruction),
+            (.refused, nil, nil, .refused),
+            (.unable, nil, nil, .unableToTake),
+            (.missed, nil, nil, .outOfSupply),
+            (.skipped, nil, nil, nil)
+        ]
+        let records = zip(occurrences, outcomes).map { occurrence, outcome in
+            MedicationDoseRecord(
+                profileID: profileID,
+                medicationID: regimen.medicationID,
+                regimenID: regimen.id,
+                occurrenceKey: occurrence.occurrenceKey,
+                scheduledAt: occurrence.scheduledAt,
+                status: outcome.0,
+                takenAt: outcome.0 == .taken ? occurrence.scheduledAt.addingTimeInterval(45 * 60) : nil,
+                actualDoseAmount: outcome.2,
+                timing: outcome.1,
+                reason: outcome.3,
+                doseAmount: occurrence.doseAmount,
+                doseUnit: occurrence.doseUnit
+            )
+        }
+
+        let summary = MedicationScheduleEngine.adherence(
+            occurrences: occurrences,
+            records: records,
+            through: date(7, hour: 23)
+        )
+        XCTAssertEqual(summary.scheduledCount, 7)
+        XCTAssertEqual(summary.takenCount, 1)
+        XCTAssertEqual(summary.lateCount, 1)
+        XCTAssertEqual(summary.differentAmountCount, 1)
+        XCTAssertEqual(summary.heldCount, 1)
+        XCTAssertEqual(summary.refusedCount, 1)
+        XCTAssertEqual(summary.unableCount, 1)
+        XCTAssertEqual(summary.recordedMissedCount, 1)
+        XCTAssertEqual(summary.skippedCount, 1)
+        XCTAssertEqual(summary.missedCount, 1)
+        XCTAssertEqual(summary.recordedNotTakenCount, 5)
+        XCTAssertEqual(summary.takenExceptionCount, 1)
+        XCTAssertEqual(summary.exceptionCount, 7)
+        XCTAssertEqual(summary.completionRate ?? -1, 1.0 / 7.0, accuracy: 0.000_001)
+    }
+
+    @MainActor
     func testAdultProfilesDefaultPrivateAndExposeAdultCapabilities() {
         let profile = CareProfile(
             profileType: .adult,
@@ -438,6 +497,845 @@ final class MedicationScheduleEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testMedicationPlanEditsCreateVersionsAndPreservePriorDoseMeaning() throws {
+        let planCalendar = MedicationScheduleDate.currentCalendar()
+        func planDate(_ day: Int, hour: Int = 0) -> Date {
+            planCalendar.date(from: DateComponents(
+                year: 2026,
+                month: 1,
+                day: day,
+                hour: hour
+            ))!
+        }
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        context.insert(profile)
+        let medication = MedicationService.createMedication(
+            profileID: profile.id,
+            name: "Test Medication",
+            form: .tablet,
+            strength: 10,
+            strengthUnit: "mg",
+            route: .oral,
+            instructions: "Take with food.",
+            reasonForTaking: "Test purpose",
+            prescriber: "Test Clinician",
+            pharmacy: "Test Pharmacy",
+            currentSupply: nil,
+            refillThreshold: nil,
+            context: context
+        )
+        let originalRegimen = try XCTUnwrap(MedicationService.createRegimen(
+            for: medication,
+            scheduleKind: .alternating,
+            startDate: planDate(1),
+            endDate: nil,
+            doseAmount: 1,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 8, minute: 0)],
+            weekdayMask: 127,
+            intervalDays: 1,
+            cycleOnDays: 1,
+            cycleOffDays: 0,
+            minimumHoursBetweenDoses: nil,
+            maximumDosesPerDay: nil,
+            remindersEnabled: true,
+            followUpRemindersEnabled: true,
+            timeZoneBehavior: .localTime,
+            phases: [(durationDays: 1, doseAmount: 1), (durationDays: 1, doseAmount: 2)],
+            changeContext: MedicationPlanChangeContext(
+                effectiveFrom: planDate(1),
+                source: .prescriptionLabel,
+                notes: "Initial label review.",
+                confirmsCurrent: true
+            ),
+            context: context
+        ))
+        let occurrence = try XCTUnwrap(MedicationScheduleEngine.occurrences(
+            regimen: originalRegimen,
+            phases: MedicationService.phasesForRegimen(originalRegimen.id, context: context),
+            from: planDate(1),
+            through: planDate(1, hour: 23),
+            calendar: planCalendar
+        ).first)
+        let originalDose = try XCTUnwrap(MedicationService.recordDose(
+            medication: medication,
+            regimen: originalRegimen,
+            occurrence: occurrence,
+            status: .taken,
+            at: occurrence.scheduledAt,
+            context: context
+        ))
+
+        let revisedRegimen = try XCTUnwrap(MedicationService.updateMedication(
+            medication: medication,
+            regimen: originalRegimen,
+            name: "Test Medication",
+            form: .tablet,
+            strength: 10,
+            strengthUnit: "mg",
+            route: .oral,
+            instructions: "Take in the morning.",
+            reasonForTaking: "Test purpose",
+            prescriber: "Test Clinician",
+            pharmacy: "Test Pharmacy",
+            currentSupply: nil,
+            refillThreshold: nil,
+            scheduleKind: .daily,
+            startDate: planDate(2),
+            endDate: nil,
+            doseAmount: 2,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 9, minute: 0)],
+            weekdayMask: 127,
+            intervalDays: 1,
+            cycleOnDays: 1,
+            cycleOffDays: 0,
+            minimumHoursBetweenDoses: nil,
+            maximumDosesPerDay: nil,
+            remindersEnabled: true,
+            followUpRemindersEnabled: false,
+            timeZoneBehavior: .localTime,
+            phases: [],
+            changeContext: MedicationPlanChangeContext(
+                effectiveFrom: planDate(2),
+                source: .clinician,
+                notes: "Dose changed after visit.",
+                confirmsCurrent: true
+            ),
+            context: context
+        ))
+
+        XCTAssertNotEqual(originalRegimen.id, revisedRegimen.id)
+        XCTAssertFalse(originalRegimen.isActive)
+        XCTAssertEqual(originalRegimen.doseAmount, 1)
+        XCTAssertEqual(originalRegimen.doseTimes, [MedicationDoseTime(hour: 8, minute: 0)])
+        let preservedPhases = MedicationService.phasesForRegimen(
+            originalRegimen.id,
+            context: context
+        )
+        XCTAssertEqual(preservedPhases.map(\.doseAmount), [1, 2])
+        XCTAssertTrue(revisedRegimen.isActive)
+        XCTAssertEqual(revisedRegimen.doseAmount, 2)
+        XCTAssertEqual(revisedRegimen.doseTimes, [MedicationDoseTime(hour: 9, minute: 0)])
+        XCTAssertEqual(originalDose.regimenID, originalRegimen.id)
+        XCTAssertEqual(originalDose.doseAmount, occurrence.doseAmount)
+        XCTAssertTrue(medication.isConfirmedCurrent)
+        XCTAssertNotNil(medication.lastReviewedAt)
+
+        let revisions = try context.fetch(FetchDescriptor<MedicationPlanRevision>(
+            sortBy: [SortDescriptor(\.changedAt)]
+        ))
+        XCTAssertEqual(revisions.count, 2)
+        XCTAssertEqual(revisions.first?.changeKind, .added)
+        let changedRevision = try XCTUnwrap(revisions.last)
+        XCTAssertEqual(changedRevision.changeKind, .updated)
+        XCTAssertEqual(changedRevision.source, .clinician)
+        XCTAssertEqual(
+            changedRevision.effectiveFrom,
+            planCalendar.startOfDay(for: planDate(2))
+        )
+        XCTAssertEqual(changedRevision.priorRegimenID, originalRegimen.id)
+        XCTAssertEqual(changedRevision.regimenID, revisedRegimen.id)
+        XCTAssertEqual(changedRevision.beforeSnapshot?.doseAmount, 1)
+        XCTAssertEqual(changedRevision.afterSnapshot?.doseAmount, 2)
+        XCTAssertEqual(changedRevision.beforeSnapshot?.instructions, "Take with food.")
+        XCTAssertEqual(changedRevision.afterSnapshot?.instructions, "Take in the morning.")
+        XCTAssertFalse(changedRevision.changedByName.isEmpty)
+
+        let versionedOccurrences = MedicationScheduleEngine.versionedOccurrences(
+            medicationID: medication.id,
+            regimens: [originalRegimen, revisedRegimen],
+            phases: preservedPhases + MedicationService.phasesForRegimen(
+                revisedRegimen.id,
+                context: context
+            ),
+            revisions: revisions,
+            from: planDate(1),
+            through: planDate(3, hour: 23),
+            calendar: planCalendar
+        )
+        XCTAssertEqual(versionedOccurrences.map(\.regimenID), [
+            originalRegimen.id,
+            revisedRegimen.id,
+            revisedRegimen.id
+        ])
+        XCTAssertEqual(versionedOccurrences.map { planCalendar.component(.hour, from: $0.scheduledAt) }, [8, 9, 9])
+    }
+
+    @MainActor
+    func testVersionedOccurrencesIgnoreAbandonedConcurrentPlanBranch() {
+        let profileID = UUID()
+        let medication = Medication(profileID: profileID, name: "Test Medication")
+        let original = MedicationRegimen(
+            profileID: profileID,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 8, minute: 0)],
+            isActive: false
+        )
+        let abandoned = MedicationRegimen(
+            profileID: profileID,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(2),
+            doseAmount: 2,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 9, minute: 0)],
+            isActive: false
+        )
+        let authoritative = MedicationRegimen(
+            profileID: profileID,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(2),
+            doseAmount: 3,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 10, minute: 0)],
+            isActive: true
+        )
+        let revisions = [
+            MedicationPlanRevision(
+                profileID: profileID,
+                medicationID: medication.id,
+                regimenID: original.id,
+                changeKind: .added,
+                source: .prescriptionLabel,
+                effectiveFrom: date(1),
+                changedAt: date(1),
+                afterSnapshot: MedicationPlanSnapshot(
+                    medication: medication,
+                    regimen: original,
+                    phases: []
+                )
+            ),
+            MedicationPlanRevision(
+                profileID: profileID,
+                medicationID: medication.id,
+                priorRegimenID: original.id,
+                regimenID: abandoned.id,
+                changeKind: .updated,
+                source: .caregiver,
+                effectiveFrom: date(2),
+                changedAt: date(3, hour: 9),
+                afterSnapshot: MedicationPlanSnapshot(
+                    medication: medication,
+                    regimen: abandoned,
+                    phases: []
+                )
+            ),
+            MedicationPlanRevision(
+                profileID: profileID,
+                medicationID: medication.id,
+                priorRegimenID: original.id,
+                regimenID: authoritative.id,
+                changeKind: .updated,
+                source: .clinician,
+                effectiveFrom: date(2),
+                changedAt: date(3, hour: 10),
+                afterSnapshot: MedicationPlanSnapshot(
+                    medication: medication,
+                    regimen: authoritative,
+                    phases: []
+                )
+            )
+        ]
+
+        let occurrences = MedicationScheduleEngine.versionedOccurrences(
+            medicationID: medication.id,
+            regimens: [original, abandoned, authoritative],
+            phases: [],
+            revisions: revisions,
+            from: date(1),
+            through: date(3, hour: 23),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(occurrences.map(\.regimenID), [
+            original.id,
+            authoritative.id,
+            authoritative.id
+        ])
+        XCTAssertEqual(
+            occurrences.map { calendar.component(.hour, from: $0.scheduledAt) },
+            [8, 10, 10]
+        )
+    }
+
+    @MainActor
+    func testSameDayPlanChangePreservesEarlierDoseUnderPriorPlan() {
+        let profileID = UUID()
+        let medication = Medication(profileID: profileID, name: "Test Medication")
+        let original = MedicationRegimen(
+            profileID: profileID,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 8, minute: 0)],
+            isActive: false
+        )
+        let revised = MedicationRegimen(
+            profileID: profileID,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(2),
+            doseAmount: 2,
+            doseUnit: "tablet",
+            doseTimes: [
+                MedicationDoseTime(hour: 9, minute: 0),
+                MedicationDoseTime(hour: 18, minute: 0)
+            ],
+            isActive: true
+        )
+        let revisions = [
+            MedicationPlanRevision(
+                profileID: profileID,
+                medicationID: medication.id,
+                regimenID: original.id,
+                changeKind: .added,
+                source: .prescriptionLabel,
+                effectiveFrom: date(1),
+                changedAt: date(1, hour: 7),
+                afterSnapshot: MedicationPlanSnapshot(
+                    medication: medication,
+                    regimen: original,
+                    phases: []
+                )
+            ),
+            MedicationPlanRevision(
+                profileID: profileID,
+                medicationID: medication.id,
+                priorRegimenID: original.id,
+                regimenID: revised.id,
+                changeKind: .updated,
+                source: .clinician,
+                effectiveFrom: date(2),
+                changedAt: date(2, hour: 12),
+                afterSnapshot: MedicationPlanSnapshot(
+                    medication: medication,
+                    regimen: revised,
+                    phases: []
+                )
+            )
+        ]
+
+        let occurrences = MedicationScheduleEngine.versionedOccurrences(
+            medicationID: medication.id,
+            regimens: [original, revised],
+            phases: [],
+            revisions: revisions,
+            from: date(1),
+            through: date(2, hour: 23),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(occurrences.map(\.regimenID), [
+            original.id,
+            original.id,
+            revised.id
+        ])
+        XCTAssertEqual(
+            occurrences.map { calendar.component(.hour, from: $0.scheduledAt) },
+            [8, 8, 18]
+        )
+    }
+
+    func testFamilySyncMergeLeavesOneAuthoritativeActiveRegimen() throws {
+        let medicationID = UUID().uuidString
+        let originalID = UUID().uuidString
+        let localID = UUID().uuidString
+        let remoteID = UUID().uuidString
+        let base = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-01T08:00:00Z","medications":[{"id":"\(medicationID)","isArchived":false,"updatedAt":"2026-01-01T08:00:00Z"}],"medicationRegimens":[{"id":"\(originalID)","medicationID":"\(medicationID)","isActive":true,"updatedAt":"2026-01-01T08:00:00Z"}]}
+            """.utf8
+        )
+        let local = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-02T09:00:00Z","medications":[{"id":"\(medicationID)","isArchived":false,"updatedAt":"2026-01-01T08:00:00Z"}],"medicationRegimens":[{"id":"\(originalID)","medicationID":"\(medicationID)","isActive":false,"updatedAt":"2026-01-02T09:00:00Z"},{"id":"\(localID)","medicationID":"\(medicationID)","isActive":true,"updatedAt":"2026-01-02T09:00:00Z"}]}
+            """.utf8
+        )
+        let remote = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-02T10:00:00Z","medications":[{"id":"\(medicationID)","isArchived":false,"updatedAt":"2026-01-01T08:00:00Z"}],"medicationRegimens":[{"id":"\(originalID)","medicationID":"\(medicationID)","isActive":false,"updatedAt":"2026-01-02T10:00:00Z"},{"id":"\(remoteID)","medicationID":"\(medicationID)","isActive":true,"updatedAt":"2026-01-02T10:00:00Z"}]}
+            """.utf8
+        )
+
+        let merged = try DataExportImportService.mergeFamilySyncData(
+            base: base,
+            local: local,
+            remote: remote,
+            localChangedAt: date(2, hour: 9),
+            remoteChangedAt: date(2, hour: 10)
+        )
+        let payloads = try DataExportImportService.familySyncEntityPayloads(from: merged)
+        let regimens = try payloads.compactMap { key, payload -> [String: Any]? in
+            guard key.hasPrefix("medicationRegimens|") else { return nil }
+            return try XCTUnwrap(
+                JSONSerialization.jsonObject(with: payload) as? [String: Any]
+            )
+        }
+        let activeRegimens = regimens.filter { ($0["isActive"] as? Bool) == true }
+
+        XCTAssertEqual(activeRegimens.count, 1)
+        XCTAssertEqual(activeRegimens.first?["id"] as? String, remoteID)
+    }
+
+    func testFamilySyncMergeResolvesConcurrentRefillTasksAndStaleClaims() throws {
+        let medicationID = UUID().uuidString
+        let localTaskID = UUID().uuidString
+        let remoteTaskID = UUID().uuidString
+        let localClaimID = UUID().uuidString
+        let remoteClaimID = UUID().uuidString
+        let localSourceKey = "medicationRefill:\(localTaskID.lowercased())"
+        let remoteSourceKey = "medicationRefill:\(remoteTaskID.lowercased())"
+        let base = Data(
+            #"{"version":30,"exportedAt":"2026-01-01T08:00:00Z","medicationRefillTasks":[],"attentionClaims":[]}"#.utf8
+        )
+        let local = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-02T09:00:00Z","medicationRefillTasks":[{"id":"\(localTaskID)","medicationID":"\(medicationID)","statusRawValue":"needsRequest","updatedAt":"2026-01-02T09:00:00Z"}],"attentionClaims":[{"id":"\(localClaimID)","sourceKey":"\(localSourceKey)","updatedAt":"2026-01-02T09:00:00Z"}]}
+            """.utf8
+        )
+        let remote = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-02T10:00:00Z","medicationRefillTasks":[{"id":"\(remoteTaskID)","medicationID":"\(medicationID)","statusRawValue":"requested","updatedAt":"2026-01-02T10:00:00Z"}],"attentionClaims":[{"id":"\(remoteClaimID)","sourceKey":"\(remoteSourceKey)","updatedAt":"2026-01-02T10:00:00Z"}]}
+            """.utf8
+        )
+
+        let merged = try DataExportImportService.mergeFamilySyncData(
+            base: base,
+            local: local,
+            remote: remote,
+            localChangedAt: date(2, hour: 9),
+            remoteChangedAt: date(2, hour: 10)
+        )
+        let payloads = try DataExportImportService.familySyncEntityPayloads(from: merged)
+        let tasks = try payloads.compactMap { key, payload -> [String: Any]? in
+            guard key.hasPrefix("medicationRefillTasks|") else { return nil }
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        }
+        let claims = payloads.keys.filter { $0.hasPrefix("attentionClaims|") }
+
+        XCTAssertEqual(tasks.filter {
+            ($0["statusRawValue"] as? String) == MedicationRefillStatus.requested.rawValue
+        }.count, 1)
+        XCTAssertEqual(tasks.filter {
+            ($0["statusRawValue"] as? String) == MedicationRefillStatus.cancelled.rawValue
+        }.count, 1)
+        XCTAssertEqual(claims, ["attentionClaims|\(remoteClaimID)"])
+    }
+
+    func testFamilySyncMergeKeepsCompletedPickupOverStaleOpenEdit() throws {
+        let taskID = UUID().uuidString
+        let base = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-01T08:00:00Z","medicationRefillTasks":[{"id":"\(taskID)","statusRawValue":"readyForPickup","updatedAt":"2026-01-01T08:00:00Z"}]}
+            """.utf8
+        )
+        let local = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-02T09:00:00Z","medicationRefillTasks":[{"id":"\(taskID)","statusRawValue":"pickedUp","updatedAt":"2026-01-02T09:00:00Z"}]}
+            """.utf8
+        )
+        let remote = Data(
+            """
+            {"version":30,"exportedAt":"2026-01-02T10:00:00Z","medicationRefillTasks":[{"id":"\(taskID)","statusRawValue":"readyForPickup","updatedAt":"2026-01-02T10:00:00Z"}]}
+            """.utf8
+        )
+
+        let merged = try DataExportImportService.mergeFamilySyncData(
+            base: base,
+            local: local,
+            remote: remote,
+            localChangedAt: date(2, hour: 9),
+            remoteChangedAt: date(2, hour: 10)
+        )
+        let payload = try XCTUnwrap(
+            DataExportImportService.familySyncEntityPayloads(from: merged)[
+                "medicationRefillTasks|\(taskID)"
+            ]
+        )
+        let task = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+
+        XCTAssertEqual(
+            task["statusRawValue"] as? String,
+            MedicationRefillStatus.pickedUp.rawValue
+        )
+    }
+
+    @MainActor
+    func testMedicationReconciliationConfirmsAndLinksReviewSession() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .parent
+        )
+        let medication = Medication(profileID: profile.id, name: "Test Medication")
+        let regimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        context.insert(profile)
+        context.insert(medication)
+        context.insert(regimen)
+        try context.save()
+
+        let appointmentID = UUID()
+        let reconciliationID = UUID()
+        XCTAssertTrue(MedicationService.confirmCurrent(
+            medication: medication,
+            regimens: [regimen],
+            changeContext: MedicationPlanChangeContext(
+                effectiveFrom: date(2),
+                source: .dischargePaperwork,
+                appointmentID: appointmentID,
+                reconciliationID: reconciliationID,
+                notes: "Compared with discharge list.",
+                confirmsCurrent: true
+            ),
+            context: context
+        ))
+        XCTAssertTrue(medication.isConfirmedCurrent)
+        XCTAssertNotNil(medication.lastReviewedAt)
+        let confirmation = try XCTUnwrap(
+            context.fetch(FetchDescriptor<MedicationPlanRevision>()).first
+        )
+        XCTAssertEqual(confirmation.changeKind, .confirmedCurrent)
+        XCTAssertEqual(confirmation.source, .dischargePaperwork)
+        XCTAssertEqual(confirmation.appointmentID, appointmentID)
+        XCTAssertEqual(confirmation.reconciliationID, reconciliationID)
+        XCTAssertEqual(confirmation.beforeSnapshot?.isConfirmedCurrent, false)
+        XCTAssertEqual(confirmation.afterSnapshot?.isConfirmedCurrent, true)
+        XCTAssertNil(confirmation.beforeSnapshot?.lastReviewedAt)
+        XCTAssertNotNil(confirmation.afterSnapshot?.lastReviewedAt)
+
+        let reconciliation = try XCTUnwrap(MedicationService.completeReconciliation(
+            id: reconciliationID,
+            profileID: profile.id,
+            source: .dischargePaperwork,
+            effectiveFrom: date(2),
+            appointmentID: appointmentID,
+            notes: "Discharge reconciliation complete.",
+            reviewedMedicationIDs: [medication.id],
+            context: context
+        ))
+        XCTAssertEqual(reconciliation.id, reconciliationID)
+        XCTAssertEqual(reconciliation.source, .dischargePaperwork)
+        XCTAssertEqual(reconciliation.appointmentID, appointmentID)
+        XCTAssertEqual(reconciliation.reviewedMedicationIDs, [medication.id])
+    }
+
+    @MainActor
+    func testSupplyProjectionUsesActualTakenAmountsAndFlagsTripRisk() throws {
+        let profileID = UUID()
+        let medication = Medication(
+            profileID: profileID,
+            name: "Test Medication",
+            currentSupply: 10
+        )
+        let now = date(10, hour: 12)
+        let records = (7...10).map { day in
+            MedicationDoseRecord(
+                profileID: profileID,
+                medicationID: medication.id,
+                status: .taken,
+                loggedAt: date(day, hour: 8),
+                takenAt: date(day, hour: 8),
+                actualDoseAmount: 1,
+                doseAmount: 2,
+                doseUnit: "tablet"
+            )
+        }
+
+        let projection = try XCTUnwrap(MedicationService.supplyProjection(
+            medication: medication,
+            doseRecords: records,
+            now: now,
+            calendar: calendar
+        ))
+        XCTAssertEqual(projection.averageDailyUse, 1, accuracy: 0.000_001)
+        XCTAssertEqual(projection.estimatedDaysRemaining, 10, accuracy: 0.000_001)
+        XCTAssertEqual(projection.observedDoseCount, 4)
+        XCTAssertEqual(projection.observedDayCount, 4)
+        XCTAssertEqual(projection.estimatedRunOutDate, now.addingTimeInterval(10 * 86_400))
+        XCTAssertEqual(projection.confidence, .developing)
+
+        let householdID = UUID()
+        let duringTrip = PackingTrip(
+            householdID: householdID,
+            title: "Test Trip",
+            startDate: date(15),
+            endDate: date(22)
+        )
+        guard case .duringTrip(let duringRunOut)? = MedicationService.tripSupplyRisk(
+            projection: projection,
+            trip: duringTrip,
+            calendar: calendar
+        ) else {
+            return XCTFail("Expected a during-trip supply warning.")
+        }
+        XCTAssertEqual(duringRunOut, projection.estimatedRunOutDate)
+
+        let afterRunOutTrip = PackingTrip(
+            householdID: householdID,
+            title: "Later Test Trip",
+            startDate: date(21),
+            endDate: date(24)
+        )
+        guard case .beforeTrip(let beforeRunOut)? = MedicationService.tripSupplyRisk(
+            projection: projection,
+            trip: afterRunOutTrip,
+            calendar: calendar
+        ) else {
+            return XCTFail("Expected a before-trip supply warning.")
+        }
+        XCTAssertEqual(beforeRunOut, projection.estimatedRunOutDate)
+    }
+
+    @MainActor
+    func testBatchSupplyProjectionKeepsMedicationHistoriesIsolated() throws {
+        let profileID = UUID()
+        let firstMedication = Medication(
+            profileID: profileID,
+            name: "Test Medication A",
+            currentSupply: 10
+        )
+        let secondMedication = Medication(
+            profileID: profileID,
+            name: "Test Medication B",
+            currentSupply: 24
+        )
+        let now = date(10, hour: 12)
+        let firstRecords = (7...10).map { day in
+            MedicationDoseRecord(
+                profileID: profileID,
+                medicationID: firstMedication.id,
+                status: .taken,
+                loggedAt: date(day, hour: 8),
+                takenAt: date(day, hour: 8),
+                actualDoseAmount: 1,
+                doseAmount: 1,
+                doseUnit: "tablet"
+            )
+        }
+        let secondRecords = (7...10).map { day in
+            MedicationDoseRecord(
+                profileID: profileID,
+                medicationID: secondMedication.id,
+                status: .taken,
+                loggedAt: date(day, hour: 8),
+                takenAt: date(day, hour: 8),
+                actualDoseAmount: 2,
+                doseAmount: 2,
+                doseUnit: "tablet"
+            )
+        }
+        let ignoredRecord = MedicationDoseRecord(
+            profileID: profileID,
+            medicationID: firstMedication.id,
+            scheduledAt: date(10, hour: 9),
+            status: .held,
+            loggedAt: date(10, hour: 9),
+            doseAmount: 20,
+            doseUnit: "tablet"
+        )
+
+        let projections = MedicationService.supplyProjections(
+            medications: [firstMedication, secondMedication],
+            doseRecords: firstRecords + secondRecords + [ignoredRecord],
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(projections.count, 2)
+        let first = try XCTUnwrap(projections[firstMedication.id])
+        XCTAssertEqual(first.averageDailyUse, 1, accuracy: 0.000_001)
+        XCTAssertEqual(first.estimatedDaysRemaining, 10, accuracy: 0.000_001)
+        XCTAssertEqual(first.observedDoseCount, 4)
+        let second = try XCTUnwrap(projections[secondMedication.id])
+        XCTAssertEqual(second.averageDailyUse, 2, accuracy: 0.000_001)
+        XCTAssertEqual(second.estimatedDaysRemaining, 12, accuracy: 0.000_001)
+        XCTAssertEqual(second.observedDoseCount, 4)
+    }
+
+    @MainActor
+    func testRefillLifecycleAddsFillAndDecrementsRemainingRefills() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(
+            profileID: profile.id,
+            name: "Test Medication",
+            pharmacy: "Test Pharmacy",
+            currentSupply: 5,
+            refillLeadDays: 7,
+            prescriptionNumber: "RX-TEST",
+            fillQuantity: 30,
+            refillsRemaining: 2
+        )
+        context.insert(household)
+        context.insert(profile)
+        context.insert(medication)
+        try context.save()
+
+        XCTAssertNil(MedicationService.createRefillTask(
+            medication: medication,
+            householdID: UUID(),
+            dueDate: date(12),
+            fillQuantity: 30,
+            context: context,
+            now: date(10)
+        ))
+        let task = try XCTUnwrap(MedicationService.createRefillTask(
+            medication: medication,
+            householdID: household.id,
+            dueDate: date(12),
+            fillQuantity: 30,
+            assignedCaregiverIdentifier: "test-caregiver",
+            assignedCaregiverName: "Test Caregiver",
+            notes: "Request before travel.",
+            context: context,
+            now: date(10)
+        ))
+        XCTAssertEqual(task.status, .needsRequest)
+        XCTAssertEqual(task.prescriptionNumberSnapshot, "RX-TEST")
+        XCTAssertEqual(task.assignedCaregiverName, "Test Caregiver")
+        XCTAssertNil(MedicationService.createRefillTask(
+            medication: medication,
+            householdID: household.id,
+            dueDate: date(13),
+            fillQuantity: 30,
+            context: context,
+            now: date(10)
+        ))
+
+        XCTAssertTrue(MedicationService.setRefillStatus(
+            task,
+            medication: medication,
+            status: .requested,
+            context: context,
+            now: date(11)
+        ))
+        XCTAssertEqual(task.status, .requested)
+        XCTAssertEqual(task.requestedAt, date(11))
+        XCTAssertTrue(MedicationService.setRefillStatus(
+            task,
+            medication: medication,
+            status: .readyForPickup,
+            context: context,
+            now: date(12)
+        ))
+        XCTAssertEqual(task.status, .readyForPickup)
+        XCTAssertTrue(MedicationService.setRefillStatus(
+            task,
+            medication: medication,
+            status: .pickedUp,
+            context: context,
+            now: date(13)
+        ))
+        XCTAssertEqual(task.status, .pickedUp)
+        XCTAssertEqual(medication.currentSupply, 35)
+        XCTAssertEqual(medication.refillsRemaining, 1)
+        XCTAssertNotNil(task.completedByCaregiverIdentifier)
+        let refillLog = try XCTUnwrap(
+            context.fetch(FetchDescriptor<MedicationSupplyLog>()).last
+        )
+        XCTAssertEqual(refillLog.reason, .refill)
+        XCTAssertEqual(refillLog.adjustment, 30)
+        XCTAssertEqual(refillLog.resultingSupply, 35)
+
+        XCTAssertTrue(MedicationService.setRefillStatus(
+            task,
+            medication: medication,
+            status: .pickedUp,
+            context: context,
+            now: date(14)
+        ))
+        XCTAssertEqual(medication.currentSupply, 35)
+        XCTAssertEqual(medication.refillsRemaining, 1)
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<MedicationSupplyLog>()).filter { $0.reason == .refill }.count,
+            1
+        )
+    }
+
+    @MainActor
+    func testArchivingMedicationCancelsOpenRefillTask() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let household = Household(name: "Home")
+        let profile = CareProfile(profileType: .adult, name: "Test Adult")
+        let medication = Medication(profileID: profile.id, name: "Test Medication")
+        let regimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        context.insert(household)
+        context.insert(profile)
+        context.insert(medication)
+        context.insert(regimen)
+        try context.save()
+
+        let task = try XCTUnwrap(MedicationService.createRefillTask(
+            medication: medication,
+            householdID: household.id,
+            dueDate: date(5),
+            fillQuantity: 30,
+            context: context,
+            now: date(1)
+        ))
+
+        MedicationService.archive(
+            medication: medication,
+            regimens: [regimen],
+            context: context
+        )
+
+        XCTAssertTrue(medication.isArchived)
+        XCTAssertEqual(task.status, .cancelled)
+        XCTAssertEqual(task.cancelledAt, task.updatedAt)
+        XCTAssertFalse(task.isOpen)
+    }
+
+    @MainActor
     func testBackupRoundTripPreservesMedicationAndHealthDetails() throws {
         let container = try ModelContainer(
             for: PersistenceService.schema,
@@ -449,6 +1347,7 @@ final class MedicationScheduleEngineTests: XCTestCase {
             name: "Test Adult",
             adultRelationship: .myself
         )
+        let household = Household(name: "Home")
         let event = CareEvent(profileID: profile.id, type: .bloodPressure, startDate: date(1, hour: 9))
         event.profileTypeSnapshot = .adult
         event.healthObservationDetails = HealthObservationDetails(
@@ -456,7 +1355,20 @@ final class MedicationScheduleEngineTests: XCTestCase {
             diastolicBloodPressure: 76,
             heartRateBPM: 64
         )
-        let medication = Medication(profileID: profile.id, name: "Test Medication", strength: 10)
+        let medication = Medication(
+            profileID: profile.id,
+            name: "Test Medication",
+            strength: 10,
+            currentSupply: 12,
+            refillThreshold: 5,
+            refillLeadDays: 8,
+            prescriptionNumber: "RX-BACKUP",
+            fillQuantity: 30,
+            refillsRemaining: 3,
+            prescriptionExpirationDate: date(30),
+            lastReviewedAt: date(2, hour: 10),
+            isConfirmedCurrent: true
+        )
         let regimen = MedicationRegimen(
             profileID: profile.id,
             medicationID: medication.id,
@@ -472,17 +1384,76 @@ final class MedicationScheduleEngineTests: XCTestCase {
             medicationID: medication.id,
             regimenID: regimen.id,
             status: .taken,
-            loggedAt: date(1, hour: 8),
-            takenAt: date(1, hour: 8),
+            loggedAt: date(1, hour: 10),
+            takenAt: date(1, hour: 9),
+            actualDoseAmount: 0.5,
+            timing: .late,
             doseAmount: 1,
             doseUnit: "tablet",
-            supplyAdjustmentApplied: -1
+            supplyAdjustmentApplied: -0.5,
+            notes: "Actual dose recorded."
         )
+        let missedDose = MedicationDoseRecord(
+            profileID: profile.id,
+            medicationID: medication.id,
+            regimenID: regimen.id,
+            status: .missed,
+            loggedAt: date(2, hour: 8),
+            reason: .outOfSupply,
+            doseAmount: 1,
+            doseUnit: "tablet",
+            notes: "Refill requested."
+        )
+        let reconciliationID = UUID()
+        let planRevision = MedicationPlanRevision(
+            profileID: profile.id,
+            medicationID: medication.id,
+            regimenID: regimen.id,
+            changeKind: .confirmedCurrent,
+            source: .prescriptionLabel,
+            effectiveFrom: date(2),
+            changedAt: date(2, hour: 10),
+            reconciliationID: reconciliationID,
+            notes: "Label confirmed.",
+            afterSnapshot: MedicationPlanSnapshot(
+                medication: medication,
+                regimen: regimen,
+                phases: []
+            )
+        )
+        let reconciliation = MedicationReconciliation(
+            id: reconciliationID,
+            profileID: profile.id,
+            source: .prescriptionLabel,
+            effectiveFrom: date(2),
+            completedAt: date(2, hour: 10),
+            notes: "Medication review complete.",
+            reviewedMedicationIDs: [medication.id]
+        )
+        let refillTask = MedicationRefillTask(
+            householdID: household.id,
+            profileID: profile.id,
+            medicationID: medication.id,
+            status: .requested,
+            dueDate: date(8),
+            fillQuantity: 30,
+            prescriptionNumberSnapshot: "RX-BACKUP",
+            pharmacySnapshot: "Test Pharmacy",
+            notes: "Backup refill task.",
+            requestedAt: date(3),
+            assignedCaregiverIdentifier: "test-caregiver",
+            assignedCaregiverName: "Test Caregiver"
+        )
+        context.insert(household)
         context.insert(profile)
         context.insert(event)
         context.insert(medication)
         context.insert(regimen)
         context.insert(dose)
+        context.insert(missedDose)
+        context.insert(planRevision)
+        context.insert(reconciliation)
+        context.insert(refillTask)
         try context.save()
 
         let backup = try DataExportImportService.exportData(context: context)
@@ -496,13 +1467,42 @@ final class MedicationScheduleEngineTests: XCTestCase {
         let restoredMedications = try context.fetch(FetchDescriptor<Medication>())
         let restoredRegimens = try context.fetch(FetchDescriptor<MedicationRegimen>())
         let restoredDoses = try context.fetch(FetchDescriptor<MedicationDoseRecord>())
+        let restoredPlanRevisions = try context.fetch(FetchDescriptor<MedicationPlanRevision>())
+        let restoredReconciliations = try context.fetch(FetchDescriptor<MedicationReconciliation>())
+        let restoredRefillTasks = try context.fetch(FetchDescriptor<MedicationRefillTask>())
         XCTAssertEqual(restoredEvents.first?.healthObservationDetails.systolicBloodPressure, 118)
         XCTAssertEqual(restoredEvents.first?.healthObservationDetails.diastolicBloodPressure, 76)
         XCTAssertEqual(restoredMedications.map(\.name), ["Test Medication"])
+        XCTAssertEqual(restoredMedications.first?.isConfirmedCurrent, true)
+        XCTAssertEqual(restoredMedications.first?.lastReviewedAt, date(2, hour: 10))
+        XCTAssertEqual(restoredMedications.first?.refillLeadDays, 8)
+        XCTAssertEqual(restoredMedications.first?.prescriptionNumber, "RX-BACKUP")
+        XCTAssertEqual(restoredMedications.first?.fillQuantity, 30)
+        XCTAssertEqual(restoredMedications.first?.refillsRemaining, 3)
+        XCTAssertEqual(restoredMedications.first?.prescriptionExpirationDate, date(30))
         XCTAssertEqual(restoredRegimens.first?.scheduleKind, .daily)
         XCTAssertEqual(restoredRegimens.first?.followUpRemindersEnabled, true)
-        XCTAssertEqual(restoredDoses.first?.status, .taken)
-        XCTAssertEqual(restoredDoses.first?.supplyAdjustmentApplied, -1)
+        let restoredTakenDose = try XCTUnwrap(restoredDoses.first { $0.id == dose.id })
+        XCTAssertEqual(restoredTakenDose.status, .taken)
+        XCTAssertEqual(restoredTakenDose.takenAt, date(1, hour: 9))
+        XCTAssertEqual(restoredTakenDose.actualDoseAmount, 0.5)
+        XCTAssertEqual(restoredTakenDose.timing, .late)
+        XCTAssertTrue(restoredTakenDose.hasDifferentActualAmount)
+        XCTAssertEqual(restoredTakenDose.supplyAdjustmentApplied, -0.5)
+        XCTAssertEqual(restoredTakenDose.notes, "Actual dose recorded.")
+        let restoredMissedDose = try XCTUnwrap(restoredDoses.first { $0.id == missedDose.id })
+        XCTAssertEqual(restoredMissedDose.status, .missed)
+        XCTAssertEqual(restoredMissedDose.reason, .outOfSupply)
+        XCTAssertNil(restoredMissedDose.actualDoseAmount)
+        XCTAssertEqual(restoredMissedDose.notes, "Refill requested.")
+        XCTAssertEqual(restoredPlanRevisions.first?.changeKind, .confirmedCurrent)
+        XCTAssertEqual(restoredPlanRevisions.first?.source, .prescriptionLabel)
+        XCTAssertEqual(restoredPlanRevisions.first?.afterSnapshot?.doseAmount, 1)
+        XCTAssertEqual(restoredReconciliations.first?.id, reconciliationID)
+        XCTAssertEqual(restoredReconciliations.first?.reviewedMedicationIDs, [medication.id])
+        XCTAssertEqual(restoredRefillTasks.first?.id, refillTask.id)
+        XCTAssertEqual(restoredRefillTasks.first?.status, .requested)
+        XCTAssertEqual(restoredRefillTasks.first?.assignedCaregiverName, "Test Caregiver")
     }
 
     @MainActor
@@ -1162,6 +2162,103 @@ final class MedicationScheduleEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testActualDoseCorrectionsReconcileSupplyAndTimeline() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(
+            profileID: profile.id,
+            name: "Test Medication",
+            currentSupply: 10
+        )
+        let regimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduleKind: .asNeeded,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        context.insert(profile)
+        context.insert(medication)
+        context.insert(regimen)
+        try context.save()
+
+        let record = try XCTUnwrap(MedicationService.recordDose(
+            medication: medication,
+            regimen: regimen,
+            status: .taken,
+            at: date(1, hour: 9),
+            takenAt: date(1, hour: 9),
+            actualDoseAmount: 0.5,
+            timing: .late,
+            notes: "Half dose taken.",
+            context: context
+        ))
+        XCTAssertEqual(record.actualDoseAmount, 0.5)
+        XCTAssertEqual(record.timing, .late)
+        XCTAssertEqual(record.supplyAdjustmentApplied, -0.5)
+        XCTAssertEqual(medication.currentSupply, 9.5)
+        var mirror = try XCTUnwrap(context.fetch(FetchDescriptor<CareEvent>()).first)
+        XCTAssertEqual(mirror.startDate, date(1, hour: 9))
+        XCTAssertEqual(mirror.dose, 0.5)
+        XCTAssertEqual(mirror.notes, "Half dose taken.")
+
+        XCTAssertTrue(MedicationService.updateDoseRecord(
+            record,
+            medication: medication,
+            entry: MedicationDoseEntry(
+                status: .taken,
+                takenAt: date(1, hour: 10),
+                actualDoseAmount: 0.75,
+                timing: .late,
+                reason: nil,
+                notes: "Corrected actual amount."
+            ),
+            at: date(1, hour: 10),
+            context: context
+        ))
+        XCTAssertEqual(record.actualDoseAmount, 0.75)
+        XCTAssertEqual(record.supplyAdjustmentApplied, -0.75)
+        XCTAssertEqual(medication.currentSupply, 9.25)
+        let mirrorsAfterCorrection = try context.fetch(FetchDescriptor<CareEvent>())
+        XCTAssertEqual(mirrorsAfterCorrection.count, 1)
+        mirror = try XCTUnwrap(mirrorsAfterCorrection.first)
+        XCTAssertEqual(mirror.startDate, date(1, hour: 10))
+        XCTAssertEqual(mirror.dose, 0.75)
+        XCTAssertEqual(mirror.notes, "Corrected actual amount.")
+
+        XCTAssertTrue(MedicationService.updateDoseRecord(
+            record,
+            medication: medication,
+            entry: MedicationDoseEntry(
+                status: .held,
+                takenAt: nil,
+                actualDoseAmount: nil,
+                timing: nil,
+                reason: .perClinicianInstruction,
+                notes: "Held until reviewed."
+            ),
+            at: date(1, hour: 11),
+            context: context
+        ))
+        XCTAssertEqual(record.status, .held)
+        XCTAssertEqual(record.reason, .perClinicianInstruction)
+        XCTAssertNil(record.takenAt)
+        XCTAssertNil(record.actualDoseAmount)
+        XCTAssertEqual(record.supplyAdjustmentApplied, 0)
+        XCTAssertEqual(medication.currentSupply, 10)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<CareEvent>()).isEmpty)
+    }
+
+    @MainActor
     func testFamilyExportExcludesAndRemoteImportPreservesPrivateProfiles() throws {
         let container = try ModelContainer(
             for: PersistenceService.schema,
@@ -1648,6 +2745,368 @@ final class MedicationScheduleEngineTests: XCTestCase {
 
         XCTAssertEqual(resolvedRecord?.id, existingRecord.id)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MedicationDoseRecord>()), 5_001)
+    }
+
+    @MainActor
+    func testBatchSupplyProjectionLargeHistoryPerformance() {
+        let profileID = UUID()
+        let now = date(10, hour: 12)
+        let medications = (0..<40).map { index in
+            Medication(
+                profileID: profileID,
+                name: "Test Medication \(index)",
+                currentSupply: 120
+            )
+        }
+        var records = [MedicationDoseRecord]()
+        records.reserveCapacity(medications.count * 60 * 3)
+        for medication in medications {
+            for dayOffset in 0..<60 {
+                guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: now) else {
+                    continue
+                }
+                for doseIndex in 0..<3 {
+                    let takenAt = date.addingTimeInterval(-Double(doseIndex) * 60 * 60)
+                    records.append(MedicationDoseRecord(
+                        profileID: profileID,
+                        medicationID: medication.id,
+                        status: .taken,
+                        loggedAt: takenAt,
+                        takenAt: takenAt,
+                        actualDoseAmount: 1,
+                        doseAmount: 1,
+                        doseUnit: "tablet"
+                    ))
+                }
+            }
+        }
+        var projectionCount = 0
+
+        measure(metrics: [XCTClockMetric()]) {
+            projectionCount = MedicationService.supplyProjections(
+                medications: medications,
+                doseRecords: records,
+                now: now,
+                calendar: calendar
+            ).count
+        }
+
+        XCTAssertEqual(projectionCount, medications.count)
+    }
+
+    @MainActor
+    func testVersionedPlanReconstructionLargeHistoryPerformance() {
+        let profileID = UUID()
+        let medication = Medication(profileID: profileID, name: "Test Medication")
+        let baseDate = date(1)
+        var regimens = [MedicationRegimen]()
+        var revisions = [MedicationPlanRevision]()
+        var priorRegimenID: UUID?
+        for index in 0..<180 {
+            guard let effectiveDate = calendar.date(
+                byAdding: .day,
+                value: index,
+                to: baseDate
+            ) else { continue }
+            let regimen = MedicationRegimen(
+                profileID: profileID,
+                medicationID: medication.id,
+                scheduleKind: .daily,
+                startDate: effectiveDate,
+                doseAmount: Double((index % 3) + 1),
+                doseUnit: "tablet",
+                doseTimes: [MedicationDoseTime(hour: 8, minute: 0)],
+                isActive: index == 179
+            )
+            regimens.append(regimen)
+            revisions.append(MedicationPlanRevision(
+                profileID: profileID,
+                medicationID: medication.id,
+                priorRegimenID: priorRegimenID,
+                regimenID: regimen.id,
+                changeKind: index == 0 ? .added : .updated,
+                source: .clinician,
+                effectiveFrom: effectiveDate,
+                changedAt: effectiveDate.addingTimeInterval(12 * 60 * 60),
+                afterSnapshot: MedicationPlanSnapshot(
+                    medication: medication,
+                    regimen: regimen,
+                    phases: []
+                )
+            ))
+            priorRegimenID = regimen.id
+        }
+        let rangeStart = calendar.date(byAdding: .day, value: 170, to: baseDate)!
+        let rangeEnd = calendar.date(byAdding: .day, value: 180, to: baseDate)!
+            .addingTimeInterval(-0.001)
+        var occurrenceCount = 0
+
+        measure(metrics: [XCTClockMetric()]) {
+            occurrenceCount = MedicationScheduleEngine.versionedOccurrences(
+                medicationID: medication.id,
+                regimens: regimens,
+                phases: [],
+                revisions: revisions,
+                from: rangeStart,
+                through: rangeEnd,
+                calendar: calendar
+            ).count
+        }
+
+        XCTAssertEqual(occurrenceCount, 10)
+    }
+
+    @MainActor
+    func testDoseOutcomeValidationRejectsIncompleteOrFutureDetailsAndInfersLateTiming() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(profileID: profile.id, name: "Test Medication")
+        let regimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: medication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet",
+            doseTimes: [MedicationDoseTime(hour: 8, minute: 0)]
+        )
+        context.insert(profile)
+        context.insert(medication)
+        context.insert(regimen)
+        try context.save()
+        let occurrence = try XCTUnwrap(MedicationScheduleEngine.occurrences(
+            regimen: regimen,
+            phases: [],
+            from: date(1),
+            through: date(1, hour: 23),
+            calendar: calendar
+        ).first)
+
+        XCTAssertNil(MedicationService.recordDose(
+            medication: medication,
+            regimen: regimen,
+            occurrence: occurrence,
+            status: .missed,
+            at: date(1, hour: 10),
+            context: context
+        ))
+        XCTAssertNil(MedicationService.recordDose(
+            medication: medication,
+            regimen: regimen,
+            occurrence: occurrence,
+            status: .taken,
+            at: date(1, hour: 10),
+            takenAt: date(1, hour: 11),
+            context: context
+        ))
+        XCTAssertTrue(try context.fetch(FetchDescriptor<MedicationDoseRecord>()).isEmpty)
+
+        let lateDose = try XCTUnwrap(MedicationService.recordDose(
+            medication: medication,
+            regimen: regimen,
+            occurrence: occurrence,
+            status: .taken,
+            at: date(1, hour: 9),
+            takenAt: date(1, hour: 9),
+            context: context
+        ))
+        XCTAssertEqual(lateDose.timing, .late)
+    }
+
+    @MainActor
+    func testReconciliationCannotFinishWithUnreviewedMedicationAndAbandoningKeepsAuditUnlinked() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .parent
+        )
+        let firstMedication = Medication(profileID: profile.id, name: "Test Medication A")
+        let secondMedication = Medication(profileID: profile.id, name: "Test Medication B")
+        let firstRegimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: firstMedication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        let secondRegimen = MedicationRegimen(
+            profileID: profile.id,
+            medicationID: secondMedication.id,
+            scheduleKind: .daily,
+            startDate: date(1),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        )
+        context.insert(profile)
+        context.insert(firstMedication)
+        context.insert(secondMedication)
+        context.insert(firstRegimen)
+        context.insert(secondRegimen)
+        try context.save()
+
+        let reconciliationID = UUID()
+        XCTAssertTrue(MedicationService.confirmCurrent(
+            medication: firstMedication,
+            regimens: [firstRegimen, secondRegimen],
+            changeContext: MedicationPlanChangeContext(
+                effectiveFrom: date(2),
+                source: .clinician,
+                reconciliationID: reconciliationID,
+                confirmsCurrent: true
+            ),
+            context: context
+        ))
+        XCTAssertNil(MedicationService.completeReconciliation(
+            id: reconciliationID,
+            profileID: profile.id,
+            source: .clinician,
+            effectiveFrom: date(2),
+            reviewedMedicationIDs: [firstMedication.id],
+            context: context
+        ))
+        XCTAssertTrue(MedicationService.abandonReconciliation(
+            id: reconciliationID,
+            context: context
+        ))
+        let revision = try XCTUnwrap(context.fetch(FetchDescriptor<MedicationPlanRevision>()).first)
+        XCTAssertNil(revision.reconciliationID)
+        XCTAssertTrue(firstMedication.isConfirmedCurrent)
+    }
+
+    @MainActor
+    func testHomeSurfacesLeadTimeRefillPlanningAndLinksToMedication() throws {
+        let now = date(10, hour: 12)
+        let householdID = UUID()
+        let profile = CareProfile(
+            profileType: .adult,
+            name: "Test Adult",
+            adultRelationship: .myself
+        )
+        let medication = Medication(
+            profileID: profile.id,
+            name: "Test Medication",
+            currentSupply: 5,
+            refillLeadDays: 7,
+            fillQuantity: 30,
+            refillsRemaining: 1
+        )
+        let lowSupplyWithoutHistory = Medication(
+            profileID: profile.id,
+            name: "Low Supply Medication",
+            currentSupply: 2,
+            refillThreshold: 5,
+            refillLeadDays: 7
+        )
+        let doses = (1...10).map { day in
+            MedicationDoseRecord(
+                profileID: profile.id,
+                medicationID: medication.id,
+                status: .taken,
+                loggedAt: date(day, hour: 8),
+                takenAt: date(day, hour: 8),
+                actualDoseAmount: 1,
+                doseAmount: 1,
+                doseUnit: "tablet"
+            )
+        }
+        let summary = TodayHomeSummaryService.summary(
+            householdID: householdID,
+            currentCaregiverName: "Test Caregiver",
+            todoLists: [],
+            todoItems: [],
+            shoppingLists: [],
+            shoppingItems: [],
+            inventoryItems: [],
+            mealPrepItems: [],
+            mealPrepUsages: [],
+            packingTrips: [],
+            packingItems: [],
+            itineraryItems: [],
+            returnRequests: [],
+            returnItems: [],
+            returnPackages: [],
+            reminders: [],
+            profiles: [profile],
+            medications: [medication, lowSupplyWithoutHistory],
+            medicationDoseRecords: doses,
+            now: now,
+            calendar: calendar
+        )
+        let item = try XCTUnwrap(summary.allAttentionItems.first {
+            $0.id == "attention-refill-plan-\(medication.id.uuidString)"
+        })
+        XCTAssertEqual(item.title, "Start refill for Test Medication")
+        XCTAssertEqual(item.route, .medication(medication.id, profileID: profile.id))
+        let fallbackItem = try XCTUnwrap(summary.allAttentionItems.first {
+            $0.id == "attention-refill-plan-\(lowSupplyWithoutHistory.id.uuidString)"
+        })
+        XCTAssertTrue(fallbackItem.detail.contains("at or below the refill alert"))
+    }
+
+    @MainActor
+    func testTripMedicationQueriesScopeOptionalProfileIDsWithoutRuntimePredicateFailures() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let travelerProfileID = UUID()
+        let otherProfileID = UUID()
+        let travelerMedication = Medication(profileID: travelerProfileID, name: "Traveler Medication")
+        let unscopedMedication = Medication(profileID: UUID(), name: "Unscoped Medication")
+        unscopedMedication.profileID = nil
+        context.insert(travelerMedication)
+        context.insert(Medication(profileID: otherProfileID, name: "Other Medication"))
+        context.insert(unscopedMedication)
+        context.insert(MedicationDoseRecord(
+            profileID: travelerProfileID,
+            medicationID: travelerMedication.id,
+            status: .taken,
+            loggedAt: date(2),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        ))
+        context.insert(MedicationDoseRecord(
+            profileID: otherProfileID,
+            medicationID: UUID(),
+            status: .taken,
+            loggedAt: date(2),
+            doseAmount: 1,
+            doseUnit: "tablet"
+        ))
+        try context.save()
+
+        let travelerProfileIDs: Set<UUID?> = [travelerProfileID]
+        let medicationDescriptor = FetchDescriptor<Medication>(predicate: #Predicate {
+            !$0.isArchived && travelerProfileIDs.contains($0.profileID)
+        })
+        let lookbackStart = date(1)
+        let doseDescriptor = FetchDescriptor<MedicationDoseRecord>(predicate: #Predicate {
+            $0.loggedAt >= lookbackStart && travelerProfileIDs.contains($0.profileID)
+        })
+
+        XCTAssertEqual(try context.fetch(medicationDescriptor).map(\.id), [travelerMedication.id])
+        XCTAssertEqual(try context.fetch(doseDescriptor).map(\.medicationID), [travelerMedication.id])
+
+        let noTravelerProfileIDs = Set<UUID?>()
+        let emptyTripDescriptor = FetchDescriptor<Medication>(predicate: #Predicate {
+            !$0.isArchived && noTravelerProfileIDs.contains($0.profileID)
+        })
+        XCTAssertTrue(try context.fetch(emptyTripDescriptor).isEmpty)
     }
 
     @MainActor
