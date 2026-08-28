@@ -158,6 +158,9 @@
 		B00000000000000000000095 /* Services/CareReportExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000095 /* Services/CareReportExportService.swift */; };
 		B00000000000000000000096 /* Views/Settings/CareReportExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000096 /* Views/Settings/CareReportExportView.swift */; };
 		B00000000000000000000097 /* CareReportExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000097 /* CareReportExportServiceTests.swift */; };
+		B00000000000000000000098 /* Services/CareStoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000098 /* Services/CareStoryService.swift */; };
+		B00000000000000000000099 /* Views/Health/CareStoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000099 /* Views/Health/CareStoryView.swift */; };
+		B0000000000000000000009A /* CareStoryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000009A /* CareStoryServiceTests.swift */; };
 		B10000000000000000000001 /* Models/SolidFoodCatalogItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* Models/SolidFoodCatalogItem.swift */; };
 		B10000000000000000000002 /* Services/SolidFoodCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* Services/SolidFoodCatalogService.swift */; };
 		B20000000000000000000001 /* Models/TripPackingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* Models/TripPackingModels.swift */; };
@@ -428,6 +431,9 @@
 		F00000000000000000000095 /* Services/CareReportExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareReportExportService.swift; sourceTree = "<group>"; };
 		F00000000000000000000096 /* Views/Settings/CareReportExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/CareReportExportView.swift; sourceTree = "<group>"; };
 		F00000000000000000000097 /* CareReportExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareReportExportServiceTests.swift; sourceTree = "<group>"; };
+		F00000000000000000000098 /* Services/CareStoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareStoryService.swift; sourceTree = "<group>"; };
+		F00000000000000000000099 /* Views/Health/CareStoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/CareStoryView.swift; sourceTree = "<group>"; };
+		F0000000000000000000009A /* CareStoryServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareStoryServiceTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000001 /* Models/SolidFoodCatalogItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SolidFoodCatalogItem.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* Services/SolidFoodCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SolidFoodCatalogService.swift; sourceTree = "<group>"; };
 		F20000000000000000000001 /* Models/TripPackingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/TripPackingModels.swift; sourceTree = "<group>"; };
@@ -616,6 +622,7 @@
 				F00000000000000000000089 /* Services/FoodHomeServices.swift */,
 				F00000000000000000000092 /* Services/CareRoutineService.swift */,
 				F00000000000000000000095 /* Services/CareReportExportService.swift */,
+				F00000000000000000000098 /* Services/CareStoryService.swift */,
 				F20000000000000000000002 /* Services/TripPackingService.swift */,
 				F20000000000000000000003 /* Services/TripWeatherService.swift */,
 				F20000000000000000000006 /* Services/TripItineraryService.swift */,
@@ -655,6 +662,7 @@
 				F00000000000000000000076 /* Views/Profiles/ProfileViews.swift */,
 				E20000000000000000000003 /* Views/Medications/MedicationViews.swift */,
 				E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */,
+				F00000000000000000000099 /* Views/Health/CareStoryView.swift */,
 				F0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift */,
 				F0000000000000000000007B /* Views/Insights/DogInsightsView.swift */,
 				F00000000000000000000026 /* Views/Insights/InsightMetricCard.swift */,
@@ -692,6 +700,7 @@
 				A50000000000000000000006 /* WatchCompanionTests.swift */,
 				F0000000000000000000001B /* SleepPredictionEngineTests.swift */,
 				F00000000000000000000097 /* CareReportExportServiceTests.swift */,
+				F0000000000000000000009A /* CareStoryServiceTests.swift */,
 				C20000000000000000000005 /* SolidsFeatureTests.swift */,
 				E20000000000000000000005 /* MedicationScheduleEngineTests.swift */,
 			);
@@ -1111,6 +1120,7 @@
 				B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */,
 				B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */,
 				B00000000000000000000095 /* Services/CareReportExportService.swift in Sources */,
+				B00000000000000000000098 /* Services/CareStoryService.swift in Sources */,
 				B20000000000000000000002 /* Services/TripPackingService.swift in Sources */,
 				B20000000000000000000003 /* Services/TripWeatherService.swift in Sources */,
 				B20000000000000000000006 /* Services/TripItineraryService.swift in Sources */,
@@ -1150,6 +1160,7 @@
 				B00000000000000000000076 /* Views/Profiles/ProfileViews.swift in Sources */,
 				E10000000000000000000003 /* Views/Medications/MedicationViews.swift in Sources */,
 				E10000000000000000000004 /* Views/Health/AdultHealthViews.swift in Sources */,
+				B00000000000000000000099 /* Views/Health/CareStoryView.swift in Sources */,
 				B0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift in Sources */,
 				B0000000000000000000007B /* Views/Insights/DogInsightsView.swift in Sources */,
 				B00000000000000000000024 /* Views/Insights/InsightMetricCard.swift in Sources */,
@@ -1183,6 +1194,7 @@
 				C10000000000000000000005 /* SolidsFeatureTests.swift in Sources */,
 				B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */,
 				B00000000000000000000097 /* CareReportExportServiceTests.swift in Sources */,
+				B0000000000000000000009A /* CareStoryServiceTests.swift in Sources */,
 				E10000000000000000000005 /* MedicationScheduleEngineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -24,6 +24,10 @@ struct CareReportExportView: View {
     @State private var defaultFilename = "Little-Windows-Care-Report.pdf"
     @State private var statusMessage: String?
 
+    init(profileID: UUID? = nil) {
+        _selectedProfileID = State(initialValue: profileID)
+    }
+
     private var uniqueProfiles: [CareProfile] {
         ProfileService.shared.allProfiles(in: profiles)
     }
@@ -147,7 +151,9 @@ struct CareReportExportView: View {
                 startDate = range.0
                 endDate = range.1
             }
-            selectedProfileID = selectedProfile?.id
+            if selectedProfileID == nil {
+                selectedProfileID = selectedProfile?.id
+            }
         }
         .fileExporter(
             isPresented: $showingExporter,

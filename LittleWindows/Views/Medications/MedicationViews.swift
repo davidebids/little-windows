@@ -2147,27 +2147,33 @@ private struct MedicationInstructionsFormField: View {
     @Binding var text: String
 
     var body: some View {
+        MedicationMultilineFormField(
+            title: "Instructions",
+            prompt: "Optional",
+            text: $text,
+            lineLimit: 1...5,
+            accessibilityIdentifier: "medication.instructions"
+        )
+    }
+}
+
+private struct MedicationMultilineFormField: View {
+    let title: String
+    let prompt: String
+    @Binding var text: String
+    let lineLimit: ClosedRange<Int>
+    let accessibilityIdentifier: String
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Instructions")
+            Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .accessibilityIdentifier("medication.instructions.label")
+                .accessibilityIdentifier("\(accessibilityIdentifier).label")
 
-            ZStack(alignment: .topLeading) {
-                if text.isEmpty {
-                    Text("Optional")
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-
-                TextEditor(text: $text)
-                    .scrollContentBackground(.hidden)
-                    .frame(height: 88)
-                    .accessibilityIdentifier("medication.instructions")
-            }
+            TextField(prompt, text: $text, axis: .vertical)
+                .lineLimit(lineLimit)
+                .accessibilityIdentifier(accessibilityIdentifier)
         }
         .padding(.vertical, 2)
     }
@@ -2944,7 +2950,7 @@ private struct MedicationEditorView: View {
                     value: CaregiverIdentityService.currentCaregiverName()
                 )
                 Toggle("Confirmed current", isOn: $confirmsCurrent)
-                PersistentMultilineFormField(
+                MedicationMultilineFormField(
                     title: "Change notes",
                     prompt: "Optional context",
                     text: $changeNotes,
@@ -3106,6 +3112,7 @@ private struct MedicationEditorView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(medication == nil ? "Add Medication" : "Edit Medication")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

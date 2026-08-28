@@ -209,6 +209,43 @@ enum HouseholdAttentionService {
         return followUp
     }
 
+    /// Adds Care Story discussion prompts to visit preparation without
+    /// duplicating questions the caregiver already saved.
+    static func addAppointmentQuestions(
+        _ questions: [String],
+        to appointment: DoctorAppointment,
+        context: ModelContext,
+        now: Date = Date()
+    ) -> Int? {
+        let existing = AppointmentQuestionList.parse(appointment.questionsToAsk)
+        var known = Set(existing.map {
+            $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        })
+        var additions: [String] = []
+        for question in questions.flatMap({ AppointmentQuestionList.parse($0) }) {
+            let key = question.folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: .current
+            )
+            guard known.insert(key).inserted else { continue }
+            additions.append(question)
+        }
+        guard !additions.isEmpty else { return 0 }
+
+        let previousQuestions = appointment.questionsToAsk
+        let previousUpdatedAt = appointment.updatedAt
+        appointment.questionsToAsk = AppointmentQuestionList.storageString(
+            from: existing + additions
+        )
+        appointment.updatedAt = now
+        guard PersistenceService.save(context: context) else {
+            appointment.questionsToAsk = previousQuestions
+            appointment.updatedAt = previousUpdatedAt
+            return nil
+        }
+        return additions.count
+    }
+
     static func updateFollowUp(
         _ followUp: AppointmentFollowUp,
         title: String,

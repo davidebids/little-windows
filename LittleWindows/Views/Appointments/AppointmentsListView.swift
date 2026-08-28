@@ -263,7 +263,8 @@ struct AppointmentEditorView: View {
         appointment: DoctorAppointment? = nil,
         babyName: String = "Baby",
         profileID: UUID? = nil,
-        profileType: CareProfileType = .child
+        profileType: CareProfileType = .child,
+        initialQuestions: [String] = []
     ) {
         self.appointment = appointment
         self.babyName = babyName
@@ -297,7 +298,11 @@ struct AppointmentEditorView: View {
         _address = State(initialValue: appointment?.address ?? "")
         _phoneNumber = State(initialValue: appointment?.phoneNumber ?? "")
         _notes = State(initialValue: appointment?.notes ?? "")
-        _questionDrafts = State(initialValue: AppointmentQuestionDraft.drafts(from: appointment?.questionsToAsk))
+        let initialQuestionValue = appointment?.questionsToAsk
+            ?? AppointmentQuestionList.storageString(from: initialQuestions)
+        _questionDrafts = State(
+            initialValue: AppointmentQuestionDraft.drafts(from: initialQuestionValue)
+        )
         _remindersEnabled = State(initialValue: appointment?.remindersEnabled ?? true)
         _selectedLeadTimes = State(
             initialValue: Set(

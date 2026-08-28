@@ -155,7 +155,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         addMedication.tap()
 
         XCTAssertTrue(app.navigationBars["Add Medication"].waitForExistence(timeout: 4))
-        for label in ["Name", "Strength", "Strength unit", "Instructions", "Dose", "Dose unit"] {
+        for label in ["Name", "Strength", "Strength unit"] {
             XCTAssertTrue(
                 app.staticTexts[label].exists,
                 "The \(label) label should remain visible independently of its input value."
@@ -165,11 +165,21 @@ final class UserVisibleFlowUITests: XCTestCase {
         let formPicker = app.buttons["medication.form"]
         let doseUnitPicker = app.buttons["medication.dose-unit"]
         XCTAssertTrue(formPicker.exists)
-        XCTAssertTrue(doseUnitPicker.exists)
 
         formPicker.tap()
         XCTAssertTrue(app.buttons["Liquid"].waitForExistence(timeout: 3))
         app.buttons["Liquid"].tap()
+
+        assertPersistentMultilineField(
+            identifier: "medication.instructions",
+            maxScrolls: 3
+        )
+
+        for _ in 0..<3 where !doseUnitPicker.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(doseUnitPicker.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Dose"].exists)
         XCTAssertTrue(doseUnitPicker.label.contains("Milliliter (mL)"))
 
         doseUnitPicker.tap()
@@ -177,17 +187,18 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.buttons["Milligram (mg)"].tap()
         XCTAssertTrue(doseUnitPicker.label.contains("Milligram (mg)"))
 
-        assertPersistentMultilineField(
-            identifier: "medication.instructions",
-            maxScrolls: 2
-        )
-
+        app.swipeUp()
         let supplyToggle = app.switches["Track quantity on hand"]
         for _ in 0..<5 where !supplyToggle.isHittable {
             app.swipeUp()
         }
         XCTAssertTrue(supplyToggle.waitForExistence(timeout: 3))
-        supplyToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let supplyControl = app.switches
+            .matching(NSPredicate(format: "label == ''"))
+            .allElementsBoundByIndex
+            .first { abs($0.frame.midY - supplyToggle.frame.midY) < 4 }
+            ?? supplyToggle
+        supplyControl.tap()
         let supplyEnabled = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == '1'"),
             object: supplyToggle
@@ -221,6 +232,9 @@ final class UserVisibleFlowUITests: XCTestCase {
         let instructions = app.descendants(matching: .any)
             .matching(identifier: "medication.instructions")
             .firstMatch
+        for _ in 0..<3 where !instructions.exists {
+            app.swipeUp()
+        }
         XCTAssertTrue(instructions.waitForExistence(timeout: 4))
 
         let focusStartedAt = Date()
@@ -1727,6 +1741,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         let feeding = app.buttons["care.solids"]
         let memoryHeading = app.staticTexts["Sample Child's little big moments"]
         XCTAssertTrue(feeding.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Child care"].exists)
+        XCTAssertFalse(app.staticTexts["Daily care"].exists)
+        XCTAssertFalse(app.staticTexts["Share care"].exists)
+        XCTAssertFalse(app.staticTexts["Feeding"].exists)
         XCTAssertTrue(memoryHeading.waitForExistence(timeout: 4))
         XCTAssertLessThan(feeding.frame.minY, memoryHeading.frame.minY)
 
@@ -1740,6 +1758,209 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Care"].waitForExistence(timeout: 4))
         XCTAssertTrue(feeding.waitForExistence(timeout: 4))
         XCTAssertEqual(app.tabBars.buttons["Care"].isSelected, true)
+    }
+
+    func testCareExportEntryOpensPDFReportForSelectedProfile() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://care")
+
+        let exportReport = app.buttons["care.export-report"]
+        XCTAssertTrue(exportReport.waitForExistence(timeout: 8))
+        exportReport.tap()
+
+        XCTAssertTrue(app.navigationBars["Care Report Export"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sample Child"].waitForExistence(timeout: 3))
+        let pdfFormat = app.buttons["PDF"]
+        XCTAssertTrue(pdfFormat.waitForExistence(timeout: 3))
+        if !pdfFormat.isSelected {
+            pdfFormat.tap()
+        }
+        let exportPDF = app.buttons["Export PDF Report"]
+        for _ in 0..<3 where !exportPDF.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(exportPDF.waitForExistence(timeout: 3))
+    }
+
+    func testAdultCareStoryBuildsEpisodeIntelligenceAndRemainsResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000103/today")
+        XCTAssertTrue(app.buttons["Sample Adult settings"].waitForExistence(timeout: 12))
+
+        app.tabBars.buttons["Care"].tap()
+        XCTAssertTrue(app.navigationBars["Care"].waitForExistence(timeout: 4))
+        let careStory = app.buttons["care.story"]
+        XCTAssertTrue(careStory.waitForExistence(timeout: 4))
+
+        let careHubAttachment = XCTAttachment(screenshot: app.screenshot())
+        careHubAttachment.name = "Compact adult Care hub"
+        careHubAttachment.lifetime = .keepAlways
+        add(careHubAttachment)
+
+        let navigationStartedAt = ContinuousClock.now
+        careStory.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.navigationBars["Care Story"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            navigationStartedAt.duration(to: .now),
+            .seconds(4),
+            "A large adult history must not delay opening Care Story."
+        )
+        let storyContentStartedAt = ContinuousClock.now
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["care-story.safety-note"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.segmentedControls["care-story.period-picker"].exists)
+        XCTAssertFalse(app.segmentedControls["care-story.view-picker"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["care-story.chart"].exists)
+        XCTAssertFalse(app.buttons["care-story.focus.symptom"].exists)
+
+        for _ in 0..<3
+            where !app.descendants(matching: .any)["care-story.chapter-hero"].exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            app.descendants(matching: .any)["care-story.chapter-hero"]
+                .waitForExistence(timeout: 6)
+        )
+        XCTAssertLessThan(
+            storyContentStartedAt.duration(to: .now),
+            .seconds(4),
+            "Production-scale Care Story chapters must become usable promptly."
+        )
+
+        let periodPicker = app.segmentedControls["care-story.period-picker"]
+        let thirtyDayPeriod = periodPicker.buttons["30d"]
+        let ninetyDayPeriod = periodPicker.buttons["90d"]
+        XCTAssertTrue(thirtyDayPeriod.exists)
+        XCTAssertTrue(ninetyDayPeriod.exists)
+        thirtyDayPeriod.tap()
+        let thirtyDayStory = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier == %@ AND value == %@",
+                "care-story.chapter-hero",
+                "30-day story"
+            )
+        ).firstMatch
+        XCTAssertTrue(thirtyDayStory.waitForExistence(timeout: 5))
+
+        let cachedPeriodStartedAt = ContinuousClock.now
+        ninetyDayPeriod.tap()
+        let ninetyDayStory = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier == %@ AND value == %@",
+                "care-story.chapter-hero",
+                "90-day story"
+            )
+        ).firstMatch
+        XCTAssertTrue(ninetyDayStory.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["care-story.loading"].exists)
+        XCTAssertLessThan(
+            cachedPeriodStartedAt.duration(to: .now),
+            .seconds(2),
+            "Returning to a previously built story window should not rebuild its snapshot."
+        )
+        XCTAssertTrue(app.staticTexts["Care review"].waitForExistence(timeout: 3))
+
+        for _ in 0..<3
+            where !app.descendants(matching: .any)["care-story.change-pulse"].exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            app.descendants(matching: .any)["care-story.change-pulse"]
+                .waitForExistence(timeout: 4)
+        )
+
+        let populatedPulseCell = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "care-story.pulse-cell.")
+        ).firstMatch
+        for _ in 0..<3 where !populatedPulseCell.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(populatedPulseCell.waitForExistence(timeout: 4))
+        populatedPulseCell.tap()
+        XCTAssertTrue(app.navigationBars["Day Details"].waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["care-story.pulse-records"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["Open Health Log"].exists)
+        app.navigationBars["Day Details"].buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Care Story"].waitForExistence(timeout: 3))
+
+        let reviewSources = app.buttons["care-story.review-sources"]
+        for _ in 0..<8 {
+            if reviewSources.waitForExistence(timeout: 0.75) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(reviewSources.waitForExistence(timeout: 4))
+        reviewSources.tap()
+        XCTAssertTrue(app.navigationBars["Story evidence"].waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["care-story.source-records"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label BEGINSWITH %@",
+                    "These are the exact records counted in this chapter’s 14-day pulse."
+                )
+            ).firstMatch.exists
+        )
+        app.navigationBars["Story evidence"].buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Care Story"].waitForExistence(timeout: 3))
+
+        let chapterAttachment = XCTAttachment(screenshot: app.screenshot())
+        chapterAttachment.name = "Adult Care Story episode pulse"
+        chapterAttachment.lifetime = .keepAlways
+        add(chapterAttachment)
+
+        let domainShifts = app.descendants(matching: .any)["care-story.domain-shifts"]
+        for _ in 0..<6 {
+            if domainShifts.waitForExistence(timeout: 0.75) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(domainShifts.waitForExistence(timeout: 4))
+
+        let addToAppointment = app.buttons["care-story.add-to-appointment"]
+        for _ in 0..<6 {
+            if addToAppointment.waitForExistence(timeout: 0.75) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(addToAppointment.waitForExistence(timeout: 4))
+        addToAppointment.tap()
+        XCTAssertTrue(app.alerts["Care Story"].waitForExistence(timeout: 4))
+        XCTAssertTrue(
+            app.alerts["Care Story"].staticTexts.matching(
+                NSPredicate(format: "label CONTAINS %@", "Upcoming follow-up")
+            ).firstMatch.exists
+        )
+        app.alerts["Care Story"].buttons["OK"].tap()
+
+        let shareChapter = app.buttons["care-story.share-chapter"]
+        for _ in 0..<4 {
+            if shareChapter.waitForExistence(timeout: 0.75) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(shareChapter.waitForExistence(timeout: 4))
+
+        let scrollOptions = XCTMeasureOptions()
+        scrollOptions.iterationCount = 3
+        measure(
+            metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric],
+            options: scrollOptions
+        ) {
+            app.swipeDown(velocity: .fast)
+            app.swipeUp(velocity: .fast)
+        }
     }
 
     func testHomeAreasStayBelowNavigationBarWhenPulledDown() {

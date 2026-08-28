@@ -1649,7 +1649,7 @@ private struct FirstRunOnboardingView: View {
 
 #if DEBUG
 enum DebugSimulatorSmokeSeedService {
-    private static let performanceSeededKey = "debug.performanceSeeded.v5"
+    private static let performanceSeededKey = "debug.performanceSeeded.v6"
     static var isEnabled: Bool {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
@@ -1709,6 +1709,7 @@ enum DebugSimulatorSmokeSeedService {
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v2")
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v3")
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v4")
+        UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v5")
         UserDefaults.standard.removeObject(forKey: performanceSeededKey)
         PersistenceService.setICloudSyncEnabled(false)
     }
@@ -2186,6 +2187,68 @@ enum DebugSimulatorSmokeSeedService {
                 updatedAt: now
             )
         if regimen.modelContext == nil { context.insert(regimen) }
+
+        let planRevisionID = UUID(uuidString: "00000000-0000-0000-0000-000000000923")!
+        if fetch(MedicationPlanRevision.self, id: planRevisionID, context: context) == nil {
+            let effectiveFrom = calendar.date(byAdding: .day, value: -21, to: now) ?? now
+            context.insert(MedicationPlanRevision(
+                id: planRevisionID,
+                profileID: profile.id,
+                medicationID: medication.id,
+                regimenID: regimen.id,
+                changeKind: .added,
+                source: .clinician,
+                effectiveFrom: effectiveFrom,
+                changedAt: effectiveFrom,
+                changedByIdentifier: "sample-caregiver",
+                changedByName: "Sample Caregiver",
+                afterSnapshot: MedicationPlanSnapshot(
+                    medication: medication,
+                    regimen: regimen,
+                    phases: []
+                ),
+                createdAt: effectiveFrom,
+                updatedAt: effectiveFrom
+            ))
+        }
+
+        let completedAppointmentID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000924"
+        )!
+        if fetch(DoctorAppointment.self, id: completedAppointmentID, context: context) == nil {
+            let appointmentDate = calendar.date(byAdding: .day, value: -10, to: now) ?? now
+            context.insert(DoctorAppointment(
+                id: completedAppointmentID,
+                profileID: profile.id,
+                title: "Care review",
+                appointmentType: .primaryCare,
+                startDate: appointmentDate,
+                visitSummary: "Reviewed current symptoms, routines, and follow-up questions.",
+                remindersEnabled: false,
+                createdAt: appointmentDate,
+                updatedAt: appointmentDate,
+                isCompleted: true,
+                caregiverName: "Sample Caregiver"
+            ))
+        }
+
+        let upcomingAppointmentID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000925"
+        )!
+        if fetch(DoctorAppointment.self, id: upcomingAppointmentID, context: context) == nil {
+            let appointmentDate = calendar.date(byAdding: .day, value: 12, to: now) ?? now
+            context.insert(DoctorAppointment(
+                id: upcomingAppointmentID,
+                profileID: profile.id,
+                title: "Upcoming follow-up",
+                appointmentType: .primaryCare,
+                startDate: appointmentDate,
+                remindersEnabled: false,
+                createdAt: now,
+                updatedAt: now,
+                caregiverName: "Sample Caregiver"
+            ))
+        }
 
         var doseCountDescriptor = FetchDescriptor<MedicationDoseRecord>(
             predicate: #Predicate { $0.medicationID == medicationID }

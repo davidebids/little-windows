@@ -1026,11 +1026,15 @@ struct MilestonesView: View {
     var body: some View {
         let timelineItems = self.timelineItems
         List {
-            medicationsSection
+            if profile?.profileType == .adult {
+                adultCareSection
+            } else if profile?.profileType == .child {
+                childCareSection
+            } else {
+                medicationsSection
 
-            adultHealthSection
-
-            solidsSection
+                careReportExportSection
+            }
 
             Section {
                 memoryHeader
@@ -1129,22 +1133,161 @@ struct MilestonesView: View {
     }
 
     @ViewBuilder
-    private var adultHealthSection: some View {
+    private var adultCareSection: some View {
         if let profile, profile.profileType == .adult {
             Section {
                 NavigationLink {
+                    MedicationsView(profile: profile)
+                } label: {
+                    compactCareRow(
+                        title: "Medications",
+                        subtitle: "Schedules, doses, reminders, and refills",
+                        systemImage: "pills.fill",
+                        tint: .red
+                    )
+                }
+                .accessibilityIdentifier("care.medications")
+
+                NavigationLink {
+                    CareStoryView(profile: profile)
+                } label: {
+                    compactCareRow(
+                        title: "Care Story",
+                        subtitle: "See meaningful care episodes unfold",
+                        systemImage: "sparkles.rectangle.stack.fill",
+                        tint: .indigo
+                    )
+                }
+                .accessibilityIdentifier("care.story")
+
+                NavigationLink {
                     AdultHealthOverviewView(profile: profile)
                 } label: {
+                    compactCareRow(
+                        title: "Symptoms & Vitals",
+                        subtitle: "Symptoms, pain, vitals, weight, and trends",
+                        systemImage: "waveform.path.ecg.rectangle.fill",
+                        tint: .purple
+                    )
+                }
+                .accessibilityIdentifier("care.adult-health")
+
+                NavigationLink {
+                    CareReportExportView(profileID: profile.id)
+                } label: {
+                    compactCareRow(
+                        title: "Export Care Report",
+                        subtitle: "Create a PDF or CSV for visits and handoffs",
+                        systemImage: "doc.text.fill",
+                        tint: .indigo
+                    )
+                }
+                .accessibilityIdentifier("care.export-report")
+            } header: {
+                AppSectionHeader(title: "Adult care", subtitle: profile.name)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var childCareSection: some View {
+        if let profile, profile.profileType == .child {
+            Section {
+                if profile.profileType.capabilities.supportsMedications {
+                    NavigationLink {
+                        MedicationsView(profile: profile)
+                    } label: {
+                        compactCareRow(
+                            title: "Medications",
+                            subtitle: "Schedules, doses, reminders, and refills",
+                            systemImage: "pills.fill",
+                            tint: .red
+                        )
+                    }
+                    .accessibilityIdentifier("care.medications")
+                }
+
+                NavigationLink {
+                    CareReportExportView(profileID: profile.id)
+                } label: {
+                    compactCareRow(
+                        title: "Export Care Report",
+                        subtitle: "Create a PDF or CSV for visits and handoffs",
+                        systemImage: "doc.text.fill",
+                        tint: .indigo
+                    )
+                }
+                .accessibilityIdentifier("care.export-report")
+
+                if solidsAccessLevel != .hidden {
+                    Button {
+                        openSolids(.solidsHome)
+                    } label: {
+                        HStack(spacing: 8) {
+                            compactCareRow(
+                                title: solidsAccessLevel == .readinessPreview
+                                    ? "Starting solids soon"
+                                    : "Solids",
+                                subtitle: solidsSubtitle,
+                                systemImage: "carrot.fill",
+                                tint: .orange
+                            )
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("care.solids")
+                }
+            } header: {
+                AppSectionHeader(title: "Child care", subtitle: profile.name)
+            }
+        }
+    }
+
+    private func compactCareRow(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        tint: Color
+    ) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(tint.gradient, in: RoundedRectangle(cornerRadius: 11))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var careReportExportSection: some View {
+        if let profile {
+            Section {
+                NavigationLink {
+                    CareReportExportView(profileID: profile.id)
+                } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "waveform.path.ecg.rectangle.fill")
+                        Image(systemName: "doc.text.fill")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(.white)
                             .frame(width: 42, height: 42)
-                            .background(Color.purple.gradient, in: RoundedRectangle(cornerRadius: 13))
+                            .background(Color.indigo.gradient, in: RoundedRectangle(cornerRadius: 13))
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Symptoms & Vitals")
+                            Text("Export Care Report")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Record symptoms, core vitals, pain, weight, and trends")
+                            Text("Create a PDF or CSV for appointments and care handoffs")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.leading)
@@ -1152,9 +1295,9 @@ struct MilestonesView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .accessibilityIdentifier("care.adult-health")
+                .accessibilityIdentifier("care.export-report")
             } header: {
-                AppSectionHeader(title: "Health log", subtitle: "Recorded values")
+                AppSectionHeader(title: "Share care", subtitle: profile.name)
             }
         }
     }
@@ -1209,44 +1352,6 @@ struct MilestonesView: View {
                     .listRowSeparator(.hidden)
             } header: {
                 AppSectionHeader(title: "This Month", subtitle: guide.ageLabel)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var solidsSection: some View {
-        if let profile,
-           profile.profileType == .child,
-           solidsAccessLevel != .hidden {
-            Section {
-                Button {
-                    openSolids(.solidsHome)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "carrot.fill")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 42, height: 42)
-                            .background(Color.orange.gradient, in: RoundedRectangle(cornerRadius: 13))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(solidsAccessLevel == .readinessPreview ? "Starting solids soon" : "Solids")
-                                .font(.subheadline.weight(.semibold))
-                            Text(solidsSubtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.leading)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("care.solids")
-            } header: {
-                AppSectionHeader(title: "Feeding", subtitle: profile.name)
             }
         }
     }
