@@ -407,7 +407,16 @@ struct TodayView: View {
         )
     }
 
+    private var renderStateRefreshIsDeferred: Bool {
+        deepLinkRouter.showingSettings || showingProfileEditor
+    }
+
     private func refreshCachedRenderState() {
+        // Today remains mounted underneath full-screen editing sheets. Building
+        // its bounded event timeline while the user saves a profile needlessly
+        // faults and sorts hundreds of rows on the main actor, delaying the
+        // visible sheet. The dismissal path schedules one coalesced refresh.
+        guard !renderStateRefreshIsDeferred else { return }
         cachedRenderState = makeRenderState()
         scheduleIntegrationAnalysisRefresh()
     }
@@ -2714,6 +2723,18 @@ struct TodayView: View {
             // is a yield, not a time-based attempt to hide main-actor work.
             await Task.yield()
             guard !Task.isCancelled else { return }
+            // A save performed by a covering sheet still needs to reach Today,
+            // but only after that sheet is gone. Waiting here avoids faulting
+            // the hidden timeline and coalesces every save notification into a
+            // single visible refresh after dismissal.
+            while renderStateRefreshIsDeferred {
+                do {
+                    try await Task.sleep(for: .milliseconds(200))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+            }
             refreshCachedRenderState()
             timerMutationRenderDeferralActive = false
         }
