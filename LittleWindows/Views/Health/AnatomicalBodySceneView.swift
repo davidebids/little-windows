@@ -129,6 +129,7 @@ struct BodyVisualizationView: UIViewRepresentable {
         private var specificationsByStructureID: [String: AnatomyAssetSpecification] = [:]
         private var restPosesByEntity: [ObjectIdentifier: AnatomyRestPose] = [:]
         private var markerPositions: [String: SIMD3<Float>] = [:]
+        private var selectionZonesByEntity: [ObjectIdentifier: AnatomySelectionZone] = [:]
         private var nervePulseTracks: [AnatomyPulseTrack] = []
         private var arterialPulseTargets: [Entity] = []
         private var lastArterialPulseStep = -1
@@ -210,6 +211,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             specificationsByStructureID.removeAll()
             restPosesByEntity.removeAll()
             markerPositions.removeAll()
+            selectionZonesByEntity.removeAll()
             nervePulseTracks.removeAll()
             arterialPulseTargets.removeAll()
             atmosphereMotes.removeAll()
@@ -402,6 +404,7 @@ struct BodyVisualizationView: UIViewRepresentable {
                 let semanticName = semanticName(for: hit.entity)
                 guard let structureID = resolvedStructureID(
                     for: semanticName,
+                    selectionZone: selectionZone(for: hit.entity),
                     at: localPosition
                 ),
                 let structure = BodyAnatomyCatalog.structure(id: structureID),
@@ -428,8 +431,7 @@ struct BodyVisualizationView: UIViewRepresentable {
                let marker = FootDetailStructureMapper.markerPosition(
                    for: structureID,
                    focus: parent.footDetailFocus,
-                   variant: parent.variant,
-                   soleView: parent.orientation == .back
+                   variant: parent.variant
                ) {
                 return marker
             }
@@ -468,6 +470,7 @@ struct BodyVisualizationView: UIViewRepresentable {
 
         private func resolvedStructureID(
             for semanticName: String,
+            selectionZone: AnatomySelectionZone?,
             at localPosition: SIMD3<Float>
         ) -> String? {
             if semanticName.hasPrefix("system:foot-"), isShowingFootDetail {
@@ -475,8 +478,7 @@ struct BodyVisualizationView: UIViewRepresentable {
                     layer: parent.activeLayer,
                     focus: parent.footDetailFocus,
                     at: localPosition / anatomySceneScale,
-                    variant: parent.variant,
-                    soleView: parent.orientation == .back
+                    variant: parent.variant
                 )
             }
             if semanticName.hasPrefix("system:hand-"), isShowingHandDetail {
@@ -488,6 +490,13 @@ struct BodyVisualizationView: UIViewRepresentable {
             }
             if semanticName.hasPrefix("anatomy:"), parent.activeLayer == .organs {
                 return String(semanticName.dropFirst("anatomy:".count))
+            }
+            if let selectionZone {
+                return selectionZone.structureID(
+                    layer: parent.activeLayer,
+                    at: localPosition,
+                    variant: parent.variant
+                )
             }
             if semanticName == "system:selectionProxy", parent.activeLayer == .bodyAreas {
                 return BodySurfaceMapper.structureID(
@@ -512,6 +521,17 @@ struct BodyVisualizationView: UIViewRepresentable {
                     at: localPosition,
                     variant: parent.variant
                 )
+            }
+            return nil
+        }
+
+        private func selectionZone(for entity: Entity) -> AnatomySelectionZone? {
+            var candidate: Entity? = entity
+            while let value = candidate {
+                if let zone = selectionZonesByEntity[ObjectIdentifier(value)] {
+                    return zone
+                }
+                candidate = value.parent
             }
             return nil
         }
@@ -572,6 +592,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             specificationsByStructureID = [:]
             restPosesByEntity = [:]
             markerPositions = [:]
+            selectionZonesByEntity = [:]
             nervePulseTracks = []
             arterialPulseTargets = []
             lastArterialPulseStep = -1
@@ -939,8 +960,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             proxy.components.set(CollisionComponent(shapes: FootDetailStructureMapper
                 .selectionProxyShapes(
                     focus: parent.footDetailFocus,
-                    variant: parent.variant,
-                    soleView: parent.orientation == .back
+                    variant: parent.variant
                 )))
             footDetailSelectionProxyRoot.addChild(proxy)
         }
@@ -1153,28 +1173,151 @@ struct BodyVisualizationView: UIViewRepresentable {
 
         private func addSelectionProxy() {
             selectionProxyRoot.name = "system:selectionProxy"
-            let capsules: [(SIMD3<Float>, SIMD3<Float>, Float)] = [
-                (SIMD3(0, 0.69, 0), SIMD3(0, 0.82, 0), 0.115),
-                (SIMD3(0, 0.57, 0), SIMD3(0, 0.69, 0), 0.075),
-                (SIMD3(0, 0.27, 0), SIMD3(0, 0.56, 0), 0.205),
-                (SIMD3(0, -0.09, 0), SIMD3(0, 0.28, 0), 0.185),
-                (SIMD3(-0.2, 0.51, 0), SIMD3(-0.34, 0.25, 0), 0.072),
-                (SIMD3(-0.34, 0.25, 0), SIMD3(-0.49, 0.02, 0), 0.055),
-                (SIMD3(-0.49, 0.02, 0.015), SIMD3(-0.53, -0.08, 0.03), 0.065),
-                (SIMD3(0.2, 0.51, 0), SIMD3(0.34, 0.25, 0), 0.072),
-                (SIMD3(0.34, 0.25, 0), SIMD3(0.49, 0.02, 0), 0.055),
-                (SIMD3(0.49, 0.02, 0.015), SIMD3(0.53, -0.08, 0.03), 0.065),
-                (SIMD3(-0.1, -0.08, 0), SIMD3(-0.12, -0.5, 0), 0.102),
-                (SIMD3(-0.12, -0.5, 0), SIMD3(-0.1, -0.84, 0), 0.068),
-                (SIMD3(-0.1, -0.84, 0.02), SIMD3(-0.1, -0.91, 0.1), 0.073),
-                (SIMD3(0.1, -0.08, 0), SIMD3(0.12, -0.5, 0), 0.102),
-                (SIMD3(0.12, -0.5, 0), SIMD3(0.1, -0.84, 0), 0.068),
-                (SIMD3(0.1, -0.84, 0.02), SIMD3(0.1, -0.91, 0.1), 0.073)
-            ]
-            let shapes = capsules.compactMap { start, end, radius in
-                selectionCapsule(from: start, to: end, radius: radius)
+            selectionProxyRoot.children.removeAll()
+            selectionProxyRoot.components.remove(CollisionComponent.self)
+            selectionZonesByEntity.removeAll()
+
+            addSelectionCapsule(
+                .head,
+                from: SIMD3(0, 0.69, 0),
+                to: SIMD3(0, 0.82, 0),
+                radius: 0.115
+            )
+            addSelectionCapsule(
+                .neck,
+                from: SIMD3(0, 0.57, 0),
+                to: SIMD3(0, 0.69, 0),
+                radius: 0.075
+            )
+            addSelectionCapsule(
+                .upperTorso,
+                from: SIMD3(0, 0.31, 0),
+                to: SIMD3(0, 0.56, 0),
+                radius: 0.205
+            )
+            addSelectionCapsule(
+                .lowerTorso,
+                from: SIMD3(0, 0.04, 0),
+                to: SIMD3(0, 0.31, 0),
+                radius: 0.185
+            )
+            addSelectionCapsule(
+                .pelvis,
+                from: SIMD3(0, -0.10, 0),
+                to: SIMD3(0, 0.06, 0),
+                radius: 0.17
+            )
+
+            for side in [BodySide.left, .right] {
+                let sign: Float = side == .left ? 1 : -1
+                addSelectionSphere(
+                    .shoulder(side),
+                    center: SIMD3(sign * 0.19, 0.545, 0),
+                    radius: 0.095
+                )
+                addSelectionCapsule(
+                    .upperArm(side),
+                    from: SIMD3(sign * 0.205, 0.49, 0),
+                    to: SIMD3(sign * 0.25, 0.315, 0),
+                    radius: 0.076
+                )
+                addSelectionSphere(
+                    .elbow(side),
+                    center: SIMD3(sign * 0.265, 0.272, 0),
+                    radius: 0.082
+                )
+                addSelectionCapsule(
+                    .forearm(side),
+                    from: SIMD3(sign * 0.28, 0.225, 0),
+                    to: SIMD3(sign * 0.39, 0.045, 0.01),
+                    radius: 0.062
+                )
+                addSelectionSphere(
+                    .wrist(side),
+                    center: SIMD3(sign * 0.408, 0.001, 0.015),
+                    radius: 0.067
+                )
+                addSelectionCapsule(
+                    .hand(side),
+                    from: SIMD3(sign * 0.425, -0.018, 0.02),
+                    to: SIMD3(sign * 0.505, -0.078, 0.045),
+                    radius: 0.074
+                )
+
+                addSelectionSphere(
+                    .hip(side),
+                    center: SIMD3(sign * 0.14, -0.075, 0),
+                    radius: 0.125
+                )
+                addSelectionCapsule(
+                    .thigh(side),
+                    from: SIMD3(sign * 0.14, -0.145, 0),
+                    to: SIMD3(sign * 0.115, -0.405, 0),
+                    radius: 0.108
+                )
+                addSelectionSphere(
+                    .knee(side),
+                    center: SIMD3(sign * 0.115, -0.465, -0.005),
+                    radius: 0.087
+                )
+                addSelectionCapsule(
+                    .lowerLeg(side),
+                    from: SIMD3(sign * 0.12, -0.535, 0),
+                    to: SIMD3(sign * 0.145, -0.70, -0.005),
+                    radius: 0.073
+                )
+                addSelectionSphere(
+                    .ankle(side),
+                    center: SIMD3(sign * 0.15, -0.755, -0.015),
+                    radius: 0.072
+                )
+                addFootSelectionZone(side: side)
             }
-            selectionProxyRoot.components.set(CollisionComponent(shapes: shapes))
+        }
+
+        private func addSelectionCapsule(
+            _ zone: AnatomySelectionZone,
+            from start: SIMD3<Float>,
+            to end: SIMD3<Float>,
+            radius: Float
+        ) {
+            guard let shape = selectionCapsule(from: start, to: end, radius: radius) else {
+                return
+            }
+            addSelectionZone(zone, shapes: [shape])
+        }
+
+        private func addSelectionSphere(
+            _ zone: AnatomySelectionZone,
+            center: SIMD3<Float>,
+            radius: Float
+        ) {
+            let radiusScale: Float = parent.variant == .female ? 1 : 1.06
+            let shape = ShapeResource.generateSphere(
+                radius: radius * anatomySceneScale * radiusScale
+            ).offsetBy(translation: selectionProxyPoint(center))
+            addSelectionZone(zone, shapes: [shape])
+        }
+
+        private func addFootSelectionZone(side: BodySide) {
+            let focus: BodyFootDetailFocus = side == .left ? .left : .right
+            let shapes = FootDetailStructureMapper.selectionProxyShapes(
+                focus: focus,
+                variant: parent.variant
+            )
+            addSelectionZone(.foot(side), shapes: shapes)
+        }
+
+        private func addSelectionZone(
+            _ zone: AnatomySelectionZone,
+            shapes: [ShapeResource]
+        ) {
+            guard !shapes.isEmpty else { return }
+            let entity = Entity()
+            entity.name = "system:selection-zone"
+            entity.components.set(CollisionComponent(shapes: shapes))
+            selectionZonesByEntity[ObjectIdentifier(entity)] = zone
+            selectionProxyRoot.addChild(entity)
         }
 
         private func selectionCapsule(
@@ -2289,6 +2432,222 @@ private struct AnatomyRestPose {
     let scale: SIMD3<Float>
 }
 
+private enum AnatomySelectionZone: Hashable {
+    case head
+    case neck
+    case upperTorso
+    case lowerTorso
+    case pelvis
+    case shoulder(BodySide)
+    case upperArm(BodySide)
+    case elbow(BodySide)
+    case forearm(BodySide)
+    case wrist(BodySide)
+    case hand(BodySide)
+    case hip(BodySide)
+    case thigh(BodySide)
+    case knee(BodySide)
+    case lowerLeg(BodySide)
+    case ankle(BodySide)
+    case foot(BodySide)
+
+    func structureID(
+        layer: BodyAnatomyLayer,
+        at renderedPoint: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String? {
+        let front = renderedPoint.z >= 0
+        switch layer {
+        case .bodyAreas:
+            return bodyAreaID(front: front, point: renderedPoint, variant: variant)
+        case .muscles:
+            if case let .foot(side) = self {
+                return footStructureID(
+                    layer: layer,
+                    side: side,
+                    point: renderedPoint,
+                    variant: variant
+                )
+            }
+            if case let .hand(side) = self {
+                return "muscle.hand.\(sideName(side))"
+            }
+            let structureID = muscleID(front: front)
+                ?? BodySurfaceMapper.muscleID(at: renderedPoint, variant: variant)
+            return enforcingSide(on: structureID)
+        case .joints:
+            if case let .foot(side) = self {
+                return footStructureID(
+                    layer: layer,
+                    side: side,
+                    point: renderedPoint,
+                    variant: variant
+                )
+            }
+            let structureID = jointID
+                ?? BodySurfaceMapper.jointID(at: renderedPoint, variant: variant)
+            return enforcingSide(on: structureID)
+        case .nerves:
+            if case let .foot(side) = self {
+                return footStructureID(
+                    layer: layer,
+                    side: side,
+                    point: renderedPoint,
+                    variant: variant
+                )
+            }
+            let structureID = BodySurfaceMapper.nerveID(
+                at: renderedPoint,
+                variant: variant
+            )
+            return enforcingSide(on: structureID)
+        case .organs:
+            return nil
+        }
+    }
+
+    private func bodyAreaID(
+        front: Bool,
+        point: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String? {
+        switch self {
+        case .head:
+            return front ? "body.face" : "body.head"
+        case .neck:
+            return "body.neck"
+        case .upperTorso:
+            return front ? "body.chest" : "body.upperBack"
+        case .lowerTorso:
+            return front ? "body.abdomen" : "body.lowerBack"
+        case .pelvis:
+            return BodySurfaceMapper.structureID(at: point, variant: variant)
+        case let .shoulder(side):
+            return pairedID("body.shoulder", side: side)
+        case let .upperArm(side):
+            return pairedID("body.upperArm", side: side)
+        case let .elbow(side):
+            return pairedID("body.elbow", side: side)
+        case let .forearm(side):
+            return pairedID("body.forearm", side: side)
+        case let .wrist(side):
+            return pairedID("body.wrist", side: side)
+        case let .hand(side):
+            return pairedID("body.hand", side: side)
+        case let .hip(side):
+            return pairedID(front ? "body.hip" : "body.buttock", side: side)
+        case let .thigh(side):
+            return pairedID(front ? "body.thigh" : "body.posteriorThigh", side: side)
+        case let .knee(side):
+            return pairedID("body.knee", side: side)
+        case let .lowerLeg(side):
+            return pairedID(front ? "body.lowerLeg" : "body.calf", side: side)
+        case let .ankle(side):
+            return pairedID("body.ankle", side: side)
+        case let .foot(side):
+            return footStructureID(
+                layer: .bodyAreas,
+                side: side,
+                point: point,
+                variant: variant
+            )
+        }
+    }
+
+    private func muscleID(front: Bool) -> String? {
+        switch self {
+        case .upperTorso:
+            return front ? "muscle.pectorals" : "muscle.trapezius"
+        case .lowerTorso:
+            return front ? "muscle.abdominals" : "muscle.lowerBack"
+        case let .shoulder(side):
+            return pairedID("muscle.deltoid", side: side)
+        case let .upperArm(side):
+            return pairedID(front ? "muscle.biceps" : "muscle.triceps", side: side)
+        case let .elbow(side), let .forearm(side), let .wrist(side):
+            return pairedID("muscle.forearm", side: side)
+        case let .hip(side):
+            return pairedID("muscle.gluteal", side: side)
+        case let .thigh(side), let .knee(side):
+            return pairedID(front ? "muscle.quadriceps" : "muscle.hamstrings", side: side)
+        case let .lowerLeg(side), let .ankle(side):
+            return pairedID("muscle.calf", side: side)
+        case .head, .neck, .pelvis, .hand, .foot:
+            return nil
+        }
+    }
+
+    private var jointID: String? {
+        switch self {
+        case .neck:
+            return "joint.cervicalSpine"
+        case .upperTorso:
+            return "joint.ribCage"
+        case .lowerTorso:
+            return "joint.lumbarSpine"
+        case let .shoulder(side), let .upperArm(side):
+            return pairedID("joint.shoulder", side: side)
+        case let .elbow(side):
+            return pairedID("joint.elbow", side: side)
+        case let .forearm(side), let .wrist(side), let .hand(side):
+            return pairedID("joint.wrist", side: side)
+        case let .hip(side), let .thigh(side):
+            return pairedID("joint.hip", side: side)
+        case let .knee(side), let .lowerLeg(side):
+            return pairedID("joint.knee", side: side)
+        case let .ankle(side):
+            return pairedID("joint.ankle", side: side)
+        case .head, .pelvis, .foot:
+            return nil
+        }
+    }
+
+    private func footStructureID(
+        layer: BodyAnatomyLayer,
+        side: BodySide,
+        point: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String? {
+        FootDetailStructureMapper.structureID(
+            layer: layer,
+            focus: side == .left ? .left : .right,
+            at: point / anatomySceneScale,
+            variant: variant
+        )
+    }
+
+    private func enforcingSide(on structureID: String?) -> String? {
+        guard let structureID, let side else { return structureID }
+        guard structureID.hasSuffix(".left") || structureID.hasSuffix(".right") else {
+            return structureID
+        }
+        return structureID
+            .split(separator: ".")
+            .dropLast()
+            .joined(separator: ".") + ".\(sideName(side))"
+    }
+
+    private var side: BodySide? {
+        switch self {
+        case let .shoulder(side), let .upperArm(side), let .elbow(side),
+             let .forearm(side), let .wrist(side), let .hand(side),
+             let .hip(side), let .thigh(side), let .knee(side),
+             let .lowerLeg(side), let .ankle(side), let .foot(side):
+            return side
+        case .head, .neck, .upperTorso, .lowerTorso, .pelvis:
+            return nil
+        }
+    }
+
+    private func pairedID(_ base: String, side: BodySide) -> String {
+        "\(base).\(sideName(side))"
+    }
+
+    private func sideName(_ side: BodySide) -> String {
+        side == .left ? "left" : "right"
+    }
+}
+
 private enum AnatomyVascularKind: CaseIterable {
     case arterial
     case venous
@@ -2393,41 +2752,39 @@ private enum FootDetailStructureMapper {
         layer: BodyAnatomyLayer,
         focus: BodyFootDetailFocus,
         at point: SIMD3<Float>,
-        variant: BodyModelVariant,
-        soleView: Bool = false
+        variant: BodyModelVariant
     ) -> String? {
         guard focus != .both else { return nil }
         let frame = frame(focus: focus, variant: variant)
         let side = focus == .left ? "left" : "right"
-        let point = soleView ? SIMD3(point.x, point.y, -point.z) : point
         let lateral = (point.x - frame.centerX) * frame.sideSign / frame.halfWidth
 
         switch layer {
         case .bodyAreas:
-            if point.y > frame.ankleBoundaryY, point.z > -0.065 {
+            if point.y > frame.ankleBoundaryY {
                 return "body.ankle.\(side)"
             }
-            if point.z > frame.heelBoundaryZ { return "body.heel.\(side)" }
-            if point.z < frame.toeBoundaryZ {
+            if point.z < frame.heelBoundaryZ { return "body.heel.\(side)" }
+            if point.z > frame.toeBoundaryZ {
                 return "body.\(toeID(lateral: lateral)).\(side)"
             }
             if point.y <= frame.soleBoundaryY {
-                if point.z < -0.035 { return "body.ballOfFoot.\(side)" }
+                if point.z > 0.035 { return "body.ballOfFoot.\(side)" }
                 if lateral < -0.08 { return "body.arch.\(side)" }
                 return "body.sole.\(side)"
             }
             return "body.topOfFoot.\(side)"
         case .muscles:
-            if point.z > 0.045, point.y > frame.soleBoundaryY {
+            if point.z < -0.045, point.y > frame.soleBoundaryY {
                 return "muscle.achilles.\(side)"
             }
             return "muscle.foot.\(side)"
         case .joints:
-            if point.y > frame.ankleBoundaryY, point.z > -0.065 {
+            if point.y > frame.ankleBoundaryY {
                 return "joint.ankle.\(side)"
             }
-            if point.z > frame.heelBoundaryZ { return "joint.heel.\(side)" }
-            if point.z < frame.toeBoundaryZ {
+            if point.z < frame.heelBoundaryZ { return "joint.heel.\(side)" }
+            if point.z > frame.toeBoundaryZ {
                 return "joint.\(toeID(lateral: lateral)).\(side)"
             }
             return "joint.midfoot.\(side)"
@@ -2446,8 +2803,7 @@ private enum FootDetailStructureMapper {
     static func markerPosition(
         for structureID: String,
         focus: BodyFootDetailFocus,
-        variant: BodyModelVariant,
-        soleView: Bool = false
+        variant: BodyModelVariant
     ) -> SIMD3<Float>? {
         guard focus != .both else { return nil }
         let frame = frame(focus: focus, variant: variant)
@@ -2456,55 +2812,52 @@ private enum FootDetailStructureMapper {
         if structureID.contains("ankle") {
             point = frame.ankle
         } else if structureID.contains("achilles") {
-            point = SIMD3(frame.centerX, frame.topY + 0.018, 0.062)
+            point = SIMD3(frame.centerX, frame.topY + 0.018, -0.062)
         } else if structureID.contains("heel") {
-            point = SIMD3(frame.centerX, frame.soleY + 0.012, 0.074)
+            point = SIMD3(frame.centerX, frame.soleY + 0.012, -0.074)
         } else if structureID.contains("topOfFoot") {
-            point = SIMD3(frame.centerX, frame.topY, -0.005)
+            point = SIMD3(frame.centerX, frame.topY, 0.005)
         } else if structureID.contains("sole") {
-            point = SIMD3(frame.centerX, frame.soleY, -0.018)
+            point = SIMD3(frame.centerX, frame.soleY, 0.018)
         } else if structureID.contains("arch") {
             point = SIMD3(
                 frame.centerX - frame.sideSign * frame.halfWidth * 0.36,
                 frame.soleY,
-                -0.012
+                0.012
             )
         } else if structureID.contains("ballOfFoot") {
-            point = SIMD3(frame.centerX, frame.soleY + 0.004, -0.052)
+            point = SIMD3(frame.centerX, frame.soleY + 0.004, 0.052)
         } else if structureID.contains("greatToe") {
             point = toeMarker(frame: frame, lateral: -0.70, z: frame.toeTipZ)
         } else if structureID.contains("secondToe") {
-            point = toeMarker(frame: frame, lateral: -0.34, z: frame.toeTipZ + 0.010)
+            point = toeMarker(frame: frame, lateral: -0.34, z: frame.toeTipZ - 0.010)
         } else if structureID.contains("middleToe") {
-            point = toeMarker(frame: frame, lateral: 0, z: frame.toeTipZ + 0.018)
+            point = toeMarker(frame: frame, lateral: 0, z: frame.toeTipZ - 0.018)
         } else if structureID.contains("fourthToe") {
-            point = toeMarker(frame: frame, lateral: 0.34, z: frame.toeTipZ + 0.028)
+            point = toeMarker(frame: frame, lateral: 0.34, z: frame.toeTipZ - 0.028)
         } else if structureID.contains("littleToe") {
-            point = toeMarker(frame: frame, lateral: 0.70, z: frame.toeTipZ + 0.038)
+            point = toeMarker(frame: frame, lateral: 0.70, z: frame.toeTipZ - 0.038)
         } else if structureID.contains("midfoot") || structureID.contains("foot") {
-            point = SIMD3(frame.centerX, frame.topY, -0.012)
+            point = SIMD3(frame.centerX, frame.topY, 0.012)
         } else if structureID.contains("plantar") {
-            point = SIMD3(frame.centerX, frame.soleY, -0.020)
+            point = SIMD3(frame.centerX, frame.soleY, 0.020)
         } else if structureID.contains("fibular") {
             point = SIMD3(
                 frame.centerX + frame.sideSign * frame.halfWidth * 0.38,
                 frame.topY,
-                -0.01
+                0.01
             )
         } else if structureID.contains("tibial") {
             point = SIMD3(
                 frame.centerX - frame.sideSign * frame.halfWidth * 0.20,
                 frame.topY + 0.015,
-                0.036
+                -0.036
             )
         } else {
             return nil
         }
 
-        let orientedPoint = soleView
-            ? SIMD3(point.x, point.y, -point.z)
-            : point
-        return orientedPoint * anatomySceneScale
+        return point * anatomySceneScale
     }
 
     static func focusPivot(
@@ -2517,28 +2870,23 @@ private enum FootDetailStructureMapper {
 
     static func selectionProxyShapes(
         focus: BodyFootDetailFocus,
-        variant: BodyModelVariant,
-        soleView: Bool
+        variant: BodyModelVariant
     ) -> [ShapeResource] {
         guard focus != .both else { return [] }
         let frame = frame(focus: focus, variant: variant)
         let scale = SIMD3<Float>(repeating: anatomySceneScale)
 
-        func oriented(_ point: SIMD3<Float>) -> SIMD3<Float> {
-            soleView ? SIMD3(point.x, point.y, -point.z) : point
-        }
-
         func box(center: SIMD3<Float>, size: SIMD3<Float>) -> ShapeResource {
             ShapeResource.generateBox(size: size * scale).offsetBy(
-                translation: oriented(center) * scale
+                translation: center * scale
             )
         }
 
         let footBottom = frame.soleY - 0.006
         let footTop = frame.topY + 0.012
         let footWidth = frame.halfWidth * 2.45
-        let mainToe = frame.toeBoundaryZ - 0.014
-        let mainHeel = frame.heelBoundaryZ + 0.018
+        let mainHeel = frame.heelBoundaryZ - 0.014
+        let mainToe = frame.toeBoundaryZ + 0.018
         let ankleTop = frame.ankleBoundaryY
             + (variant == .female ? 0.13 : 0.15)
         let ankleBottom = frame.topY - 0.012
@@ -2553,7 +2901,7 @@ private enum FootDetailStructureMapper {
                 size: SIMD3(
                     footWidth,
                     footTop - footBottom,
-                    mainHeel - mainToe
+                    mainToe - mainHeel
                 )
             ),
             box(
@@ -2565,14 +2913,14 @@ private enum FootDetailStructureMapper {
                 size: SIMD3(
                     footWidth * 1.02,
                     footTop - footBottom,
-                    frame.toeBoundaryZ - frame.toeTipZ + 0.014
+                    frame.toeTipZ - frame.toeBoundaryZ + 0.014
                 )
             ),
             box(
                 center: SIMD3(
                     frame.centerX,
                     (footBottom + footTop) / 2,
-                    frame.heelBoundaryZ + 0.034
+                    frame.heelBoundaryZ - 0.034
                 ),
                 size: SIMD3(
                     footWidth * 0.82,
@@ -2630,9 +2978,9 @@ private enum FootDetailStructureMapper {
                 focusY: -0.735,
                 ankleBoundaryY: -0.716,
                 soleBoundaryY: -0.775,
-                toeBoundaryZ: -0.082,
-                toeTipZ: -0.151,
-                heelBoundaryZ: 0.053,
+                toeBoundaryZ: 0.053,
+                toeTipZ: 0.103,
+                heelBoundaryZ: -0.082,
                 ankle: isLeft
                     ? SIMD3(0.143649, -0.774522, -0.020298)
                     : SIMD3(-0.162165, -0.776210, -0.011443)
@@ -2647,9 +2995,9 @@ private enum FootDetailStructureMapper {
             focusY: -0.842,
             ankleBoundaryY: -0.825,
             soleBoundaryY: -0.895,
-            toeBoundaryZ: -0.078,
-            toeTipZ: -0.146,
-            heelBoundaryZ: 0.049,
+            toeBoundaryZ: 0.049,
+            toeTipZ: 0.088,
+            heelBoundaryZ: -0.078,
             ankle: isLeft
                 ? SIMD3(0.209669, -0.883374, -0.039116)
                 : SIMD3(-0.210147, -0.883491, -0.038887)

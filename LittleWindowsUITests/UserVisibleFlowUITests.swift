@@ -175,6 +175,13 @@ final class UserVisibleFlowUITests: XCTestCase {
                 withNormalizedOffset: CGVector(dx: 0.5, dy: 0.69)
             ).tap()
 
+            XCTAssertTrue(
+                app.buttons["body-location.selection.body.heel.left"]
+                    .firstMatch
+                    .waitForExistence(timeout: 3),
+                "A tap on the rendered heel must select the heel in Sole view."
+            )
+
             let soleOrientation = app.buttons["body-location.orientation.back"]
             XCTAssertEqual(
                 soleOrientation.value as? String,
@@ -191,14 +198,13 @@ final class UserVisibleFlowUITests: XCTestCase {
                 "Selecting a toe from the sole must keep the sole view open."
             )
 
-            let soleSelections = [
-                "body.sole.left", "body.arch.left", "body.ballOfFoot.left",
-                "body.heel.left", "body.greatToe.left", "body.secondToe.left",
+            let toeSelections = [
+                "body.greatToe.left", "body.secondToe.left",
                 "body.middleToe.left", "body.fourthToe.left", "body.littleToe.left"
             ].map { app.buttons["body-location.selection.\($0)"] }
             XCTAssertTrue(
-                soleSelections.contains { $0.waitForExistence(timeout: 1) },
-                "Expected a forefoot tap in Sole view to resolve to a granular foot zone."
+                toeSelections.contains { $0.waitForExistence(timeout: 1) },
+                "A tap on the rendered toes must select a toe in Sole view."
             )
         }
     }
@@ -306,6 +312,65 @@ final class UserVisibleFlowUITests: XCTestCase {
             didSelectRightElbow,
             "Expected the rendered right elbow in \(visualization.frame); selected \(selectedIdentifiers)."
         )
+    }
+
+    func testBodyLocationFullBodyLowerLimbZonesStayOnTappedSideAndSegment() {
+        continueAfterFailure = false
+
+        let frontCases: [(name: String, point: CGVector, expectedID: String)] = [
+            ("right knee", CGVector(dx: 0.445, dy: 0.69), "body.knee.right"),
+            ("left knee", CGVector(dx: 0.555, dy: 0.69), "body.knee.left"),
+            ("right lower leg", CGVector(dx: 0.44, dy: 0.75), "body.lowerLeg.right"),
+            ("left lower leg", CGVector(dx: 0.56, dy: 0.75), "body.lowerLeg.left")
+        ]
+
+        for testCase in frontCases {
+            launch(startURL: "littlewindows://debug/body-location/bodyAreas/female")
+            XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+            let visualization = app.otherElements["body-location.visualization"]
+            XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+            visualization.coordinate(withNormalizedOffset: testCase.point).tap()
+
+            let expected = app.buttons[
+                "body-location.selection.\(testCase.expectedID)"
+            ].firstMatch
+            let didSelectExpected = expected.waitForExistence(timeout: 3)
+            let selectedIdentifiers = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+            ).allElementsBoundByAccessibilityElement.map(\.identifier)
+            XCTAssertTrue(
+                didSelectExpected,
+                "Expected the rendered \(testCase.name) to select \(testCase.expectedID); selected \(selectedIdentifiers)."
+            )
+        }
+
+        for (name, point, expectedID) in [
+            ("left calf", CGVector(dx: 0.44, dy: 0.75), "body.calf.left"),
+            ("right calf", CGVector(dx: 0.56, dy: 0.75), "body.calf.right")
+        ] {
+            launch(startURL: "littlewindows://debug/body-location/bodyAreas/female")
+            XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+            let back = app.buttons["body-location.orientation.back"]
+            XCTAssertTrue(back.waitForExistence(timeout: 4))
+            back.tap()
+            let visualization = app.otherElements["body-location.visualization"]
+            XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+            visualization.coordinate(withNormalizedOffset: point).tap()
+
+            let expected = app.buttons["body-location.selection.\(expectedID)"].firstMatch
+            let didSelectExpected = expected.waitForExistence(timeout: 3)
+            let selectedIdentifiers = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+            ).allElementsBoundByAccessibilityElement.map(\.identifier)
+            XCTAssertTrue(
+                didSelectExpected,
+                "Expected the rendered \(name) to select \(expectedID); selected \(selectedIdentifiers)."
+            )
+        }
     }
 
     func testBodyLocationModelDragDoesNotScrollPicker() {
