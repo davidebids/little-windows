@@ -492,6 +492,16 @@ struct RootView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        #if DEBUG
+        .sheet(isPresented: $router.showingBodyLocationPreview) {
+            BodyLocationPickerView(
+                profileSex: router.bodyLocationPreviewSex,
+                initialRecord: BodyLocationRecord(profileSex: router.bodyLocationPreviewSex),
+                initialLayer: router.bodyLocationPreviewLayer,
+                onSave: { _ in }
+            )
+        }
+        #endif
     }
 
     private var alertedTabs: some View {

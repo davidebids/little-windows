@@ -219,12 +219,12 @@ private actor CareStorySnapshotWorker {
             title = symptom
             detail = [
                 details.symptomSeverity.map { "Severity \($0) of 5" },
-                details.symptomBodyLocation?.nilIfBlank,
+                details.symptomLocationSummary,
                 details.symptomResolved == true ? "Marked resolved" : nil
             ].compactMap { $0 }.joined(separator: " · ").nilIfBlank
         case .pain:
             title = details.painScore.map { "Pain \($0)/10" } ?? "Pain"
-            detail = details.painLocation?.nilIfBlank
+            detail = details.painLocationSummary
         case .sleep:
             title = event.displayTitle
             detail = event.timelineDurationDescription

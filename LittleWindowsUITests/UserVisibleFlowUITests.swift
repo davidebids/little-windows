@@ -3,6 +3,520 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testBodyLocationVisualizationSelectsThroughLightweightHitTargets() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location")
+
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)
+        ).tap()
+
+        let abdomen = app.buttons["body-location.selection.body.abdomen"].firstMatch
+        XCTAssertTrue(
+            abdomen.waitForExistence(timeout: 4),
+            "Expected a center-torso tap to select the abdomen through the proxy collision geometry."
+        )
+    }
+
+    func testBodyLocationFocusedHandAcceptsDirectSelections() {
+        continueAfterFailure = false
+
+        let expectations = [
+            (layer: "bodyAreas", structure: "body.middleFinger"),
+            (layer: "muscles", structure: "muscle.hand"),
+            (layer: "joints", structure: "joint.middleFinger"),
+            (layer: "nerves", structure: "nerve.median")
+        ]
+
+        for expectation in expectations {
+            launch(
+                startURL: "littlewindows://debug/body-location/\(expectation.layer)/female"
+            )
+
+            XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+            let hands = app.buttons["body-location.region.armsAndHands"]
+            XCTAssertTrue(hands.waitForExistence(timeout: 4))
+            hands.tap()
+
+            for (focus, side) in [("Left hand", "left"), ("Right hand", "right")] {
+                let hand = app.buttons[focus]
+                XCTAssertTrue(hand.waitForExistence(timeout: 4))
+                hand.tap()
+
+                let visualization = app.otherElements["body-location.visualization"]
+                XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+                RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+                visualization.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+                ).tap()
+
+                XCTAssertTrue(
+                    app.buttons[
+                        "body-location.selection.\(expectation.structure).\(side)"
+                    ]
+                    .firstMatch
+                    .waitForExistence(timeout: 4),
+                    "Expected a direct tap on the focused \(focus.lowercased()) in the \(expectation.layer) layer to add its anatomy selection."
+                )
+            }
+        }
+    }
+
+    func testBodyLocationFocusedFootAcceptsGranularSelections() {
+        continueAfterFailure = false
+
+        let expectedPrefixes: [(layer: String, structures: [String])] = [
+            (
+                layer: "bodyAreas",
+                structures: [
+                    "body.heel", "body.topOfFoot", "body.sole", "body.arch",
+                    "body.ballOfFoot", "body.greatToe", "body.secondToe",
+                    "body.middleToe", "body.fourthToe", "body.littleToe"
+                ]
+            ),
+            (
+                layer: "muscles",
+                structures: ["muscle.achilles", "muscle.foot"]
+            ),
+            (
+                layer: "joints",
+                structures: [
+                    "joint.ankle", "joint.heel", "joint.midfoot", "joint.greatToe",
+                    "joint.secondToe", "joint.middleToe", "joint.fourthToe",
+                    "joint.littleToe"
+                ]
+            ),
+            (
+                layer: "nerves",
+                structures: ["nerve.tibial", "nerve.fibular", "nerve.plantar"]
+            )
+        ]
+
+        for expectation in expectedPrefixes {
+            launch(startURL: "littlewindows://debug/body-location/\(expectation.layer)/female")
+            XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+
+            let regionScroll = app.scrollViews["body-location.region-scroll"]
+            XCTAssertTrue(regionScroll.waitForExistence(timeout: 4))
+            regionScroll.swipeLeft()
+            let legsAndFeet = app.buttons["body-location.region.legsAndFeet"]
+            XCTAssertTrue(legsAndFeet.waitForExistence(timeout: 4))
+            legsAndFeet.tap()
+
+            for (focus, side) in [("Left foot", "left"), ("Right foot", "right")] {
+                let foot = app.buttons[focus]
+                XCTAssertTrue(foot.waitForExistence(timeout: 4))
+                foot.tap()
+
+                let visualization = app.otherElements["body-location.visualization"]
+                XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+                visualization.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+                ).tap()
+
+                let selectedIdentifiers = app.buttons.matching(
+                    NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+                ).allElementsBoundByAccessibilityElement.map(\.identifier)
+                let expectedIdentifiers = expectation.structures.map {
+                    "body-location.selection.\($0).\(side)"
+                }
+                XCTAssertFalse(
+                    Set(selectedIdentifiers).isDisjoint(with: expectedIdentifiers),
+                    "Expected a granular \(side) foot selection in \(expectation.layer); selected \(selectedIdentifiers)."
+                )
+
+                let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                attachment.name = "Foot fidelity female \(expectation.layer) \(side)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+    }
+
+    func testBodyLocationFocusedFootPresentsTopAndSoleForBothModels() {
+        continueAfterFailure = false
+
+        for sex in ["female", "male"] {
+            launch(startURL: "littlewindows://debug/body-location/bodyAreas/\(sex)")
+            XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+
+            let regionScroll = app.scrollViews["body-location.region-scroll"]
+            XCTAssertTrue(regionScroll.waitForExistence(timeout: 4))
+            regionScroll.swipeLeft()
+            let legsAndFeet = app.buttons["body-location.region.legsAndFeet"]
+            XCTAssertTrue(legsAndFeet.waitForExistence(timeout: 4))
+            legsAndFeet.tap()
+
+            let leftFoot = app.buttons["Left foot"]
+            XCTAssertTrue(leftFoot.waitForExistence(timeout: 4))
+            leftFoot.tap()
+            XCTAssertTrue(app.buttons["Side"].waitForExistence(timeout: 4))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+            let topAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            topAttachment.name = "Foot presentation \(sex) side"
+            topAttachment.lifetime = .keepAlways
+            add(topAttachment)
+
+            app.buttons["Sole"].tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+            let soleAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            soleAttachment.name = "Foot presentation \(sex) sole"
+            soleAttachment.lifetime = .keepAlways
+            add(soleAttachment)
+
+            let visualization = app.otherElements["body-location.visualization"]
+            visualization.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.69)
+            ).tap()
+
+            let soleOrientation = app.buttons["body-location.orientation.back"]
+            XCTAssertEqual(
+                soleOrientation.value as? String,
+                "Selected",
+                "Selecting the sole must not reset the focused foot to its side view."
+            )
+
+            visualization.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.24)
+            ).tap()
+            XCTAssertEqual(
+                soleOrientation.value as? String,
+                "Selected",
+                "Selecting a toe from the sole must keep the sole view open."
+            )
+
+            let soleSelections = [
+                "body.sole.left", "body.arch.left", "body.ballOfFoot.left",
+                "body.heel.left", "body.greatToe.left", "body.secondToe.left",
+                "body.middleToe.left", "body.fourthToe.left", "body.littleToe.left"
+            ].map { app.buttons["body-location.selection.\($0)"] }
+            XCTAssertTrue(
+                soleSelections.contains { $0.waitForExistence(timeout: 1) },
+                "Expected a forefoot tap in Sole view to resolve to a granular foot zone."
+            )
+        }
+    }
+
+    func testBodyLocationFocusedFootSkeletonPresentationForBothModels() {
+        continueAfterFailure = false
+
+        for sex in ["female", "male"] {
+            launch(startURL: "littlewindows://debug/body-location/joints/\(sex)")
+            XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+
+            let regionScroll = app.scrollViews["body-location.region-scroll"]
+            XCTAssertTrue(regionScroll.waitForExistence(timeout: 4))
+            regionScroll.swipeLeft()
+            let legsAndFeet = app.buttons["body-location.region.legsAndFeet"]
+            XCTAssertTrue(legsAndFeet.waitForExistence(timeout: 4))
+            legsAndFeet.tap()
+
+            for focus in ["Left foot", "Right foot"] {
+                let foot = app.buttons[focus]
+                XCTAssertTrue(foot.waitForExistence(timeout: 4))
+                foot.tap()
+
+                let side = app.buttons["Side"]
+                XCTAssertTrue(side.waitForExistence(timeout: 4))
+                side.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+                let sideAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                sideAttachment.name = "Foot skeleton \(sex) \(focus.lowercased()) side"
+                sideAttachment.lifetime = .keepAlways
+                add(sideAttachment)
+
+                app.buttons["Sole"].tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+                let soleAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                soleAttachment.name = "Foot skeleton \(sex) \(focus.lowercased()) sole"
+                soleAttachment.lifetime = .keepAlways
+                add(soleAttachment)
+            }
+        }
+    }
+
+    func testBodyLocationFocusedFootSoftTissuePresentationForBothModels() {
+        continueAfterFailure = false
+
+        for layer in ["muscles", "nerves"] {
+            for sex in ["female", "male"] {
+                launch(startURL: "littlewindows://debug/body-location/\(layer)/\(sex)")
+                XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+
+                let regionScroll = app.scrollViews["body-location.region-scroll"]
+                XCTAssertTrue(regionScroll.waitForExistence(timeout: 4))
+                regionScroll.swipeLeft()
+                let legsAndFeet = app.buttons["body-location.region.legsAndFeet"]
+                XCTAssertTrue(legsAndFeet.waitForExistence(timeout: 4))
+                legsAndFeet.tap()
+
+                for focus in ["Left foot", "Right foot"] {
+                    let foot = app.buttons[focus]
+                    XCTAssertTrue(foot.waitForExistence(timeout: 4))
+                    foot.tap()
+
+                    let side = app.buttons["Side"]
+                    XCTAssertTrue(side.waitForExistence(timeout: 4))
+                    side.tap()
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+                    let sideAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                    sideAttachment.name = "Foot \(layer) \(sex) \(focus.lowercased()) side"
+                    sideAttachment.lifetime = .keepAlways
+                    add(sideAttachment)
+
+                    let sole = app.buttons["Sole"]
+                    XCTAssertTrue(sole.waitForExistence(timeout: 4))
+                    sole.tap()
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+                    let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                    attachment.name = "Foot \(layer) \(sex) \(focus.lowercased()) sole"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+            }
+        }
+    }
+
+    func testBodyLocationRightElbowTapResolvesToNearestJointLandmark() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location/joints/female")
+
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.365, dy: 0.39)
+        ).tap()
+
+        let rightElbow = app.buttons["body-location.selection.joint.elbow.right"].firstMatch
+        let didSelectRightElbow = rightElbow.waitForExistence(timeout: 4)
+        let selectedIdentifiers = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+        ).allElementsBoundByAccessibilityElement.map(\.identifier)
+        XCTAssertTrue(
+            didSelectRightElbow,
+            "Expected the rendered right elbow in \(visualization.frame); selected \(selectedIdentifiers)."
+        )
+    }
+
+    func testBodyLocationModelDragDoesNotScrollPicker() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location")
+
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        let initialMinY = visualization.frame.minY
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.55, dy: 0.70)
+        ).press(
+            forDuration: 0.1,
+            thenDragTo: visualization.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.72, dy: 0.25)
+            )
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+
+        XCTAssertEqual(
+            visualization.frame.minY,
+            initialMinY,
+            accuracy: 2,
+            "Dragging inside the model should rotate it without scrolling the picker."
+        )
+    }
+
+    func testBodyLocationAnatomyLayersLoadOnDemandAndRemainResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location")
+
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        for layer in ["muscles", "joints", "nerves", "organs", "bodyAreas"] {
+            let layerButton = app.buttons["body-location.layer.\(layer)"]
+            XCTAssertTrue(layerButton.waitForExistence(timeout: 4))
+            layerButton.tap()
+            XCTAssertTrue(
+                app.buttons["body-location.done"].waitForExistence(timeout: 6),
+                "Expected the picker to stay responsive after loading \(layer)."
+            )
+        }
+    }
+
+    func testBodyLocationOrganLayerRendersItsInteractiveVascularView() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location/organs")
+
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        let organLayer = app.buttons["body-location.layer.organs"]
+        XCTAssertTrue(organLayer.waitForExistence(timeout: 5))
+        organLayer.tap()
+        XCTAssertEqual(organLayer.value as? String, "Selected")
+        XCTAssertTrue(app.otherElements["body-location.visualization"].waitForExistence(timeout: 6))
+
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Body location organ and vascular layer"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        let back = app.buttons["body-location.orientation.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 3))
+        back.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        let backScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        backScreenshot.name = "Body location posterior vascular alignment"
+        backScreenshot.lifetime = .keepAlways
+        add(backScreenshot)
+    }
+
+    func testBodyLocationAlignmentAuditCapturesEveryInternalLayerAroundFullRotation() {
+        continueAfterFailure = false
+
+        for sex in ["female", "male"] {
+            for layer in ["muscles", "joints", "nerves", "organs"] {
+                launch(startURL: "littlewindows://debug/body-location/\(layer)/\(sex)")
+
+                XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+                let visualization = app.otherElements["body-location.visualization"]
+                XCTAssertTrue(visualization.waitForExistence(timeout: 6))
+                RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+                attachAlignmentScreenshot(sex: sex, layer: layer, degrees: 0)
+                for degrees in stride(from: 45, through: 315, by: 45) {
+                    rotateAlignmentVisualization(visualization)
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.18))
+                    attachAlignmentScreenshot(sex: sex, layer: layer, degrees: degrees)
+                }
+
+                let reset = app.buttons["body-location.reset-view"]
+                for pitch in ["up", "down"] {
+                    XCTAssertTrue(reset.waitForExistence(timeout: 3))
+                    reset.tap()
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.45))
+                    pitchAlignmentVisualization(visualization, direction: pitch)
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.18))
+                    attachAlignmentScreenshot(
+                        sex: sex,
+                        layer: layer,
+                        degrees: 0,
+                        pitch: pitch
+                    )
+                    for degrees in stride(from: 45, through: 315, by: 45) {
+                        rotateAlignmentVisualization(visualization)
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.18))
+                        attachAlignmentScreenshot(
+                            sex: sex,
+                            layer: layer,
+                            degrees: degrees,
+                            pitch: pitch
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    func testBodyLocationHandAnatomyFidelityFromMultipleAngles() {
+        continueAfterFailure = false
+
+        for sex in ["female", "male"] {
+            for layer in ["muscles", "joints", "nerves"] {
+                launch(startURL: "littlewindows://debug/body-location/\(layer)/\(sex)")
+
+                XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+                let visualization = app.otherElements["body-location.visualization"]
+                XCTAssertTrue(visualization.waitForExistence(timeout: 6))
+                let hands = app.buttons["body-location.region.armsAndHands"]
+                XCTAssertTrue(hands.waitForExistence(timeout: 4))
+                hands.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+                let leftHand = app.buttons["Left hand"]
+                XCTAssertTrue(leftHand.waitForExistence(timeout: 3))
+                leftHand.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+                attachHandScreenshot(sex: sex, layer: layer, hand: "left", angle: "front")
+                rotateAlignmentVisualization(visualization)
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+                attachHandScreenshot(sex: sex, layer: layer, hand: "left", angle: "oblique")
+
+                let back = app.buttons["body-location.orientation.back"]
+                XCTAssertTrue(back.waitForExistence(timeout: 3))
+                back.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+                attachHandScreenshot(sex: sex, layer: layer, hand: "left", angle: "back")
+
+                let rightHand = app.buttons["Right hand"]
+                XCTAssertTrue(rightHand.waitForExistence(timeout: 3))
+                rightHand.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+                attachHandScreenshot(sex: sex, layer: layer, hand: "right", angle: "back")
+            }
+        }
+    }
+
+    private func rotateAlignmentVisualization(_ visualization: XCUIElement) {
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.62, dy: 0.48)
+        ).press(
+            forDuration: 0.05,
+            thenDragTo: visualization.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.355, dy: 0.48)
+            )
+        )
+    }
+
+    private func pitchAlignmentVisualization(
+        _ visualization: XCUIElement,
+        direction: String
+    ) {
+        let destinationY = direction == "up" ? 0.27 : 0.70
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48)
+        ).press(
+            forDuration: 0.05,
+            thenDragTo: visualization.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: destinationY)
+            )
+        )
+    }
+
+    private func attachAlignmentScreenshot(
+        sex: String,
+        layer: String,
+        degrees: Int,
+        pitch: String = "level"
+    ) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Alignment \(sex) \(layer) \(degrees) degrees \(pitch) pitch"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func attachHandScreenshot(
+        sex: String,
+        layer: String,
+        hand: String,
+        angle: String
+    ) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Hand fidelity \(sex) \(layer) \(hand) \(angle)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testProfileAvatarFitsToolbarOnInitialLoad() {
         continueAfterFailure = false
 
@@ -321,6 +835,48 @@ final class UserVisibleFlowUITests: XCTestCase {
             .seconds(3.5),
             "Loaded medication history must not make the detail screen unresponsive."
         )
+    }
+
+    func testMedicationDetailOffersDirectSupplyTrackingSetup() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-performance")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000103/today")
+        XCTAssertTrue(app.buttons["Sample Adult settings"].waitForExistence(timeout: 12))
+        launch(startURL: "littlewindows://medications")
+
+        XCTAssertTrue(app.navigationBars["Medications"].waitForExistence(timeout: 8))
+        let medication = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Sample Medication")
+        ).firstMatch
+        XCTAssertTrue(medication.waitForExistence(timeout: 4))
+        medication.tap()
+        XCTAssertTrue(app.navigationBars["Sample Medication"].waitForExistence(timeout: 4))
+
+        let setup = app.buttons["medication.supply.setup"]
+        for _ in 0..<6 where !setup.isHittable {
+            app.swipeUp(velocity: .fast)
+        }
+        XCTAssertTrue(setup.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Supply tracking is off"].exists)
+        setup.tap()
+
+        XCTAssertTrue(app.navigationBars["Supply Tracking"].waitForExistence(timeout: 4))
+        let quantity = app.textFields["medication.supply.quantity"]
+        XCTAssertTrue(quantity.exists)
+        XCTAssertEqual(quantity.value as? String, "Enter quantity")
+        XCTAssertTrue(app.staticTexts["tablets"].exists)
+        quantity.tap()
+        quantity.typeText("3")
+        XCTAssertEqual(quantity.value as? String, "3")
+        XCTAssertTrue(app.textFields["medication.supply.threshold"].exists)
+        app.buttons["medication.supply.save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Sample Medication"].waitForExistence(timeout: 4))
+        XCTAssertFalse(setup.exists)
+        XCTAssertTrue(app.staticTexts["Remaining"].exists)
+        XCTAssertTrue(app.staticTexts["Refill alert"].exists)
     }
 
     func testHouseholdOnlySetupAndCareDeepLinkPrompt() {

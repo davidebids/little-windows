@@ -466,7 +466,7 @@ private actor AdultHealthReportWorker {
                 id: event.id,
                 date: event.startDate,
                 score: score,
-                location: details.painLocation?.nilIfBlank
+                location: details.painLocationSummary
             )
         }
         let painChartPoints = Dictionary(
@@ -1237,7 +1237,7 @@ struct AdultHealthOverviewView: View {
                                     .font(.subheadline.weight(.semibold))
                                 Text([
                                     details.symptomSeverity.map { "\($0)/10" },
-                                    details.symptomBodyLocation,
+                                    details.symptomLocationSummary,
                                     details.symptomResolved == true ? "resolved" : nil
                                 ].compactMap { $0 }.joined(separator: " · "))
                                     .font(.caption)

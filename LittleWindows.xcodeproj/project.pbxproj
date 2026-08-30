@@ -181,6 +181,11 @@
 		E10000000000000000000002 /* Services/MedicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* Services/MedicationService.swift */; };
 		E10000000000000000000003 /* Views/Medications/MedicationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* Views/Medications/MedicationViews.swift */; };
 		E10000000000000000000004 /* Views/Health/AdultHealthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */; };
+		F40000000000000000000001 /* Models/BodyLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000001 /* Models/BodyLocation.swift */; };
+		F40000000000000000000002 /* Views/Health/BodyLocationPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000002 /* Views/Health/BodyLocationPickerView.swift */; };
+		F40000000000000000000003 /* BodyLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000003 /* BodyLocationTests.swift */; };
+		F40000000000000000000004 /* Resources/BodyAnatomy in Resources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000004 /* Resources/BodyAnatomy */; };
+		F40000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */; };
 		E10000000000000000000005 /* MedicationScheduleEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000005 /* MedicationScheduleEngineTests.swift */; };
 		E80000000000000000000001 /* NightLightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* NightLightWidget.swift */; };
 		F90000000000000000000001 /* SUPPORT.md in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000011 /* SUPPORT.md */; };
@@ -299,6 +304,11 @@
 		E20000000000000000000002 /* Services/MedicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/MedicationService.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* Views/Medications/MedicationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Medications/MedicationViews.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/AdultHealthViews.swift; sourceTree = "<group>"; };
+		F30000000000000000000001 /* Models/BodyLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BodyLocation.swift; sourceTree = "<group>"; };
+		F30000000000000000000002 /* Views/Health/BodyLocationPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/BodyLocationPickerView.swift; sourceTree = "<group>"; };
+		F30000000000000000000003 /* BodyLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyLocationTests.swift; sourceTree = "<group>"; };
+		F30000000000000000000004 /* Resources/BodyAnatomy */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/BodyAnatomy; sourceTree = "<group>"; };
+		F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/AnatomicalBodySceneView.swift; sourceTree = "<group>"; };
 		E20000000000000000000005 /* MedicationScheduleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationScheduleEngineTests.swift; sourceTree = "<group>"; };
 		E80000000000000000000002 /* NightLightWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NightLightWidget.swift; sourceTree = "<group>"; };
 		F00000000000000000000001 /* LittleWindowsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsApp.swift; sourceTree = "<group>"; };
@@ -565,6 +575,7 @@
 				A50000000000000000000005 /* Services/WatchConnectivityService.swift */,
 				F00000000000000000000002 /* Models/BabyProfile.swift */,
 				F00000000000000000000003 /* Models/BabyEvent.swift */,
+				F30000000000000000000001 /* Models/BodyLocation.swift */,
 				F00000000000000000000004 /* Models/EventType.swift */,
 				F00000000000000000000005 /* Models/EventSubtypes.swift */,
 				F10000000000000000000001 /* Models/SolidFoodCatalogItem.swift */,
@@ -662,6 +673,8 @@
 				F00000000000000000000076 /* Views/Profiles/ProfileViews.swift */,
 				E20000000000000000000003 /* Views/Medications/MedicationViews.swift */,
 				E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */,
+				F30000000000000000000002 /* Views/Health/BodyLocationPickerView.swift */,
+				F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */,
 				F00000000000000000000099 /* Views/Health/CareStoryView.swift */,
 				F0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift */,
 				F0000000000000000000007B /* Views/Insights/DogInsightsView.swift */,
@@ -690,6 +703,7 @@
 				F0000000000000000000005B /* Resources/GrowthCharts */,
 				F00000000000000000000074 /* Resources/AgeGuides */,
 				F00000000000000000000094 /* Resources/NightLightAudio */,
+				F30000000000000000000004 /* Resources/BodyAnatomy */,
 			);
 			path = LittleWindows;
 			sourceTree = "<group>";
@@ -701,6 +715,7 @@
 				F0000000000000000000001B /* SleepPredictionEngineTests.swift */,
 				F00000000000000000000097 /* CareReportExportServiceTests.swift */,
 				F0000000000000000000009A /* CareStoryServiceTests.swift */,
+				F30000000000000000000003 /* BodyLocationTests.swift */,
 				C20000000000000000000005 /* SolidsFeatureTests.swift */,
 				E20000000000000000000005 /* MedicationScheduleEngineTests.swift */,
 			);
@@ -992,6 +1007,7 @@
 				B0000000000000000000005C /* Resources/GrowthCharts in Resources */,
 				B00000000000000000000074 /* Resources/AgeGuides in Resources */,
 				B00000000000000000000094 /* Resources/NightLightAudio in Resources */,
+				F40000000000000000000004 /* Resources/BodyAnatomy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1063,6 +1079,7 @@
 				B00000000000000000000001 /* LittleWindowsApp.swift in Sources */,
 				B00000000000000000000002 /* Models/BabyProfile.swift in Sources */,
 				B00000000000000000000003 /* Models/BabyEvent.swift in Sources */,
+				F40000000000000000000001 /* Models/BodyLocation.swift in Sources */,
 				B00000000000000000000004 /* Models/EventType.swift in Sources */,
 				B00000000000000000000005 /* Models/EventSubtypes.swift in Sources */,
 				B10000000000000000000001 /* Models/SolidFoodCatalogItem.swift in Sources */,
@@ -1160,6 +1177,8 @@
 				B00000000000000000000076 /* Views/Profiles/ProfileViews.swift in Sources */,
 				E10000000000000000000003 /* Views/Medications/MedicationViews.swift in Sources */,
 				E10000000000000000000004 /* Views/Health/AdultHealthViews.swift in Sources */,
+				F40000000000000000000002 /* Views/Health/BodyLocationPickerView.swift in Sources */,
+				F40000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift in Sources */,
 				B00000000000000000000099 /* Views/Health/CareStoryView.swift in Sources */,
 				B0000000000000000000007C /* Views/Dog/PuppyStageGuideViews.swift in Sources */,
 				B0000000000000000000007B /* Views/Insights/DogInsightsView.swift in Sources */,
@@ -1195,6 +1214,7 @@
 				B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */,
 				B00000000000000000000097 /* CareReportExportServiceTests.swift in Sources */,
 				B0000000000000000000009A /* CareStoryServiceTests.swift in Sources */,
+				F40000000000000000000003 /* BodyLocationTests.swift in Sources */,
 				E10000000000000000000005 /* MedicationScheduleEngineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

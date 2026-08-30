@@ -287,6 +287,9 @@ final class DeepLinkRouter: ObservableObject {
     ) ?? .day
     @Published var showingSettings = false
     @Published var showingFamilySyncSettings = false
+    @Published var showingBodyLocationPreview = false
+    @Published var bodyLocationPreviewLayer: BodyAnatomyLayer = .bodyAreas
+    @Published var bodyLocationPreviewSex: ProfileSex = .female
     @Published var isDataReady = false
     @Published var careProfileRequirement: CareProfileRequirement?
     @Published private(set) var navigationRequestRevision = 0
@@ -420,6 +423,21 @@ final class DeepLinkRouter: ObservableObject {
             components[0] = "food"
         }
 
+        #if DEBUG
+        if components.count >= 2,
+           components[0] == "debug",
+           components[1] == "body-location" {
+            let previewOptions = components.dropFirst(2)
+            bodyLocationPreviewLayer = previewOptions
+                .compactMap(BodyAnatomyLayer.init(rawValue:))
+                .first ?? .bodyAreas
+            bodyLocationPreviewSex = previewOptions
+                .compactMap(ProfileSex.init(rawValue:))
+                .first ?? .female
+            showingBodyLocationPreview = true
+            return
+        }
+        #endif
         if components == ["today"] {
             selectTodayCare()
         } else if components == ["food"] {

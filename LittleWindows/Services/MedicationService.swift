@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import UserNotifications
 
-struct MedicationOccurrence: Identifiable, Equatable, Hashable {
+struct MedicationOccurrence: Identifiable, Equatable, Hashable, Sendable {
     var regimenID: UUID
     var medicationID: UUID
     var phaseID: UUID?
@@ -45,7 +45,7 @@ enum MedicationScheduledDoseMutationResult: Equatable {
     case rejected(String)
 }
 
-struct MedicationAdherenceSummary: Equatable {
+struct MedicationAdherenceSummary: Equatable, Sendable {
     var scheduledCount: Int
     var takenCount: Int
     var skippedCount: Int
@@ -1042,6 +1042,31 @@ enum MedicationService {
         )
     }
 
+    static func asNeededDecision(
+        regimen: MedicationRegimen,
+        at date: Date = Date(),
+        context: ModelContext
+    ) -> MedicationAsNeededDecision? {
+        guard let profileID = regimen.profileID else { return nil }
+        let regimenID = regimen.id
+        var descriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { record in
+                record.profileID == profileID && record.regimenID == regimenID
+            },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        )
+        // Interval and daily-limit checks only need the most recent records.
+        // Bounding this fetch prevents a large imported history from blocking
+        // the dose editor while still leaving ample safety headroom.
+        descriptor.fetchLimit = 250
+        guard let records = try? context.fetch(descriptor) else { return nil }
+        return MedicationScheduleEngine.asNeededDecision(
+            regimen: regimen,
+            records: records,
+            at: date
+        )
+    }
+
     static func recordScheduledDose(
         _ reference: MedicationScheduledDoseReference,
         status: MedicationDoseStatus,
@@ -1293,6 +1318,41 @@ enum MedicationService {
         if PersistenceService.save(context: context) {
             SystemIntegrationReconciler.requestReconciliation()
         }
+    }
+
+    @discardableResult
+    static func configureSupplyTracking(
+        medication: Medication,
+        currentSupply: Double,
+        refillThreshold: Double,
+        refillLeadDays: Int,
+        context: ModelContext
+    ) -> Bool {
+        guard let profileID = medication.profileID,
+              currentSupply.isFinite,
+              refillThreshold.isFinite,
+              currentSupply >= 0,
+              refillThreshold >= 0 else { return false }
+
+        let previousSupply = medication.currentSupply ?? 0
+        let isTurningOn = medication.currentSupply == nil
+        medication.currentSupply = currentSupply
+        medication.refillThreshold = refillThreshold
+        medication.refillLeadDays = max(refillLeadDays, 0)
+        medication.updatedAt = Date()
+        context.insert(MedicationSupplyLog(
+            profileID: profileID,
+            medicationID: medication.id,
+            adjustment: currentSupply - previousSupply,
+            resultingSupply: currentSupply,
+            reason: .correction,
+            notes: isTurningOn
+                ? "Supply tracking turned on."
+                : "Supply tracking settings updated."
+        ))
+        guard PersistenceService.save(context: context) else { return false }
+        SystemIntegrationReconciler.requestReconciliation()
+        return true
     }
 
     static func supplyProjection(

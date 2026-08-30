@@ -664,7 +664,7 @@ enum CareReportExportService {
             if event.profileTypeSnapshot == .adult {
                 let details = event.healthObservationDetails
                 parts.appendIfPresent(details.symptomSeverity.map { "Severity: \($0)/10" })
-                parts.appendIfPresent(details.symptomBodyLocation.map { "Location: \($0)" })
+                parts.appendIfPresent(details.symptomLocationSummary.map { "Location: \($0)" })
                 if details.symptomResolved == true { parts.append("Resolved") }
             } else {
                 let details = event.dogDetails
@@ -683,7 +683,7 @@ enum CareReportExportService {
                 parts.appendIfPresent(event.dogDetails.glucoseMealRelation.map { "Meal relation: \($0.displayName)" })
             }
         case .pain:
-            parts.appendIfPresent(event.healthObservationDetails.painLocation.map { "Location: \($0)" })
+            parts.appendIfPresent(event.healthObservationDetails.painLocationSummary.map { "Location: \($0)" })
         default:
             break
         }
