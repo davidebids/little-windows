@@ -386,7 +386,10 @@ final class UserVisibleFlowUITests: XCTestCase {
         let dragPaths = [
             (CGVector(dx: 0.55, dy: 0.70), CGVector(dx: 0.55, dy: 0.25)),
             (CGVector(dx: 0.48, dy: 0.28), CGVector(dx: 0.48, dy: 0.68)),
-            (CGVector(dx: 0.62, dy: 0.62), CGVector(dx: 0.35, dy: 0.30))
+            (CGVector(dx: 0.62, dy: 0.62), CGVector(dx: 0.35, dy: 0.30)),
+            // A long downward pull used to be claimed by the sheet's own pan
+            // recognizer even after the surrounding ScrollView was locked.
+            (CGVector(dx: 0.50, dy: 0.18), CGVector(dx: 0.50, dy: 0.96))
         ]
         for (start, end) in dragPaths {
             visualization.coordinate(withNormalizedOffset: start).press(
@@ -395,6 +398,10 @@ final class UserVisibleFlowUITests: XCTestCase {
             )
             RunLoop.current.run(until: Date().addingTimeInterval(0.15))
 
+            XCTAssertTrue(
+                app.navigationBars["Where is it?"].exists,
+                "Dragging inside the model should not collapse or dismiss the picker."
+            )
             XCTAssertEqual(
                 visualization.frame.minY,
                 initialMinY,

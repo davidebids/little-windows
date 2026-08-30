@@ -13,6 +13,14 @@ private final class AnatomyWeakScrollViewReference {
     }
 }
 
+private final class AnatomyWeakGestureRecognizerReference {
+    weak var value: UIGestureRecognizer?
+
+    init(_ value: UIGestureRecognizer) {
+        self.value = value
+    }
+}
+
 private let anatomyBodyScanProfile: [(height: Float, radius: SIMD2<Float>)] = [
     (-0.92, SIMD2(0.23, 0.18)),
     (-0.80, SIMD2(0.20, 0.16)),
@@ -95,8 +103,10 @@ struct BodyVisualizationView: UIViewRepresentable {
         private weak var modelPanGestureRecognizer: UIPanGestureRecognizer?
         private weak var modelPinchGestureRecognizer: UIPinchGestureRecognizer?
         private var prioritizedScrollViews: [AnatomyWeakScrollViewReference] = []
+        private var prioritizedAncestorPanGestures: [AnatomyWeakGestureRecognizerReference] = []
         private var activeManipulationRecognizers: Set<ObjectIdentifier> = []
         private var suspendedScrollViewStates: [ObjectIdentifier: Bool] = [:]
+        private var suspendedAncestorPanStates: [ObjectIdentifier: Bool] = [:]
         private weak var faceFillLight: PointLight?
         private var animationDisplayLink: CADisplayLink?
         private var lastAnimationTimestamp: CFTimeInterval?
@@ -221,6 +231,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             scanEchoEntities.removeAll()
             faceFillLight = nil
             prioritizedScrollViews.removeAll()
+            prioritizedAncestorPanGestures.removeAll()
             modelPanGestureRecognizer = nil
             modelPinchGestureRecognizer = nil
             arView = nil
@@ -317,7 +328,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            !isScrollViewPan(gestureRecognizer) && !isScrollViewPan(otherGestureRecognizer)
+            isModelManipulation(gestureRecognizer) && isModelManipulation(otherGestureRecognizer)
         }
 
         private func prioritizeModelDrag(in view: UIView) {
@@ -329,8 +340,32 @@ struct BodyVisualizationView: UIViewRepresentable {
                     reference.value.map(ObjectIdentifier.init)
                 }
             )
+            prioritizedAncestorPanGestures.removeAll { $0.value == nil }
+            var knownAncestorPanIDs = Set(
+                prioritizedAncestorPanGestures.compactMap { reference in
+                    reference.value.map(ObjectIdentifier.init)
+                }
+            )
             var ancestor = view.superview
             while let current = ancestor {
+                for case let ancestorPan as UIPanGestureRecognizer in current.gestureRecognizers ?? [] {
+                    guard ancestorPan !== modelPanGestureRecognizer,
+                          !isScrollViewPan(ancestorPan) else { continue }
+                    let identifier = ObjectIdentifier(ancestorPan)
+                    if knownAncestorPanIDs.insert(identifier).inserted {
+                        // SwiftUI sheets install their own pan recognizer above
+                        // the content scroll view. Give model manipulation first
+                        // refusal so a vertical rotation cannot start collapsing
+                        // the presentation at the same time.
+                        ancestorPan.require(toFail: modelPanGestureRecognizer)
+                        if let modelPinchGestureRecognizer {
+                            ancestorPan.require(toFail: modelPinchGestureRecognizer)
+                        }
+                        prioritizedAncestorPanGestures.append(
+                            AnatomyWeakGestureRecognizerReference(ancestorPan)
+                        )
+                    }
+                }
                 if let scrollView = current as? UIScrollView {
                     let identifier = ObjectIdentifier(scrollView)
                     if knownScrollViewIDs.insert(identifier).inserted {
@@ -370,6 +405,14 @@ struct BodyVisualizationView: UIViewRepresentable {
                 // began during the same physical drag.
                 scrollView.isScrollEnabled = false
             }
+            for reference in prioritizedAncestorPanGestures {
+                guard let ancestorPan = reference.value else { continue }
+                let identifier = ObjectIdentifier(ancestorPan)
+                if suspendedAncestorPanStates[identifier] == nil {
+                    suspendedAncestorPanStates[identifier] = ancestorPan.isEnabled
+                }
+                ancestorPan.isEnabled = false
+            }
         }
 
         private func endExclusiveManipulation(_ recognizer: UIGestureRecognizer) {
@@ -386,6 +429,17 @@ struct BodyVisualizationView: UIViewRepresentable {
                 scrollView.isScrollEnabled = wasEnabled
             }
             suspendedScrollViewStates.removeAll()
+            for reference in prioritizedAncestorPanGestures {
+                guard let ancestorPan = reference.value else { continue }
+                let identifier = ObjectIdentifier(ancestorPan)
+                guard let wasEnabled = suspendedAncestorPanStates[identifier] else { continue }
+                ancestorPan.isEnabled = wasEnabled
+            }
+            suspendedAncestorPanStates.removeAll()
+        }
+
+        private func isModelManipulation(_ recognizer: UIGestureRecognizer) -> Bool {
+            recognizer === modelPanGestureRecognizer || recognizer === modelPinchGestureRecognizer
         }
 
         private func isScrollViewPan(_ recognizer: UIGestureRecognizer) -> Bool {
