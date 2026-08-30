@@ -318,22 +318,25 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(visualization.waitForExistence(timeout: 5))
         let initialMinY = visualization.frame.minY
 
-        visualization.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.55, dy: 0.70)
-        ).press(
-            forDuration: 0.1,
-            thenDragTo: visualization.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.72, dy: 0.25)
+        let dragPaths = [
+            (CGVector(dx: 0.55, dy: 0.70), CGVector(dx: 0.55, dy: 0.25)),
+            (CGVector(dx: 0.48, dy: 0.28), CGVector(dx: 0.48, dy: 0.68)),
+            (CGVector(dx: 0.62, dy: 0.62), CGVector(dx: 0.35, dy: 0.30))
+        ]
+        for (start, end) in dragPaths {
+            visualization.coordinate(withNormalizedOffset: start).press(
+                forDuration: 0.05,
+                thenDragTo: visualization.coordinate(withNormalizedOffset: end)
             )
-        )
-        RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
 
-        XCTAssertEqual(
-            visualization.frame.minY,
-            initialMinY,
-            accuracy: 2,
-            "Dragging inside the model should rotate it without scrolling the picker."
-        )
+            XCTAssertEqual(
+                visualization.frame.minY,
+                initialMinY,
+                accuracy: 1,
+                "Dragging inside the model should rotate it without scrolling the picker."
+            )
+        }
     }
 
     func testBodyLocationAnatomyLayersLoadOnDemandAndRemainResponsive() {

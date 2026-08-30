@@ -394,13 +394,17 @@ struct BodyLocationPickerView: View {
                     orientation = value
                 }
                 .font(.caption.weight(.bold))
-                .foregroundStyle(orientation == value ? Color.primary : .white.opacity(0.78))
+                // The selected pill is always white, so semantic `.primary`
+                // becomes white-on-white in dark mode. Keep its contrast tied
+                // to the pill instead of the surrounding color scheme.
+                .foregroundStyle(orientation == value ? Color.black.opacity(0.88) : .white.opacity(0.78))
                 .padding(.horizontal, 10)
                 .frame(height: 32)
                 .background(
                     orientation == value ? Color.white : Color.clear,
                     in: Capsule()
                 )
+                .buttonStyle(.plain)
                 .accessibilityIdentifier("body-location.orientation.\(value.rawValue)")
                 .accessibilityValue(
                     orientation == value ? "Selected" : "Not selected"

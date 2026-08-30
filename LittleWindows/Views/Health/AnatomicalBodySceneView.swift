@@ -5,6 +5,14 @@ import UIKit
 
 private let anatomySceneScale: Float = 2.55
 
+private final class AnatomyWeakScrollViewReference {
+    weak var value: UIScrollView?
+
+    init(_ value: UIScrollView) {
+        self.value = value
+    }
+}
+
 private let anatomyBodyScanProfile: [(height: Float, radius: SIMD2<Float>)] = [
     (-0.92, SIMD2(0.23, 0.18)),
     (-0.80, SIMD2(0.20, 0.16)),
@@ -85,7 +93,10 @@ struct BodyVisualizationView: UIViewRepresentable {
 
         private weak var arView: ARView?
         private weak var modelPanGestureRecognizer: UIPanGestureRecognizer?
-        private weak var prioritizedScrollView: UIScrollView?
+        private weak var modelPinchGestureRecognizer: UIPinchGestureRecognizer?
+        private var prioritizedScrollViews: [AnatomyWeakScrollViewReference] = []
+        private var activeManipulationRecognizers: Set<ObjectIdentifier> = []
+        private var suspendedScrollViewStates: [ObjectIdentifier: Bool] = [:]
         private weak var faceFillLight: PointLight?
         private var animationDisplayLink: CADisplayLink?
         private var lastAnimationTimestamp: CFTimeInterval?
@@ -164,6 +175,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             pinch.delegate = self
             pan.cancelsTouchesInView = true
             modelPanGestureRecognizer = pan
+            modelPinchGestureRecognizer = pinch
             view.addGestureRecognizer(tap)
             view.addGestureRecognizer(pan)
             view.addGestureRecognizer(pinch)
@@ -176,6 +188,8 @@ struct BodyVisualizationView: UIViewRepresentable {
         }
 
         func stop() {
+            activeManipulationRecognizers.removeAll()
+            restoreAncestorScrolling()
             animationDisplayLink?.invalidate()
             animationDisplayLink = nil
             lastAnimationTimestamp = nil
@@ -204,6 +218,9 @@ struct BodyVisualizationView: UIViewRepresentable {
             scanHaloEntity = nil
             scanEchoEntities.removeAll()
             faceFillLight = nil
+            prioritizedScrollViews.removeAll()
+            modelPanGestureRecognizer = nil
+            modelPinchGestureRecognizer = nil
             arView = nil
         }
 
@@ -304,16 +321,69 @@ struct BodyVisualizationView: UIViewRepresentable {
         private func prioritizeModelDrag(in view: UIView) {
             guard let modelPanGestureRecognizer else { return }
 
+            prioritizedScrollViews.removeAll { $0.value == nil }
+            var knownScrollViewIDs = Set(
+                prioritizedScrollViews.compactMap { reference in
+                    reference.value.map(ObjectIdentifier.init)
+                }
+            )
             var ancestor = view.superview
             while let current = ancestor {
                 if let scrollView = current as? UIScrollView {
-                    guard prioritizedScrollView !== scrollView else { return }
-                    scrollView.panGestureRecognizer.require(toFail: modelPanGestureRecognizer)
-                    prioritizedScrollView = scrollView
-                    return
+                    let identifier = ObjectIdentifier(scrollView)
+                    if knownScrollViewIDs.insert(identifier).inserted {
+                        scrollView.panGestureRecognizer.require(
+                            toFail: modelPanGestureRecognizer
+                        )
+                        if let modelPinchGestureRecognizer {
+                            scrollView.panGestureRecognizer.require(
+                                toFail: modelPinchGestureRecognizer
+                            )
+                        }
+                        prioritizedScrollViews.append(
+                            AnatomyWeakScrollViewReference(scrollView)
+                        )
+                    }
                 }
                 ancestor = current.superview
             }
+        }
+
+        private func beginExclusiveManipulation(_ recognizer: UIGestureRecognizer) {
+            let identifier = ObjectIdentifier(recognizer)
+            guard activeManipulationRecognizers.insert(identifier).inserted else { return }
+            guard activeManipulationRecognizers.count == 1 else { return }
+
+            if let arView {
+                prioritizeModelDrag(in: arView)
+            }
+            for reference in prioritizedScrollViews {
+                guard let scrollView = reference.value else { continue }
+                let scrollViewID = ObjectIdentifier(scrollView)
+                if suspendedScrollViewStates[scrollViewID] == nil {
+                    suspendedScrollViewStates[scrollViewID] = scrollView.isScrollEnabled
+                }
+                // Requiring failure establishes initial gesture priority. This
+                // active lock also cancels any parent pan that UIKit already
+                // began during the same physical drag.
+                scrollView.isScrollEnabled = false
+            }
+        }
+
+        private func endExclusiveManipulation(_ recognizer: UIGestureRecognizer) {
+            activeManipulationRecognizers.remove(ObjectIdentifier(recognizer))
+            guard activeManipulationRecognizers.isEmpty else { return }
+            restoreAncestorScrolling()
+        }
+
+        private func restoreAncestorScrolling() {
+            for reference in prioritizedScrollViews {
+                guard let scrollView = reference.value else { continue }
+                let identifier = ObjectIdentifier(scrollView)
+                guard let wasEnabled = suspendedScrollViewStates[identifier] else { continue }
+                scrollView.isScrollEnabled = wasEnabled
+            }
+            suspendedScrollViewStates.removeAll()
         }
 
         private func isScrollViewPan(_ recognizer: UIGestureRecognizer) -> Bool {
@@ -450,6 +520,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             guard let view = arView else { return }
             switch recognizer.state {
             case .began:
+                beginExclusiveManipulation(recognizer)
                 gestureStartYaw = yaw
                 gestureStartPitch = pitch
             case .changed:
@@ -461,6 +532,8 @@ struct BodyVisualizationView: UIViewRepresentable {
                     max(-pitchLimit, gestureStartPitch + Float(translation.y) * 0.0035)
                 )
                 applyInteractionTransform(animated: false)
+            case .ended, .cancelled, .failed:
+                endExclusiveManipulation(recognizer)
             default:
                 break
             }
@@ -469,10 +542,13 @@ struct BodyVisualizationView: UIViewRepresentable {
         @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
             switch recognizer.state {
             case .began:
+                beginExclusiveManipulation(recognizer)
                 gestureStartZoom = zoom
             case .changed:
                 zoom = min(1.7, max(0.76, gestureStartZoom * Float(recognizer.scale)))
                 applyInteractionTransform(animated: false)
+            case .ended, .cancelled, .failed:
+                endExclusiveManipulation(recognizer)
             default:
                 break
             }
