@@ -58,7 +58,15 @@ final class AnatomyRenderContainerView: UIView {
     func releaseRenderingView() {
         guard let renderingView else { return }
         self.renderingView = nil
+        renderingView.scene.anchors.removeAll()
+        renderingView.session.pause()
+        renderingView.layer.removeAllAnimations()
+        // Collapse the drawable before detaching it so a SwiftUI-retained
+        // container cannot continue presenting the last full-size surface.
+        renderingView.contentScaleFactor = 1
+        renderingView.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
         renderingView.isHidden = true
+        renderingView.isUserInteractionEnabled = false
         renderingView.removeFromSuperview()
     }
 }
@@ -287,6 +295,27 @@ struct BodyVisualizationView: UIViewRepresentable {
             ] {
                 root.children.removeAll()
             }
+            // SwiftUI can retain this coordinator after dismissing the sheet.
+            // Replace every root so that retained coordinator owns only a fresh
+            // minimal graph, not the detached scene's engine entities.
+            interactionRoot = Entity()
+            breathingRoot = Entity()
+            selectionProxyRoot = Entity()
+            surfaceRoot = Entity()
+            ghostRoot = Entity()
+            muscleRoot = Entity()
+            skeletonRoot = Entity()
+            nerveRoot = Entity()
+            circulationRoot = Entity()
+            organRoot = Entity()
+            organSelectionProxyRoot = Entity()
+            handDetailRoot = Entity()
+            handDetailSelectionProxyRoot = Entity()
+            footDetailRoot = Entity()
+            footDetailSelectionProxyRoot = Entity()
+            markerRoot = Entity()
+            atmosphereRoot = Entity()
+            scanRoot = Entity()
             entitiesByStructureID.removeAll()
             specificationsByStructureID.removeAll()
             restPosesByEntity.removeAll()
@@ -294,6 +323,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             selectionZonesByEntity.removeAll()
             nervePulseTracks.removeAll()
             arterialPulseTargets.removeAll()
+            lastArterialPulseStep = -1
             atmosphereMotes.removeAll()
             loadedLayers.removeAll()
             loadedLayerOrder.removeAll()
