@@ -479,6 +479,15 @@ struct EventEditorView: View {
     private var isDogProfile: Bool {
         activeProfileType == .dog
     }
+    private var canPresentBodyLocationPicker: Bool {
+        activeProfileType == .adult && (type == .symptom || type == .pain)
+    }
+    private var bodyLocationPickerPresentation: Binding<Bool> {
+        Binding(
+            get: { canPresentBodyLocationPicker && showingBodyLocationPicker },
+            set: { showingBodyLocationPicker = canPresentBodyLocationPicker && $0 }
+        )
+    }
     private var solidsAccessLevel: SolidsAccessLevel {
         SolidsTrackingService.accessLevel(
             for: activeProfile,
@@ -787,17 +796,19 @@ struct EventEditorView: View {
                     syncSolidFoodDetails(names: names)
                 }
             }
-            .sheet(isPresented: $showingBodyLocationPicker) {
-                BodyLocationPickerView(
-                    profileSex: activeProfile?.sex ?? .unknown,
-                    initialRecord: type == .pain
-                        ? painBodyLocationRecord
-                        : symptomBodyLocationRecord
-                ) { updatedRecord in
-                    if type == .pain {
-                        painBodyLocationRecord = updatedRecord
-                    } else {
-                        symptomBodyLocationRecord = updatedRecord
+            .sheet(isPresented: bodyLocationPickerPresentation) {
+                if canPresentBodyLocationPicker {
+                    BodyLocationPickerView(
+                        profileSex: activeProfile?.sex ?? .unknown,
+                        initialRecord: type == .pain
+                            ? painBodyLocationRecord
+                            : symptomBodyLocationRecord
+                    ) { updatedRecord in
+                        if type == .pain {
+                            painBodyLocationRecord = updatedRecord
+                        } else {
+                            symptomBodyLocationRecord = updatedRecord
+                        }
                     }
                 }
             }
@@ -1340,14 +1351,16 @@ struct EventEditorView: View {
                             .multilineTextAlignment(.trailing)
                     }
                     Stepper("Severity: \(symptomSeverity)/10", value: $symptomSeverity, in: 0...10)
-                    BodyLocationEditorButton(
-                        title: "Body location",
-                        summary: symptomBodyLocationRecord.summary,
-                        selectionCount: symptomBodyLocationRecord.selections.count
-                    ) {
-                        showingBodyLocationPicker = true
+                    if canPresentBodyLocationPicker {
+                        BodyLocationEditorButton(
+                            title: "Body location",
+                            summary: symptomBodyLocationRecord.summary,
+                            selectionCount: symptomBodyLocationRecord.selections.count
+                        ) {
+                            showingBodyLocationPicker = true
+                        }
+                        .accessibilityIdentifier("event.symptom-body-location")
                     }
-                    .accessibilityIdentifier("event.symptom-body-location")
                     Toggle("Resolved", isOn: $symptomResolved)
                     healthTrackingFooter
                 }
@@ -1451,14 +1464,16 @@ struct EventEditorView: View {
         case .pain:
             Section("Pain") {
                 Stepper("Pain: \(painScore)/10", value: $painScore, in: 0...10)
-                BodyLocationEditorButton(
-                    title: "Body location",
-                    summary: painBodyLocationRecord.summary,
-                    selectionCount: painBodyLocationRecord.selections.count
-                ) {
-                    showingBodyLocationPicker = true
+                if canPresentBodyLocationPicker {
+                    BodyLocationEditorButton(
+                        title: "Body location",
+                        summary: painBodyLocationRecord.summary,
+                        selectionCount: painBodyLocationRecord.selections.count
+                    ) {
+                        showingBodyLocationPicker = true
+                    }
+                    .accessibilityIdentifier("event.pain-body-location")
                 }
-                .accessibilityIdentifier("event.pain-body-location")
                 healthTrackingFooter
             }
         case .custom:
