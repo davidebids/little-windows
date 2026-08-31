@@ -538,10 +538,12 @@ struct BodyVisualizationView: UIViewRepresentable {
             from anatomicalPosition: SIMD3<Float>,
             canonicalDepth: Float
         ) -> SIMD3<Float> {
-            let rotation = interactionRotation
-            let towardCamera = rotation.inverse.act(SIMD3<Float>(0, 0, 1))
-            return anatomicalPosition
-                + towardCamera * canonicalDepth * anatomySceneScale
+            AnatomyMarkerPlacement.displayedPosition(
+                from: anatomicalPosition,
+                yaw: yaw,
+                pitch: pitch,
+                canonicalDepth: canonicalDepth
+            )
         }
 
         private func resolvedStructureID(
@@ -2075,15 +2077,23 @@ struct BodyVisualizationView: UIViewRepresentable {
         private func displayedMarkerPosition(
             from anatomicalPosition: SIMD3<Float>
         ) -> SIMD3<Float> {
-            guard parent.activeLayer == .joints else { return anatomicalPosition }
+            let canonicalDepth: Float
+            if isShowingExtremityDetail {
+                canonicalDepth = parent.activeLayer == .bodyAreas ? 0.035 : 0.055
+            } else {
+                // The lightweight calf and torso collision proxies sit slightly
+                // inside the registered skin shell on the posterior side. Keep
+                // the marker beyond the deepest measured shell point so its core
+                // cannot be swallowed by the depth buffer in Back view.
+                canonicalDepth = parent.activeLayer == .bodyAreas ? 0.115 : 0.14
+            }
             return cameraFacingMarkerPosition(
                 from: anatomicalPosition,
-                canonicalDepth: isShowingExtremityDetail ? 0.055 : 0.14
+                canonicalDepth: canonicalDepth
             )
         }
 
-        private func refreshJointMarkerDepthOffsets() {
-            guard parent.activeLayer == .joints else { return }
+        private func refreshMarkerDepthOffsets() {
             for marker in markerRoot.children {
                 guard marker.name.hasPrefix("marker:") else { continue }
                 let structureID = String(marker.name.dropFirst("marker:".count))
@@ -2123,13 +2133,11 @@ struct BodyVisualizationView: UIViewRepresentable {
             } else {
                 interactionRoot.transform = transform
             }
-            refreshJointMarkerDepthOffsets()
+            refreshMarkerDepthOffsets()
         }
 
         private var interactionRotation: simd_quatf {
-            let pitchRotation = simd_quatf(angle: pitch, axis: SIMD3(1, 0, 0))
-            let yawRotation = simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0))
-            return yawRotation * pitchRotation
+            AnatomyMarkerPlacement.rotation(yaw: yaw, pitch: pitch)
         }
 
         private func focusTransform(
@@ -2320,7 +2328,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             for marker in markerRoot.children {
                 marker.scale = .one
             }
-            refreshJointMarkerDepthOffsets()
+            refreshMarkerDepthOffsets()
         }
 
         private func refreshPerformanceConstraint() {
@@ -2532,6 +2540,26 @@ private struct AnatomyRestPose {
     let center: SIMD3<Float>
     let position: SIMD3<Float>
     let scale: SIMD3<Float>
+}
+
+enum AnatomyMarkerPlacement {
+    static func rotation(yaw: Float, pitch: Float) -> simd_quatf {
+        let pitchRotation = simd_quatf(angle: pitch, axis: SIMD3(1, 0, 0))
+        let yawRotation = simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0))
+        return yawRotation * pitchRotation
+    }
+
+    static func displayedPosition(
+        from anatomicalPosition: SIMD3<Float>,
+        yaw: Float,
+        pitch: Float,
+        canonicalDepth: Float
+    ) -> SIMD3<Float> {
+        let viewRotation = rotation(yaw: yaw, pitch: pitch)
+        let towardCamera = viewRotation.inverse.act(SIMD3<Float>(0, 0, 1))
+        return anatomicalPosition
+            + towardCamera * canonicalDepth * anatomySceneScale
+    }
 }
 
 private enum AnatomySelectionZone: Hashable {
@@ -4259,8 +4287,11 @@ enum BodySurfaceMapper {
         if structureID.contains("hip") || structureID.contains("gluteal") || structureID.contains("buttock") {
             return SIMD3(side * 0.14, -0.13, structureID.contains("gluteal") || structureID.contains("buttock") ? -0.1 : 0)
         }
-        if structureID.contains("thigh") || structureID.contains("quadriceps") || structureID.contains("hamstrings") || structureID.contains("sciatic") || structureID.contains("femoral") {
-            return SIMD3(side * 0.13, -0.34, structureID.contains("hamstrings") || structureID.contains("sciatic") ? -0.08 : 0.06)
+        if structureID.contains("thigh") || structureID.contains("Thigh") || structureID.contains("quadriceps") || structureID.contains("hamstrings") || structureID.contains("sciatic") || structureID.contains("femoral") {
+            let isPosterior = structureID.contains("posteriorThigh")
+                || structureID.contains("hamstrings")
+                || structureID.contains("sciatic")
+            return SIMD3(side * 0.13, -0.34, isPosterior ? -0.08 : 0.06)
         }
         if structureID.contains("knee") { return SIMD3(side * 0.12, -0.5, 0.04) }
         if structureID.contains("lowerLeg") || structureID.contains("calf") {

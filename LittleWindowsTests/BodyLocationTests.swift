@@ -386,6 +386,48 @@ final class BodyLocationTests: XCTestCase {
         }
     }
 
+    func testSelectionMarkerDepthTracksFrontBackAndSoleOrientations() {
+        let anchor = SIMD3<Float>(0, 0, 0)
+        let depth: Float = 0.075
+        let expectedOffset = depth * 2.55
+        let front = AnatomyMarkerPlacement.displayedPosition(
+            from: anchor,
+            yaw: 0,
+            pitch: 0,
+            canonicalDepth: depth
+        )
+        let back = AnatomyMarkerPlacement.displayedPosition(
+            from: anchor,
+            yaw: .pi,
+            pitch: 0,
+            canonicalDepth: depth
+        )
+        let sole = AnatomyMarkerPlacement.displayedPosition(
+            from: anchor,
+            yaw: 0,
+            pitch: -.pi / 2,
+            canonicalDepth: depth
+        )
+
+        XCTAssertEqual(front.z, expectedOffset, accuracy: 0.0001)
+        XCTAssertEqual(back.z, -expectedOffset, accuracy: 0.0001)
+        XCTAssertEqual(sole.y, -expectedOffset, accuracy: 0.0001)
+    }
+
+    func testPosteriorThighDefaultMarkerStartsOnTheBackOfTheBody() {
+        for variant in [BodyModelVariant.female, .male] {
+            for side in ["left", "right"] {
+                XCTAssertLessThan(
+                    BodySurfaceMapper.markerPosition(
+                        for: "body.posteriorThigh.\(side)",
+                        variant: variant
+                    ).z,
+                    0
+                )
+            }
+        }
+    }
+
     private func organIDs(for variant: BodyModelVariant) -> Set<String> {
         Set(BodyAnatomyCatalog.structures(
             layer: .organs,

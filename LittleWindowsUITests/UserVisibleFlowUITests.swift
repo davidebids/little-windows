@@ -22,6 +22,35 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
     }
 
+    func testBodyLocationBackSelectionMarkerVisualRegression() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location/bodyAreas/female")
+
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        let back = app.buttons["body-location.orientation.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 4))
+        back.tap()
+
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.44, dy: 0.75)
+        ).tap()
+
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.calf.left"]
+                .firstMatch
+                .waitForExistence(timeout: 3)
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Body location Back selection marker"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testBodyLocationFocusedHandAcceptsDirectSelections() {
         continueAfterFailure = false
 
