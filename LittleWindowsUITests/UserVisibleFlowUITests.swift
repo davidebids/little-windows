@@ -153,10 +153,14 @@ final class UserVisibleFlowUITests: XCTestCase {
             ("left inner elbow", CGVector(dx: 0.635, dy: 0.39), "body.innerElbow.left"),
             ("right forearm", CGVector(dx: 0.33, dy: 0.445), "body.forearm.right"),
             ("left forearm", CGVector(dx: 0.67, dy: 0.445), "body.forearm.left"),
-            ("right wrist", CGVector(dx: 0.29, dy: 0.495), "body.wrist.right"),
-            ("left wrist", CGVector(dx: 0.71, dy: 0.495), "body.wrist.left"),
-            ("right palm", CGVector(dx: 0.28, dy: 0.505), "body.palm.right"),
-            ("left palm", CGVector(dx: 0.72, dy: 0.505), "body.palm.left"),
+            ("right wrist", CGVector(dx: 0.31, dy: 0.46), "body.wrist.right"),
+            ("left wrist", CGVector(dx: 0.69, dy: 0.46), "body.wrist.left"),
+            ("right palm", CGVector(dx: 0.285, dy: 0.485), "body.palm.right"),
+            ("left palm", CGVector(dx: 0.715, dy: 0.485), "body.palm.left"),
+            ("right index finger", CGVector(dx: 0.265, dy: 0.50), "body.indexFinger.right"),
+            ("left index finger", CGVector(dx: 0.735, dy: 0.50), "body.indexFinger.left"),
+            ("right groin", CGVector(dx: 0.46, dy: 0.525), "body.groin.right"),
+            ("left groin", CGVector(dx: 0.54, dy: 0.525), "body.groin.left"),
             ("right hip", CGVector(dx: 0.43, dy: 0.535), "body.hip.right"),
             ("left hip", CGVector(dx: 0.57, dy: 0.535), "body.hip.left")
         ]
@@ -176,10 +180,10 @@ final class UserVisibleFlowUITests: XCTestCase {
             ("right back of elbow", CGVector(dx: 0.635, dy: 0.39), "body.backOfElbow.right"),
             ("left outer forearm", CGVector(dx: 0.33, dy: 0.445), "body.outerForearm.left"),
             ("right outer forearm", CGVector(dx: 0.67, dy: 0.445), "body.outerForearm.right"),
-            ("left back of wrist", CGVector(dx: 0.29, dy: 0.495), "body.backOfWrist.left"),
-            ("right back of wrist", CGVector(dx: 0.71, dy: 0.495), "body.backOfWrist.right"),
-            ("left back of hand", CGVector(dx: 0.28, dy: 0.505), "body.backOfHand.left"),
-            ("right back of hand", CGVector(dx: 0.72, dy: 0.505), "body.backOfHand.right"),
+            ("left back of wrist", CGVector(dx: 0.31, dy: 0.46), "body.backOfWrist.left"),
+            ("right back of wrist", CGVector(dx: 0.69, dy: 0.46), "body.backOfWrist.right"),
+            ("left back of hand", CGVector(dx: 0.30, dy: 0.475), "body.backOfHand.left"),
+            ("right back of hand", CGVector(dx: 0.70, dy: 0.475), "body.backOfHand.right"),
             ("left buttock", CGVector(dx: 0.43, dy: 0.535), "body.buttock.left"),
             ("right buttock", CGVector(dx: 0.57, dy: 0.535), "body.buttock.right")
         ]
@@ -203,10 +207,12 @@ final class UserVisibleFlowUITests: XCTestCase {
             ("left inner elbow", CGVector(dx: 0.65, dy: 0.40), "body.innerElbow.left"),
             ("right forearm", CGVector(dx: 0.30, dy: 0.45), "body.forearm.right"),
             ("left forearm", CGVector(dx: 0.70, dy: 0.45), "body.forearm.left"),
-            ("right wrist", CGVector(dx: 0.265, dy: 0.50), "body.wrist.right"),
-            ("left wrist", CGVector(dx: 0.735, dy: 0.50), "body.wrist.left"),
-            ("right palm", CGVector(dx: 0.255, dy: 0.505), "body.palm.right"),
-            ("left palm", CGVector(dx: 0.745, dy: 0.505), "body.palm.left"),
+            ("right wrist", CGVector(dx: 0.30, dy: 0.475), "body.wrist.right"),
+            ("left wrist", CGVector(dx: 0.70, dy: 0.475), "body.wrist.left"),
+            ("right palm", CGVector(dx: 0.285, dy: 0.49), "body.palm.right"),
+            ("left palm", CGVector(dx: 0.715, dy: 0.49), "body.palm.left"),
+            ("right index finger", CGVector(dx: 0.245, dy: 0.52), "body.indexFinger.right"),
+            ("left index finger", CGVector(dx: 0.755, dy: 0.52), "body.indexFinger.left"),
             ("right hip", CGVector(dx: 0.42, dy: 0.545), "body.hip.right"),
             ("left hip", CGVector(dx: 0.58, dy: 0.545), "body.hip.left")
         ]
@@ -226,10 +232,10 @@ final class UserVisibleFlowUITests: XCTestCase {
             ("right back of elbow", CGVector(dx: 0.65, dy: 0.40), "body.backOfElbow.right"),
             ("left outer forearm", CGVector(dx: 0.30, dy: 0.45), "body.outerForearm.left"),
             ("right outer forearm", CGVector(dx: 0.70, dy: 0.45), "body.outerForearm.right"),
-            ("left back of wrist", CGVector(dx: 0.265, dy: 0.50), "body.backOfWrist.left"),
-            ("right back of wrist", CGVector(dx: 0.735, dy: 0.50), "body.backOfWrist.right"),
-            ("left back of hand", CGVector(dx: 0.255, dy: 0.505), "body.backOfHand.left"),
-            ("right back of hand", CGVector(dx: 0.745, dy: 0.505), "body.backOfHand.right"),
+            ("left back of wrist", CGVector(dx: 0.30, dy: 0.475), "body.backOfWrist.left"),
+            ("right back of wrist", CGVector(dx: 0.70, dy: 0.475), "body.backOfWrist.right"),
+            ("left back of hand", CGVector(dx: 0.285, dy: 0.49), "body.backOfHand.left"),
+            ("right back of hand", CGVector(dx: 0.715, dy: 0.49), "body.backOfHand.right"),
             ("left buttock", CGVector(dx: 0.42, dy: 0.545), "body.buttock.left"),
             ("right buttock", CGVector(dx: 0.58, dy: 0.545), "body.buttock.right")
         ]
@@ -246,7 +252,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 
         visualization.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.71, dy: 0.495)
+            withNormalizedOffset: CGVector(dx: 0.69, dy: 0.46)
         ).tap()
         let wristSelections = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
@@ -258,7 +264,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
 
         visualization.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.72, dy: 0.505)
+            withNormalizedOffset: CGVector(dx: 0.70, dy: 0.475)
         ).tap()
         XCTAssertTrue(
             app.buttons["body-location.selection.body.palm.left"].firstMatch
@@ -266,17 +272,121 @@ final class UserVisibleFlowUITests: XCTestCase {
             "A tap just beyond the wrist crease should select the visible left palm."
         )
 
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.735, dy: 0.50)
+        ).tap()
+        let fingertipSelections = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+        ).allElementsBoundByAccessibilityElement.map(\.identifier)
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.indexFinger.left"].firstMatch
+                .waitForExistence(timeout: 2),
+            "A tap on the prominent left fingertip should select the individual index finger; selected \(fingertipSelections)."
+        )
+
         let back = app.buttons["body-location.orientation.back"]
         XCTAssertTrue(back.waitForExistence(timeout: 4))
         back.tap()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         visualization.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.72, dy: 0.505)
+            withNormalizedOffset: CGVector(dx: 0.70, dy: 0.475)
         ).tap()
+        let backHandSelections = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+        ).allElementsBoundByAccessibilityElement.map(\.identifier)
         XCTAssertTrue(
             app.buttons["body-location.selection.body.backOfHand.right"].firstMatch
                 .waitForExistence(timeout: 2),
-            "A tap on the visible back of the right hand should select that surface."
+            "A tap on the visible back of the right hand should select that surface; selected \(backHandSelections)."
+        )
+    }
+
+    func testBodyLocationGroinAndButtockRespectVisibleSurface() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location/bodyAreas/female")
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.46, dy: 0.525)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.groin.right"].firstMatch
+                .waitForExistence(timeout: 2),
+            "The front right groin crease must not resolve to the posterior buttock."
+        )
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.54, dy: 0.525)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.groin.left"].firstMatch
+                .waitForExistence(timeout: 2),
+            "The front left groin crease must not resolve to the posterior buttock."
+        )
+
+        let back = app.buttons["body-location.orientation.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 4))
+        back.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.43, dy: 0.535)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.buttock.left"].firstMatch
+                .waitForExistence(timeout: 2),
+            "The visible left buttock should remain selectable from the back view."
+        )
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.57, dy: 0.535)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.buttock.right"].firstMatch
+                .waitForExistence(timeout: 2),
+            "The visible right buttock should remain selectable from the back view."
+        )
+    }
+
+    func testBodyLocationMaleHandTargetsMatchRenderedHand() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location/bodyAreas/male")
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.70, dy: 0.475)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.wrist.left"].firstMatch
+                .waitForExistence(timeout: 2)
+        )
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.715, dy: 0.49)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.palm.left"].firstMatch
+                .waitForExistence(timeout: 2)
+        )
+
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.755, dy: 0.52)
+        ).tap()
+        let fingerSelections = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+        ).allElementsBoundByAccessibilityElement.map(\.identifier)
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.indexFinger.left"].firstMatch
+                .waitForExistence(timeout: 2),
+            "The male full-body hand must distinguish the visible index finger from the palm; selected \(fingerSelections)."
         )
     }
 

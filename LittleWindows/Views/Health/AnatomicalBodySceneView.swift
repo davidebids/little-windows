@@ -470,8 +470,8 @@ struct BodyVisualizationView: UIViewRepresentable {
                         return lhsDistance < rhsDistance
                     }
                 }
-                let lhsPriority = selectionZone(for: lhs.element.entity)?.hitPriority ?? 0
-                let rhsPriority = selectionZone(for: rhs.element.entity)?.hitPriority ?? 0
+                let lhsPriority = selectionHitPriority(for: lhs.element.entity)
+                let rhsPriority = selectionHitPriority(for: rhs.element.entity)
                 if lhsPriority == rhsPriority {
                     return lhs.offset < rhs.offset
                 }
@@ -484,9 +484,16 @@ struct BodyVisualizationView: UIViewRepresentable {
                 // from being rebuilt for every subtle idle-animation frame.
                 let localPosition = interactionRoot.convert(position: hit.position, from: nil)
                 let zone = selectionZone(for: hit.entity)
-                let resolutionPosition = zone?.usesAnatomicalSelectionPlane == true
+                var resolutionPosition = zone?.usesAnatomicalSelectionPlane == true
                     ? anatomicalSelectionPlanePosition(from: localPosition)
                     : localPosition
+                if zone?.usesAnatomicalSelectionPlane == true {
+                    // The anatomical plane is useful for stable x/y boundaries,
+                    // but its calculated depth sits at (or microscopically across)
+                    // zero. Preserve the actual surface depth so a front hip tap
+                    // can never resolve to a posterior buttock, and vice versa.
+                    resolutionPosition.z = localPosition.z
+                }
                 let semanticName = semanticName(for: hit.entity)
                 guard let structureID = resolvedStructureID(
                     for: semanticName,
@@ -525,6 +532,14 @@ struct BodyVisualizationView: UIViewRepresentable {
                 projectedCenter.x - tapLocation.x,
                 projectedCenter.y - tapLocation.y
             )
+        }
+
+        private func selectionHitPriority(for entity: Entity) -> Int {
+            let zonePriority = selectionZone(for: entity)?.hitPriority ?? 0
+            let digitPriority = semanticName(for: entity).hasPrefix(
+                "system:full-body-hand-digit:"
+            ) ? 4 : 0
+            return zonePriority + digitPriority
         }
 
         private func anatomicalSelectionPlanePosition(
@@ -567,10 +582,19 @@ struct BodyVisualizationView: UIViewRepresentable {
 
             if parent.activeLayer == .bodyAreas,
                BodySurfaceMapper.usesRegisteredUpperLimbMarker(structureID) {
-                return BodySurfaceMapper.markerPosition(
+                var marker = BodySurfaceMapper.markerPosition(
                     for: structureID,
                     variant: parent.variant
                 )
+                let identifier = structureID.lowercased()
+                if identifier.contains("thumb") || identifier.contains("finger") {
+                    // Digits share one structure ID between front and back.
+                    // Keep their registered x/y centerline but retain the
+                    // surface depth of the actual tap so the marker stays
+                    // visible on whichever side the user selected.
+                    marker.z = rawHitPosition.z
+                }
+                return marker
             }
 
             if parent.activeLayer == .joints {
@@ -605,6 +629,25 @@ struct BodyVisualizationView: UIViewRepresentable {
             selectionZone: AnatomySelectionZone?,
             at localPosition: SIMD3<Float>
         ) -> String? {
+            let fullBodyDigitPrefix = "system:full-body-hand-digit:"
+            if semanticName.hasPrefix(fullBodyDigitPrefix) {
+                let components = semanticName
+                    .dropFirst(fullBodyDigitPrefix.count)
+                    .split(separator: ":")
+                guard components.count == 2 else { return nil }
+                let digitID = String(components[0])
+                let side = String(components[1])
+                return switch parent.activeLayer {
+                case .bodyAreas: "body.\(digitID).\(side)"
+                case .muscles: "muscle.hand.\(side)"
+                case .joints: "joint.\(digitID).\(side)"
+                case .nerves:
+                    ["ringFinger", "littleFinger"].contains(digitID)
+                        ? "nerve.ulnar.\(side)"
+                        : "nerve.median.\(side)"
+                case .organs: nil
+                }
+            }
             if semanticName.hasPrefix("system:foot-toe:"), isShowingFootDetail {
                 let toeID = String(semanticName.dropFirst("system:foot-toe:".count))
                 let side = parent.footDetailFocus == .left ? "left" : "right"
@@ -1393,17 +1436,13 @@ struct BodyVisualizationView: UIViewRepresentable {
                     to: SIMD3(sign * 0.39, 0.045, 0.01),
                     radius: 0.062
                 )
-                addSelectionSphere(
-                    .wrist(side),
-                    center: SIMD3(sign * 0.408, 0.001, 0.015),
-                    radius: 0.067
-                )
                 addSelectionCapsule(
-                    .hand(side),
-                    from: SIMD3(sign * 0.425, -0.018, 0.02),
-                    to: SIMD3(sign * 0.505, -0.078, 0.045),
-                    radius: 0.074
+                    .wrist(side),
+                    from: SIMD3(sign * 0.342, 0.145, 0),
+                    to: SIMD3(sign * 0.372, 0.088, 0),
+                    radius: 0.046
                 )
+                addFullBodyHandSelectionZone(side: side)
 
                 addSelectionSphere(
                     .hip(side),
@@ -1469,13 +1508,38 @@ struct BodyVisualizationView: UIViewRepresentable {
             addSelectionZone(.foot(side), shapes: shapes)
         }
 
+        private func addFullBodyHandSelectionZone(side: BodySide) {
+            let sign: Float = side == .left ? 1 : -1
+            addSelectionCapsule(
+                .hand(side),
+                from: SIMD3(sign * 0.365, 0.105, 0),
+                to: SIMD3(sign * 0.410, 0.045, 0),
+                radius: 0.047
+            )
+
+            let sideName = side == .left ? "left" : "right"
+            for centerline in BodySurfaceMapper.fullBodyHandDigitCenterlines(for: side) {
+                guard let shape = selectionCapsule(
+                    from: centerline.start,
+                    to: centerline.end,
+                    radius: centerline.radius
+                ) else { continue }
+                addSelectionZone(
+                    .hand(side),
+                    shapes: [shape],
+                    name: "system:full-body-hand-digit:\(centerline.id):\(sideName)"
+                )
+            }
+        }
+
         private func addSelectionZone(
             _ zone: AnatomySelectionZone,
-            shapes: [ShapeResource]
+            shapes: [ShapeResource],
+            name: String = "system:selection-zone"
         ) {
             guard !shapes.isEmpty else { return }
             let entity = Entity()
-            entity.name = "system:selection-zone"
+            entity.name = name
             entity.components.set(CollisionComponent(shapes: shapes))
             selectionZonesByEntity[ObjectIdentifier(entity)] = zone
             selectionProxyRoot.addChild(entity)
@@ -2710,7 +2774,10 @@ private enum AnatomySelectionZone: Hashable {
                     variant: variant
                 )
                 let identifier = bodyAreaID.lowercased()
-                return identifier.contains("hand") || identifier.contains(".palm.")
+                return identifier.contains("hand")
+                    || identifier.contains(".palm.")
+                    || identifier.contains("thumb")
+                    || identifier.contains("finger")
                     ? "muscle.hand.\(sideName(side))"
                     : "muscle.forearm.\(sideName(side))"
             case let .knee(side):
@@ -2759,7 +2826,11 @@ private enum AnatomySelectionZone: Hashable {
             default:
                 break
             }
-            let structureID = jointID(front: front, at: renderedPoint)
+            let structureID = jointID(
+                front: front,
+                at: renderedPoint,
+                variant: variant
+            )
                 ?? BodySurfaceMapper.jointID(at: renderedPoint, variant: variant)
             return enforcingSide(on: structureID)
         case .nerves:
@@ -2910,7 +2981,11 @@ private enum AnatomySelectionZone: Hashable {
         return false
     }
 
-    private func jointID(front: Bool, at renderedPoint: SIMD3<Float>) -> String? {
+    private func jointID(
+        front: Bool,
+        at renderedPoint: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String? {
         let point = renderedPoint / anatomySceneScale
         let side = point.x >= 0 ? BodySide.left : .right
         switch self {
@@ -2929,7 +3004,24 @@ private enum AnatomySelectionZone: Hashable {
             return pairedID("joint.shoulder", side: side)
         case let .elbow(side):
             return pairedID("joint.elbow", side: side)
-        case let .forearm(side), let .wrist(side), let .hand(side):
+        case let .forearm(side), let .wrist(side):
+            return pairedID("joint.wrist", side: side)
+        case let .hand(side):
+            let bodyAreaID = BodySurfaceMapper.upperLimbBodyAreaID(
+                at: renderedPoint,
+                side: side,
+                variant: variant
+            )
+            let digitPrefixes = [
+                "body.thumb.",
+                "body.indexFinger.",
+                "body.middleFinger.",
+                "body.ringFinger.",
+                "body.littleFinger."
+            ]
+            if let digitPrefix = digitPrefixes.first(where: bodyAreaID.hasPrefix) {
+                return "joint.\(digitPrefix.dropFirst("body.".count))\(sideName(side))"
+            }
             return pairedID("joint.wrist", side: side)
         case let .hip(side):
             return pairedID("joint.hip", side: side)
@@ -4208,21 +4300,101 @@ enum BodySurfaceMapper {
         atCanonical point: SIMD3<Float>,
         side: BodySide
     ) -> String {
-        let distalX = side == .left ? point.x : -point.x
-        // Project onto the modeled forearm-to-palm axis. This keeps the narrow
-        // wrist crease stable even where the lightweight proxies overlap.
-        let wristToHandProgress = (distalX - 0.408) * 0.758
-            + (point.y - 0.001) * -0.652
+        // Project onto the wrist-to-palm axis measured from the skin mesh,
+        // rather than the older oversized hand proxy. That proxy extended into
+        // the fingers and made real digit taps look like generic palm taps.
+        let wristToHandProgress = wristToHandProgress(
+            atCanonical: point,
+            side: side
+        )
         let sideName = side == .left ? "left" : "right"
         let front = point.z >= 0
 
-        if wristToHandProgress > 0 {
+        if wristToHandProgress > 0.038 {
+            if let digitID = fullBodyHandDigitID(
+                atCanonical: point,
+                side: side
+            ) {
+                return "body.\(digitID).\(sideName)"
+            }
             return "body.\(front ? "palm" : "backOfHand").\(sideName)"
         }
-        if wristToHandProgress > -0.026 {
+        if wristToHandProgress > 0 {
             return "body.\(front ? "wrist" : "backOfWrist").\(sideName)"
         }
         return "body.\(front ? "forearm" : "outerForearm").\(sideName)"
+    }
+
+    private static func wristToHandProgress(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> Float {
+        let distalX = side == .left ? point.x : -point.x
+        return (distalX - 0.360) * 0.514
+            + (point.y - 0.115) * -0.857
+    }
+
+    /// Digit centerlines registered directly against the canonical female skin
+    /// mesh. Male input is transformed into this same coordinate space before
+    /// it reaches the mapper. Keeping the bases on the exposed portion of each
+    /// finger leaves the metacarpal surface available as palm/back-of-hand.
+    private static let fullBodyHandDigits: [(
+        id: String,
+        start: SIMD2<Float>,
+        end: SIMD2<Float>,
+        radius: Float
+    )] = [
+        ("thumb", SIMD2(0.420, 0.100), SIMD2(0.461, 0.075), 0.028),
+        ("indexFinger", SIMD2(0.435, 0.040), SIMD2(0.478, -0.008), 0.026),
+        ("middleFinger", SIMD2(0.420, 0.012), SIMD2(0.462, -0.032), 0.026),
+        ("ringFinger", SIMD2(0.395, -0.004), SIMD2(0.442, -0.052), 0.026),
+        ("littleFinger", SIMD2(0.370, -0.005), SIMD2(0.415, -0.060), 0.026)
+    ]
+
+    static func fullBodyHandDigitCenterlines(
+        for side: BodySide
+    ) -> [(id: String, start: SIMD3<Float>, end: SIMD3<Float>, radius: Float)] {
+        let sign: Float = side == .left ? 1 : -1
+        return fullBodyHandDigits.map { digit in
+            (
+                digit.id,
+                SIMD3(sign * digit.start.x, digit.start.y, 0),
+                SIMD3(sign * digit.end.x, digit.end.y, 0),
+                digit.radius
+            )
+        }
+    }
+
+    private static func fullBodyHandDigitID(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> String? {
+        let handPoint = SIMD2(
+            side == .left ? point.x : -point.x,
+            point.y
+        )
+        var bestMatch: (id: String, normalizedDistance: Float)?
+
+        for digit in fullBodyHandDigits {
+            let direction = digit.end - digit.start
+            let squaredLength = simd_length_squared(direction)
+            guard squaredLength > 0 else { continue }
+            let progress = max(
+                0,
+                min(1, simd_dot(handPoint - digit.start, direction) / squaredLength)
+            )
+            let closestPoint = digit.start + direction * progress
+            let normalizedDistance = simd_distance(handPoint, closestPoint) / digit.radius
+            if let currentMatch = bestMatch,
+               normalizedDistance >= currentMatch.normalizedDistance {
+                continue
+            } else {
+                bestMatch = (digit.id, normalizedDistance)
+            }
+        }
+
+        guard let bestMatch, bestMatch.normalizedDistance <= 1 else { return nil }
+        return bestMatch.id
     }
 
     static func headBodyAreaID(
@@ -4329,10 +4501,11 @@ enum BodySurfaceMapper {
 
         if x > 0.25, y > -0.18 {
             let bodySide: BodySide = point.x >= 0 ? .left : .right
-            let distalX = bodySide == .left ? point.x : -point.x
-            let wristToHandProgress = (distalX - 0.408) * 0.758
-                + (point.y - 0.001) * -0.652
-            if wristToHandProgress > -0.026 {
+            let wristToHandProgress = wristToHandProgress(
+                atCanonical: point,
+                side: bodySide
+            )
+            if wristToHandProgress > -0.035 {
                 return upperLimbBodyAreaID(
                     atCanonical: point,
                     side: bodySide
@@ -4714,6 +4887,8 @@ enum BodySurfaceMapper {
             || identifier.contains("wrist")
             || identifier.contains("hand")
             || identifier.contains("palm")
+            || identifier.contains("thumb")
+            || identifier.contains("finger")
     }
 
     static func defaultPosition(for structureID: String, variant: BodyModelVariant) -> SIMD3<Float> {
@@ -4730,7 +4905,7 @@ enum BodySurfaceMapper {
             return SIMD3(side * 0.34, 0.25, 0)
         }
         if structureID.hasPrefix("joint.wrist.") {
-            return SIMD3(side * 0.49, 0.02, 0.015)
+            return SIMD3(side * 0.365, 0.105, 0.015)
         }
         if structureID.hasPrefix("joint.sacroiliac.") {
             return SIMD3(side * 0.07, -0.055, -0.045)
@@ -4784,10 +4959,15 @@ enum BodySurfaceMapper {
         if identifier.contains("innerelbow") { return SIMD3(side * 0.265, 0.272, 0.055) }
         if identifier.contains("backofelbow") { return SIMD3(side * 0.265, 0.272, -0.055) }
         if identifier.contains("outerforearm") { return SIMD3(side * 0.335, 0.135, -0.045) }
+        if identifier.contains("thumb") { return SIMD3(side * 0.448, 0.083, 0.02) }
+        if identifier.contains("indexfinger") { return SIMD3(side * 0.462, 0.010, 0.02) }
+        if identifier.contains("middlefinger") { return SIMD3(side * 0.449, -0.018, 0.015) }
+        if identifier.contains("ringfinger") { return SIMD3(side * 0.428, -0.035, 0.01) }
+        if identifier.contains("littlefinger") { return SIMD3(side * 0.403, -0.042, 0.01) }
         if identifier.contains("radial") { return SIMD3(side * 0.335, 0.135, -0.045) }
-        if identifier.contains("backofwrist") { return SIMD3(side * 0.408, 0.001, -0.035) }
-        if identifier.contains("body.palm") { return SIMD3(side * 0.465, -0.048, 0.065) }
-        if identifier.contains("backofhand") { return SIMD3(side * 0.465, -0.048, -0.055) }
+        if identifier.contains("backofwrist") { return SIMD3(side * 0.365, 0.105, -0.035) }
+        if identifier.contains("body.palm") { return SIMD3(side * 0.402, 0.052, 0.055) }
+        if identifier.contains("backofhand") { return SIMD3(side * 0.402, 0.052, -0.045) }
         if identifier.contains("innerthigh") { return SIMD3(side * 0.08, -0.34, 0.055) }
         if identifier.contains("outerthigh") { return SIMD3(side * 0.19, -0.34, 0.04) }
         if identifier.contains("innerknee") { return SIMD3(side * 0.08, -0.50, 0.035) }
@@ -4816,8 +4996,8 @@ enum BodySurfaceMapper {
         }
         if structureID.contains("wrist") || structureID.contains("hand") {
             return structureID.contains("wrist")
-                ? SIMD3(side * 0.408, 0.001, 0.025)
-                : SIMD3(side * 0.465, -0.048, front * 0.4)
+                ? SIMD3(side * 0.365, 0.105, 0.025)
+                : SIMD3(side * 0.402, 0.052, front * 0.35)
         }
         if structureID.contains("chest") || structureID.contains("pector") || structureID.contains("heart") || structureID.contains("lung") || structureID.contains("ribCage") {
             return SIMD3(side * 0.08, 0.46, front * 0.72)

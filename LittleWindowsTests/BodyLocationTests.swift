@@ -269,10 +269,39 @@ final class BodyLocationTests: XCTestCase {
             variant: female
         ), "body.outerForearm.left")
         XCTAssertEqual(BodySurfaceMapper.upperLimbBodyAreaID(
-            at: SIMD3<Float>(-0.465, -0.048, 0.07) * scale,
+            at: SIMD3<Float>(-0.405, 0.055, 0.07) * scale,
             side: .right,
             variant: female
         ), "body.palm.right")
+        let leftDigitTargets: [(point: SIMD3<Float>, expectedID: String)] = [
+            (SIMD3<Float>(0.458, 0.080, 0.04), "body.thumb.left"),
+            (SIMD3<Float>(0.474, -0.008, 0.04), "body.indexFinger.left"),
+            (SIMD3<Float>(0.458, -0.030, 0.04), "body.middleFinger.left"),
+            (SIMD3<Float>(0.438, -0.050, 0.04), "body.ringFinger.left"),
+            (SIMD3<Float>(0.410, -0.057, 0.04), "body.littleFinger.left")
+        ]
+        for target in leftDigitTargets {
+            XCTAssertEqual(
+                BodySurfaceMapper.upperLimbBodyAreaID(
+                    at: target.point * scale,
+                    side: .left,
+                    variant: female
+                ),
+                target.expectedID
+            )
+            XCTAssertEqual(
+                BodySurfaceMapper.upperLimbBodyAreaID(
+                    at: SIMD3<Float>(
+                        -target.point.x,
+                        target.point.y,
+                        -target.point.z
+                    ) * scale,
+                    side: .right,
+                    variant: female
+                ),
+                target.expectedID.replacingOccurrences(of: ".left", with: ".right")
+            )
+        }
         XCTAssertEqual(BodySurfaceMapper.lowerLimbBodyAreaID(
             at: SIMD3<Float>(0.075, -0.30, 0.07) * scale,
             side: .left,
@@ -562,8 +591,8 @@ final class BodyLocationTests: XCTestCase {
             ("body.upperArm.left", SIMD3(0.228, 0.403, 0.05)),
             ("body.elbow.left", SIMD3(0.265, 0.272, 0.015)),
             ("body.forearm.left", SIMD3(0.335, 0.135, 0.04)),
-            ("body.wrist.left", SIMD3(0.408, 0.001, 0.025)),
-            ("body.hand.left", SIMD3(0.465, -0.048, 0.064))
+            ("body.wrist.left", SIMD3(0.365, 0.105, 0.025)),
+            ("body.hand.left", SIMD3(0.402, 0.052, 0.056))
         ]
 
         for value in expected {
