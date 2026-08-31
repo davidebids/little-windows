@@ -196,6 +196,13 @@ struct LittleWindowsApp: App {
 
     @MainActor
     private func scheduleLaunchMaintenance(container modelContainer: ModelContainer) {
+        Task(priority: .utility) {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            let worker = FoodHomeDuplicateRepairWorker(modelContainer: modelContainer)
+            _ = await worker.repair()
+        }
+
         Task(priority: .utility) { @MainActor in
             await Task.yield()
             await NotificationManager.shared.configure()

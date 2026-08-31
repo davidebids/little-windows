@@ -812,6 +812,99 @@ enum HomeTodoService {
     }
 }
 
+enum FoodHomeDuplicateRepairService {
+    @discardableResult
+    @MainActor
+    static func repair(context: ModelContext, saveChanges: Bool = true) -> Int {
+        repairCore(context: context, saveChanges: saveChanges)
+    }
+
+    nonisolated static func repairInBackground(context: ModelContext) -> Int {
+        repairCore(context: context, saveChanges: true)
+    }
+
+    nonisolated private static func repairCore(
+        context: ModelContext,
+        saveChanges: Bool
+    ) -> Int {
+        let duplicateTodoLists = duplicateModels(
+            (try? context.fetch(FetchDescriptor<HomeTodoList>())) ?? [],
+            id: \.id,
+            createdAt: \.createdAt,
+            updatedAt: \.updatedAt
+        )
+        let duplicateTodoItems = duplicateModels(
+            (try? context.fetch(FetchDescriptor<HomeTodoItem>())) ?? [],
+            id: \.id,
+            createdAt: \.createdAt,
+            updatedAt: \.updatedAt
+        )
+        let duplicateShoppingLists = duplicateModels(
+            (try? context.fetch(FetchDescriptor<ShoppingList>())) ?? [],
+            id: \.id,
+            createdAt: \.createdAt,
+            updatedAt: \.updatedAt
+        )
+        let duplicateShoppingItems = duplicateModels(
+            (try? context.fetch(FetchDescriptor<ShoppingListItem>())) ?? [],
+            id: \.id,
+            createdAt: \.createdAt,
+            updatedAt: \.updatedAt
+        )
+        let duplicateCount = duplicateTodoLists.count
+            + duplicateTodoItems.count
+            + duplicateShoppingLists.count
+            + duplicateShoppingItems.count
+        guard duplicateCount > 0 else { return 0 }
+
+        duplicateTodoLists.forEach(context.delete)
+        duplicateTodoItems.forEach(context.delete)
+        duplicateShoppingLists.forEach(context.delete)
+        duplicateShoppingItems.forEach(context.delete)
+        if saveChanges, !PersistenceService.save(context: context) {
+            return 0
+        }
+        return duplicateCount
+    }
+
+    nonisolated private static func duplicateModels<Model: PersistentModel>(
+        _ models: [Model],
+        id: KeyPath<Model, UUID>,
+        createdAt: KeyPath<Model, Date>,
+        updatedAt: KeyPath<Model, Date>
+    ) -> [Model] {
+        var canonicalByID = [UUID: Model]()
+        var duplicates = [Model]()
+
+        for model in models {
+            let modelID = model[keyPath: id]
+            guard let canonical = canonicalByID[modelID] else {
+                canonicalByID[modelID] = model
+                continue
+            }
+            let modelIsPreferred = model[keyPath: updatedAt] > canonical[keyPath: updatedAt]
+                || (
+                    model[keyPath: updatedAt] == canonical[keyPath: updatedAt]
+                        && model[keyPath: createdAt] < canonical[keyPath: createdAt]
+                )
+            if modelIsPreferred {
+                duplicates.append(canonical)
+                canonicalByID[modelID] = model
+            } else {
+                duplicates.append(model)
+            }
+        }
+        return duplicates
+    }
+}
+
+@ModelActor
+actor FoodHomeDuplicateRepairWorker {
+    func repair() -> Int {
+        FoodHomeDuplicateRepairService.repairInBackground(context: modelContext)
+    }
+}
+
 @MainActor
 enum InventoryLocationService {
     @discardableResult
@@ -2589,9 +2682,19 @@ enum TodayHomeSummaryService {
         dayStart: Date,
         dayEnd: Date
     ) -> TodayHomeSummarySection {
-        let activeLists = lists.filter { $0.householdID == householdID && !$0.isArchived }
-        let listsByID = Dictionary(uniqueKeysWithValues: activeLists.map { ($0.id, $0) })
-        let scopedItems = items.filter {
+        let listsByID = latestValuesByID(
+            lists,
+            id: \.id,
+            updatedAt: \.updatedAt
+        ).filter { _, list in
+            list.householdID == householdID && !list.isArchived
+        }
+        let activeLists = Array(listsByID.values)
+        let scopedItems = latestValuesByID(
+            items,
+            id: \.id,
+            updatedAt: \.updatedAt
+        ).values.filter {
             $0.householdID == householdID && listsByID[$0.todoListID] != nil
         }
         let completedToday = scopedItems.filter {
@@ -2641,9 +2744,17 @@ enum TodayHomeSummaryService {
         dayStart: Date,
         dayEnd: Date
     ) -> TodayHomeSummarySection {
-        let activeLists = lists.filter { $0.householdID == householdID && !$0.isArchived }
+        let activeLists = latestValuesByID(
+            lists,
+            id: \.id,
+            updatedAt: \.updatedAt
+        ).values.filter { $0.householdID == householdID && !$0.isArchived }
         let listIDs = Set(activeLists.map(\.id))
-        let scopedItems = items.filter {
+        let scopedItems = latestValuesByID(
+            items,
+            id: \.id,
+            updatedAt: \.updatedAt
+        ).values.filter {
             $0.householdID == householdID && listIDs.contains($0.shoppingListID)
         }
         let openItems = scopedItems.filter { !$0.isChecked }
@@ -2689,6 +2800,21 @@ enum TodayHomeSummaryService {
             items: Array(visible),
             remainderText: remainderText(listsWithItems.count - visible.count, noun: "list"),
             emptyMessage: "Shopping lists are clear."
+        )
+    }
+
+    private static func latestValuesByID<Value>(
+        _ values: [Value],
+        id: KeyPath<Value, UUID>,
+        updatedAt: KeyPath<Value, Date>
+    ) -> [UUID: Value] {
+        Dictionary(
+            values.map { ($0[keyPath: id], $0) },
+            uniquingKeysWith: { current, candidate in
+                candidate[keyPath: updatedAt] > current[keyPath: updatedAt]
+                    ? candidate
+                    : current
+            }
         )
     }
 

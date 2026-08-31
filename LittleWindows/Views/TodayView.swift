@@ -4603,7 +4603,13 @@ private struct TodayHomeSummaryView: View {
 
     private var allVisibleAttentionItems: [TodayHomeSummaryItem] {
         var itemsByID = Dictionary(
-            uniqueKeysWithValues: summary.allAttentionItems.map { ($0.id, $0) }
+            summary.allAttentionItems.map { ($0.id, $0) },
+            uniquingKeysWith: { current, candidate in
+                (candidate.sourceUpdatedAt ?? .distantPast)
+                    > (current.sourceUpdatedAt ?? .distantPast)
+                    ? candidate
+                    : current
+            }
         )
         for snoozed in summary.snoozedAttentionItems where
             unsnoozedSourceKeys.contains(snoozed.item.sourceKey ?? "") || snoozed.until <= attentionNow {

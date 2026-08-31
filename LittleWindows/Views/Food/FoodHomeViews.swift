@@ -1229,12 +1229,28 @@ private struct FoodHomeDataLoader<Content: View>: View {
     var body: some View {
         content(FoodHomeRouteData(
             scopeKey: scope.key,
-            shoppingLists: shoppingLists,
-            shoppingItems: shoppingItems,
+            shoppingLists: latestUniqueValues(
+                shoppingLists,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
+            shoppingItems: latestUniqueValues(
+                shoppingItems,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
             stores: stores,
             storeSections: storeSections,
-            todoLists: todoLists,
-            todoItems: todoItems,
+            todoLists: latestUniqueValues(
+                todoLists,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
+            todoItems: latestUniqueValues(
+                todoItems,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
             locations: locations,
             inventoryItems: inventoryItems,
             foodItems: [],
@@ -1253,6 +1269,27 @@ private struct FoodHomeDataLoader<Content: View>: View {
             itineraryItems: itineraryItems,
             itineraryLinks: itineraryLinks
         ))
+    }
+
+    private func latestUniqueValues<Value>(
+        _ values: [Value],
+        id: KeyPath<Value, UUID>,
+        updatedAt: KeyPath<Value, Date>
+    ) -> [Value] {
+        var order = [UUID]()
+        var valuesByID = [UUID: Value]()
+        for value in values {
+            let valueID = value[keyPath: id]
+            if let current = valuesByID[valueID] {
+                if value[keyPath: updatedAt] > current[keyPath: updatedAt] {
+                    valuesByID[valueID] = value
+                }
+            } else {
+                order.append(valueID)
+                valuesByID[valueID] = value
+            }
+        }
+        return order.compactMap { valuesByID[$0] }
     }
 
     private func sortedRequests() -> [ReturnRequest] {

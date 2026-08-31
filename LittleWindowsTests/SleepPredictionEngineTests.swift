@@ -8325,6 +8325,107 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testTodayHomeSummaryCoalescesDuplicateListAndItemIdentifiers() throws {
+        let household = Household(name: "Test Home")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let listID = UUID()
+        let itemID = UUID()
+        let oldList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Old Tasks",
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let currentList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Current Tasks",
+            updatedAt: now
+        )
+        let oldItem = HomeTodoItem(
+            id: itemID,
+            householdID: household.id,
+            todoListID: listID,
+            title: "Old title",
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let currentItem = HomeTodoItem(
+            id: itemID,
+            householdID: household.id,
+            todoListID: listID,
+            title: "Current title",
+            updatedAt: now
+        )
+
+        let summary = TodayHomeSummaryService.summary(
+            householdID: household.id,
+            currentCaregiverName: "",
+            todoLists: [oldList, currentList],
+            todoItems: [oldItem, currentItem],
+            shoppingLists: [],
+            shoppingItems: [],
+            inventoryItems: [],
+            mealPrepItems: [],
+            mealPrepUsages: [],
+            packingTrips: [],
+            packingItems: [],
+            itineraryItems: [],
+            returnRequests: [],
+            returnItems: [],
+            returnPackages: [],
+            reminders: [],
+            now: now
+        )
+
+        let todos = try XCTUnwrap(summary.sections.first { $0.category == .todos })
+        XCTAssertEqual(todos.summary, "1 active list · 0 completed today")
+        XCTAssertEqual(todos.countLabel, "1 open")
+        XCTAssertEqual(todos.items.map(\.title), ["Current title"])
+        XCTAssertEqual(todos.items.first?.detail, "Current Tasks")
+    }
+
+    @MainActor
+    func testFoodHomeDuplicateRepairKeepsNewestRowsAndLinkedItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Test Home")
+        let listID = UUID()
+        let linkedItem = HomeTodoItem(
+            householdID: household.id,
+            todoListID: listID,
+            title: "Preserved task"
+        )
+        let oldList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Old Tasks",
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let currentList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Current Tasks",
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 300)
+        )
+        context.insert(household)
+        context.insert(linkedItem)
+        context.insert(oldList)
+        context.insert(currentList)
+        try context.save()
+
+        XCTAssertEqual(FoodHomeDuplicateRepairService.repair(context: context), 1)
+
+        let lists = try context.fetch(FetchDescriptor<HomeTodoList>())
+        let items = try context.fetch(FetchDescriptor<HomeTodoItem>())
+        XCTAssertEqual(lists.count, 1)
+        XCTAssertEqual(lists.first?.name, "Current Tasks")
+        XCTAssertEqual(items.map(\.title), ["Preserved task"])
+        XCTAssertEqual(items.first?.todoListID, listID)
+    }
+
+    @MainActor
     func testTodayHomeSummaryPrioritizesUsefulRowsAndRoutesToHomeDetails() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
