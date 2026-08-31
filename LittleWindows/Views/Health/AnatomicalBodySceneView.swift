@@ -506,7 +506,8 @@ struct BodyVisualizationView: UIViewRepresentable {
                let marker = FootDetailStructureMapper.markerPosition(
                    for: structureID,
                    focus: parent.footDetailFocus,
-                   variant: parent.variant
+                   variant: parent.variant,
+                   soleView: parent.orientation == .back
                ) {
                 return marker
             }
@@ -548,12 +549,24 @@ struct BodyVisualizationView: UIViewRepresentable {
             selectionZone: AnatomySelectionZone?,
             at localPosition: SIMD3<Float>
         ) -> String? {
+            if semanticName.hasPrefix("system:foot-toe:"), isShowingFootDetail {
+                let toeID = String(semanticName.dropFirst("system:foot-toe:".count))
+                let side = parent.footDetailFocus == .left ? "left" : "right"
+                return switch parent.activeLayer {
+                case .bodyAreas: "body.\(toeID).\(side)"
+                case .joints: "joint.\(toeID).\(side)"
+                case .muscles: "muscle.foot.\(side)"
+                case .nerves: "nerve.plantar.\(side)"
+                case .organs: nil
+                }
+            }
             if semanticName.hasPrefix("system:foot-"), isShowingFootDetail {
                 return FootDetailStructureMapper.structureID(
                     layer: parent.activeLayer,
                     focus: parent.footDetailFocus,
                     at: localPosition / anatomySceneScale,
-                    variant: parent.variant
+                    variant: parent.variant,
+                    soleView: parent.orientation == .back
                 )
             }
             if semanticName.hasPrefix("system:hand-"), isShowingHandDetail {
@@ -1035,9 +1048,22 @@ struct BodyVisualizationView: UIViewRepresentable {
             proxy.components.set(CollisionComponent(shapes: FootDetailStructureMapper
                 .selectionProxyShapes(
                     focus: parent.footDetailFocus,
-                    variant: parent.variant
+                    variant: parent.variant,
+                    soleView: parent.orientation == .back,
+                    includesToeRegion: parent.orientation != .back
                 )))
             footDetailSelectionProxyRoot.addChild(proxy)
+
+            guard parent.orientation == .back else { return }
+            for toe in FootDetailStructureMapper.toeSelectionProxies(
+                focus: parent.footDetailFocus,
+                variant: parent.variant
+            ) {
+                let toeProxy = Entity()
+                toeProxy.name = "system:foot-toe:\(toe.id)"
+                toeProxy.components.set(CollisionComponent(shapes: [toe.shape]))
+                footDetailSelectionProxyRoot.addChild(toeProxy)
+            }
         }
 
         private func ensureHandDetailLoaded() {
@@ -2136,7 +2162,8 @@ struct BodyVisualizationView: UIViewRepresentable {
                         4.8,
                         FootDetailStructureMapper.focusPivot(
                             focus: footDetailFocus,
-                            variant: parent.variant
+                            variant: parent.variant,
+                            soleView: parent.orientation == .back
                         ) * anatomySceneScale
                     )
                 }
@@ -2843,15 +2870,16 @@ private enum HandDetailStructureMapper {
     }
 }
 
-private enum FootDetailStructureMapper {
+enum FootDetailStructureMapper {
     static func structureID(
         layer: BodyAnatomyLayer,
         focus: BodyFootDetailFocus,
         at point: SIMD3<Float>,
-        variant: BodyModelVariant
+        variant: BodyModelVariant,
+        soleView: Bool = false
     ) -> String? {
         guard focus != .both else { return nil }
-        let frame = frame(focus: focus, variant: variant)
+        let frame = frame(focus: focus, variant: variant, soleView: soleView)
         let side = focus == .left ? "left" : "right"
         let lateral = (point.x - frame.centerX) * frame.sideSign / frame.halfWidth
 
@@ -2862,7 +2890,7 @@ private enum FootDetailStructureMapper {
             }
             if point.z < frame.heelBoundaryZ { return "body.heel.\(side)" }
             if point.z > frame.toeBoundaryZ {
-                return "body.\(toeID(lateral: lateral)).\(side)"
+                return "body.\(toeID(lateral: lateral, soleView: soleView)).\(side)"
             }
             if point.y <= frame.soleBoundaryY {
                 if point.z > 0.035 { return "body.ballOfFoot.\(side)" }
@@ -2881,7 +2909,7 @@ private enum FootDetailStructureMapper {
             }
             if point.z < frame.heelBoundaryZ { return "joint.heel.\(side)" }
             if point.z > frame.toeBoundaryZ {
-                return "joint.\(toeID(lateral: lateral)).\(side)"
+                return "joint.\(toeID(lateral: lateral, soleView: soleView)).\(side)"
             }
             return "joint.midfoot.\(side)"
         case .nerves:
@@ -2899,40 +2927,67 @@ private enum FootDetailStructureMapper {
     static func markerPosition(
         for structureID: String,
         focus: BodyFootDetailFocus,
-        variant: BodyModelVariant
+        variant: BodyModelVariant,
+        soleView: Bool = false
     ) -> SIMD3<Float>? {
         guard focus != .both else { return nil }
-        let frame = frame(focus: focus, variant: variant)
+        let frame = frame(focus: focus, variant: variant, soleView: soleView)
         let point: SIMD3<Float>
+        let plantarMarkerY = soleView ? frame.soleY - 0.004 : frame.soleY + 0.012
 
         if structureID.contains("ankle") {
             point = frame.ankle
         } else if structureID.contains("achilles") {
             point = SIMD3(frame.centerX, frame.topY + 0.018, -0.062)
         } else if structureID.contains("heel") {
-            point = SIMD3(frame.centerX, frame.soleY + 0.012, -0.074)
+            point = SIMD3(frame.centerX, plantarMarkerY, -0.074)
         } else if structureID.contains("topOfFoot") {
             point = SIMD3(frame.centerX, frame.topY, 0.005)
         } else if structureID.contains("sole") {
-            point = SIMD3(frame.centerX, frame.soleY, 0.018)
+            point = SIMD3(frame.centerX, plantarMarkerY, 0.018)
         } else if structureID.contains("arch") {
             point = SIMD3(
                 frame.centerX - frame.sideSign * frame.halfWidth * 0.36,
-                frame.soleY,
+                plantarMarkerY,
                 0.012
             )
         } else if structureID.contains("ballOfFoot") {
-            point = SIMD3(frame.centerX, frame.soleY + 0.004, 0.052)
+            point = SIMD3(frame.centerX, plantarMarkerY, 0.052)
         } else if structureID.contains("greatToe") {
-            point = toeMarker(frame: frame, lateral: -0.70, z: frame.toeTipZ)
+            point = toeMarker(
+                frame: frame,
+                lateral: toeLateralPosition(for: "greatToe", soleView: soleView),
+                y: soleView ? plantarMarkerY : frame.topY - 0.012,
+                z: frame.toeTipZ
+            )
         } else if structureID.contains("secondToe") {
-            point = toeMarker(frame: frame, lateral: -0.34, z: frame.toeTipZ - 0.010)
+            point = toeMarker(
+                frame: frame,
+                lateral: toeLateralPosition(for: "secondToe", soleView: soleView),
+                y: soleView ? plantarMarkerY : frame.topY - 0.012,
+                z: frame.toeTipZ - (soleView ? 0 : 0.010)
+            )
         } else if structureID.contains("middleToe") {
-            point = toeMarker(frame: frame, lateral: 0, z: frame.toeTipZ - 0.018)
+            point = toeMarker(
+                frame: frame,
+                lateral: toeLateralPosition(for: "middleToe", soleView: soleView),
+                y: soleView ? plantarMarkerY : frame.topY - 0.012,
+                z: frame.toeTipZ - (soleView ? 0.010 : 0.018)
+            )
         } else if structureID.contains("fourthToe") {
-            point = toeMarker(frame: frame, lateral: 0.34, z: frame.toeTipZ - 0.028)
+            point = toeMarker(
+                frame: frame,
+                lateral: toeLateralPosition(for: "fourthToe", soleView: soleView),
+                y: soleView ? plantarMarkerY : frame.topY - 0.012,
+                z: frame.toeTipZ - (soleView ? 0.027 : 0.028)
+            )
         } else if structureID.contains("littleToe") {
-            point = toeMarker(frame: frame, lateral: 0.70, z: frame.toeTipZ - 0.038)
+            point = toeMarker(
+                frame: frame,
+                lateral: toeLateralPosition(for: "littleToe", soleView: soleView),
+                y: soleView ? plantarMarkerY : frame.topY - 0.012,
+                z: frame.toeTipZ - (soleView ? 0.039 : 0.038)
+            )
         } else if structureID.contains("midfoot") || structureID.contains("foot") {
             point = SIMD3(frame.centerX, frame.topY, 0.012)
         } else if structureID.contains("plantar") {
@@ -2958,18 +3013,24 @@ private enum FootDetailStructureMapper {
 
     static func focusPivot(
         focus: BodyFootDetailFocus,
-        variant: BodyModelVariant
+        variant: BodyModelVariant,
+        soleView: Bool = false
     ) -> SIMD3<Float> {
-        let frame = frame(focus: focus, variant: variant)
-        return SIMD3(frame.centerX, frame.focusY, -0.025)
+        let frame = frame(focus: focus, variant: variant, soleView: soleView)
+        let centerZ = soleView
+            ? (frame.heelBoundaryZ + frame.toeTipZ) / 2
+            : -0.025
+        return SIMD3(frame.centerX, frame.focusY, centerZ)
     }
 
     static func selectionProxyShapes(
         focus: BodyFootDetailFocus,
-        variant: BodyModelVariant
+        variant: BodyModelVariant,
+        soleView: Bool = false,
+        includesToeRegion: Bool = true
     ) -> [ShapeResource] {
         guard focus != .both else { return [] }
-        let frame = frame(focus: focus, variant: variant)
+        let frame = frame(focus: focus, variant: variant, soleView: soleView)
         let scale = SIMD3<Float>(repeating: anatomySceneScale)
 
         func box(center: SIMD3<Float>, size: SIMD3<Float>) -> ShapeResource {
@@ -2982,12 +3043,12 @@ private enum FootDetailStructureMapper {
         let footTop = frame.topY + 0.012
         let footWidth = frame.halfWidth * 2.45
         let mainHeel = frame.heelBoundaryZ - 0.014
-        let mainToe = frame.toeBoundaryZ + 0.018
+        let mainToe = frame.toeBoundaryZ + (includesToeRegion ? 0.018 : -0.004)
         let ankleTop = frame.ankleBoundaryY
             + (variant == .female ? 0.13 : 0.15)
         let ankleBottom = frame.topY - 0.012
 
-        return [
+        var shapes = [
             box(
                 center: SIMD3(
                     frame.centerX,
@@ -2998,18 +3059,6 @@ private enum FootDetailStructureMapper {
                     footWidth,
                     footTop - footBottom,
                     mainToe - mainHeel
-                )
-            ),
-            box(
-                center: SIMD3(
-                    frame.centerX,
-                    (footBottom + footTop) / 2,
-                    (frame.toeTipZ + frame.toeBoundaryZ) / 2
-                ),
-                size: SIMD3(
-                    footWidth * 1.02,
-                    footTop - footBottom,
-                    frame.toeTipZ - frame.toeBoundaryZ + 0.014
                 )
             ),
             box(
@@ -3037,9 +3086,72 @@ private enum FootDetailStructureMapper {
                 )
             )
         ]
+        if includesToeRegion {
+            shapes.append(box(
+                center: SIMD3(
+                    frame.centerX,
+                    (footBottom + footTop) / 2,
+                    (frame.toeTipZ + frame.toeBoundaryZ) / 2
+                ),
+                size: SIMD3(
+                    footWidth * 1.02,
+                    footTop - footBottom,
+                    frame.toeTipZ - frame.toeBoundaryZ + 0.014
+                )
+            ))
+        }
+        return shapes
     }
 
-    private static func toeID(lateral: Float) -> String {
+    static func toeSelectionProxies(
+        focus: BodyFootDetailFocus,
+        variant: BodyModelVariant
+    ) -> [(id: String, shape: ShapeResource)] {
+        guard focus != .both else { return [] }
+        let frame = frame(focus: focus, variant: variant, soleView: true)
+        let scale = SIMD3<Float>(repeating: anatomySceneScale)
+        let footThickness = frame.topY - frame.soleY + 0.020
+        // These intervals come from the registered plantar shell rather than
+        // splitting the forefoot into five equal columns. The great toe owns
+        // the broad medial ray, while the four narrower targets follow the
+        // actual distal profile of the remaining toes.
+        let toeSpecifications: [(String, Float, Float, Float)] = [
+            ("greatToe", -0.695, 0.61, 0),
+            ("secondToe", -0.18, 0.42, 0),
+            ("middleToe", 0.19, 0.32, 0.010),
+            ("fourthToe", 0.495, 0.29, 0.027),
+            ("littleToe", 0.82, 0.36, 0.039)
+        ]
+        return toeSpecifications.map { id, lateral, widthScale, tipInset in
+            let tipZ = frame.toeTipZ - tipInset
+            let baseZ = frame.toeBoundaryZ - 0.006
+            let center = SIMD3(
+                frame.centerX + frame.sideSign * frame.halfWidth * lateral,
+                (frame.soleY + frame.topY) / 2,
+                (baseZ + tipZ) / 2
+            )
+            let size = SIMD3(
+                frame.halfWidth * widthScale,
+                footThickness,
+                tipZ - baseZ + 0.010
+            )
+            return (
+                id,
+                ShapeResource.generateBox(size: size * scale).offsetBy(
+                    translation: center * scale
+                )
+            )
+        }
+    }
+
+    private static func toeID(lateral: Float, soleView: Bool) -> String {
+        if soleView {
+            if lateral < -0.39 { return "greatToe" }
+            if lateral < 0.03 { return "secondToe" }
+            if lateral < 0.35 { return "middleToe" }
+            if lateral < 0.64 { return "fourthToe" }
+            return "littleToe"
+        }
         if lateral < -0.44 { return "greatToe" }
         if lateral < -0.12 { return "secondToe" }
         if lateral < 0.18 { return "middleToe" }
@@ -3047,35 +3159,59 @@ private enum FootDetailStructureMapper {
         return "littleToe"
     }
 
+    private static func toeLateralPosition(
+        for toeID: String,
+        soleView: Bool
+    ) -> Float {
+        if soleView {
+            return switch toeID {
+            case "greatToe": -0.65
+            case "secondToe": -0.14
+            case "middleToe": 0.20
+            case "fourthToe": 0.49
+            default: 0.78
+            }
+        }
+        return switch toeID {
+        case "greatToe": -0.70
+        case "secondToe": -0.34
+        case "middleToe": 0
+        case "fourthToe": 0.34
+        default: 0.70
+        }
+    }
+
     private static func toeMarker(
         frame: FootDetailFrame,
         lateral: Float,
+        y: Float,
         z: Float
     ) -> SIMD3<Float> {
         SIMD3(
             frame.centerX + frame.sideSign * frame.halfWidth * lateral,
-            frame.topY - 0.012,
+            y,
             z
         )
     }
 
     private static func frame(
         focus: BodyFootDetailFocus,
-        variant: BodyModelVariant
+        variant: BodyModelVariant,
+        soleView: Bool
     ) -> FootDetailFrame {
         let isLeft = focus == .left
         if variant == .female {
             return FootDetailFrame(
                 sideSign: isLeft ? 1 : -1,
                 centerX: isLeft ? 0.141 : -0.160,
-                halfWidth: 0.043,
-                soleY: -0.790,
-                topY: -0.747,
-                focusY: -0.735,
+                halfWidth: soleView ? 0.051 : 0.043,
+                soleY: soleView ? -0.794 : -0.790,
+                topY: soleView ? -0.720 : -0.747,
+                focusY: soleView ? -0.757 : -0.735,
                 ankleBoundaryY: -0.716,
                 soleBoundaryY: -0.775,
-                toeBoundaryZ: 0.053,
-                toeTipZ: 0.103,
+                toeBoundaryZ: soleView ? 0.078 : 0.053,
+                toeTipZ: soleView ? 0.159 : 0.103,
                 heelBoundaryZ: -0.082,
                 ankle: isLeft
                     ? SIMD3(0.143649, -0.774522, -0.020298)
@@ -3085,14 +3221,14 @@ private enum FootDetailStructureMapper {
         return FootDetailFrame(
             sideSign: isLeft ? 1 : -1,
             centerX: isLeft ? 0.214 : -0.214,
-            halfWidth: 0.057,
-            soleY: -0.909,
-            topY: -0.874,
-            focusY: -0.842,
+            halfWidth: soleView ? 0.066 : 0.057,
+            soleY: soleView ? -0.915 : -0.909,
+            topY: soleView ? -0.826 : -0.874,
+            focusY: soleView ? -0.870 : -0.842,
             ankleBoundaryY: -0.825,
             soleBoundaryY: -0.895,
-            toeBoundaryZ: 0.049,
-            toeTipZ: 0.088,
+            toeBoundaryZ: soleView ? 0.080 : 0.049,
+            toeTipZ: soleView ? 0.162 : 0.088,
             heelBoundaryZ: -0.078,
             ankle: isLeft
                 ? SIMD3(0.209669, -0.883374, -0.039116)

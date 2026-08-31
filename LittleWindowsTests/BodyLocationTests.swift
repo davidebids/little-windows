@@ -343,6 +343,49 @@ final class BodyLocationTests: XCTestCase {
         }
     }
 
+    func testSoleFootDetailProvidesAnIndividualTargetForEveryToe() throws {
+        let toeIDs = [
+            "greatToe", "secondToe", "middleToe", "fourthToe", "littleToe"
+        ]
+        let sceneScale: Float = 2.55
+
+        for variant in [BodyModelVariant.female, .male] {
+            for focus in [BodyFootDetailFocus.left, .right] {
+                let side = focus == .left ? "left" : "right"
+                XCTAssertEqual(
+                    FootDetailStructureMapper.toeSelectionProxies(
+                        focus: focus,
+                        variant: variant
+                    ).map(\.id),
+                    toeIDs
+                )
+
+                for toeID in toeIDs {
+                    let structureID = "body.\(toeID).\(side)"
+                    let marker = try XCTUnwrap(
+                        FootDetailStructureMapper.markerPosition(
+                            for: structureID,
+                            focus: focus,
+                            variant: variant,
+                            soleView: true
+                        )
+                    )
+                    XCTAssertEqual(
+                        FootDetailStructureMapper.structureID(
+                            layer: .bodyAreas,
+                            focus: focus,
+                            at: marker / sceneScale,
+                            variant: variant,
+                            soleView: true
+                        ),
+                        structureID,
+                        "Expected the \(variant.rawValue) \(side) sole marker to resolve to \(toeID)."
+                    )
+                }
+            }
+        }
+    }
+
     private func organIDs(for variant: BodyModelVariant) -> Set<String> {
         Set(BodyAnatomyCatalog.structures(
             layer: .organs,
