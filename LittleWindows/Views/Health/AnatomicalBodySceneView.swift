@@ -1103,7 +1103,14 @@ struct BodyVisualizationView: UIViewRepresentable {
                 return parent.orientation == .front ? 0 : .pi
             }
             guard parent.orientation == .front else { return 0 }
-            return parent.footDetailFocus == .right ? .pi / 2 : -.pi / 2
+            // A perfectly lateral foot view projects all five toe rays onto the
+            // same line, making correct phalanges look like a malformed stack.
+            // Keep the presentation side-facing while exposing enough of the
+            // dorsal plane to show each metatarsal and toe distinctly.
+            let threeQuarterLateralYaw = Float.pi * 0.34
+            return parent.footDetailFocus == .right
+                ? threeQuarterLateralYaw
+                : -threeQuarterLateralYaw
         }
 
         private func prepareForLayerTransition(
