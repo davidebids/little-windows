@@ -294,6 +294,7 @@ final class DeepLinkRouter: ObservableObject {
     @Published var careProfileRequirement: CareProfileRequirement?
     @Published private(set) var navigationRequestRevision = 0
     private(set) var lastRequestedURL: URL?
+    private var isRoutingURL = false
 
     private init() {
         selectedTab = AppNavigationLaunchPolicy.initialTab
@@ -397,11 +398,15 @@ final class DeepLinkRouter: ObservableObject {
 
     func route(_ url: URL) {
         guard url.scheme == "littlewindows" else { return }
+        isRoutingURL = true
+        defer {
+            isRoutingURL = false
+            recordNavigationRequest(url)
+        }
         if AppNavigationPolicy.isHouseholdRoute(url) {
             discardCareNavigationRequest()
         }
         lastRequestedURL = url
-        defer { recordNavigationRequest(url) }
         pendingSolidsOrigin = nil
         pendingFeedingInsightsMode = nil
         var components = [url.host].compactMap { $0 } + url.pathComponents.filter { $0 != "/" }
@@ -773,6 +778,10 @@ final class DeepLinkRouter: ObservableObject {
     }
 
     private func recordNavigationRequest(_ url: URL?) {
+        // URL routes reuse the public navigation helpers below. Those helpers
+        // normally publish their own revision, but a URL route must publish one
+        // consolidated update after every pending field and tab is configured.
+        guard !isRoutingURL else { return }
         lastRequestedURL = url
         navigationRequestRevision &+= 1
     }

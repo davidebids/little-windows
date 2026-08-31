@@ -76,6 +76,7 @@ struct BodyLocationEditorButton: View {
 struct BodyLocationPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     let profileSex: ProfileSex
     let onSave: (BodyLocationRecord) -> Void
@@ -90,6 +91,8 @@ struct BodyLocationPickerView: View {
     @State private var searchText = ""
     @State private var isBrowseExpanded = false
     @State private var showingSelectionLimit = false
+    @State private var reorderDropTargetID: UUID?
+    @State private var isVisualizationActive = false
 
     init(
         profileSex: ProfileSex,
@@ -157,10 +160,16 @@ struct BodyLocationPickerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        isVisualizationActive = false
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
+                        // Tear down RealityKit before the save callback updates
+                        // the editor and the sheet begins its dismissal animation.
+                        isVisualizationActive = false
                         record.normalizeForPattern()
                         onSave(record)
                         dismiss()
@@ -174,6 +183,15 @@ struct BodyLocationPickerView: View {
             } message: {
                 Text("Remove a location before choosing another one.")
             }
+        }
+        .onAppear {
+            isVisualizationActive = true
+        }
+        .onDisappear {
+            // SwiftUI can retain a dismissed sheet's view hierarchy for reuse.
+            // Remove the ARView explicitly so RealityKit does not keep a Metal
+            // display link and render graph alive behind Today.
+            isVisualizationActive = false
         }
     }
 
@@ -300,27 +318,30 @@ struct BodyLocationPickerView: View {
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .stroke(.white.opacity(0.12), lineWidth: 1)
                 }
+                .shadow(color: activeLayer.tint.opacity(0.18), radius: 22, y: 10)
 
             scienceBackdrop
 
-            BodyVisualizationView(
-                variant: record.modelVariant,
-                activeLayer: activeLayer,
-                regionFilter: regionFilter,
-                handDetailFocus: handDetailFocus,
-                footDetailFocus: footDetailFocus,
-                orientation: orientation,
-                selectedStructureIDs: selectedIDs,
-                resetToken: resetToken,
-                reduceMotion: reduceMotion,
-                onSelect: { structureID in
-                    selectStructure(id: structureID, updateOrientation: false)
-                }
-            )
-            .accessibilityElement()
-            .accessibilityLabel("Interactive 3D body")
-            .accessibilityHint("Tap a body region, or use the anatomy list below")
-            .accessibilityIdentifier("body-location.visualization")
+            if isVisualizationActive, scenePhase == .active {
+                BodyVisualizationView(
+                    variant: record.modelVariant,
+                    activeLayer: activeLayer,
+                    regionFilter: regionFilter,
+                    handDetailFocus: handDetailFocus,
+                    footDetailFocus: footDetailFocus,
+                    orientation: orientation,
+                    selectedStructureIDs: selectedIDs,
+                    resetToken: resetToken,
+                    reduceMotion: reduceMotion,
+                    onSelect: { structureID in
+                        selectStructure(id: structureID, updateOrientation: false)
+                    }
+                )
+                .accessibilityElement()
+                .accessibilityLabel("Interactive 3D body")
+                .accessibilityHint("Tap a body region, or use the anatomy list below")
+                .accessibilityIdentifier("body-location.visualization")
+            }
 
             VStack {
                 HStack {
@@ -351,25 +372,42 @@ struct BodyLocationPickerView: View {
         }
         .frame(height: 440)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: activeLayer.tint.opacity(0.18), radius: 22, y: 10)
     }
 
     private var scienceBackdrop: some View {
         ZStack {
             Circle()
-                .fill(activeLayer.tint.opacity(0.2))
-                .frame(width: 210, height: 210)
-                .blur(radius: 70)
+                .fill(
+                    RadialGradient(
+                        colors: [activeLayer.tint.opacity(0.22), .clear],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 150
+                    )
+                )
+                .frame(width: 300, height: 300)
                 .offset(x: 120, y: 155)
             Circle()
-                .fill(Color.indigo.opacity(0.2))
-                .frame(width: 190, height: 190)
-                .blur(radius: 72)
+                .fill(
+                    RadialGradient(
+                        colors: [Color.indigo.opacity(0.2), .clear],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 145
+                    )
+                )
+                .frame(width: 290, height: 290)
                 .offset(x: -125, y: -155)
             Circle()
-                .fill(Color.white.opacity(0.055))
-                .frame(width: 115, height: 115)
-                .blur(radius: 42)
+                .fill(
+                    RadialGradient(
+                        colors: [Color.white.opacity(0.055), .clear],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 85
+                    )
+                )
+                .frame(width: 170, height: 170)
 
             ForEach(0..<12, id: \.self) { index in
                 Circle()
@@ -423,10 +461,22 @@ struct BodyLocationPickerView: View {
         return value == .front ? "Side" : "Sole"
     }
 
+    private var usesOrderedSelectionList: Bool {
+        record.pattern == .radiating || record.pattern == .diffuse
+    }
+
+    private var selectionSectionTitle: String {
+        switch record.pattern {
+        case .radiating: "Path order"
+        case .diffuse: "Area order"
+        case .spot, .multiple: "Selected locations"
+        }
+    }
+
     private var selectionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(record.pattern == .radiating ? "Path order" : "Selected locations")
+                Text(selectionSectionTitle)
                     .font(.headline)
                 Spacer()
                 if record.hasValue {
@@ -435,6 +485,12 @@ struct BodyLocationPickerView: View {
                     }
                     .font(.caption.weight(.semibold))
                 }
+            }
+
+            if usesOrderedSelectionList, record.selections.count > 1 {
+                Label("Drag the handles to reorder", systemImage: "line.3.horizontal")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if record.selections.isEmpty {
@@ -452,7 +508,7 @@ struct BodyLocationPickerView: View {
                                 focus(on: selection)
                             } label: {
                                 HStack(spacing: 11) {
-                                    if record.pattern == .radiating {
+                                    if usesOrderedSelectionList {
                                         Text("\(index + 1)")
                                             .font(.caption.weight(.bold))
                                             .foregroundStyle(.white)
@@ -477,6 +533,21 @@ struct BodyLocationPickerView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Show \(selection.displayName) on the body")
+                            if usesOrderedSelectionList, record.selections.count > 1 {
+                                    Image(systemName: "line.3.horizontal")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                                    .draggable(selection.id.uuidString) {
+                                        Label(selection.displayName, systemImage: "line.3.horizontal")
+                                            .padding(10)
+                                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                                    }
+                                    .accessibilityLabel("Reorder \(selection.displayName)")
+                                    .accessibilityHint("Drag to a different position in the order")
+                                    .accessibilityIdentifier("body-location.reorder.\(selection.structureID)")
+                            }
                             Button {
                                 withAnimation { record.remove(selectionID: selection.id) }
                             } label: {
@@ -488,7 +559,36 @@ struct BodyLocationPickerView: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
-                        .background(selection.layer.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
+                        .background(
+                            reorderDropTargetID == selection.id
+                                ? selection.layer.tint.opacity(0.22)
+                                : selection.layer.tint.opacity(0.1),
+                            in: RoundedRectangle(cornerRadius: 13)
+                        )
+                        .overlay {
+                            if reorderDropTargetID == selection.id {
+                                RoundedRectangle(cornerRadius: 13)
+                                    .stroke(selection.layer.tint.opacity(0.65), lineWidth: 1.5)
+                            }
+                        }
+                        .dropDestination(for: String.self) { values, _ in
+                            guard usesOrderedSelectionList,
+                                  let value = values.first,
+                                  let draggedID = UUID(uuidString: value)
+                            else { return false }
+                            withAnimation(.snappy) {
+                                record.moveSelection(draggedID, to: selection.id)
+                            }
+                            reorderDropTargetID = nil
+                            return true
+                        } isTargeted: { isTargeted in
+                            guard usesOrderedSelectionList else { return }
+                            if isTargeted {
+                                reorderDropTargetID = selection.id
+                            } else if reorderDropTargetID == selection.id {
+                                reorderDropTargetID = nil
+                            }
+                        }
                         .accessibilityIdentifier("body-location.selection.\(selection.structureID)")
                     }
                 }

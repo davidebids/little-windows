@@ -6567,6 +6567,17 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testURLRoutePublishesOneConsolidatedNavigationRevision() throws {
+        let router = DeepLinkRouter.shared
+        let initialRevision = router.navigationRequestRevision
+
+        router.route(try XCTUnwrap(URL(string: "littlewindows://quick-log/sleep")))
+
+        XCTAssertEqual(router.navigationRequestRevision, initialRevision + 1)
+        XCTAssertEqual(router.consumeAction(), .startTimer(.sleep, nil))
+    }
+
+    @MainActor
     func testDeepLinkActionCanRemainQueuedUntilDataIsReady() {
         let router = DeepLinkRouter.shared
         router.isDataReady = false
@@ -8423,6 +8434,80 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(lists.first?.name, "Current Tasks")
         XCTAssertEqual(items.map(\.title), ["Preserved task"])
         XCTAssertEqual(items.first?.todoListID, listID)
+    }
+
+    @MainActor
+    func testFoodHomeDuplicateRepairBoundsEachLaunchCleanup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let listID = UUID()
+
+        for revision in 0..<41 {
+            context.insert(HomeTodoList(
+                id: listID,
+                householdID: householdID,
+                name: "Tasks \(revision)",
+                createdAt: Date(timeIntervalSince1970: 100),
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(200 + revision))
+            ))
+        }
+        try context.save()
+
+        XCTAssertEqual(FoodHomeDuplicateRepairService.repair(context: context), 32)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<HomeTodoList>()).count, 9)
+    }
+
+    @MainActor
+    func testFoodHomeDuplicateRepairDoesNotSweepUnrelatedSyncedModels() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let sectionID = UUID()
+        let routineID = UUID()
+        let oldDate = Date(timeIntervalSince1970: 100)
+        let currentDate = Date(timeIntervalSince1970: 200)
+
+        context.insert(FoodStoreSection(
+            id: sectionID,
+            householdID: householdID,
+            storeID: UUID(),
+            name: "Old Section",
+            createdAt: oldDate,
+            updatedAt: oldDate
+        ))
+        context.insert(FoodStoreSection(
+            id: sectionID,
+            householdID: householdID,
+            storeID: UUID(),
+            name: "Current Section",
+            createdAt: oldDate,
+            updatedAt: currentDate
+        ))
+        context.insert(CareRoutine(
+            id: routineID,
+            scope: .household,
+            householdID: householdID,
+            title: "Old Routine",
+            createdAt: oldDate,
+            updatedAt: oldDate
+        ))
+        context.insert(CareRoutine(
+            id: routineID,
+            scope: .household,
+            householdID: householdID,
+            title: "Current Routine",
+            createdAt: oldDate,
+            updatedAt: currentDate
+        ))
+        try context.save()
+
+        XCTAssertEqual(FoodHomeDuplicateRepairService.repair(context: context), 0)
+
+        let sections = try context.fetch(FetchDescriptor<FoodStoreSection>())
+        let routines = try context.fetch(FetchDescriptor<CareRoutine>())
+        XCTAssertEqual(sections.count, 2)
+        XCTAssertEqual(routines.count, 2)
     }
 
     @MainActor

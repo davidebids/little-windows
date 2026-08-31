@@ -31,6 +31,39 @@ final class BodyLocationTests: XCTestCase {
         )
     }
 
+    func testRadiatingPathCanBeReordered() throws {
+        var record = BodyLocationRecord(modelVariant: .female, pattern: .radiating)
+        for structureID in ["body.lowerBack", "body.buttock.left", "body.calf.left"] {
+            XCTAssertEqual(record.toggle(try structure(structureID)), .added)
+        }
+
+        record.moveSelection(record.selections[0].id, to: record.selections[2].id)
+
+        XCTAssertEqual(
+            record.selections.map(\.structureID),
+            ["body.buttock.left", "body.calf.left", "body.lowerBack"]
+        )
+        XCTAssertEqual(
+            record.summary,
+            "Radiates: Left buttock → Left calf → Lower back"
+        )
+    }
+
+    func testDiffuseAreasCanBeReordered() throws {
+        var record = BodyLocationRecord(modelVariant: .female, pattern: .diffuse)
+        for structureID in ["body.chest", "body.abdomen", "body.pelvis"] {
+            XCTAssertEqual(record.toggle(try structure(structureID)), .added)
+        }
+
+        record.moveSelection(record.selections[2].id, to: record.selections[0].id)
+
+        XCTAssertEqual(
+            record.selections.map(\.structureID),
+            ["body.pelvis", "body.chest", "body.abdomen"]
+        )
+        XCTAssertEqual(record.summary, "Diffuse: Pelvis · Chest · Abdomen")
+    }
+
     func testSpotPatternReplacesThePreviousSelection() throws {
         var record = BodyLocationRecord(modelVariant: .female, pattern: .spot)
 

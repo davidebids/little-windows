@@ -566,6 +566,16 @@ struct BodyLocationRecord: Codable, Equatable {
         selections.removeAll { $0.id == selectionID }
     }
 
+    mutating func moveSelection(_ selectionID: UUID, to targetSelectionID: UUID) {
+        guard selectionID != targetSelectionID,
+              let sourceIndex = selections.firstIndex(where: { $0.id == selectionID }),
+              let targetIndex = selections.firstIndex(where: { $0.id == targetSelectionID })
+        else { return }
+
+        let selection = selections.remove(at: sourceIndex)
+        selections.insert(selection, at: min(targetIndex, selections.endIndex))
+    }
+
     mutating func clear() {
         selections = []
         customText = nil

@@ -708,14 +708,20 @@ actor SolidsBackfillWriter {
         let progressDescriptor = FetchDescriptor<SolidFoodProgress>(
             predicate: #Predicate { $0.profileID == profileID }
         )
-        var progressByFoodID = Dictionary(uniqueKeysWithValues:
-            ((try? modelContext.fetch(progressDescriptor)) ?? []).map { ($0.foodID, $0) }
+        var progressByFoodID = Dictionary(
+            ((try? modelContext.fetch(progressDescriptor)) ?? []).map { ($0.foodID, $0) },
+            uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            }
         )
         let allergenDescriptor = FetchDescriptor<SolidAllergenProgress>(
             predicate: #Predicate { $0.profileID == profileID }
         )
-        var allergenByID = Dictionary(uniqueKeysWithValues:
-            ((try? modelContext.fetch(allergenDescriptor)) ?? []).map { ($0.allergenID, $0) }
+        var allergenByID = Dictionary(
+            ((try? modelContext.fetch(allergenDescriptor)) ?? []).map { ($0.allergenID, $0) },
+            uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            }
         )
         let stateDescriptor = FetchDescriptor<SolidsProfileState>(
             predicate: #Predicate { $0.profileID == profileID }
@@ -1905,8 +1911,11 @@ actor SolidsAllergenProgressWriter {
         let progressDescriptor = FetchDescriptor<SolidAllergenProgress>(
             predicate: #Predicate { $0.profileID == profileID }
         )
-        var existingByID = Dictionary(uniqueKeysWithValues:
-            ((try? modelContext.fetch(progressDescriptor)) ?? []).map { ($0.allergenID, $0) }
+        var existingByID = Dictionary(
+            ((try? modelContext.fetch(progressDescriptor)) ?? []).map { ($0.allergenID, $0) },
+            uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            }
         )
         var itemsByAllergenID: [String: [SolidFoodEventItem]] = [:]
         for item in items {
@@ -3865,7 +3874,10 @@ enum SolidsTrackingService {
                 ?? customFoods.first(where: { $0.trackingID == foodID })?.allergenIDs else { return nil }
             return (foodID, allergenIDs)
         }
-        let allergenIDsByFoodID = Dictionary(uniqueKeysWithValues: allergenEntries)
+        let allergenIDsByFoodID = Dictionary(
+            allergenEntries,
+            uniquingKeysWith: { current, _ in current }
+        )
         return SolidFeedEditorPreset(
             foodIDs: plan.foodIDs,
             foodNames: plan.foodNames,
@@ -4394,7 +4406,12 @@ enum SolidsTrackingService {
         context: ModelContext,
         now: Date
     ) {
-        let existingByAllergenID = Dictionary(uniqueKeysWithValues: existing.map { ($0.allergenID, $0) })
+        let existingByAllergenID = Dictionary(
+            existing.map { ($0.allergenID, $0) },
+            uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            }
+        )
         let recognizedAllergenIDs = Set(SolidsAllergen.allCases.map(\.rawValue))
         var itemsByAllergenID: [String: [SolidFoodEventItem]] = [:]
         for item in items {

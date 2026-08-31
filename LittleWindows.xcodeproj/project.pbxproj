@@ -181,13 +181,13 @@
 		E10000000000000000000002 /* Services/MedicationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* Services/MedicationService.swift */; };
 		E10000000000000000000003 /* Views/Medications/MedicationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* Views/Medications/MedicationViews.swift */; };
 		E10000000000000000000004 /* Views/Health/AdultHealthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */; };
+		E10000000000000000000005 /* MedicationScheduleEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000005 /* MedicationScheduleEngineTests.swift */; };
+		E80000000000000000000001 /* NightLightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* NightLightWidget.swift */; };
 		F40000000000000000000001 /* Models/BodyLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000001 /* Models/BodyLocation.swift */; };
 		F40000000000000000000002 /* Views/Health/BodyLocationPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000002 /* Views/Health/BodyLocationPickerView.swift */; };
 		F40000000000000000000003 /* BodyLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000003 /* BodyLocationTests.swift */; };
 		F40000000000000000000004 /* Resources/BodyAnatomy in Resources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000004 /* Resources/BodyAnatomy */; };
 		F40000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */; };
-		E10000000000000000000005 /* MedicationScheduleEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000005 /* MedicationScheduleEngineTests.swift */; };
-		E80000000000000000000001 /* NightLightWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80000000000000000000002 /* NightLightWidget.swift */; };
 		F90000000000000000000001 /* SUPPORT.md in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000011 /* SUPPORT.md */; };
 		F90000000000000000000002 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000012 /* PRIVACY.md */; };
 /* End PBXBuildFile section */
@@ -304,11 +304,6 @@
 		E20000000000000000000002 /* Services/MedicationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/MedicationService.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* Views/Medications/MedicationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Medications/MedicationViews.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* Views/Health/AdultHealthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/AdultHealthViews.swift; sourceTree = "<group>"; };
-		F30000000000000000000001 /* Models/BodyLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BodyLocation.swift; sourceTree = "<group>"; };
-		F30000000000000000000002 /* Views/Health/BodyLocationPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/BodyLocationPickerView.swift; sourceTree = "<group>"; };
-		F30000000000000000000003 /* BodyLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyLocationTests.swift; sourceTree = "<group>"; };
-		F30000000000000000000004 /* Resources/BodyAnatomy */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/BodyAnatomy; sourceTree = "<group>"; };
-		F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/AnatomicalBodySceneView.swift; sourceTree = "<group>"; };
 		E20000000000000000000005 /* MedicationScheduleEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationScheduleEngineTests.swift; sourceTree = "<group>"; };
 		E80000000000000000000002 /* NightLightWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NightLightWidget.swift; sourceTree = "<group>"; };
 		F00000000000000000000001 /* LittleWindowsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LittleWindowsApp.swift; sourceTree = "<group>"; };
@@ -453,6 +448,11 @@
 		F20000000000000000000005 /* Models/TripItineraryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/TripItineraryModels.swift; sourceTree = "<group>"; };
 		F20000000000000000000006 /* Services/TripItineraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/TripItineraryService.swift; sourceTree = "<group>"; };
 		F20000000000000000000007 /* Views/Trips/TripItineraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Trips/TripItineraryViews.swift; sourceTree = "<group>"; };
+		F30000000000000000000001 /* Models/BodyLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/BodyLocation.swift; sourceTree = "<group>"; };
+		F30000000000000000000002 /* Views/Health/BodyLocationPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/BodyLocationPickerView.swift; sourceTree = "<group>"; };
+		F30000000000000000000003 /* BodyLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyLocationTests.swift; sourceTree = "<group>"; };
+		F30000000000000000000004 /* Resources/BodyAnatomy */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/BodyAnatomy; sourceTree = "<group>"; };
+		F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/AnatomicalBodySceneView.swift; sourceTree = "<group>"; };
 		F90000000000000000000011 /* SUPPORT.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SUPPORT.md; sourceTree = "<group>"; };
 		F90000000000000000000012 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1292,7 +1292,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1302,7 +1302,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
 				PRODUCT_NAME = LittleWindowsWatch;
 				SDKROOT = watchos;
@@ -1321,7 +1321,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1331,7 +1331,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
 				PRODUCT_NAME = LittleWindowsWatch;
 				SDKROOT = watchos;
@@ -1350,11 +1350,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
 				PRODUCT_NAME = LittleWindowsWatchWidgets;
 				SDKROOT = watchos;
@@ -1373,11 +1373,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
 				PRODUCT_NAME = LittleWindowsWatchWidgets;
 				SDKROOT = watchos;
@@ -1553,13 +1553,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1578,13 +1578,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1632,11 +1632,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1652,11 +1652,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.3;
+				CURRENT_PROJECT_VERSION = 1.4.4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.3;
+				MARKETING_VERSION = 1.4.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

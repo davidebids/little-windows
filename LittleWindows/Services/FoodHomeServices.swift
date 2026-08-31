@@ -812,7 +812,23 @@ enum HomeTodoService {
     }
 }
 
+private protocol SyncedDuplicateRepairModel: PersistentModel {
+    var id: UUID { get }
+    var createdAt: Date { get }
+    var updatedAt: Date { get }
+}
+
+extension HomeTodoItem: SyncedDuplicateRepairModel {}
+extension HomeTodoList: SyncedDuplicateRepairModel {}
+extension ShoppingList: SyncedDuplicateRepairModel {}
+extension ShoppingListItem: SyncedDuplicateRepairModel {}
+
 enum FoodHomeDuplicateRepairService {
+    // CloudKit schedules work for every deleted managed object. Bound launch
+    // maintenance so a damaged store cannot create hundreds of overlapping
+    // background tasks or hold SQLite's WAL open for minutes.
+    private static let maximumDeletesPerRun = 32
+
     @discardableResult
     @MainActor
     static func repair(context: ModelContext, saveChanges: Bool = true) -> Int {
@@ -827,44 +843,50 @@ enum FoodHomeDuplicateRepairService {
         context: ModelContext,
         saveChanges: Bool
     ) -> Int {
-        let duplicateTodoLists = duplicateModels(
-            (try? context.fetch(FetchDescriptor<HomeTodoList>())) ?? [],
-            id: \.id,
-            createdAt: \.createdAt,
-            updatedAt: \.updatedAt
+        var duplicateCount = 0
+        duplicateCount += deleteDuplicateModels(
+            HomeTodoList.self,
+            context: context,
+            maximumCount: maximumDeletesPerRun - duplicateCount
         )
-        let duplicateTodoItems = duplicateModels(
-            (try? context.fetch(FetchDescriptor<HomeTodoItem>())) ?? [],
-            id: \.id,
-            createdAt: \.createdAt,
-            updatedAt: \.updatedAt
+        duplicateCount += deleteDuplicateModels(
+            HomeTodoItem.self,
+            context: context,
+            maximumCount: maximumDeletesPerRun - duplicateCount
         )
-        let duplicateShoppingLists = duplicateModels(
-            (try? context.fetch(FetchDescriptor<ShoppingList>())) ?? [],
-            id: \.id,
-            createdAt: \.createdAt,
-            updatedAt: \.updatedAt
+        duplicateCount += deleteDuplicateModels(
+            ShoppingList.self,
+            context: context,
+            maximumCount: maximumDeletesPerRun - duplicateCount
         )
-        let duplicateShoppingItems = duplicateModels(
-            (try? context.fetch(FetchDescriptor<ShoppingListItem>())) ?? [],
-            id: \.id,
-            createdAt: \.createdAt,
-            updatedAt: \.updatedAt
+        duplicateCount += deleteDuplicateModels(
+            ShoppingListItem.self,
+            context: context,
+            maximumCount: maximumDeletesPerRun - duplicateCount
         )
-        let duplicateCount = duplicateTodoLists.count
-            + duplicateTodoItems.count
-            + duplicateShoppingLists.count
-            + duplicateShoppingItems.count
         guard duplicateCount > 0 else { return 0 }
 
-        duplicateTodoLists.forEach(context.delete)
-        duplicateTodoItems.forEach(context.delete)
-        duplicateShoppingLists.forEach(context.delete)
-        duplicateShoppingItems.forEach(context.delete)
         if saveChanges, !PersistenceService.save(context: context) {
             return 0
         }
         return duplicateCount
+    }
+
+    nonisolated private static func deleteDuplicateModels<Model: SyncedDuplicateRepairModel>(
+        _ modelType: Model.Type,
+        context: ModelContext,
+        maximumCount: Int
+    ) -> Int {
+        guard maximumCount > 0 else { return 0 }
+        let duplicates = duplicateModels(
+            (try? context.fetch(FetchDescriptor<Model>())) ?? [],
+            id: \.id,
+            createdAt: \.createdAt,
+            updatedAt: \.updatedAt
+        )
+        let boundedDuplicates = duplicates.prefix(maximumCount)
+        boundedDuplicates.forEach(context.delete)
+        return boundedDuplicates.count
     }
 
     nonisolated private static func duplicateModels<Model: PersistentModel>(
@@ -1984,7 +2006,11 @@ enum TodayHomeSummaryService {
         calendar: Calendar
     ) -> [TodayHomeSummaryItem] {
         let activeProfiles = profiles.filter { !$0.isArchived }
-        let profilesByID = Dictionary(uniqueKeysWithValues: activeProfiles.map { ($0.id, $0) })
+        let profilesByID = latestValuesByID(
+            activeProfiles,
+            id: \.id,
+            updatedAt: \.updatedAt
+        )
         var items = medicationAttentionItems(
             profilesByID: profilesByID,
             medications: medications,
@@ -2002,8 +2028,10 @@ enum TodayHomeSummaryService {
             now: now,
             calendar: calendar
         )
-        let medicationsByID = Dictionary(
-            uniqueKeysWithValues: medications.map { ($0.id, $0) }
+        let medicationsByID = latestValuesByID(
+            medications,
+            id: \.id,
+            updatedAt: \.updatedAt
         )
         items.append(contentsOf: medications.compactMap { medication in
             guard !medication.isArchived,
@@ -2198,11 +2226,17 @@ enum TodayHomeSummaryService {
         records: [MedicationDoseRecord],
         now: Date
     ) -> [TodayHomeSummaryItem] {
-        let medicationsByID = Dictionary(
-            uniqueKeysWithValues: medications.filter { !$0.isArchived }.map { ($0.id, $0) }
+        let medicationsByID = latestValuesByID(
+            medications.filter { !$0.isArchived },
+            id: \.id,
+            updatedAt: \.updatedAt
         )
         let phasesByRegimenID = Dictionary(grouping: phases, by: \.regimenID)
-        let phasesByID = Dictionary(uniqueKeysWithValues: phases.map { ($0.id, $0) })
+        let phasesByID = latestValuesByID(
+            phases,
+            id: \.id,
+            updatedAt: \.updatedAt
+        )
         var recordsByRegimenID = [UUID: [MedicationDoseRecord]]()
         for record in records {
             guard let regimenID = record.regimenID else { continue }
@@ -2330,7 +2364,11 @@ enum TodayHomeSummaryService {
         currentCaregiverIdentifier: String,
         familySyncEnabled: Bool
     ) -> [TodayHomeSummaryItem] {
-        let profilesByID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+        let profilesByID = latestValuesByID(
+            profiles,
+            id: \.id,
+            updatedAt: \.updatedAt
+        )
         let acknowledgementsBySource = Dictionary(grouping: acknowledgements, by: \.sourceKey)
         let caregiverNamesByIdentifier = Dictionary(
             familyCaregiverIdentities.map { ($0.caregiverIdentifier, $0.displayName) },
@@ -2536,8 +2574,16 @@ enum TodayHomeSummaryService {
         let sourceKeys = Set(notes.compactMap { note in
             note.householdID == householdID ? note.sourceKey : nil
         })
-        let routinesByID = Dictionary(uniqueKeysWithValues: careRoutines.map { ($0.id, $0) })
-        let routineRunsByID = Dictionary(uniqueKeysWithValues: careRoutineRuns.map { ($0.id, $0) })
+        let routinesByID = latestValuesByID(
+            careRoutines,
+            id: \.id,
+            updatedAt: \.updatedAt
+        )
+        let routineRunsByID = latestValuesByID(
+            careRoutineRuns,
+            id: \.id,
+            updatedAt: \.updatedAt
+        )
 
         for sourceKey in sourceKeys where routes[sourceKey] == nil {
             guard let separator = sourceKey.firstIndex(of: ":"),
