@@ -190,6 +190,111 @@ final class BodyLocationTests: XCTestCase {
         }
     }
 
+    func testCatalogCoversCommonPainSitesAcrossTheEntireBody() {
+        let identifiers = Set(BodyAnatomyCatalog.structures.map(\.id))
+        let expected: Set<String> = [
+            "body.scalp", "body.forehead", "body.temple.left", "body.eye.left",
+            "body.ear.left", "body.jaw.left", "body.throat", "body.backOfNeck",
+            "body.collarbone.left", "body.sternum", "body.rib.left",
+            "body.shoulderBlade.left", "body.midBack.left", "body.upperAbdomen.left",
+            "body.navel", "body.lowerAbdomen.left", "body.flank.left", "body.sacrum",
+            "body.tailbone", "body.groin.left", "body.shoulder.left",
+            "body.posteriorUpperArm.left", "body.innerElbow.left",
+            "body.backOfElbow.left", "body.outerForearm.left", "body.palm.left",
+            "body.backOfHand.left", "body.innerThigh.left", "body.outerThigh.left",
+            "body.backOfKnee.left", "body.shin.left", "body.innerAnkle.left",
+            "body.outerAnkle.left", "body.heel.left", "body.sole.left",
+            "muscle.neck.left", "muscle.deltoid.left", "muscle.rotatorCuff.left",
+            "muscle.rhomboid.left", "muscle.latissimus.left", "muscle.oblique.left",
+            "muscle.hipFlexor.left", "muscle.adductor.left", "muscle.itBand.left",
+            "muscle.shin.left", "joint.tmj.left", "joint.thoracicSpine",
+            "joint.sacrumCoccyx", "nerve.cervical.left", "nerve.radial.left",
+            "nerve.intercostal.left", "nerve.sciatic.left"
+        ]
+
+        XCTAssertTrue(expected.isSubset(of: identifiers), expected.subtracting(identifiers).sorted().joined(separator: ", "))
+        for leftID in expected.filter({ $0.hasSuffix(".left") }) {
+            XCTAssertTrue(
+                identifiers.contains(leftID.replacingOccurrences(of: ".left", with: ".right")),
+                "Expected a right-side counterpart for \(leftID)."
+            )
+        }
+    }
+
+    func testExpandedSurfacePainZonesResolveFromDistinctAnatomicalTargets() {
+        let scale: Float = 2.55
+        let female = BodyModelVariant.female
+
+        XCTAssertEqual(BodySurfaceMapper.headBodyAreaID(
+            at: SIMD3<Float>(0.045, 0.75, 0.12) * scale,
+            variant: female
+        ), "body.eye.left")
+        XCTAssertEqual(BodySurfaceMapper.headBodyAreaID(
+            at: SIMD3<Float>(-0.08, 0.74, 0.10) * scale,
+            variant: female
+        ), "body.temple.right")
+        XCTAssertEqual(BodySurfaceMapper.neckBodyAreaID(
+            at: SIMD3<Float>(0, 0.625, -0.09) * scale,
+            variant: female
+        ), "body.backOfNeck")
+        XCTAssertEqual(BodySurfaceMapper.upperTorsoBodyAreaID(
+            at: SIMD3<Float>(0.10, 0.51, 0.12) * scale,
+            variant: female
+        ), "body.collarbone.left")
+        XCTAssertEqual(BodySurfaceMapper.upperTorsoBodyAreaID(
+            at: SIMD3<Float>(-0.11, 0.445, -0.12) * scale,
+            variant: female
+        ), "body.shoulderBlade.right")
+        XCTAssertEqual(BodySurfaceMapper.lowerTorsoBodyAreaID(
+            at: SIMD3<Float>(0.15, 0.15, -0.08) * scale,
+            variant: female
+        ), "body.flank.left")
+        XCTAssertEqual(BodySurfaceMapper.pelvisBodyAreaID(
+            at: SIMD3<Float>(0, -0.07, -0.10) * scale,
+            variant: female
+        ), "body.tailbone")
+        XCTAssertEqual(BodySurfaceMapper.shoulderBodyAreaID(
+            at: SIMD3<Float>(0.12, 0.515, 0.11) * scale,
+            side: .left,
+            variant: female
+        ), "body.collarbone.left")
+        XCTAssertEqual(BodySurfaceMapper.shoulderBodyAreaID(
+            at: SIMD3<Float>(-0.19, 0.54, 0.08) * scale,
+            side: .right,
+            variant: female
+        ), "body.shoulder.right")
+        XCTAssertEqual(BodySurfaceMapper.upperLimbBodyAreaID(
+            at: SIMD3<Float>(0.335, 0.135, -0.06) * scale,
+            side: .left,
+            variant: female
+        ), "body.outerForearm.left")
+        XCTAssertEqual(BodySurfaceMapper.upperLimbBodyAreaID(
+            at: SIMD3<Float>(-0.465, -0.048, 0.07) * scale,
+            side: .right,
+            variant: female
+        ), "body.palm.right")
+        XCTAssertEqual(BodySurfaceMapper.lowerLimbBodyAreaID(
+            at: SIMD3<Float>(0.075, -0.30, 0.07) * scale,
+            side: .left,
+            variant: female
+        ), "body.innerThigh.left")
+        XCTAssertEqual(BodySurfaceMapper.lowerLimbBodyAreaID(
+            at: SIMD3<Float>(-0.09, -0.08, 0.07) * scale,
+            side: .right,
+            variant: female
+        ), "body.groin.right")
+        XCTAssertEqual(BodySurfaceMapper.lowerLimbBodyAreaID(
+            at: SIMD3<Float>(-0.18, -0.45, 0.06) * scale,
+            side: .right,
+            variant: female
+        ), "body.outerKnee.right")
+        XCTAssertEqual(BodySurfaceMapper.lowerLimbBodyAreaID(
+            at: SIMD3<Float>(0.12, -0.62, 0.07) * scale,
+            side: .left,
+            variant: female
+        ), "body.shin.left")
+    }
+
     func testJointSelectionUsesNearestAnatomicalLandmarkAndExactMarkerAnchor() {
         let rightElbow = BodySurfaceMapper.markerPosition(
             for: "joint.elbow.right",
@@ -234,7 +339,7 @@ final class BodyLocationTests: XCTestCase {
                 side: .right,
                 variant: .female
             ),
-            "body.lowerLeg.right"
+            "body.shin.right"
         )
         XCTAssertEqual(
             BodySurfaceMapper.lowerLimbJointID(
@@ -251,6 +356,25 @@ final class BodyLocationTests: XCTestCase {
                 variant: .female
             ),
             "joint.ankle.left"
+        )
+
+        // Once a rendered segment proxy wins the hit test, neighboring height
+        // bands must not reclassify its boundary pixels as the adjacent limb.
+        XCTAssertEqual(
+            BodySurfaceMapper.kneeBodyAreaID(
+                at: SIMD3<Float>(-0.12, -0.36, 0.08) * scale,
+                side: .right,
+                variant: .female
+            ),
+            "body.knee.right"
+        )
+        XCTAssertEqual(
+            BodySurfaceMapper.lowerLegBodyAreaID(
+                at: SIMD3<Float>(0.12, -0.49, 0.08) * scale,
+                side: .left,
+                variant: .female
+            ),
+            "body.shin.left"
         )
     }
 

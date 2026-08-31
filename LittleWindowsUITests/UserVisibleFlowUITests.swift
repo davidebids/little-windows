@@ -15,10 +15,10 @@ final class UserVisibleFlowUITests: XCTestCase {
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)
         ).tap()
 
-        let abdomen = app.buttons["body-location.selection.body.abdomen"].firstMatch
+        let abdomen = app.buttons["body-location.selection.body.navel"].firstMatch
         XCTAssertTrue(
             abdomen.waitForExistence(timeout: 4),
-            "Expected a center-torso tap to select the abdomen through the proxy collision geometry."
+            "Expected a center-torso tap to select the navel region through the proxy collision geometry."
         )
     }
 
@@ -88,27 +88,75 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testBodyLocationShoulderIsSelectableOnSkinAndMuscleLayers() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/body-location/bodyAreas/female")
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        var visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.45))
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.39, dy: 0.285)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.shoulder.right"]
+                .firstMatch
+                .waitForExistence(timeout: 3),
+            "The skin-layer shoulder target must win over the overlapping chest and upper-arm targets."
+        )
+
+        launch(startURL: "littlewindows://debug/body-location/muscles/female")
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.45))
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.39, dy: 0.285)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.muscle.deltoid.right"]
+                .firstMatch
+                .waitForExistence(timeout: 3),
+            "The front shoulder must select the deltoid on the muscle layer."
+        )
+
+        let back = app.buttons["body-location.orientation.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 3))
+        back.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.39, dy: 0.285)
+        ).tap()
+        XCTAssertTrue(
+            app.buttons["body-location.selection.muscle.rotatorCuff.left"]
+                .firstMatch
+                .waitForExistence(timeout: 3),
+            "The back shoulder must select the rotator-cuff region."
+        )
+    }
+
     func testBodyLocationFullBodyLandmarksMatchRenderedAnatomy() {
         continueAfterFailure = false
 
         let frontCases: [(name: String, point: CGVector, expectedID: String)] = [
-            ("face", CGVector(dx: 0.50, dy: 0.18), "body.face"),
-            ("neck", CGVector(dx: 0.50, dy: 0.245), "body.neck"),
-            ("chest", CGVector(dx: 0.50, dy: 0.31), "body.chest"),
-            ("abdomen", CGVector(dx: 0.50, dy: 0.42), "body.abdomen"),
+            ("nose", CGVector(dx: 0.50, dy: 0.18), "body.nose"),
+            ("throat", CGVector(dx: 0.50, dy: 0.245), "body.throat"),
+            ("sternum", CGVector(dx: 0.50, dy: 0.31), "body.sternum"),
+            ("navel", CGVector(dx: 0.50, dy: 0.42), "body.navel"),
             ("pelvis", CGVector(dx: 0.50, dy: 0.525), "body.pelvis"),
             ("right shoulder", CGVector(dx: 0.39, dy: 0.285), "body.shoulder.right"),
             ("left shoulder", CGVector(dx: 0.61, dy: 0.285), "body.shoulder.left"),
             ("right upper arm", CGVector(dx: 0.35, dy: 0.35), "body.upperArm.right"),
             ("left upper arm", CGVector(dx: 0.65, dy: 0.35), "body.upperArm.left"),
-            ("right elbow", CGVector(dx: 0.365, dy: 0.39), "body.elbow.right"),
-            ("left elbow", CGVector(dx: 0.635, dy: 0.39), "body.elbow.left"),
+            ("right inner elbow", CGVector(dx: 0.365, dy: 0.39), "body.innerElbow.right"),
+            ("left inner elbow", CGVector(dx: 0.635, dy: 0.39), "body.innerElbow.left"),
             ("right forearm", CGVector(dx: 0.33, dy: 0.445), "body.forearm.right"),
             ("left forearm", CGVector(dx: 0.67, dy: 0.445), "body.forearm.left"),
             ("right wrist", CGVector(dx: 0.29, dy: 0.495), "body.wrist.right"),
             ("left wrist", CGVector(dx: 0.71, dy: 0.495), "body.wrist.left"),
-            ("right palm", CGVector(dx: 0.28, dy: 0.505), "body.hand.right"),
-            ("left palm", CGVector(dx: 0.72, dy: 0.505), "body.hand.left"),
+            ("right palm", CGVector(dx: 0.28, dy: 0.505), "body.palm.right"),
+            ("left palm", CGVector(dx: 0.72, dy: 0.505), "body.palm.left"),
             ("right hip", CGVector(dx: 0.43, dy: 0.535), "body.hip.right"),
             ("left hip", CGVector(dx: 0.57, dy: 0.535), "body.hip.left")
         ]
@@ -116,22 +164,22 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         let backCases: [(name: String, point: CGVector, expectedID: String)] = [
             ("back of head", CGVector(dx: 0.50, dy: 0.18), "body.head"),
-            ("neck", CGVector(dx: 0.50, dy: 0.245), "body.neck"),
+            ("back of neck", CGVector(dx: 0.50, dy: 0.245), "body.backOfNeck"),
             ("upper back", CGVector(dx: 0.50, dy: 0.31), "body.upperBack"),
             ("lower back", CGVector(dx: 0.50, dy: 0.42), "body.lowerBack"),
-            ("pelvis", CGVector(dx: 0.50, dy: 0.525), "body.pelvis"),
+            ("tailbone", CGVector(dx: 0.50, dy: 0.55), "body.tailbone"),
             ("left shoulder", CGVector(dx: 0.39, dy: 0.285), "body.shoulder.left"),
             ("right shoulder", CGVector(dx: 0.61, dy: 0.285), "body.shoulder.right"),
-            ("left upper arm", CGVector(dx: 0.35, dy: 0.35), "body.upperArm.left"),
-            ("right upper arm", CGVector(dx: 0.65, dy: 0.35), "body.upperArm.right"),
-            ("left elbow", CGVector(dx: 0.365, dy: 0.39), "body.elbow.left"),
-            ("right elbow", CGVector(dx: 0.635, dy: 0.39), "body.elbow.right"),
-            ("left forearm", CGVector(dx: 0.33, dy: 0.445), "body.forearm.left"),
-            ("right forearm", CGVector(dx: 0.67, dy: 0.445), "body.forearm.right"),
-            ("left wrist", CGVector(dx: 0.29, dy: 0.495), "body.wrist.left"),
-            ("right wrist", CGVector(dx: 0.71, dy: 0.495), "body.wrist.right"),
-            ("left hand", CGVector(dx: 0.28, dy: 0.505), "body.hand.left"),
-            ("right hand", CGVector(dx: 0.72, dy: 0.505), "body.hand.right"),
+            ("left back of upper arm", CGVector(dx: 0.35, dy: 0.35), "body.posteriorUpperArm.left"),
+            ("right back of upper arm", CGVector(dx: 0.65, dy: 0.35), "body.posteriorUpperArm.right"),
+            ("left back of elbow", CGVector(dx: 0.365, dy: 0.39), "body.backOfElbow.left"),
+            ("right back of elbow", CGVector(dx: 0.635, dy: 0.39), "body.backOfElbow.right"),
+            ("left outer forearm", CGVector(dx: 0.33, dy: 0.445), "body.outerForearm.left"),
+            ("right outer forearm", CGVector(dx: 0.67, dy: 0.445), "body.outerForearm.right"),
+            ("left back of wrist", CGVector(dx: 0.29, dy: 0.495), "body.backOfWrist.left"),
+            ("right back of wrist", CGVector(dx: 0.71, dy: 0.495), "body.backOfWrist.right"),
+            ("left back of hand", CGVector(dx: 0.28, dy: 0.505), "body.backOfHand.left"),
+            ("right back of hand", CGVector(dx: 0.72, dy: 0.505), "body.backOfHand.right"),
             ("left buttock", CGVector(dx: 0.43, dy: 0.535), "body.buttock.left"),
             ("right buttock", CGVector(dx: 0.57, dy: 0.535), "body.buttock.right")
         ]
@@ -142,23 +190,23 @@ final class UserVisibleFlowUITests: XCTestCase {
         continueAfterFailure = false
 
         let frontCases: [(name: String, point: CGVector, expectedID: String)] = [
-            ("face", CGVector(dx: 0.50, dy: 0.16), "body.face"),
-            ("neck", CGVector(dx: 0.50, dy: 0.235), "body.neck"),
-            ("chest", CGVector(dx: 0.50, dy: 0.31), "body.chest"),
-            ("abdomen", CGVector(dx: 0.50, dy: 0.42), "body.abdomen"),
+            ("nose", CGVector(dx: 0.50, dy: 0.16), "body.nose"),
+            ("throat", CGVector(dx: 0.50, dy: 0.235), "body.throat"),
+            ("sternum", CGVector(dx: 0.50, dy: 0.31), "body.sternum"),
+            ("navel", CGVector(dx: 0.50, dy: 0.42), "body.navel"),
             ("pelvis", CGVector(dx: 0.50, dy: 0.535), "body.pelvis"),
             ("right shoulder", CGVector(dx: 0.38, dy: 0.285), "body.shoulder.right"),
             ("left shoulder", CGVector(dx: 0.62, dy: 0.285), "body.shoulder.left"),
             ("right upper arm", CGVector(dx: 0.34, dy: 0.35), "body.upperArm.right"),
             ("left upper arm", CGVector(dx: 0.66, dy: 0.35), "body.upperArm.left"),
-            ("right elbow", CGVector(dx: 0.35, dy: 0.40), "body.elbow.right"),
-            ("left elbow", CGVector(dx: 0.65, dy: 0.40), "body.elbow.left"),
+            ("right inner elbow", CGVector(dx: 0.35, dy: 0.40), "body.innerElbow.right"),
+            ("left inner elbow", CGVector(dx: 0.65, dy: 0.40), "body.innerElbow.left"),
             ("right forearm", CGVector(dx: 0.30, dy: 0.45), "body.forearm.right"),
             ("left forearm", CGVector(dx: 0.70, dy: 0.45), "body.forearm.left"),
             ("right wrist", CGVector(dx: 0.265, dy: 0.50), "body.wrist.right"),
             ("left wrist", CGVector(dx: 0.735, dy: 0.50), "body.wrist.left"),
-            ("right palm", CGVector(dx: 0.255, dy: 0.505), "body.hand.right"),
-            ("left palm", CGVector(dx: 0.745, dy: 0.505), "body.hand.left"),
+            ("right palm", CGVector(dx: 0.255, dy: 0.505), "body.palm.right"),
+            ("left palm", CGVector(dx: 0.745, dy: 0.505), "body.palm.left"),
             ("right hip", CGVector(dx: 0.42, dy: 0.545), "body.hip.right"),
             ("left hip", CGVector(dx: 0.58, dy: 0.545), "body.hip.left")
         ]
@@ -166,22 +214,22 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         let backCases: [(name: String, point: CGVector, expectedID: String)] = [
             ("back of head", CGVector(dx: 0.50, dy: 0.16), "body.head"),
-            ("neck", CGVector(dx: 0.50, dy: 0.235), "body.neck"),
+            ("back of neck", CGVector(dx: 0.50, dy: 0.235), "body.backOfNeck"),
             ("upper back", CGVector(dx: 0.50, dy: 0.31), "body.upperBack"),
             ("lower back", CGVector(dx: 0.50, dy: 0.42), "body.lowerBack"),
-            ("pelvis", CGVector(dx: 0.50, dy: 0.535), "body.pelvis"),
+            ("tailbone", CGVector(dx: 0.50, dy: 0.56), "body.tailbone"),
             ("left shoulder", CGVector(dx: 0.38, dy: 0.285), "body.shoulder.left"),
             ("right shoulder", CGVector(dx: 0.62, dy: 0.285), "body.shoulder.right"),
-            ("left upper arm", CGVector(dx: 0.34, dy: 0.35), "body.upperArm.left"),
-            ("right upper arm", CGVector(dx: 0.66, dy: 0.35), "body.upperArm.right"),
-            ("left elbow", CGVector(dx: 0.35, dy: 0.40), "body.elbow.left"),
-            ("right elbow", CGVector(dx: 0.65, dy: 0.40), "body.elbow.right"),
-            ("left forearm", CGVector(dx: 0.30, dy: 0.45), "body.forearm.left"),
-            ("right forearm", CGVector(dx: 0.70, dy: 0.45), "body.forearm.right"),
-            ("left wrist", CGVector(dx: 0.265, dy: 0.50), "body.wrist.left"),
-            ("right wrist", CGVector(dx: 0.735, dy: 0.50), "body.wrist.right"),
-            ("left hand", CGVector(dx: 0.255, dy: 0.505), "body.hand.left"),
-            ("right hand", CGVector(dx: 0.745, dy: 0.505), "body.hand.right"),
+            ("left back of upper arm", CGVector(dx: 0.34, dy: 0.35), "body.posteriorUpperArm.left"),
+            ("right back of upper arm", CGVector(dx: 0.66, dy: 0.35), "body.posteriorUpperArm.right"),
+            ("left back of elbow", CGVector(dx: 0.35, dy: 0.40), "body.backOfElbow.left"),
+            ("right back of elbow", CGVector(dx: 0.65, dy: 0.40), "body.backOfElbow.right"),
+            ("left outer forearm", CGVector(dx: 0.30, dy: 0.45), "body.outerForearm.left"),
+            ("right outer forearm", CGVector(dx: 0.70, dy: 0.45), "body.outerForearm.right"),
+            ("left back of wrist", CGVector(dx: 0.265, dy: 0.50), "body.backOfWrist.left"),
+            ("right back of wrist", CGVector(dx: 0.735, dy: 0.50), "body.backOfWrist.right"),
+            ("left back of hand", CGVector(dx: 0.255, dy: 0.505), "body.backOfHand.left"),
+            ("right back of hand", CGVector(dx: 0.745, dy: 0.505), "body.backOfHand.right"),
             ("left buttock", CGVector(dx: 0.42, dy: 0.545), "body.buttock.left"),
             ("right buttock", CGVector(dx: 0.58, dy: 0.545), "body.buttock.right")
         ]
@@ -213,9 +261,9 @@ final class UserVisibleFlowUITests: XCTestCase {
             withNormalizedOffset: CGVector(dx: 0.72, dy: 0.505)
         ).tap()
         XCTAssertTrue(
-            app.buttons["body-location.selection.body.hand.left"].firstMatch
+            app.buttons["body-location.selection.body.palm.left"].firstMatch
                 .waitForExistence(timeout: 2),
-            "A tap just beyond the wrist crease on the visible palm should select the left hand."
+            "A tap just beyond the wrist crease should select the visible left palm."
         )
 
         let back = app.buttons["body-location.orientation.back"]
@@ -226,9 +274,9 @@ final class UserVisibleFlowUITests: XCTestCase {
             withNormalizedOffset: CGVector(dx: 0.72, dy: 0.505)
         ).tap()
         XCTAssertTrue(
-            app.buttons["body-location.selection.body.hand.right"].firstMatch
+            app.buttons["body-location.selection.body.backOfHand.right"].firstMatch
                 .waitForExistence(timeout: 2),
-            "A tap on the visible back of the right hand should remain a hand selection."
+            "A tap on the visible back of the right hand should select that surface."
         )
     }
 
@@ -293,10 +341,10 @@ final class UserVisibleFlowUITests: XCTestCase {
             layer: "nerves",
             backView: true,
             cases: [
-                ("left upper arm", CGVector(dx: 0.35, dy: 0.35), "nerve.ulnar.left"),
-                ("right upper arm", CGVector(dx: 0.65, dy: 0.35), "nerve.ulnar.right"),
-                ("left forearm", CGVector(dx: 0.33, dy: 0.445), "nerve.ulnar.left"),
-                ("right forearm", CGVector(dx: 0.67, dy: 0.445), "nerve.ulnar.right")
+                ("left upper arm", CGVector(dx: 0.35, dy: 0.35), "nerve.radial.left"),
+                ("right upper arm", CGVector(dx: 0.65, dy: 0.35), "nerve.radial.right"),
+                ("left forearm", CGVector(dx: 0.33, dy: 0.445), "nerve.radial.left"),
+                ("right forearm", CGVector(dx: 0.67, dy: 0.445), "nerve.radial.right")
             ]
         )
     }
@@ -684,10 +732,10 @@ final class UserVisibleFlowUITests: XCTestCase {
             ("left upper knee", CGVector(dx: 0.555, dy: 0.665), "body.knee.left"),
             ("right lower knee", CGVector(dx: 0.445, dy: 0.69), "body.knee.right"),
             ("left lower knee", CGVector(dx: 0.555, dy: 0.69), "body.knee.left"),
-            ("right upper shin", CGVector(dx: 0.44, dy: 0.72), "body.lowerLeg.right"),
-            ("left upper shin", CGVector(dx: 0.56, dy: 0.72), "body.lowerLeg.left"),
-            ("right lower leg", CGVector(dx: 0.44, dy: 0.75), "body.lowerLeg.right"),
-            ("left lower leg", CGVector(dx: 0.56, dy: 0.75), "body.lowerLeg.left")
+            ("right upper shin", CGVector(dx: 0.44, dy: 0.72), "body.shin.right"),
+            ("left upper shin", CGVector(dx: 0.56, dy: 0.72), "body.shin.left"),
+            ("right lower shin", CGVector(dx: 0.44, dy: 0.75), "body.shin.right"),
+            ("left lower shin", CGVector(dx: 0.56, dy: 0.75), "body.shin.left")
         ]
 
         for testCase in frontCases {

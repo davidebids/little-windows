@@ -167,6 +167,7 @@ struct BodyVisualizationView: UIViewRepresentable {
         private var gestureStartYaw: Float = 0
         private var gestureStartPitch: Float = 0
         private var gestureStartZoom: Float = 1
+        private var lastInteractiveTransformTimestamp: CFTimeInterval = 0
         private var elapsed: Float = 0
         private var configuredAnimationFrameRate = 0
         private var isApplicationActive = true
@@ -686,6 +687,7 @@ struct BodyVisualizationView: UIViewRepresentable {
                 beginExclusiveManipulation(recognizer)
                 gestureStartYaw = yaw
                 gestureStartPitch = pitch
+                lastInteractiveTransformTimestamp = 0
             case .changed:
                 let translation = recognizer.translation(in: view)
                 yaw = gestureStartYaw + Float(translation.x) * 0.008
@@ -694,8 +696,9 @@ struct BodyVisualizationView: UIViewRepresentable {
                     pitchLimit,
                     max(-pitchLimit, gestureStartPitch + Float(translation.y) * 0.0035)
                 )
-                applyInteractionTransform(animated: false)
+                applyInteractiveTransformIfNeeded()
             case .ended, .cancelled, .failed:
+                applyInteractiveTransformIfNeeded(force: true)
                 endExclusiveManipulation(recognizer)
             default:
                 break
@@ -707,10 +710,12 @@ struct BodyVisualizationView: UIViewRepresentable {
             case .began:
                 beginExclusiveManipulation(recognizer)
                 gestureStartZoom = zoom
+                lastInteractiveTransformTimestamp = 0
             case .changed:
                 zoom = min(1.7, max(0.76, gestureStartZoom * Float(recognizer.scale)))
-                applyInteractionTransform(animated: false)
+                applyInteractiveTransformIfNeeded()
             case .ended, .cancelled, .failed:
+                applyInteractiveTransformIfNeeded(force: true)
                 endExclusiveManipulation(recognizer)
             default:
                 break
@@ -1413,8 +1418,8 @@ struct BodyVisualizationView: UIViewRepresentable {
                 )
                 addSelectionSphere(
                     .knee(side),
-                    center: SIMD3(sign * 0.115, -0.465, -0.005),
-                    radius: 0.087
+                    center: SIMD3(sign * 0.115, -0.455, -0.005),
+                    radius: 0.095
                 )
                 addSelectionCapsule(
                     .lowerLeg(side),
@@ -2189,6 +2194,18 @@ struct BodyVisualizationView: UIViewRepresentable {
             refreshMarkerDepthOffsets()
         }
 
+        private func applyInteractiveTransformIfNeeded(force: Bool = false) {
+            let timestamp = CACurrentMediaTime()
+            // ProMotion can deliver gesture updates at 120 Hz. The model does
+            // not gain visible fidelity above 60 Hz, while every root transform
+            // dirties the complete RealityKit hierarchy and its collision tree.
+            guard force || timestamp - lastInteractiveTransformTimestamp >= 1.0 / 60.0 else {
+                return
+            }
+            lastInteractiveTransformTimestamp = timestamp
+            applyInteractionTransform(animated: false)
+        }
+
         private var interactionRotation: simd_quatf {
             AnatomyMarkerPlacement.rotation(yaw: yaw, pitch: pitch)
         }
@@ -2252,10 +2269,10 @@ struct BodyVisualizationView: UIViewRepresentable {
                         || parent.activeLayer == .muscles
                         || parent.activeLayer == .joints {
                 // Focused extremities and static tissue layers only carry slow
-                // ambient motion, which remains smooth without a 30 Hz scene tick.
-                frameRate = 20
+                // ambient motion, which remains smooth at the constrained rate.
+                frameRate = 15
             } else {
-                frameRate = 30
+                frameRate = 24
             }
             if configuredAnimationFrameRate != frameRate {
                 configuredAnimationFrameRate = frameRate
@@ -2289,8 +2306,6 @@ struct BodyVisualizationView: UIViewRepresentable {
             elapsed += frameDelta
             let motionScale: Float = 1
             let breath = sin(elapsed * 1.18) * motionScale
-            breathingRoot.scale = SIMD3(1, 1 + breath * 0.0018, 1 + breath * 0.0065)
-            breathingRoot.position.y = sin(elapsed * 0.64) * 0.008 * motionScale
 
             if parent.activeLayer == .bodyAreas {
                 animateBodyScan(motionScale: motionScale, deltaTime: frameDelta)
@@ -2651,7 +2666,9 @@ private enum AnatomySelectionZone: Hashable {
     /// back hit order because their visible hit position resolves boundaries.
     var hitPriority: Int {
         switch self {
-        case .neck, .elbow:
+        case .shoulder, .elbow, .wrist, .hip, .knee, .ankle:
+            2
+        case .neck:
             1
         default:
             0
@@ -2692,13 +2709,24 @@ private enum AnatomySelectionZone: Hashable {
                     side: side,
                     variant: variant
                 )
-                return bodyAreaID.contains(".hand.")
+                let identifier = bodyAreaID.lowercased()
+                return identifier.contains("hand") || identifier.contains(".palm.")
                     ? "muscle.hand.\(sideName(side))"
                     : "muscle.forearm.\(sideName(side))"
+            case let .knee(side):
+                if let candidate = BodySurfaceMapper.muscleID(
+                    at: renderedPoint,
+                    variant: variant
+                ), candidate.hasPrefix("muscle.shin.") || candidate.hasPrefix("muscle.calf.") {
+                    return pairedID(
+                        candidate.hasPrefix("muscle.shin.") ? "muscle.shin" : "muscle.calf",
+                        side: side
+                    )
+                }
             default:
                 break
             }
-            let structureID = muscleID(front: front)
+            let structureID = muscleID(front: front, at: renderedPoint)
                 ?? BodySurfaceMapper.muscleID(at: renderedPoint, variant: variant)
             return enforcingSide(on: structureID)
         case .joints:
@@ -2711,17 +2739,27 @@ private enum AnatomySelectionZone: Hashable {
                 )
             }
             switch self {
-            case let .hip(side), let .thigh(side), let .knee(side),
-                 let .lowerLeg(side), let .ankle(side):
-                return BodySurfaceMapper.lowerLimbJointID(
+            case let .hip(side):
+                return pairedID("joint.hip", side: side)
+            case let .thigh(side):
+                return pairedID("joint.femur", side: side)
+            case let .knee(side):
+                if BodySurfaceMapper.lowerLimbJointID(
                     at: renderedPoint,
                     side: side,
                     variant: variant
-                )
+                ).hasPrefix("joint.shin.") {
+                    return pairedID("joint.shin", side: side)
+                }
+                return pairedID("joint.knee", side: side)
+            case let .lowerLeg(side):
+                return pairedID("joint.shin", side: side)
+            case let .ankle(side):
+                return pairedID("joint.ankle", side: side)
             default:
                 break
             }
-            let structureID = jointID
+            let structureID = jointID(front: front, at: renderedPoint)
                 ?? BodySurfaceMapper.jointID(at: renderedPoint, variant: variant)
             return enforcingSide(on: structureID)
         case .nerves:
@@ -2750,30 +2788,60 @@ private enum AnatomySelectionZone: Hashable {
     ) -> String? {
         switch self {
         case .head:
-            return front ? "body.face" : "body.head"
+            return BodySurfaceMapper.headBodyAreaID(at: point, variant: variant)
         case .neck:
-            return "body.neck"
+            return BodySurfaceMapper.neckBodyAreaID(at: point, variant: variant)
         case .upperTorso:
-            return front ? "body.chest" : "body.upperBack"
+            return BodySurfaceMapper.upperTorsoBodyAreaID(at: point, variant: variant)
         case .lowerTorso:
-            return front ? "body.abdomen" : "body.lowerBack"
+            return BodySurfaceMapper.lowerTorsoBodyAreaID(at: point, variant: variant)
         case .pelvis:
-            return BodySurfaceMapper.structureID(at: point, variant: variant)
+            return BodySurfaceMapper.pelvisBodyAreaID(at: point, variant: variant)
         case let .shoulder(side):
-            return pairedID("body.shoulder", side: side)
+            return BodySurfaceMapper.shoulderBodyAreaID(
+                at: point,
+                side: side,
+                variant: variant
+            )
         case let .upperArm(side):
-            return pairedID("body.upperArm", side: side)
+            return pairedID(
+                front ? "body.upperArm" : "body.posteriorUpperArm",
+                side: side
+            )
         case let .elbow(side):
-            return pairedID("body.elbow", side: side)
+            return pairedID(front ? "body.innerElbow" : "body.backOfElbow", side: side)
         case let .forearm(side), let .wrist(side), let .hand(side):
             return BodySurfaceMapper.upperLimbBodyAreaID(
                 at: point,
                 side: side,
                 variant: variant
             )
-        case let .hip(side), let .thigh(side), let .knee(side),
-             let .lowerLeg(side), let .ankle(side):
-            return BodySurfaceMapper.lowerLimbBodyAreaID(
+        case let .hip(side):
+            return BodySurfaceMapper.hipBodyAreaID(
+                at: point,
+                side: side,
+                variant: variant
+            )
+        case let .thigh(side):
+            return BodySurfaceMapper.thighBodyAreaID(
+                at: point,
+                side: side,
+                variant: variant
+            )
+        case let .knee(side):
+            return BodySurfaceMapper.kneeBodyAreaID(
+                at: point,
+                side: side,
+                variant: variant
+            )
+        case let .lowerLeg(side):
+            return BodySurfaceMapper.lowerLegBodyAreaID(
+                at: point,
+                side: side,
+                variant: variant
+            )
+        case let .ankle(side):
+            return BodySurfaceMapper.ankleBodyAreaID(
                 at: point,
                 side: side,
                 variant: variant
@@ -2788,37 +2856,75 @@ private enum AnatomySelectionZone: Hashable {
         }
     }
 
-    private func muscleID(front: Bool) -> String? {
+    private func muscleID(front: Bool, at renderedPoint: SIMD3<Float>) -> String? {
+        let point = renderedPoint / anatomySceneScale
+        let x = abs(point.x)
+        let side = point.x >= 0 ? BodySide.left : .right
         switch self {
+        case .neck:
+            return pairedID("muscle.neck", side: side)
         case .upperTorso:
-            return front ? "muscle.pectorals" : "muscle.trapezius"
+            if front { return "muscle.pectorals" }
+            return x > 0.075
+                ? pairedID("muscle.rhomboid", side: side)
+                : "muscle.trapezius"
         case .lowerTorso:
-            return front ? "muscle.abdominals" : "muscle.lowerBack"
+            if front {
+                return x > 0.11
+                    ? pairedID("muscle.oblique", side: side)
+                    : "muscle.abdominals"
+            }
+            return x > 0.105
+                ? pairedID("muscle.latissimus", side: side)
+                : "muscle.lowerBack"
+        case .pelvis:
+            return pairedID(front ? "muscle.hipFlexor" : "muscle.gluteal", side: side)
         case let .shoulder(side):
-            return pairedID("muscle.deltoid", side: side)
+            return pairedID(front ? "muscle.deltoid" : "muscle.rotatorCuff", side: side)
         case let .upperArm(side):
             return pairedID(front ? "muscle.biceps" : "muscle.triceps", side: side)
         case let .elbow(side), let .forearm(side), let .wrist(side):
             return pairedID("muscle.forearm", side: side)
         case let .hip(side):
-            return pairedID("muscle.gluteal", side: side)
+            return pairedID(front ? "muscle.hipFlexor" : "muscle.gluteal", side: side)
         case let .thigh(side), let .knee(side):
-            return pairedID(front ? "muscle.quadriceps" : "muscle.hamstrings", side: side)
+            guard front else { return pairedID("muscle.hamstrings", side: side) }
+            let centerX: Float = self.isKnee ? 0.115 : 0.13
+            let lateralOffset = x - centerX
+            if lateralOffset < -0.035 {
+                return pairedID("muscle.adductor", side: side)
+            }
+            if lateralOffset > 0.045 {
+                return pairedID("muscle.itBand", side: side)
+            }
+            return pairedID("muscle.quadriceps", side: side)
         case let .lowerLeg(side), let .ankle(side):
-            return pairedID("muscle.calf", side: side)
-        case .head, .neck, .pelvis, .hand, .foot:
+            return pairedID(front ? "muscle.shin" : "muscle.calf", side: side)
+        case .head, .hand, .foot:
             return nil
         }
     }
 
-    private var jointID: String? {
+    private var isKnee: Bool {
+        if case .knee = self { return true }
+        return false
+    }
+
+    private func jointID(front: Bool, at renderedPoint: SIMD3<Float>) -> String? {
+        let point = renderedPoint / anatomySceneScale
+        let side = point.x >= 0 ? BodySide.left : .right
         switch self {
+        case .head:
+            guard front, point.y < 0.735, abs(point.x) > 0.035 else { return nil }
+            return pairedID("joint.tmj", side: side)
         case .neck:
             return "joint.cervicalSpine"
         case .upperTorso:
-            return "joint.ribCage"
+            return front ? "joint.ribCage" : "joint.thoracicSpine"
         case .lowerTorso:
             return "joint.lumbarSpine"
+        case .pelvis:
+            return "joint.sacrumCoccyx"
         case let .shoulder(side), let .upperArm(side):
             return pairedID("joint.shoulder", side: side)
         case let .elbow(side):
@@ -2835,7 +2941,7 @@ private enum AnatomySelectionZone: Hashable {
             return pairedID("joint.shin", side: side)
         case let .ankle(side):
             return pairedID("joint.ankle", side: side)
-        case .head, .pelvis, .foot:
+        case .foot:
             return nil
         }
     }
@@ -2921,8 +3027,12 @@ private enum HandDetailStructureMapper {
 
         switch layer {
         case .bodyAreas:
-            if point.y < -0.205 { return "body.wrist.\(side)" }
-            if point.y < -0.105 { return "body.hand.\(side)" }
+            if point.y < -0.205 {
+                return "body.\(point.z >= 0 ? "wrist" : "backOfWrist").\(side)"
+            }
+            if point.y < -0.105 {
+                return "body.\(point.z >= 0 ? "palm" : "backOfHand").\(side)"
+            }
             return "body.\(digitID(at: point)).\(side)"
         case .muscles:
             return "muscle.hand.\(side)"
@@ -2930,6 +3040,11 @@ private enum HandDetailStructureMapper {
             if point.y < -0.105 { return "joint.wrist.\(side)" }
             return "joint.\(digitID(at: point)).\(side)"
         case .nerves:
+            if point.z < 0 {
+                return point.x < -0.085
+                    ? "nerve.ulnar.\(side)"
+                    : "nerve.radial.\(side)"
+            }
             return point.x < -0.04
                 ? "nerve.ulnar.\(side)"
                 : "nerve.median.\(side)"
@@ -2946,22 +3061,25 @@ private enum HandDetailStructureMapper {
         guard focus != .both else { return nil }
 
         let canonical: SIMD3<Float>
-        if structureID.contains("wrist") {
-            canonical = SIMD3(0, -0.255, 0.055)
-        } else if structureID.contains("thumb") {
+        let identifier = structureID.lowercased()
+        if identifier.contains("wrist") {
+            canonical = SIMD3(0, -0.255, identifier.contains("backof") ? -0.04 : 0.055)
+        } else if identifier.contains("thumb") {
             canonical = SIMD3(0.125, 0.055, 0.055)
-        } else if structureID.contains("indexFinger") {
+        } else if identifier.contains("indexfinger") {
             canonical = SIMD3(0.073, 0.135, 0.05)
-        } else if structureID.contains("middleFinger") {
+        } else if identifier.contains("middlefinger") {
             canonical = SIMD3(0.015, 0.155, 0.05)
-        } else if structureID.contains("ringFinger") {
+        } else if identifier.contains("ringfinger") {
             canonical = SIMD3(-0.055, 0.145, 0.05)
-        } else if structureID.contains("littleFinger") {
+        } else if identifier.contains("littlefinger") {
             canonical = SIMD3(-0.115, 0.12, 0.05)
-        } else if structureID.contains("ulnar") {
+        } else if identifier.contains("ulnar") {
             canonical = SIMD3(-0.075, -0.04, 0.045)
-        } else if structureID.contains("median") {
+        } else if identifier.contains("median") {
             canonical = SIMD3(0.035, -0.025, 0.045)
+        } else if identifier.contains("backofhand") || identifier.contains("radial") {
+            canonical = SIMD3(0, -0.105, -0.045)
         } else {
             canonical = SIMD3(0, -0.105, 0.065)
         }
@@ -4064,6 +4182,19 @@ private enum AnatomyMaterial {
 }
 
 enum BodySurfaceMapper {
+    static func shoulderBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        let sideName = side == .left ? "left" : "right"
+        if point.z >= 0, abs(point.x) < 0.15, point.y > 0.49 {
+            return "body.collarbone.\(sideName)"
+        }
+        return "body.shoulder.\(sideName)"
+    }
+
     static func upperLimbBodyAreaID(
         at point: SIMD3<Float>,
         side: BodySide,
@@ -4083,14 +4214,110 @@ enum BodySurfaceMapper {
         let wristToHandProgress = (distalX - 0.408) * 0.758
             + (point.y - 0.001) * -0.652
         let sideName = side == .left ? "left" : "right"
+        let front = point.z >= 0
 
         if wristToHandProgress > 0 {
-            return "body.hand.\(sideName)"
+            return "body.\(front ? "palm" : "backOfHand").\(sideName)"
         }
         if wristToHandProgress > -0.026 {
-            return "body.wrist.\(sideName)"
+            return "body.\(front ? "wrist" : "backOfWrist").\(sideName)"
         }
-        return "body.forearm.\(sideName)"
+        return "body.\(front ? "forearm" : "outerForearm").\(sideName)"
+    }
+
+    static func headBodyAreaID(
+        at point: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        let side = point.x >= 0 ? "left" : "right"
+        let x = abs(point.x)
+        let y = point.y
+
+        if point.z < 0 {
+            if x > 0.09, y < 0.79 { return "body.ear.\(side)" }
+            return y > 0.80 ? "body.scalp" : "body.head"
+        }
+        if x > 0.095, y < 0.79 { return "body.ear.\(side)" }
+        if y > 0.805 { return "body.scalp" }
+        if y > 0.765 {
+            if x > 0.072 { return "body.temple.\(side)" }
+            if x > 0.027 { return "body.eye.\(side)" }
+            return "body.forehead"
+        }
+        if y > 0.715 {
+            if x > 0.073 { return "body.temple.\(side)" }
+            if x > 0.032 { return "body.eye.\(side)" }
+            return "body.nose"
+        }
+        if y > 0.675 {
+            if x > 0.065 { return "body.cheek.\(side)" }
+            return x < 0.025 ? "body.nose" : "body.face"
+        }
+        if x > 0.052 { return "body.jaw.\(side)" }
+        return x < 0.027 ? "body.mouth" : "body.face"
+    }
+
+    static func neckBodyAreaID(
+        at point: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        if point.z < 0 { return "body.backOfNeck" }
+        return abs(point.x) < 0.043 ? "body.throat" : "body.neck"
+    }
+
+    static func upperTorsoBodyAreaID(
+        at point: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        let side = point.x >= 0 ? "left" : "right"
+        let x = abs(point.x)
+        let y = point.y
+
+        if point.z < 0 {
+            if x > 0.075, y > 0.40 { return "body.shoulderBlade.\(side)" }
+            if x > 0.055, y <= 0.40 { return "body.midBack.\(side)" }
+            return "body.upperBack"
+        }
+        if y > 0.49, x > 0.052 { return "body.collarbone.\(side)" }
+        if x < 0.045 { return "body.sternum" }
+        if x > 0.155 || y > 0.405 { return "body.chestSide.\(side)" }
+        if y < 0.405, x > 0.10 { return "body.rib.\(side)" }
+        return "body.chest"
+    }
+
+    static func lowerTorsoBodyAreaID(
+        at point: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        let side = point.x >= 0 ? "left" : "right"
+        let x = abs(point.x)
+        let y = point.y
+
+        if point.z < 0 {
+            if x > 0.125 { return "body.flank.\(side)" }
+            if x > 0.055, y > 0.20 { return "body.midBack.\(side)" }
+            return "body.lowerBack"
+        }
+        if y > 0.22, x > 0.045 { return "body.upperAbdomen.\(side)" }
+        if y > 0.12 {
+            return x < 0.04 ? "body.navel" : "body.abdomen"
+        }
+        if x > 0.04 { return "body.lowerAbdomen.\(side)" }
+        return "body.abdomen"
+    }
+
+    static func pelvisBodyAreaID(
+        at point: SIMD3<Float>,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        if point.z < 0 { return point.y < -0.045 ? "body.tailbone" : "body.sacrum" }
+        guard abs(point.x) > 0.065 else { return "body.pelvis" }
+        return "body.groin.\(point.x >= 0 ? "left" : "right")"
     }
 
     static func structureID(at point: SIMD3<Float>, variant: BodyModelVariant) -> String? {
@@ -4111,23 +4338,31 @@ enum BodySurfaceMapper {
                     side: bodySide
                 )
             }
-            if x > 0.32 { return "body.forearm.\(side)" }
-            if x > 0.27, y > 0.22 { return "body.elbow.\(side)" }
+            if x > 0.32 {
+                return "body.\(front ? "forearm" : "outerForearm").\(side)"
+            }
+            if x > 0.27, y > 0.22 {
+                return "body.\(front ? "innerElbow" : "backOfElbow").\(side)"
+            }
             if y > 0.49 { return "body.shoulder.\(side)" }
-            return "body.upperArm.\(side)"
+            return "body.\(front ? "upperArm" : "posteriorUpperArm").\(side)"
         }
-        if y > 0.68 { return front ? "body.face" : "body.head" }
-        if y > 0.59 { return "body.neck" }
-        if y > 0.32 { return front ? "body.chest" : "body.upperBack" }
-        if y > 0.04 { return front ? "body.abdomen" : "body.lowerBack" }
+        let renderedPoint = point * anatomySceneScale
+        if y > 0.68 { return headBodyAreaID(at: renderedPoint, variant: .female) }
+        if y > 0.59 { return neckBodyAreaID(at: renderedPoint, variant: .female) }
+        if y > 0.32 { return upperTorsoBodyAreaID(at: renderedPoint, variant: .female) }
+        if y > 0.04 { return lowerTorsoBodyAreaID(at: renderedPoint, variant: .female) }
         if y > -0.12 {
             if x > 0.11 { return front ? "body.hip.\(side)" : "body.buttock.\(side)" }
-            return "body.pelvis"
+            return pelvisBodyAreaID(at: renderedPoint, variant: .female)
         }
-        if y > -0.385 { return front ? "body.thigh.\(side)" : "body.posteriorThigh.\(side)" }
-        if y > -0.505 { return "body.knee.\(side)" }
-        if y > -0.72 { return front ? "body.lowerLeg.\(side)" : "body.calf.\(side)" }
-        if y > -0.87 { return "body.ankle.\(side)" }
+        if y > -0.87 {
+            return lowerLimbBodyAreaID(
+                at: renderedPoint,
+                side: point.x >= 0 ? .left : .right,
+                variant: .female
+            )
+        }
         return "body.foot.\(side)"
     }
 
@@ -4137,21 +4372,125 @@ enum BodySurfaceMapper {
         variant: BodyModelVariant
     ) -> String {
         let point = canonicalPoint(point / anatomySceneScale, variant: variant)
-        let sideName = side == .left ? "left" : "right"
-        let front = point.z >= 0
-
         if point.y > -0.12 {
-            return "\(front ? "body.hip" : "body.buttock").\(sideName)"
+            return hipBodyAreaID(atCanonical: point, side: side)
         }
         if point.y > -0.385 {
-            return "\(front ? "body.thigh" : "body.posteriorThigh").\(sideName)"
+            return thighBodyAreaID(atCanonical: point, side: side)
         }
         if point.y > -0.505 {
-            return "body.knee.\(sideName)"
+            return kneeBodyAreaID(atCanonical: point, side: side)
         }
         if point.y > -0.72 {
-            return "\(front ? "body.lowerLeg" : "body.calf").\(sideName)"
+            return lowerLegBodyAreaID(atCanonical: point, side: side)
         }
+        return ankleBodyAreaID(atCanonical: point, side: side)
+    }
+
+    static func hipBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        hipBodyAreaID(
+            atCanonical: canonicalPoint(point / anatomySceneScale, variant: variant),
+            side: side
+        )
+    }
+
+    static func thighBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        thighBodyAreaID(
+            atCanonical: canonicalPoint(point / anatomySceneScale, variant: variant),
+            side: side
+        )
+    }
+
+    static func kneeBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        if point.y < -0.505 {
+            return lowerLegBodyAreaID(atCanonical: point, side: side)
+        }
+        return kneeBodyAreaID(atCanonical: point, side: side)
+    }
+
+    static func lowerLegBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        lowerLegBodyAreaID(
+            atCanonical: canonicalPoint(point / anatomySceneScale, variant: variant),
+            side: side
+        )
+    }
+
+    static func ankleBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        ankleBodyAreaID(
+            atCanonical: canonicalPoint(point / anatomySceneScale, variant: variant),
+            side: side
+        )
+    }
+
+    private static func hipBodyAreaID(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> String {
+        let sideName = side == .left ? "left" : "right"
+        guard point.z >= 0 else { return "body.buttock.\(sideName)" }
+        return abs(point.x) < 0.105 ? "body.groin.\(sideName)" : "body.hip.\(sideName)"
+    }
+
+    private static func thighBodyAreaID(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> String {
+        let sideName = side == .left ? "left" : "right"
+        guard point.z >= 0 else { return "body.posteriorThigh.\(sideName)" }
+        let lateralOffset = abs(point.x) - 0.13
+        if lateralOffset < -0.04 { return "body.innerThigh.\(sideName)" }
+        if lateralOffset > 0.045 { return "body.outerThigh.\(sideName)" }
+        return "body.thigh.\(sideName)"
+    }
+
+    private static func kneeBodyAreaID(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> String {
+        let sideName = side == .left ? "left" : "right"
+        guard point.z >= 0 else { return "body.backOfKnee.\(sideName)" }
+        let lateralOffset = abs(point.x) - 0.115
+        if lateralOffset < -0.032 { return "body.innerKnee.\(sideName)" }
+        if lateralOffset > 0.038 { return "body.outerKnee.\(sideName)" }
+        return "body.knee.\(sideName)"
+    }
+
+    private static func lowerLegBodyAreaID(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> String {
+        "body.\(point.z >= 0 ? "shin" : "calf").\(side == .left ? "left" : "right")"
+    }
+
+    private static func ankleBodyAreaID(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> String {
+        let sideName = side == .left ? "left" : "right"
+        let ankleOffset = abs(point.x) - 0.15
+        if ankleOffset < -0.025 { return "body.innerAnkle.\(sideName)" }
+        if ankleOffset > 0.025 { return "body.outerAnkle.\(sideName)" }
         return "body.ankle.\(sideName)"
     }
 
@@ -4270,20 +4609,36 @@ enum BodySurfaceMapper {
         let y = point.y
 
         if x > 0.23, y > -0.16 {
-            if y > 0.46 { return "muscle.deltoid.\(side)" }
+            if y > 0.46 {
+                return "muscle.\(front ? "deltoid" : "rotatorCuff").\(side)"
+            }
             if y > 0.20 {
                 return front ? "muscle.biceps.\(side)" : "muscle.triceps.\(side)"
             }
             return "muscle.forearm.\(side)"
         }
-        if y > 0.54 { return "muscle.trapezius" }
-        if y > 0.32 { return front ? "muscle.pectorals" : "muscle.trapezius" }
-        if y > 0.03 { return front ? "muscle.abdominals" : "muscle.lowerBack" }
-        if y > -0.18 { return "muscle.gluteal.\(side)" }
-        if y > -0.52 {
-            return front ? "muscle.quadriceps.\(side)" : "muscle.hamstrings.\(side)"
+        if y > 0.59 { return "muscle.neck.\(side)" }
+        if y > 0.32 {
+            if front { return "muscle.pectorals" }
+            return x > 0.075 ? "muscle.rhomboid.\(side)" : "muscle.trapezius"
         }
-        return "muscle.calf.\(side)"
+        if y > 0.03 {
+            if front {
+                return x > 0.11 ? "muscle.oblique.\(side)" : "muscle.abdominals"
+            }
+            return x > 0.105 ? "muscle.latissimus.\(side)" : "muscle.lowerBack"
+        }
+        if y > -0.18 {
+            return "muscle.\(front ? "hipFlexor" : "gluteal").\(side)"
+        }
+        if y > -0.52 {
+            guard front else { return "muscle.hamstrings.\(side)" }
+            let lateralOffset = x - 0.13
+            if lateralOffset < -0.04 { return "muscle.adductor.\(side)" }
+            if lateralOffset > 0.045 { return "muscle.itBand.\(side)" }
+            return "muscle.quadriceps.\(side)"
+        }
+        return "muscle.\(front ? "shin" : "calf").\(side)"
     }
 
     static func nerveID(at point: SIMD3<Float>, variant: BodyModelVariant) -> String? {
@@ -4292,7 +4647,12 @@ enum BodySurfaceMapper {
         let x = abs(point.x)
         let y = point.y
         if y > 0.67 { return "nerve.trigeminal.\(side)" }
-        if x > 0.25 { return point.z < 0 ? "nerve.ulnar.\(side)" : "nerve.median.\(side)" }
+        if y > 0.52 { return "nerve.cervical.\(side)" }
+        if x > 0.25 {
+            if point.z >= 0 { return "nerve.median.\(side)" }
+            return x > 0.35 ? "nerve.ulnar.\(side)" : "nerve.radial.\(side)"
+        }
+        if y > 0.25, x > 0.08 { return "nerve.intercostal.\(side)" }
         if y > -0.06 { return "nerve.lumbar.\(side)" }
         if point.z < -0.035 { return "nerve.sciatic.\(side)" }
         return "nerve.femoral.\(side)"
@@ -4346,17 +4706,20 @@ enum BodySurfaceMapper {
     }
 
     static func usesRegisteredUpperLimbMarker(_ structureID: String) -> Bool {
-        structureID.contains("shoulder")
-            || structureID.contains("upperArm")
-            || structureID.contains("elbow")
-            || structureID.contains("forearm")
-            || structureID.contains("wrist")
-            || structureID.contains("hand")
+        let identifier = structureID.lowercased()
+        return identifier.contains("shoulder")
+            || identifier.contains("upperarm")
+            || identifier.contains("elbow")
+            || identifier.contains("forearm")
+            || identifier.contains("wrist")
+            || identifier.contains("hand")
+            || identifier.contains("palm")
     }
 
     static func defaultPosition(for structureID: String, variant: BodyModelVariant) -> SIMD3<Float> {
         let side: Float = structureID.hasSuffix(".left") ? 1 : structureID.hasSuffix(".right") ? -1 : 0
         let front: Float = 0.16
+        let identifier = structureID.lowercased()
         if structureID == "joint.cervicalSpine" { return SIMD3(0, 0.625, -0.035) }
         if structureID == "joint.ribCage" { return SIMD3(0, 0.405, 0.015) }
         if structureID == "joint.lumbarSpine" { return SIMD3(0, 0.13, -0.055) }
@@ -4381,6 +4744,60 @@ enum BodySurfaceMapper {
         if structureID.hasPrefix("joint.ankle.") {
             return SIMD3(side * 0.10, -0.84, 0.015)
         }
+        if identifier.contains("tmj") { return SIMD3(side * 0.072, 0.68, 0.055) }
+        if identifier.contains("thoracicspine") { return SIMD3(0, 0.39, -0.105) }
+        if identifier.contains("sacrumcoccyx") { return SIMD3(0, -0.035, -0.115) }
+        if identifier.contains("scalp") { return SIMD3(0, 0.83, 0.07) }
+        if identifier.contains("forehead") { return SIMD3(0, 0.785, 0.14) }
+        if identifier.contains("temple") { return SIMD3(side * 0.078, 0.755, 0.095) }
+        if identifier.contains("eye") { return SIMD3(side * 0.038, 0.745, 0.145) }
+        if identifier.hasPrefix("body.ear.") { return SIMD3(side * 0.105, 0.725, 0.015) }
+        if identifier.contains("cheek") { return SIMD3(side * 0.058, 0.70, 0.14) }
+        if identifier.contains("jaw") { return SIMD3(side * 0.058, 0.665, 0.115) }
+        if identifier.contains("nose") { return SIMD3(0, 0.715, 0.155) }
+        if identifier.contains("mouth") { return SIMD3(0, 0.675, 0.15) }
+        if identifier.contains("backofneck") { return SIMD3(0, 0.625, -0.09) }
+        if identifier.contains("throat") { return SIMD3(0, 0.625, 0.105) }
+        if identifier.contains("muscle.neck") { return SIMD3(side * 0.045, 0.625, 0.055) }
+        if identifier.contains("collarbone") { return SIMD3(side * 0.105, 0.515, 0.115) }
+        if identifier.contains("sternum") { return SIMD3(0, 0.43, 0.155) }
+        if identifier.contains("chestside") { return SIMD3(side * 0.18, 0.43, 0.07) }
+        if identifier.contains("body.rib") { return SIMD3(side * 0.13, 0.39, 0.14) }
+        if identifier.contains("shoulderblade") { return SIMD3(side * 0.11, 0.445, -0.13) }
+        if identifier.contains("midback") { return SIMD3(side * 0.085, 0.31, -0.13) }
+        if identifier.contains("upperabdomen") { return SIMD3(side * 0.085, 0.25, 0.14) }
+        if identifier.contains("navel") { return SIMD3(0, 0.15, 0.155) }
+        if identifier.contains("lowerabdomen") { return SIMD3(side * 0.08, 0.075, 0.14) }
+        if identifier.contains("flank") { return SIMD3(side * 0.155, 0.16, 0.035) }
+        if identifier.contains("tailbone") { return SIMD3(0, -0.07, -0.13) }
+        if identifier.contains("sacrum") { return SIMD3(0, 0.005, -0.13) }
+        if identifier.contains("groin") { return SIMD3(side * 0.09, -0.07, 0.105) }
+        if identifier.contains("rotatorcuff") { return SIMD3(side * 0.19, 0.52, -0.075) }
+        if identifier.contains("rhomboid") { return SIMD3(side * 0.095, 0.43, -0.105) }
+        if identifier.contains("latissimus") { return SIMD3(side * 0.125, 0.25, -0.105) }
+        if identifier.contains("oblique") { return SIMD3(side * 0.135, 0.18, 0.09) }
+        if identifier.contains("intercostal") { return SIMD3(side * 0.13, 0.39, 0.11) }
+        if identifier.contains("hipflexor") { return SIMD3(side * 0.12, -0.10, 0.085) }
+        if identifier.contains("adductor") { return SIMD3(side * 0.075, -0.31, 0.055) }
+        if identifier.contains("itband") { return SIMD3(side * 0.19, -0.32, 0.025) }
+        if identifier.contains("posteriorupperarm") { return SIMD3(side * 0.228, 0.403, -0.05) }
+        if identifier.contains("innerelbow") { return SIMD3(side * 0.265, 0.272, 0.055) }
+        if identifier.contains("backofelbow") { return SIMD3(side * 0.265, 0.272, -0.055) }
+        if identifier.contains("outerforearm") { return SIMD3(side * 0.335, 0.135, -0.045) }
+        if identifier.contains("radial") { return SIMD3(side * 0.335, 0.135, -0.045) }
+        if identifier.contains("backofwrist") { return SIMD3(side * 0.408, 0.001, -0.035) }
+        if identifier.contains("body.palm") { return SIMD3(side * 0.465, -0.048, 0.065) }
+        if identifier.contains("backofhand") { return SIMD3(side * 0.465, -0.048, -0.055) }
+        if identifier.contains("innerthigh") { return SIMD3(side * 0.08, -0.34, 0.055) }
+        if identifier.contains("outerthigh") { return SIMD3(side * 0.19, -0.34, 0.04) }
+        if identifier.contains("innerknee") { return SIMD3(side * 0.08, -0.50, 0.035) }
+        if identifier.contains("outerknee") { return SIMD3(side * 0.165, -0.50, 0.025) }
+        if identifier.contains("backofknee") { return SIMD3(side * 0.12, -0.50, -0.055) }
+        if identifier.contains("body.shin") || identifier.contains("muscle.shin") {
+            return SIMD3(side * 0.12, -0.66, 0.045)
+        }
+        if identifier.contains("innerankle") { return SIMD3(side * 0.115, -0.82, 0.015) }
+        if identifier.contains("outerankle") { return SIMD3(side * 0.185, -0.82, 0.005) }
         if structureID.contains("head") || structureID.contains("face") || structureID.contains("brain") || structureID.contains("trigeminal") {
             return SIMD3(side * 0.055, 0.79, front)
         }

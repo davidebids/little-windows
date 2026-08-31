@@ -671,9 +671,14 @@ struct BodyLocationPickerView: View {
     ) -> BodyViewOrientation {
         let backFacingIDs = [
             "body.upperBack", "body.lowerBack", "body.buttock", "body.posteriorThigh",
-            "body.calf", "muscle.trapezius", "muscle.lowerBack", "muscle.triceps",
+            "body.backOfNeck", "body.shoulderBlade", "body.midBack", "body.flank",
+            "body.sacrum", "body.tailbone", "body.posteriorUpperArm", "body.backOfElbow",
+            "body.outerForearm", "body.backOfWrist", "body.backOfHand", "body.backOfKnee",
+            "body.calf", "muscle.trapezius", "muscle.rhomboid", "muscle.latissimus",
+            "muscle.rotatorCuff", "muscle.lowerBack", "muscle.triceps",
             "muscle.gluteal", "muscle.hamstrings", "muscle.calf", "joint.cervicalSpine",
-            "joint.lumbarSpine", "joint.sacroiliac", "nerve.ulnar", "nerve.lumbar",
+            "joint.thoracicSpine", "joint.lumbarSpine", "joint.sacrumCoccyx",
+            "joint.sacroiliac", "nerve.ulnar", "nerve.radial", "nerve.lumbar",
             "nerve.sciatic", "body.sole", "body.arch", "body.ballOfFoot",
             "nerve.plantar"
         ]
@@ -683,7 +688,7 @@ struct BodyLocationPickerView: View {
     private static func prefersHandDetail(_ structure: BodyAnatomyStructure) -> Bool {
         guard structure.region == .armsAndHands,
               structure.side == .left || structure.side == .right else { return false }
-        return ["hand", "wrist", "thumb", "finger", "median", "ulnar"].contains {
+        return ["hand", "palm", "wrist", "thumb", "finger", "median", "ulnar", "radial"].contains {
             structure.id.localizedCaseInsensitiveContains($0)
         }
     }
