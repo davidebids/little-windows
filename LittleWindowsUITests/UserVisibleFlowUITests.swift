@@ -51,6 +51,43 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testBodyLocationArmMarkersVisualRegression() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/body-location/bodyAreas/female")
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+
+        let multiple = app.buttons["body-location.pattern.multiple"]
+        XCTAssertTrue(multiple.waitForExistence(timeout: 4))
+        multiple.tap()
+
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.35, dy: 0.35)
+        ).tap()
+        visualization.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.67, dy: 0.445)
+        ).tap()
+
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.upperArm.right"]
+                .firstMatch
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.buttons["body-location.selection.body.forearm.left"]
+                .firstMatch
+                .waitForExistence(timeout: 3)
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Body location arm selection markers"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testBodyLocationFullBodyLandmarksMatchRenderedAnatomy() {
         continueAfterFailure = false
 

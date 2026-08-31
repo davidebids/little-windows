@@ -1,4 +1,5 @@
 import XCTest
+import simd
 @testable import LittleWindows
 
 final class BodyLocationTests: XCTestCase {
@@ -412,6 +413,53 @@ final class BodyLocationTests: XCTestCase {
         XCTAssertEqual(front.z, expectedOffset, accuracy: 0.0001)
         XCTAssertEqual(back.z, -expectedOffset, accuracy: 0.0001)
         XCTAssertEqual(sole.y, -expectedOffset, accuracy: 0.0001)
+    }
+
+    func testSelectionMarkerDepthFollowsPerspectiveRayForOffCenterArm() {
+        let anchor = SIMD3<Float>(0.72, 0.31, 0.08)
+        let camera = SIMD3<Float>(0, 0, 3.1)
+        let depth: Float = 0.115
+        let direction = simd_normalize(camera - anchor)
+        let expected = anchor + direction * depth * 2.55
+        let displayed = AnatomyMarkerPlacement.displayedPosition(
+            from: anchor,
+            toward: camera,
+            canonicalDepth: depth
+        )
+
+        XCTAssertEqual(displayed.x, expected.x, accuracy: 0.0001)
+        XCTAssertEqual(displayed.y, expected.y, accuracy: 0.0001)
+        XCTAssertEqual(displayed.z, expected.z, accuracy: 0.0001)
+    }
+
+    func testUpperLimbDefaultMarkersMatchRenderedCenterlines() {
+        let expected: [(id: String, point: SIMD3<Float>)] = [
+            ("body.shoulder.left", SIMD3(0.19, 0.545, 0.015)),
+            ("body.upperArm.left", SIMD3(0.228, 0.403, 0.05)),
+            ("body.elbow.left", SIMD3(0.265, 0.272, 0.015)),
+            ("body.forearm.left", SIMD3(0.335, 0.135, 0.04)),
+            ("body.wrist.left", SIMD3(0.408, 0.001, 0.025)),
+            ("body.hand.left", SIMD3(0.465, -0.048, 0.064))
+        ]
+
+        for value in expected {
+            let marker = BodySurfaceMapper.markerPosition(
+                for: value.id,
+                variant: .female
+            ) / 2.55
+            XCTAssertEqual(marker.x, value.point.x, accuracy: 0.0001, value.id)
+            XCTAssertEqual(marker.y, value.point.y, accuracy: 0.0001, value.id)
+            XCTAssertEqual(marker.z, value.point.z, accuracy: 0.0001, value.id)
+
+            let rightID = value.id.replacingOccurrences(of: ".left", with: ".right")
+            let rightMarker = BodySurfaceMapper.markerPosition(
+                for: rightID,
+                variant: .female
+            ) / 2.55
+            XCTAssertEqual(rightMarker.x, -value.point.x, accuracy: 0.0001, rightID)
+            XCTAssertEqual(rightMarker.y, value.point.y, accuracy: 0.0001, rightID)
+            XCTAssertEqual(rightMarker.z, value.point.z, accuracy: 0.0001, rightID)
+        }
     }
 
     func testPosteriorThighDefaultMarkerStartsOnTheBackOfTheBody() {

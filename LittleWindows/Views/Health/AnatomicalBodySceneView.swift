@@ -564,6 +564,14 @@ struct BodyVisualizationView: UIViewRepresentable {
                 ) ?? rawHitPosition
             }
 
+            if parent.activeLayer == .bodyAreas,
+               BodySurfaceMapper.usesRegisteredUpperLimbMarker(structureID) {
+                return BodySurfaceMapper.markerPosition(
+                    for: structureID,
+                    variant: parent.variant
+                )
+            }
+
             if parent.activeLayer == .joints {
                 return BodySurfaceMapper.markerPosition(
                     for: structureID,
@@ -583,10 +591,10 @@ struct BodyVisualizationView: UIViewRepresentable {
             from anatomicalPosition: SIMD3<Float>,
             canonicalDepth: Float
         ) -> SIMD3<Float> {
-            AnatomyMarkerPlacement.displayedPosition(
+            let cameraPosition = interactionRoot.convert(position: .zero, from: nil)
+            return AnatomyMarkerPlacement.displayedPosition(
                 from: anatomicalPosition,
-                yaw: yaw,
-                pitch: pitch,
+                toward: cameraPosition,
                 canonicalDepth: canonicalDepth
             )
         }
@@ -2596,6 +2604,18 @@ enum AnatomyMarkerPlacement {
 
     static func displayedPosition(
         from anatomicalPosition: SIMD3<Float>,
+        toward cameraPosition: SIMD3<Float>,
+        canonicalDepth: Float
+    ) -> SIMD3<Float> {
+        let cameraDelta = cameraPosition - anatomicalPosition
+        let cameraDistance = simd_length(cameraDelta)
+        guard cameraDistance > 0.0001 else { return anatomicalPosition }
+        return anatomicalPosition
+            + cameraDelta / cameraDistance * canonicalDepth * anatomySceneScale
+    }
+
+    static func displayedPosition(
+        from anatomicalPosition: SIMD3<Float>,
         yaw: Float,
         pitch: Float,
         canonicalDepth: Float
@@ -4325,6 +4345,15 @@ enum BodySurfaceMapper {
         return rendered * anatomySceneScale
     }
 
+    static func usesRegisteredUpperLimbMarker(_ structureID: String) -> Bool {
+        structureID.contains("shoulder")
+            || structureID.contains("upperArm")
+            || structureID.contains("elbow")
+            || structureID.contains("forearm")
+            || structureID.contains("wrist")
+            || structureID.contains("hand")
+    }
+
     static func defaultPosition(for structureID: String, variant: BodyModelVariant) -> SIMD3<Float> {
         let side: Float = structureID.hasSuffix(".left") ? 1 : structureID.hasSuffix(".right") ? -1 : 0
         let front: Float = 0.16
@@ -4359,19 +4388,19 @@ enum BodySurfaceMapper {
             return SIMD3(side * 0.045, 0.625, -0.035)
         }
         if structureID.contains("shoulder") || structureID.contains("deltoid") {
-            return SIMD3(side * 0.205, 0.505, 0.015)
+            return SIMD3(side * 0.19, 0.545, 0.015)
         }
         if structureID.contains("upperArm") || structureID.contains("biceps") || structureID.contains("triceps") {
-            return SIMD3(side * 0.275, 0.38, structureID.contains("triceps") ? -0.07 : 0.05)
+            return SIMD3(side * 0.228, 0.403, structureID.contains("triceps") ? -0.05 : 0.05)
         }
-        if structureID.contains("elbow") { return SIMD3(side * 0.34, 0.25, 0.015) }
+        if structureID.contains("elbow") { return SIMD3(side * 0.265, 0.272, 0.015) }
         if structureID.contains("forearm") || structureID.contains("median") || structureID.contains("ulnar") {
-            return SIMD3(side * 0.415, 0.135, structureID.contains("ulnar") ? -0.04 : 0.04)
+            return SIMD3(side * 0.335, 0.135, structureID.contains("ulnar") ? -0.04 : 0.04)
         }
         if structureID.contains("wrist") || structureID.contains("hand") {
             return structureID.contains("wrist")
-                ? SIMD3(side * 0.49, 0.02, 0.025)
-                : SIMD3(side * 0.52, -0.055, front * 0.4)
+                ? SIMD3(side * 0.408, 0.001, 0.025)
+                : SIMD3(side * 0.465, -0.048, front * 0.4)
         }
         if structureID.contains("chest") || structureID.contains("pector") || structureID.contains("heart") || structureID.contains("lung") || structureID.contains("ribCage") {
             return SIMD3(side * 0.08, 0.46, front * 0.72)
