@@ -43,6 +43,26 @@ private let anatomyBodyScanProfile: [(height: Float, radius: SIMD2<Float>)] = [
     (0.84, SIMD2(0.15, 0.14))
 ]
 
+@MainActor
+final class AnatomyRenderContainerView: UIView {
+    private(set) var renderingView: ARView?
+
+    func install(_ view: ARView) {
+        releaseRenderingView()
+        renderingView = view
+        view.frame = bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(view)
+    }
+
+    func releaseRenderingView() {
+        guard let renderingView else { return }
+        self.renderingView = nil
+        renderingView.isHidden = true
+        renderingView.removeFromSuperview()
+    }
+}
+
 struct BodyVisualizationView: UIViewRepresentable {
     let variant: BodyModelVariant
     let activeLayer: BodyAnatomyLayer
@@ -59,7 +79,9 @@ struct BodyVisualizationView: UIViewRepresentable {
         Coordinator(parent: self)
     }
 
-    func makeUIView(context: Context) -> ARView {
+    func makeUIView(context: Context) -> AnatomyRenderContainerView {
+        let container = AnatomyRenderContainerView(frame: .zero)
+        container.backgroundColor = .clear
         let view = ARView(
             frame: .zero,
             cameraMode: .nonAR,
@@ -82,17 +104,26 @@ struct BodyVisualizationView: UIViewRepresentable {
             .disablePersonOcclusion,
             .disableFaceMesh
         ])
+        container.install(view)
         context.coordinator.install(in: view)
-        return view
+        return container
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {
+    func updateUIView(_ uiView: AnatomyRenderContainerView, context: Context) {
+        guard let renderingView = uiView.renderingView else { return }
         context.coordinator.parent = self
-        context.coordinator.synchronize(in: uiView)
+        context.coordinator.synchronize(in: renderingView)
     }
 
-    static func dismantleUIView(_ uiView: ARView, coordinator: Coordinator) {
+    static func dismantleUIView(
+        _ uiView: AnatomyRenderContainerView,
+        coordinator: Coordinator
+    ) {
         coordinator.releaseSceneResources()
+        // SwiftUI may retain a dismissed sheet's representable root. Keep that
+        // retained root lightweight by explicitly dropping the ARView and its
+        // Metal renderer instead of returning ARView as the root UIView.
+        uiView.releaseRenderingView()
     }
 
     @MainActor
@@ -100,6 +131,7 @@ struct BodyVisualizationView: UIViewRepresentable {
         var parent: BodyVisualizationView
 
         private weak var arView: ARView?
+        private weak var modelTapGestureRecognizer: UITapGestureRecognizer?
         private weak var modelPanGestureRecognizer: UIPanGestureRecognizer?
         private weak var modelPinchGestureRecognizer: UIPinchGestureRecognizer?
         private var prioritizedScrollViews: [AnatomyWeakScrollViewReference] = []
@@ -172,6 +204,7 @@ struct BodyVisualizationView: UIViewRepresentable {
         private var configuredAnimationFrameRate = 0
         private var isApplicationActive = true
         private var isPerformanceConstrained = false
+        private var isMemoryConstrained = false
 
         init(parent: BodyVisualizationView) {
             self.parent = parent
@@ -186,6 +219,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             pan.delegate = self
             pinch.delegate = self
             pan.cancelsTouchesInView = true
+            modelTapGestureRecognizer = tap
             modelPanGestureRecognizer = pan
             modelPinchGestureRecognizer = pinch
             view.addGestureRecognizer(tap)
@@ -215,9 +249,44 @@ struct BodyVisualizationView: UIViewRepresentable {
 
         func releaseSceneResources() {
             stop()
-            arView?.scene.anchors.removeAll()
-            interactionRoot.children.removeAll()
-            atmosphereRoot.children.removeAll()
+
+            if let arView {
+                for recognizer in [
+                    modelTapGestureRecognizer,
+                    modelPanGestureRecognizer,
+                    modelPinchGestureRecognizer
+                ].compactMap({ $0 }) {
+                    arView.removeGestureRecognizer(recognizer)
+                }
+                arView.isUserInteractionEnabled = false
+                arView.scene.anchors.removeAll()
+            }
+
+            // Removing the anchor alone is insufficient. SwiftUI can retain a
+            // dismissed representable coordinator, and each root below would
+            // otherwise continue to own its detached RealityKit entity graph.
+            for root in [
+                surfaceRoot,
+                ghostRoot,
+                muscleRoot,
+                skeletonRoot,
+                nerveRoot,
+                circulationRoot,
+                organRoot,
+                organSelectionProxyRoot,
+                handDetailRoot,
+                handDetailSelectionProxyRoot,
+                footDetailRoot,
+                footDetailSelectionProxyRoot,
+                markerRoot,
+                atmosphereRoot,
+                scanRoot,
+                selectionProxyRoot,
+                breathingRoot,
+                interactionRoot
+            ] {
+                root.children.removeAll()
+            }
             entitiesByStructureID.removeAll()
             specificationsByStructureID.removeAll()
             restPosesByEntity.removeAll()
@@ -226,13 +295,31 @@ struct BodyVisualizationView: UIViewRepresentable {
             nervePulseTracks.removeAll()
             arterialPulseTargets.removeAll()
             atmosphereMotes.removeAll()
+            loadedLayers.removeAll()
+            loadedLayerOrder.removeAll()
+            loadedHandDetailLayer = nil
+            loadedFootDetailLayer = nil
+            loadedFootDetailOrientation = nil
             sphereMeshes.removeAll()
             scanCoreEntity = nil
             scanHaloEntity = nil
             scanEchoEntities.removeAll()
+            smoothedScanEnvelope = nil
             faceFillLight = nil
+            currentVariant = nil
+            currentLayer = nil
+            currentRegion = nil
+            currentHandDetailFocus = nil
+            currentFootDetailFocus = nil
+            currentOrientation = nil
+            currentSelectionIDs.removeAll()
+            currentResetToken = nil
+            currentReduceMotion = nil
+            configuredAnimationFrameRate = 0
+            isMemoryConstrained = false
             prioritizedScrollViews.removeAll()
             prioritizedAncestorPanGestures.removeAll()
+            modelTapGestureRecognizer = nil
             modelPanGestureRecognizer = nil
             modelPinchGestureRecognizer = nil
             arView = nil
@@ -795,6 +882,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             loadedFootDetailOrientation = nil
             sphereMeshes = [:]
             configuredAnimationFrameRate = 0
+            isMemoryConstrained = false
 
             currentVariant = parent.variant
             currentLayer = nil
@@ -868,7 +956,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             memoryWarningSubscription = NotificationCenter.default.publisher(
                 for: UIApplication.didReceiveMemoryWarningNotification
             ).sink { [weak self] _ in
-                self?.purgeInactiveResources()
+                self?.handleMemoryPressure()
             }
             isApplicationActive = UIApplication.shared.applicationState == .active
             applicationStateSubscription = Publishers.Merge(
@@ -1340,6 +1428,22 @@ struct BodyVisualizationView: UIViewRepresentable {
                 loadedFootDetailLayer = nil
                 loadedFootDetailOrientation = nil
             }
+        }
+
+        private func handleMemoryPressure() {
+            isMemoryConstrained = true
+            purgeInactiveResources()
+
+            // These particles are decorative and can be rebuilt the next time
+            // the picker opens. Discard them immediately under real pressure.
+            atmosphereRoot.children.removeAll()
+            atmosphereMotes.removeAll()
+
+            // Render targets are one of ARView's largest fixed allocations.
+            // A 1x emergency scale substantially lowers their footprint while
+            // keeping the active anatomy layer fully usable.
+            arView?.contentScaleFactor = 1
+            refreshPerformanceConstraint()
         }
 
         private func unloadLayer(_ layer: BodyAnatomyLayer) {
@@ -2471,6 +2575,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             }
             isPerformanceConstrained = processInfo.isLowPowerModeEnabled
                 || isThermallyConstrained
+                || isMemoryConstrained
             refreshAnimationLoop()
         }
 

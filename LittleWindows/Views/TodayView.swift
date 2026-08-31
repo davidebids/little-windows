@@ -412,13 +412,19 @@ struct TodayView: View {
     }
 
     private func refreshCachedRenderState() {
+        refreshCachedRenderState(refreshesAnalysis: true)
+    }
+
+    private func refreshCachedRenderState(refreshesAnalysis: Bool) {
         // Today remains mounted underneath full-screen editing sheets. Building
         // its bounded event timeline while the user saves a profile needlessly
         // faults and sorts hundreds of rows on the main actor, delaying the
         // visible sheet. The dismissal path schedules one coalesced refresh.
         guard !renderStateRefreshIsDeferred else { return }
         cachedRenderState = makeRenderState()
-        scheduleIntegrationAnalysisRefresh()
+        if refreshesAnalysis {
+            scheduleIntegrationAnalysisRefresh()
+        }
     }
 
     private func scheduleIntegrationAnalysisRefresh() {
@@ -441,6 +447,16 @@ struct TodayView: View {
         let revision = UUID()
         integrationAnalysisRevision = revision
         integrationAnalysisTask = Task.detached(priority: .utility) {
+            // SwiftData/Core Data can publish a burst of saves while importing
+            // CloudKit changes. Cancellation cannot interrupt a fetch that has
+            // already entered the persistence framework, so debounce before
+            // starting it instead of leaving overlapping 60-day scans alive.
+            do {
+                try await Task.sleep(for: .milliseconds(1_250))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
             let analysis = await EventMutationService.integrationAnalysis(
                 profileID: profileID,
                 container: container,
@@ -924,7 +940,7 @@ struct TodayView: View {
             ? .home
             : deepLinkRouter.todayDisplayMode
 
-        VStack(spacing: 0) {
+        let presentedContent = VStack(spacing: 0) {
             if profile != nil {
                 TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
                     .padding(.horizontal, todayContentHorizontalMargin)
@@ -1209,6 +1225,15 @@ struct TodayView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+
+        return lifecycleView(presentedContent, state: state)
+    }
+
+    private func lifecycleView<Content: View>(
+        _ content: Content,
+        state: TodayRenderState
+    ) -> some View {
+        content
         .onChange(of: deepLinkRouter.pendingAction) { _, _ in
             handlePendingDeepLink()
         }
@@ -1218,15 +1243,29 @@ struct TodayView: View {
         .onReceive(
             NotificationCenter.default.publisher(for: ModelContext.didSave)
                 .receive(on: RunLoop.main)
-        ) { _ in
+        ) { notification in
             // Event and timer workflows publish their exact optimistic state
             // before isolated persistence begins. Their worker saves must not
             // trigger a redundant full Today rebuild while system surfaces are
             // still synchronizing.
             guard localEventMutationCount == 0,
                   !timerMutationRenderDeferralActive,
-                  timerSystemRefreshTask == nil else { return }
+                  timerSystemRefreshTask == nil,
+                  saveNotificationAffectsToday(notification) else { return }
             scheduleRenderStateRefresh()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIApplication.didReceiveMemoryWarningNotification
+            )
+        ) { _ in
+            // Drop pending, nonessential history work first. SwiftData fetches
+            // already inside the framework cannot be force-cancelled, but this
+            // prevents another scan from starting while iOS is under pressure.
+            renderStateRefreshTask?.cancel()
+            renderStateRefreshTask = nil
+            invalidateIntegrationAnalysis()
+            SystemIntegrationReconciler.invalidateInFlightReconciliation()
         }
         .onChange(of: deepLinkRouter.pendingProfileID) { _, _ in
             handlePendingProfileSwitch()
@@ -1266,6 +1305,7 @@ struct TodayView: View {
             await syncActiveSleepPlanWakeAlert()
         }
         .task(id: state.profileID) {
+            var elapsedMinutes = 0
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: .seconds(60))
@@ -1273,7 +1313,14 @@ struct TodayView: View {
                     return
                 }
                 guard !Task.isCancelled else { return }
-                refreshCachedRenderState()
+                elapsedMinutes += 1
+                // Timeline labels need a minute tick; sleep-pressure analysis
+                // does not. Refresh that bounded history scan every five
+                // minutes, while model saves still refresh it after real data
+                // changes.
+                refreshCachedRenderState(
+                    refreshesAnalysis: elapsedMinutes.isMultiple(of: 5)
+                )
             }
         }
     }
@@ -2719,10 +2766,14 @@ struct TodayView: View {
     private func scheduleRenderStateRefresh() {
         renderStateRefreshTask?.cancel()
         renderStateRefreshTask = Task { @MainActor in
-            // Coalesce changes delivered in the same SwiftUI update cycle. This
-            // is a yield, not a time-based attempt to hide main-actor work.
-            await Task.yield()
-            guard !Task.isCancelled else { return }
+            // CloudKit imports can deliver multiple saves per second. Wait for
+            // a short quiet period so the main actor faults the bounded Today
+            // rows once for the batch rather than once per transaction.
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
             // A save performed by a covering sheet still needs to reach Today,
             // but only after that sheet is gone. Waiting here avoids faulting
             // the hidden timeline and coalesces every save notification into a
@@ -2738,6 +2789,59 @@ struct TodayView: View {
             refreshCachedRenderState()
             timerMutationRenderDeferralActive = false
         }
+    }
+
+    private func saveNotificationAffectsToday(_ notification: Notification) -> Bool {
+        let keys: [ModelContext.NotificationKey] = [
+            .insertedIdentifiers,
+            .updatedIdentifiers,
+            .deletedIdentifiers,
+            .invalidatedAllIdentifiers
+        ]
+        var identifiers = [PersistentIdentifier]()
+        for key in keys {
+            if let values = notification.userInfo?[key] as? [PersistentIdentifier] {
+                identifiers.append(contentsOf: values)
+            } else if let values = notification.userInfo?[key]
+                as? Set<PersistentIdentifier> {
+                identifiers.append(contentsOf: values)
+            } else if let values = notification.userInfo?[key.rawValue]
+                as? [PersistentIdentifier] {
+                identifiers.append(contentsOf: values)
+            } else if let values = notification.userInfo?[key.rawValue]
+                as? Set<PersistentIdentifier> {
+                identifiers.append(contentsOf: values)
+            }
+        }
+
+        // Some framework-generated saves omit identifier details. Preserve the
+        // prior safe behavior for those instead of risking a stale timeline.
+        guard !identifiers.isEmpty else { return true }
+        return identifiers.contains {
+            let entityName = $0.entityName
+            return Self.todayRelevantEntityNames.contains(entityName)
+                || Self.todayRelevantEntityNames.contains {
+                    entityName.hasSuffix(".\($0)")
+                }
+        }
+    }
+
+    private static let todayRelevantEntityNames: Set<String> = [
+        CareProfile.self,
+        CareEvent.self,
+        DoctorAppointment.self,
+        SleepPredictionRecord.self,
+        AgeGuideReadState.self,
+        PuppyStageGuideReadState.self,
+        CareRoutine.self,
+        CareRoutineStep.self,
+        CareRoutineRun.self,
+        Household.self,
+        PlannedSolidMeal.self,
+        SolidsProfileState.self,
+        SolidAllergenProgress.self
+    ].map { String(describing: $0) }.reduce(into: Set<String>()) {
+        $0.insert($1)
     }
 
     private func repeatLastEvent() {

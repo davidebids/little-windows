@@ -668,8 +668,15 @@ struct RootView: View {
         }
         .task(id: "system-integrations-\(scenePhase)") {
             guard scenePhase == .active else { return }
-            await Task.yield()
-            guard !Task.isCancelled else { return }
+            // Let the initial SwiftData queries and any CloudKit import burst
+            // settle before faulting history for widgets, predictions, and
+            // notification reconciliation. These surfaces are not needed for
+            // the first interactive frame.
+            do {
+                try await Task.sleep(for: .seconds(4))
+            } catch {
+                return
+            }
             await SystemIntegrationReconciler.reconcileIfNeeded(context: modelContext)
         }
     }
