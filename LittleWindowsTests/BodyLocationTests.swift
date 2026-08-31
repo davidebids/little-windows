@@ -216,6 +216,43 @@ final class BodyLocationTests: XCTestCase {
         )
     }
 
+    func testLowerLimbSelectionBandsKeepKneeShinAndAnkleDistinct() {
+        let scale: Float = 2.55
+
+        XCTAssertEqual(
+            BodySurfaceMapper.lowerLimbBodyAreaID(
+                at: SIMD3<Float>(-0.12, -0.44, 0.08) * scale,
+                side: .right,
+                variant: .female
+            ),
+            "body.knee.right"
+        )
+        XCTAssertEqual(
+            BodySurfaceMapper.lowerLimbBodyAreaID(
+                at: SIMD3<Float>(-0.12, -0.60, 0.08) * scale,
+                side: .right,
+                variant: .female
+            ),
+            "body.lowerLeg.right"
+        )
+        XCTAssertEqual(
+            BodySurfaceMapper.lowerLimbJointID(
+                at: SIMD3<Float>(0.12, -0.60, 0.02) * scale,
+                side: .left,
+                variant: .female
+            ),
+            "joint.shin.left"
+        )
+        XCTAssertEqual(
+            BodySurfaceMapper.lowerLimbJointID(
+                at: SIMD3<Float>(0.14, -0.76, 0.02) * scale,
+                side: .left,
+                variant: .female
+            ),
+            "joint.ankle.left"
+        )
+    }
+
     func testEveryFullBodyJointMarkerResolvesBackToItsOwnMeshLandmark() {
         let structureIDs = [
             "joint.cervicalSpine", "joint.ribCage", "joint.lumbarSpine",
@@ -224,7 +261,9 @@ final class BodyLocationTests: XCTestCase {
             "joint.wrist.left", "joint.wrist.right",
             "joint.sacroiliac.left", "joint.sacroiliac.right",
             "joint.hip.left", "joint.hip.right",
+            "joint.femur.left", "joint.femur.right",
             "joint.knee.left", "joint.knee.right",
+            "joint.shin.left", "joint.shin.right",
             "joint.ankle.left", "joint.ankle.right"
         ]
 
@@ -251,7 +290,8 @@ final class BodyLocationTests: XCTestCase {
             "body.littleToe.left", "muscle.achilles.left", "muscle.foot.left",
             "joint.heel.left", "joint.midfoot.left", "joint.greatToe.left",
             "joint.secondToe.left", "joint.middleToe.left", "joint.fourthToe.left",
-            "joint.littleToe.left", "nerve.tibial.left", "nerve.fibular.left",
+            "joint.littleToe.left", "joint.femur.left", "joint.shin.left",
+            "nerve.tibial.left", "nerve.fibular.left",
             "nerve.plantar.left"
         ]
         let availableIDs = Set(BodyAnatomyCatalog.structures(

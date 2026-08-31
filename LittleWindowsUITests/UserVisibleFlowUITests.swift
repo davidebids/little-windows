@@ -318,8 +318,12 @@ final class UserVisibleFlowUITests: XCTestCase {
         continueAfterFailure = false
 
         let frontCases: [(name: String, point: CGVector, expectedID: String)] = [
-            ("right knee", CGVector(dx: 0.445, dy: 0.69), "body.knee.right"),
-            ("left knee", CGVector(dx: 0.555, dy: 0.69), "body.knee.left"),
+            ("right upper knee", CGVector(dx: 0.445, dy: 0.665), "body.knee.right"),
+            ("left upper knee", CGVector(dx: 0.555, dy: 0.665), "body.knee.left"),
+            ("right lower knee", CGVector(dx: 0.445, dy: 0.69), "body.knee.right"),
+            ("left lower knee", CGVector(dx: 0.555, dy: 0.69), "body.knee.left"),
+            ("right upper shin", CGVector(dx: 0.44, dy: 0.72), "body.lowerLeg.right"),
+            ("left upper shin", CGVector(dx: 0.56, dy: 0.72), "body.lowerLeg.left"),
             ("right lower leg", CGVector(dx: 0.44, dy: 0.75), "body.lowerLeg.right"),
             ("left lower leg", CGVector(dx: 0.56, dy: 0.75), "body.lowerLeg.left")
         ]
@@ -369,6 +373,39 @@ final class UserVisibleFlowUITests: XCTestCase {
             XCTAssertTrue(
                 didSelectExpected,
                 "Expected the rendered \(name) to select \(expectedID); selected \(selectedIdentifiers)."
+            )
+        }
+    }
+
+    func testBodyLocationBonesLayerSeparatesKneesFromThighAndShinBones() {
+        continueAfterFailure = false
+
+        let cases: [(name: String, point: CGVector, expectedID: String)] = [
+            ("right knee", CGVector(dx: 0.445, dy: 0.665), "joint.knee.right"),
+            ("left knee", CGVector(dx: 0.555, dy: 0.665), "joint.knee.left"),
+            ("right shin", CGVector(dx: 0.44, dy: 0.72), "joint.shin.right"),
+            ("left shin", CGVector(dx: 0.56, dy: 0.72), "joint.shin.left")
+        ]
+
+        for testCase in cases {
+            launch(startURL: "littlewindows://debug/body-location/joints/female")
+            XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+            let visualization = app.otherElements["body-location.visualization"]
+            XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+            visualization.coordinate(withNormalizedOffset: testCase.point).tap()
+
+            let expected = app.buttons[
+                "body-location.selection.\(testCase.expectedID)"
+            ].firstMatch
+            let didSelectExpected = expected.waitForExistence(timeout: 3)
+            let selectedIdentifiers = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+            ).allElementsBoundByAccessibilityElement.map(\.identifier)
+            XCTAssertTrue(
+                didSelectExpected,
+                "Expected the rendered \(testCase.name) to select \(testCase.expectedID); selected \(selectedIdentifiers)."
             )
         }
     }

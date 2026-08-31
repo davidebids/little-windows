@@ -455,11 +455,15 @@ struct BodyVisualizationView: UIViewRepresentable {
                 // hierarchy. Keeping them still prevents the physics broad phase
                 // from being rebuilt for every subtle idle-animation frame.
                 let localPosition = interactionRoot.convert(position: hit.position, from: nil)
+                let zone = selectionZone(for: hit.entity)
+                let resolutionPosition = zone?.usesAnatomicalSelectionPlane == true
+                    ? anatomicalSelectionPlanePosition(from: localPosition)
+                    : localPosition
                 let semanticName = semanticName(for: hit.entity)
                 guard let structureID = resolvedStructureID(
                     for: semanticName,
-                    selectionZone: selectionZone(for: hit.entity),
-                    at: localPosition
+                    selectionZone: zone,
+                    at: resolutionPosition
                 ),
                 let structure = BodyAnatomyCatalog.structure(id: structureID),
                 structure.layer == parent.activeLayer,
@@ -475,6 +479,23 @@ struct BodyVisualizationView: UIViewRepresentable {
                 parent.onSelect(structureID)
                 return
             }
+        }
+
+        private func anatomicalSelectionPlanePosition(
+            from hitPosition: SIMD3<Float>
+        ) -> SIMD3<Float> {
+            let cameraPosition = interactionRoot.convert(position: .zero, from: nil)
+            let cameraDistance = simd_length(cameraPosition)
+            guard cameraDistance > 0.001 else { return hitPosition }
+
+            let planeNormal = cameraPosition / cameraDistance
+            let ray = hitPosition - cameraPosition
+            let denominator = simd_dot(ray, planeNormal)
+            guard abs(denominator) > 0.0001 else { return hitPosition }
+
+            let distanceAlongRay = -simd_dot(cameraPosition, planeNormal) / denominator
+            guard distanceAlongRay > 0 else { return hitPosition }
+            return cameraPosition + ray * distanceAlongRay
         }
 
         private func selectionMarkerPosition(
@@ -2505,6 +2526,15 @@ private enum AnatomySelectionZone: Hashable {
     case ankle(BodySide)
     case foot(BodySide)
 
+    var usesAnatomicalSelectionPlane: Bool {
+        switch self {
+        case .hip, .thigh, .knee, .lowerLeg, .ankle:
+            true
+        default:
+            false
+        }
+    }
+
     func structureID(
         layer: BodyAnatomyLayer,
         at renderedPoint: SIMD3<Float>,
@@ -2537,6 +2567,17 @@ private enum AnatomySelectionZone: Hashable {
                     point: renderedPoint,
                     variant: variant
                 )
+            }
+            switch self {
+            case let .hip(side), let .thigh(side), let .knee(side),
+                 let .lowerLeg(side), let .ankle(side):
+                return BodySurfaceMapper.lowerLimbJointID(
+                    at: renderedPoint,
+                    side: side,
+                    variant: variant
+                )
+            default:
+                break
             }
             let structureID = jointID
                 ?? BodySurfaceMapper.jointID(at: renderedPoint, variant: variant)
@@ -2588,16 +2629,13 @@ private enum AnatomySelectionZone: Hashable {
             return pairedID("body.wrist", side: side)
         case let .hand(side):
             return pairedID("body.hand", side: side)
-        case let .hip(side):
-            return pairedID(front ? "body.hip" : "body.buttock", side: side)
-        case let .thigh(side):
-            return pairedID(front ? "body.thigh" : "body.posteriorThigh", side: side)
-        case let .knee(side):
-            return pairedID("body.knee", side: side)
-        case let .lowerLeg(side):
-            return pairedID(front ? "body.lowerLeg" : "body.calf", side: side)
-        case let .ankle(side):
-            return pairedID("body.ankle", side: side)
+        case let .hip(side), let .thigh(side), let .knee(side),
+             let .lowerLeg(side), let .ankle(side):
+            return BodySurfaceMapper.lowerLimbBodyAreaID(
+                at: point,
+                side: side,
+                variant: variant
+            )
         case let .foot(side):
             return footStructureID(
                 layer: .bodyAreas,
@@ -2645,10 +2683,14 @@ private enum AnatomySelectionZone: Hashable {
             return pairedID("joint.elbow", side: side)
         case let .forearm(side), let .wrist(side), let .hand(side):
             return pairedID("joint.wrist", side: side)
-        case let .hip(side), let .thigh(side):
+        case let .hip(side):
             return pairedID("joint.hip", side: side)
-        case let .knee(side), let .lowerLeg(side):
+        case let .thigh(side):
+            return pairedID("joint.femur", side: side)
+        case let .knee(side):
             return pairedID("joint.knee", side: side)
+        case let .lowerLeg(side):
+            return pairedID("joint.shin", side: side)
         case let .ankle(side):
             return pairedID("joint.ankle", side: side)
         case .head, .pelvis, .foot:
@@ -3794,11 +3836,50 @@ enum BodySurfaceMapper {
             if x > 0.11 { return front ? "body.hip.\(side)" : "body.buttock.\(side)" }
             return "body.pelvis"
         }
-        if y > -0.43 { return front ? "body.thigh.\(side)" : "body.posteriorThigh.\(side)" }
-        if y > -0.53 { return "body.knee.\(side)" }
-        if y > -0.79 { return front ? "body.lowerLeg.\(side)" : "body.calf.\(side)" }
+        if y > -0.385 { return front ? "body.thigh.\(side)" : "body.posteriorThigh.\(side)" }
+        if y > -0.505 { return "body.knee.\(side)" }
+        if y > -0.72 { return front ? "body.lowerLeg.\(side)" : "body.calf.\(side)" }
         if y > -0.87 { return "body.ankle.\(side)" }
         return "body.foot.\(side)"
+    }
+
+    static func lowerLimbBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        let sideName = side == .left ? "left" : "right"
+        let front = point.z >= 0
+
+        if point.y > -0.12 {
+            return "\(front ? "body.hip" : "body.buttock").\(sideName)"
+        }
+        if point.y > -0.385 {
+            return "\(front ? "body.thigh" : "body.posteriorThigh").\(sideName)"
+        }
+        if point.y > -0.505 {
+            return "body.knee.\(sideName)"
+        }
+        if point.y > -0.72 {
+            return "\(front ? "body.lowerLeg" : "body.calf").\(sideName)"
+        }
+        return "body.ankle.\(sideName)"
+    }
+
+    static func lowerLimbJointID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        let sideName = side == .left ? "left" : "right"
+
+        if point.y > -0.12 { return "joint.hip.\(sideName)" }
+        if point.y > -0.385 { return "joint.femur.\(sideName)" }
+        if point.y > -0.505 { return "joint.knee.\(sideName)" }
+        if point.y > -0.72 { return "joint.shin.\(sideName)" }
+        return "joint.ankle.\(sideName)"
     }
 
     static func jointID(at point: SIMD3<Float>, variant: BodyModelVariant) -> String? {
@@ -3836,9 +3917,15 @@ enum BodySurfaceMapper {
                 ("joint.hip.\(side)", isLeft
                     ? SIMD3(0.137619, -0.046887, -0.083725)
                     : SIMD3(-0.144295, -0.046583, -0.083695)),
+                ("joint.femur.\(side)", isLeft
+                    ? SIMD3(0.121709, -0.266411, -0.090103)
+                    : SIMD3(-0.134439, -0.266275, -0.087682)),
                 ("joint.knee.\(side)", isLeft
                     ? SIMD3(0.105798, -0.463827, -0.095274)
                     : SIMD3(-0.124583, -0.463974, -0.088036)),
+                ("joint.shin.\(side)", isLeft
+                    ? SIMD3(0.126144, -0.625372, -0.057786)
+                    : SIMD3(-0.143374, -0.626103, -0.049740)),
                 ("joint.ankle.\(side)", isLeft
                     ? SIMD3(0.143649, -0.774522, -0.020298)
                     : SIMD3(-0.162165, -0.776210, -0.011443))
@@ -3864,9 +3951,15 @@ enum BodySurfaceMapper {
             ("joint.hip.\(side)", isLeft
                 ? SIMD3(0.149709, -0.062284, -0.007297)
                 : SIMD3(-0.149586, -0.062373, -0.005856)),
+            ("joint.femur.\(side)", isLeft
+                ? SIMD3(0.142874, -0.313184, -0.043016)
+                : SIMD3(-0.142521, -0.313271, -0.041364)),
             ("joint.knee.\(side)", isLeft
                 ? SIMD3(0.136038, -0.562694, -0.077240)
                 : SIMD3(-0.135456, -0.562811, -0.076872)),
+            ("joint.shin.\(side)", isLeft
+                ? SIMD3(0.171502, -0.717982, -0.058178)
+                : SIMD3(-0.171713, -0.718151, -0.057380)),
             ("joint.ankle.\(side)", isLeft
                 ? SIMD3(0.209669, -0.883374, -0.039116)
                 : SIMD3(-0.210147, -0.883491, -0.038887))
