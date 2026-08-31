@@ -2626,13 +2626,12 @@ private enum AnatomySelectionZone: Hashable {
     case ankle(BodySide)
     case foot(BodySide)
 
-    /// Broad adjacent capsules overlap the visibly narrower neck, elbow, and
-    /// wrist so there are no dead strips at those joints. Prefer only these
-    /// known transition landmarks; other zones retain front-to-back hit order
-    /// because ray depth resolves boundaries such as thigh/knee/shin.
+    /// Broad adjacent capsules overlap the visibly narrower neck and elbow so
+    /// there are no dead strips at those joints. Other zones retain front-to-
+    /// back hit order because their visible hit position resolves boundaries.
     var hitPriority: Int {
         switch self {
-        case .neck, .elbow, .wrist:
+        case .neck, .elbow:
             1
         default:
             0
@@ -2666,8 +2665,18 @@ private enum AnatomySelectionZone: Hashable {
                     variant: variant
                 )
             }
-            if case let .hand(side) = self {
-                return "muscle.hand.\(sideName(side))"
+            switch self {
+            case let .forearm(side), let .wrist(side), let .hand(side):
+                let bodyAreaID = BodySurfaceMapper.upperLimbBodyAreaID(
+                    at: renderedPoint,
+                    side: side,
+                    variant: variant
+                )
+                return bodyAreaID.contains(".hand.")
+                    ? "muscle.hand.\(sideName(side))"
+                    : "muscle.forearm.\(sideName(side))"
+            default:
+                break
             }
             let structureID = muscleID(front: front)
                 ?? BodySurfaceMapper.muscleID(at: renderedPoint, variant: variant)
@@ -2736,12 +2745,12 @@ private enum AnatomySelectionZone: Hashable {
             return pairedID("body.upperArm", side: side)
         case let .elbow(side):
             return pairedID("body.elbow", side: side)
-        case let .forearm(side):
-            return pairedID("body.forearm", side: side)
-        case let .wrist(side):
-            return pairedID("body.wrist", side: side)
-        case let .hand(side):
-            return pairedID("body.hand", side: side)
+        case let .forearm(side), let .wrist(side), let .hand(side):
+            return BodySurfaceMapper.upperLimbBodyAreaID(
+                at: point,
+                side: side,
+                variant: variant
+            )
         case let .hip(side), let .thigh(side), let .knee(side),
              let .lowerLeg(side), let .ankle(side):
             return BodySurfaceMapper.lowerLimbBodyAreaID(
@@ -4035,6 +4044,35 @@ private enum AnatomyMaterial {
 }
 
 enum BodySurfaceMapper {
+    static func upperLimbBodyAreaID(
+        at point: SIMD3<Float>,
+        side: BodySide,
+        variant: BodyModelVariant
+    ) -> String {
+        let point = canonicalPoint(point / anatomySceneScale, variant: variant)
+        return upperLimbBodyAreaID(atCanonical: point, side: side)
+    }
+
+    private static func upperLimbBodyAreaID(
+        atCanonical point: SIMD3<Float>,
+        side: BodySide
+    ) -> String {
+        let distalX = side == .left ? point.x : -point.x
+        // Project onto the modeled forearm-to-palm axis. This keeps the narrow
+        // wrist crease stable even where the lightweight proxies overlap.
+        let wristToHandProgress = (distalX - 0.408) * 0.758
+            + (point.y - 0.001) * -0.652
+        let sideName = side == .left ? "left" : "right"
+
+        if wristToHandProgress > 0 {
+            return "body.hand.\(sideName)"
+        }
+        if wristToHandProgress > -0.026 {
+            return "body.wrist.\(sideName)"
+        }
+        return "body.forearm.\(sideName)"
+    }
+
     static func structureID(at point: SIMD3<Float>, variant: BodyModelVariant) -> String? {
         let point = canonicalPoint(point / anatomySceneScale, variant: variant)
         let side = point.x >= 0 ? "left" : "right"
@@ -4043,8 +4081,16 @@ enum BodySurfaceMapper {
         let y = point.y
 
         if x > 0.25, y > -0.18 {
-            if x > 0.46 || y < 0.02 { return "body.hand.\(side)" }
-            if x > 0.41 { return "body.wrist.\(side)" }
+            let bodySide: BodySide = point.x >= 0 ? .left : .right
+            let distalX = bodySide == .left ? point.x : -point.x
+            let wristToHandProgress = (distalX - 0.408) * 0.758
+                + (point.y - 0.001) * -0.652
+            if wristToHandProgress > -0.026 {
+                return upperLimbBodyAreaID(
+                    atCanonical: point,
+                    side: bodySide
+                )
+            }
             if x > 0.32 { return "body.forearm.\(side)" }
             if x > 0.27, y > 0.22 { return "body.elbow.\(side)" }
             if y > 0.49 { return "body.shoulder.\(side)" }
