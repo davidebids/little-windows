@@ -12,7 +12,6 @@ enum SampleData {
     @MainActor
     static func seedIfNeeded(in context: ModelContext) async {
         let defaults = UserDefaults.standard
-        _ = ProfileDuplicateRepairService.repair(context: context)
         if !defaults.bool(forKey: legacyGrowthMigrationCompletedKey) {
             _ = try? LegacyTrackerGrowthMigration.migrate(in: context)
             defaults.set(true, forKey: legacyGrowthMigrationCompletedKey)

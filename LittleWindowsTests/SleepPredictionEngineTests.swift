@@ -8458,6 +8458,23 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<HomeTodoList>()).count, 9)
     }
 
+    func testFoodHomeDuplicateRepairLaunchMaintenanceIsThrottled() {
+        let now = Date(timeIntervalSinceReferenceDate: 900_000)
+
+        XCTAssertTrue(FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+            lastCompletedAt: nil,
+            now: now
+        ))
+        XCTAssertFalse(FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+            lastCompletedAt: now.addingTimeInterval(-60),
+            now: now
+        ))
+        XCTAssertTrue(FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+            lastCompletedAt: now.addingTimeInterval(-24 * 60 * 60),
+            now: now
+        ))
+    }
+
     @MainActor
     func testFoodHomeDuplicateRepairDoesNotSweepUnrelatedSyncedModels() throws {
         let container = try makeInMemoryContainer()

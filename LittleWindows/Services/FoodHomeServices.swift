@@ -824,10 +824,23 @@ extension ShoppingList: SyncedDuplicateRepairModel {}
 extension ShoppingListItem: SyncedDuplicateRepairModel {}
 
 enum FoodHomeDuplicateRepairService {
+    static let lastLaunchMaintenanceAtKey =
+        "maintenance.foodHomeDuplicateRepair.lastCompletedAt"
+    static let launchMaintenanceInterval: TimeInterval = 24 * 60 * 60
+
     // CloudKit schedules work for every deleted managed object. Bound launch
     // maintenance so a damaged store cannot create hundreds of overlapping
     // background tasks or hold SQLite's WAL open for minutes.
     private static let maximumDeletesPerRun = 32
+
+    static func launchMaintenanceIsDue(
+        lastCompletedAt: Date?,
+        now: Date = Date(),
+        minimumInterval: TimeInterval = launchMaintenanceInterval
+    ) -> Bool {
+        guard let lastCompletedAt else { return true }
+        return now.timeIntervalSince(lastCompletedAt) >= minimumInterval
+    }
 
     @discardableResult
     @MainActor
