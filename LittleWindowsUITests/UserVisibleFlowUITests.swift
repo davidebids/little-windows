@@ -51,6 +51,248 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testBodyLocationFullBodyLandmarksMatchRenderedAnatomy() {
+        continueAfterFailure = false
+
+        let frontCases: [(name: String, point: CGVector, expectedID: String)] = [
+            ("face", CGVector(dx: 0.50, dy: 0.18), "body.face"),
+            ("neck", CGVector(dx: 0.50, dy: 0.245), "body.neck"),
+            ("chest", CGVector(dx: 0.50, dy: 0.31), "body.chest"),
+            ("abdomen", CGVector(dx: 0.50, dy: 0.42), "body.abdomen"),
+            ("pelvis", CGVector(dx: 0.50, dy: 0.525), "body.pelvis"),
+            ("right shoulder", CGVector(dx: 0.39, dy: 0.285), "body.shoulder.right"),
+            ("left shoulder", CGVector(dx: 0.61, dy: 0.285), "body.shoulder.left"),
+            ("right upper arm", CGVector(dx: 0.35, dy: 0.35), "body.upperArm.right"),
+            ("left upper arm", CGVector(dx: 0.65, dy: 0.35), "body.upperArm.left"),
+            ("right elbow", CGVector(dx: 0.365, dy: 0.39), "body.elbow.right"),
+            ("left elbow", CGVector(dx: 0.635, dy: 0.39), "body.elbow.left"),
+            ("right forearm", CGVector(dx: 0.30, dy: 0.47), "body.forearm.right"),
+            ("left forearm", CGVector(dx: 0.70, dy: 0.47), "body.forearm.left"),
+            ("right wrist", CGVector(dx: 0.27, dy: 0.515), "body.wrist.right"),
+            ("left wrist", CGVector(dx: 0.73, dy: 0.515), "body.wrist.left"),
+            ("right hand", CGVector(dx: 0.255, dy: 0.55), "body.hand.right"),
+            ("left hand", CGVector(dx: 0.745, dy: 0.55), "body.hand.left"),
+            ("right hip", CGVector(dx: 0.43, dy: 0.535), "body.hip.right"),
+            ("left hip", CGVector(dx: 0.57, dy: 0.535), "body.hip.left")
+        ]
+        assertBodyLocationLandmarks(frontCases)
+
+        let backCases: [(name: String, point: CGVector, expectedID: String)] = [
+            ("back of head", CGVector(dx: 0.50, dy: 0.18), "body.head"),
+            ("neck", CGVector(dx: 0.50, dy: 0.245), "body.neck"),
+            ("upper back", CGVector(dx: 0.50, dy: 0.31), "body.upperBack"),
+            ("lower back", CGVector(dx: 0.50, dy: 0.42), "body.lowerBack"),
+            ("pelvis", CGVector(dx: 0.50, dy: 0.525), "body.pelvis"),
+            ("left shoulder", CGVector(dx: 0.39, dy: 0.285), "body.shoulder.left"),
+            ("right shoulder", CGVector(dx: 0.61, dy: 0.285), "body.shoulder.right"),
+            ("left upper arm", CGVector(dx: 0.35, dy: 0.35), "body.upperArm.left"),
+            ("right upper arm", CGVector(dx: 0.65, dy: 0.35), "body.upperArm.right"),
+            ("left elbow", CGVector(dx: 0.365, dy: 0.39), "body.elbow.left"),
+            ("right elbow", CGVector(dx: 0.635, dy: 0.39), "body.elbow.right"),
+            ("left forearm", CGVector(dx: 0.30, dy: 0.47), "body.forearm.left"),
+            ("right forearm", CGVector(dx: 0.70, dy: 0.47), "body.forearm.right"),
+            ("left wrist", CGVector(dx: 0.27, dy: 0.515), "body.wrist.left"),
+            ("right wrist", CGVector(dx: 0.73, dy: 0.515), "body.wrist.right"),
+            ("left hand", CGVector(dx: 0.255, dy: 0.55), "body.hand.left"),
+            ("right hand", CGVector(dx: 0.745, dy: 0.55), "body.hand.right"),
+            ("left buttock", CGVector(dx: 0.43, dy: 0.535), "body.buttock.left"),
+            ("right buttock", CGVector(dx: 0.57, dy: 0.535), "body.buttock.right")
+        ]
+        assertBodyLocationLandmarks(backCases, backView: true)
+    }
+
+    func testBodyLocationMaleFullBodyLandmarksMatchRenderedAnatomy() {
+        continueAfterFailure = false
+
+        let frontCases: [(name: String, point: CGVector, expectedID: String)] = [
+            ("face", CGVector(dx: 0.50, dy: 0.16), "body.face"),
+            ("neck", CGVector(dx: 0.50, dy: 0.235), "body.neck"),
+            ("chest", CGVector(dx: 0.50, dy: 0.31), "body.chest"),
+            ("abdomen", CGVector(dx: 0.50, dy: 0.42), "body.abdomen"),
+            ("pelvis", CGVector(dx: 0.50, dy: 0.535), "body.pelvis"),
+            ("right shoulder", CGVector(dx: 0.38, dy: 0.285), "body.shoulder.right"),
+            ("left shoulder", CGVector(dx: 0.62, dy: 0.285), "body.shoulder.left"),
+            ("right elbow", CGVector(dx: 0.35, dy: 0.40), "body.elbow.right"),
+            ("left elbow", CGVector(dx: 0.65, dy: 0.40), "body.elbow.left"),
+            ("right wrist", CGVector(dx: 0.255, dy: 0.515), "body.wrist.right"),
+            ("left wrist", CGVector(dx: 0.745, dy: 0.515), "body.wrist.left"),
+            ("right hand", CGVector(dx: 0.235, dy: 0.55), "body.hand.right"),
+            ("left hand", CGVector(dx: 0.765, dy: 0.55), "body.hand.left"),
+            ("right hip", CGVector(dx: 0.42, dy: 0.545), "body.hip.right"),
+            ("left hip", CGVector(dx: 0.58, dy: 0.545), "body.hip.left")
+        ]
+        assertBodyLocationLandmarks(frontCases, variant: "male")
+
+        let backCases: [(name: String, point: CGVector, expectedID: String)] = [
+            ("back of head", CGVector(dx: 0.50, dy: 0.16), "body.head"),
+            ("neck", CGVector(dx: 0.50, dy: 0.235), "body.neck"),
+            ("upper back", CGVector(dx: 0.50, dy: 0.31), "body.upperBack"),
+            ("lower back", CGVector(dx: 0.50, dy: 0.42), "body.lowerBack"),
+            ("pelvis", CGVector(dx: 0.50, dy: 0.535), "body.pelvis"),
+            ("left shoulder", CGVector(dx: 0.38, dy: 0.285), "body.shoulder.left"),
+            ("right shoulder", CGVector(dx: 0.62, dy: 0.285), "body.shoulder.right"),
+            ("left elbow", CGVector(dx: 0.35, dy: 0.40), "body.elbow.left"),
+            ("right elbow", CGVector(dx: 0.65, dy: 0.40), "body.elbow.right"),
+            ("left hand", CGVector(dx: 0.235, dy: 0.55), "body.hand.left"),
+            ("right hand", CGVector(dx: 0.765, dy: 0.55), "body.hand.right"),
+            ("left buttock", CGVector(dx: 0.42, dy: 0.545), "body.buttock.left"),
+            ("right buttock", CGVector(dx: 0.58, dy: 0.545), "body.buttock.right")
+        ]
+        assertBodyLocationLandmarks(backCases, backView: true, variant: "male")
+    }
+
+    func testBodyLocationUpperBodyInternalLayerLandmarksMatchRenderedAnatomy() {
+        continueAfterFailure = false
+
+        assertInternalBodyLandmarks(
+            layer: "muscles",
+            cases: [
+                ("chest", CGVector(dx: 0.50, dy: 0.31), "muscle.pectorals"),
+                ("abdomen", CGVector(dx: 0.50, dy: 0.42), "muscle.abdominals"),
+                ("right shoulder", CGVector(dx: 0.39, dy: 0.285), "muscle.deltoid.right"),
+                ("left shoulder", CGVector(dx: 0.61, dy: 0.285), "muscle.deltoid.left"),
+                ("right upper arm", CGVector(dx: 0.35, dy: 0.35), "muscle.biceps.right"),
+                ("left upper arm", CGVector(dx: 0.65, dy: 0.35), "muscle.biceps.left"),
+                ("right forearm", CGVector(dx: 0.30, dy: 0.47), "muscle.forearm.right"),
+                ("left forearm", CGVector(dx: 0.70, dy: 0.47), "muscle.forearm.left"),
+                ("right hand", CGVector(dx: 0.255, dy: 0.55), "muscle.hand.right"),
+                ("left hand", CGVector(dx: 0.745, dy: 0.55), "muscle.hand.left")
+            ]
+        )
+        assertInternalBodyLandmarks(
+            layer: "muscles",
+            backView: true,
+            cases: [
+                ("upper back", CGVector(dx: 0.50, dy: 0.31), "muscle.trapezius"),
+                ("lower back", CGVector(dx: 0.50, dy: 0.42), "muscle.lowerBack"),
+                ("left upper arm", CGVector(dx: 0.35, dy: 0.35), "muscle.triceps.left"),
+                ("right upper arm", CGVector(dx: 0.65, dy: 0.35), "muscle.triceps.right"),
+                ("left buttock", CGVector(dx: 0.43, dy: 0.535), "muscle.gluteal.left"),
+                ("right buttock", CGVector(dx: 0.57, dy: 0.535), "muscle.gluteal.right")
+            ]
+        )
+
+        assertInternalBodyLandmarks(
+            layer: "joints",
+            cases: [
+                ("neck", CGVector(dx: 0.50, dy: 0.245), "joint.cervicalSpine"),
+                ("rib cage", CGVector(dx: 0.50, dy: 0.31), "joint.ribCage"),
+                ("lower spine", CGVector(dx: 0.50, dy: 0.42), "joint.lumbarSpine"),
+                ("right shoulder", CGVector(dx: 0.39, dy: 0.285), "joint.shoulder.right"),
+                ("left shoulder", CGVector(dx: 0.61, dy: 0.285), "joint.shoulder.left"),
+                ("right elbow", CGVector(dx: 0.365, dy: 0.39), "joint.elbow.right"),
+                ("left elbow", CGVector(dx: 0.635, dy: 0.39), "joint.elbow.left"),
+                ("right wrist", CGVector(dx: 0.27, dy: 0.515), "joint.wrist.right"),
+                ("left wrist", CGVector(dx: 0.73, dy: 0.515), "joint.wrist.left")
+            ]
+        )
+
+        assertInternalBodyLandmarks(
+            layer: "nerves",
+            cases: [
+                ("right face", CGVector(dx: 0.485, dy: 0.18), "nerve.trigeminal.right"),
+                ("left face", CGVector(dx: 0.515, dy: 0.18), "nerve.trigeminal.left"),
+                ("right upper arm", CGVector(dx: 0.35, dy: 0.35), "nerve.median.right"),
+                ("left upper arm", CGVector(dx: 0.65, dy: 0.35), "nerve.median.left"),
+                ("right forearm", CGVector(dx: 0.30, dy: 0.47), "nerve.median.right"),
+                ("left forearm", CGVector(dx: 0.70, dy: 0.47), "nerve.median.left")
+            ]
+        )
+        assertInternalBodyLandmarks(
+            layer: "nerves",
+            backView: true,
+            cases: [
+                ("left upper arm", CGVector(dx: 0.35, dy: 0.35), "nerve.ulnar.left"),
+                ("right upper arm", CGVector(dx: 0.65, dy: 0.35), "nerve.ulnar.right"),
+                ("left forearm", CGVector(dx: 0.30, dy: 0.47), "nerve.ulnar.left"),
+                ("right forearm", CGVector(dx: 0.70, dy: 0.47), "nerve.ulnar.right")
+            ]
+        )
+    }
+
+    func testBodyLocationVisibleOrgansSelectTheirRenderedStructure() {
+        continueAfterFailure = false
+
+        assertInternalBodyLandmarks(
+            layer: "organs",
+            cases: [
+                ("brain", CGVector(dx: 0.50, dy: 0.18), "organ.brain"),
+                ("right lung", CGVector(dx: 0.465, dy: 0.30), "organ.lung.right"),
+                ("left lung", CGVector(dx: 0.535, dy: 0.30), "organ.lung.left"),
+                ("heart", CGVector(dx: 0.545, dy: 0.325), "organ.heart"),
+                ("liver", CGVector(dx: 0.47, dy: 0.38), "organ.liver"),
+                ("intestines", CGVector(dx: 0.50, dy: 0.46), "organ.intestines"),
+                ("bladder", CGVector(dx: 0.49, dy: 0.50), "organ.bladder")
+            ]
+        )
+    }
+
+    private func assertBodyLocationLandmarks(
+        _ cases: [(name: String, point: CGVector, expectedID: String)],
+        backView: Bool = false,
+        variant: String = "female"
+    ) {
+        launch(startURL: "littlewindows://debug/body-location/bodyAreas/\(variant)")
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        if backView {
+            let back = app.buttons["body-location.orientation.back"]
+            XCTAssertTrue(back.waitForExistence(timeout: 4))
+            back.tap()
+        }
+
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        for testCase in cases {
+            visualization.coordinate(withNormalizedOffset: testCase.point).tap()
+            let expected = app.buttons[
+                "body-location.selection.\(testCase.expectedID)"
+            ].firstMatch
+            let didSelectExpected = expected.waitForExistence(timeout: 2)
+            let selectedIdentifiers = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+            ).allElementsBoundByAccessibilityElement.map(\.identifier)
+            XCTAssertTrue(
+                didSelectExpected,
+                "Expected a tap on the rendered \(testCase.name) to select \(testCase.expectedID); selected \(selectedIdentifiers)."
+            )
+        }
+    }
+
+    private func assertInternalBodyLandmarks(
+        layer: String,
+        backView: Bool = false,
+        cases: [(name: String, point: CGVector, expectedID: String)]
+    ) {
+        launch(startURL: "littlewindows://debug/body-location/\(layer)/female")
+        XCTAssertTrue(app.navigationBars["Where is it?"].waitForExistence(timeout: 8))
+        if backView {
+            let back = app.buttons["body-location.orientation.back"]
+            XCTAssertTrue(back.waitForExistence(timeout: 4))
+            back.tap()
+        }
+
+        let visualization = app.otherElements["body-location.visualization"]
+        XCTAssertTrue(visualization.waitForExistence(timeout: 6))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+        for testCase in cases {
+            visualization.coordinate(withNormalizedOffset: testCase.point).tap()
+            let expected = app.buttons[
+                "body-location.selection.\(testCase.expectedID)"
+            ].firstMatch
+            let didSelectExpected = expected.waitForExistence(timeout: 2)
+            let selectedIdentifiers = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "body-location.selection.")
+            ).allElementsBoundByAccessibilityElement.map(\.identifier)
+            XCTAssertTrue(
+                didSelectExpected,
+                "Expected \(layer) at the rendered \(testCase.name) to select \(testCase.expectedID); selected \(selectedIdentifiers)."
+            )
+        }
+    }
+
     func testBodyLocationFocusedHandAcceptsDirectSelections() {
         continueAfterFailure = false
 

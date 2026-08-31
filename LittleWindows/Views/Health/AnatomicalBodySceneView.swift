@@ -450,7 +450,34 @@ struct BodyVisualizationView: UIViewRepresentable {
         @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended, let view = arView else { return }
             let location = recognizer.location(in: view)
-            for hit in view.hitTest(location) {
+            let hits = view.hitTest(location).enumerated().sorted { lhs, rhs in
+                if parent.activeLayer == .organs {
+                    // Organ proxies are inexpensive boxes and can overlap even
+                    // where both rendered organs remain visible. Resolve those
+                    // hits by the on-screen organ center nearest the tap.
+                    let lhsDistance = organScreenDistance(
+                        for: lhs.element.entity,
+                        from: location,
+                        in: view
+                    )
+                    let rhsDistance = organScreenDistance(
+                        for: rhs.element.entity,
+                        from: location,
+                        in: view
+                    )
+                    if lhsDistance != rhsDistance {
+                        return lhsDistance < rhsDistance
+                    }
+                }
+                let lhsPriority = selectionZone(for: lhs.element.entity)?.hitPriority ?? 0
+                let rhsPriority = selectionZone(for: rhs.element.entity)?.hitPriority ?? 0
+                if lhsPriority == rhsPriority {
+                    return lhs.offset < rhs.offset
+                }
+                return lhsPriority > rhsPriority
+            }
+            for indexedHit in hits {
+                let hit = indexedHit.element
                 // Collision proxies are intentionally siblings of the breathing
                 // hierarchy. Keeping them still prevents the physics broad phase
                 // from being rebuilt for every subtle idle-animation frame.
@@ -479,6 +506,24 @@ struct BodyVisualizationView: UIViewRepresentable {
                 parent.onSelect(structureID)
                 return
             }
+        }
+
+        private func organScreenDistance(
+            for entity: Entity,
+            from tapLocation: CGPoint,
+            in view: ARView
+        ) -> CGFloat {
+            guard semanticName(for: entity).hasPrefix("anatomy:") else {
+                return .greatestFiniteMagnitude
+            }
+            let worldCenter = entity.position(relativeTo: nil)
+            guard let projectedCenter = view.project(worldCenter) else {
+                return .greatestFiniteMagnitude
+            }
+            return hypot(
+                projectedCenter.x - tapLocation.x,
+                projectedCenter.y - tapLocation.y
+            )
         }
 
         private func anatomicalSelectionPlanePosition(
@@ -2580,6 +2625,19 @@ private enum AnatomySelectionZone: Hashable {
     case lowerLeg(BodySide)
     case ankle(BodySide)
     case foot(BodySide)
+
+    /// Broad adjacent capsules overlap the visibly narrower neck, elbow, and
+    /// wrist so there are no dead strips at those joints. Prefer only these
+    /// known transition landmarks; other zones retain front-to-back hit order
+    /// because ray depth resolves boundaries such as thigh/knee/shin.
+    var hitPriority: Int {
+        switch self {
+        case .neck, .elbow, .wrist:
+            1
+        default:
+            0
+        }
+    }
 
     var usesAnatomicalSelectionPlane: Bool {
         switch self {
