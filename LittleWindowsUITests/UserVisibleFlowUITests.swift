@@ -757,6 +757,65 @@ final class UserVisibleFlowUITests: XCTestCase {
                 sideAttachment.lifetime = .keepAlways
                 add(sideAttachment)
 
+                let visualization = app.otherElements["body-location.visualization"]
+                XCTAssertTrue(visualization.waitForExistence(timeout: 4))
+                visualization.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.56, dy: 0.56)
+                ).press(
+                    forDuration: 0.05,
+                    thenDragTo: visualization.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.48, dy: 0.56)
+                    )
+                )
+                RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+                let obliqueAttachment = XCTAttachment(
+                    screenshot: XCUIScreen.main.screenshot()
+                )
+                obliqueAttachment.name =
+                    "Foot skeleton \(sex) \(focus.lowercased()) oblique"
+                obliqueAttachment.lifetime = .keepAlways
+                add(obliqueAttachment)
+
+                let reset = app.buttons["body-location.reset-view"]
+                XCTAssertTrue(reset.waitForExistence(timeout: 3))
+                reset.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                visualization.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.85, dy: 0.56)
+                ).press(
+                    forDuration: 0.05,
+                    thenDragTo: visualization.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.15, dy: 0.56)
+                    )
+                )
+                RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+                let rotatedAttachment = XCTAttachment(
+                    screenshot: XCUIScreen.main.screenshot()
+                )
+                rotatedAttachment.name =
+                    "Foot skeleton \(sex) \(focus.lowercased()) rotated"
+                rotatedAttachment.lifetime = .keepAlways
+                add(rotatedAttachment)
+
+                reset.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                visualization.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.15, dy: 0.56)
+                ).press(
+                    forDuration: 0.05,
+                    thenDragTo: visualization.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.85, dy: 0.56)
+                    )
+                )
+                RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+                let counterRotatedAttachment = XCTAttachment(
+                    screenshot: XCUIScreen.main.screenshot()
+                )
+                counterRotatedAttachment.name =
+                    "Foot skeleton \(sex) \(focus.lowercased()) counter-rotated"
+                counterRotatedAttachment.lifetime = .keepAlways
+                add(counterRotatedAttachment)
+
                 app.buttons["Sole"].tap()
                 RunLoop.current.run(until: Date().addingTimeInterval(0.6))
                 let soleAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

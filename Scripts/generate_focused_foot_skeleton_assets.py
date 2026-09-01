@@ -186,6 +186,134 @@ def center_hindfoot_assembly(
     return result
 
 
+def transform_bone_assembly(
+    bones: list[tuple[str, trimesh.Trimesh]],
+    matrix: np.ndarray,
+) -> list[tuple[str, trimesh.Trimesh]]:
+    """Apply one anatomical presentation transform without refitting components."""
+    result: list[tuple[str, trimesh.Trimesh]] = []
+    for name, mesh in bones:
+        transformed = mesh.copy()
+        transformed.apply_transform(matrix)
+        transformed.fix_normals()
+        result.append((name, transformed))
+    return result
+
+
+def cross_section_center(
+    vertices: np.ndarray,
+    y: float,
+    sample_count: int,
+) -> np.ndarray:
+    """Return a robust X/Z center close to one vertical position."""
+    count = min(sample_count, len(vertices))
+    sample = vertices[
+        np.argpartition(np.abs(vertices[:, 1] - y), count - 1)[:count]
+    ]
+    return np.asarray(
+        (
+            (
+                np.quantile(sample[:, 0], 0.06)
+                + np.quantile(sample[:, 0], 0.94)
+            )
+            * 0.5,
+            (
+                np.quantile(sample[:, 2], 0.06)
+                + np.quantile(sample[:, 2], 0.94)
+            )
+            * 0.5,
+        )
+    )
+
+
+def register_lower_leg_to_skin(
+    bones: list[tuple[str, trimesh.Trimesh]],
+    foot_bones: list[tuple[str, trimesh.Trimesh]],
+    skin: trimesh.Trimesh,
+) -> tuple[list[tuple[str, trimesh.Trimesh]], list[dict[str, float | int]]]:
+    """Register tibia/fibula along the real leg centerline without swapping them."""
+    by_name = dict(bones)
+    tibia = by_name.get("Tibia")
+    talus = dict(foot_bones).get("Talus")
+    if tibia is None or talus is None:
+        raise ValueError("Focused side skeleton requires a tibia and talus")
+
+    leg_vertices = np.concatenate([np.asarray(mesh.vertices) for _, mesh in bones])
+    tibia_vertices = np.asarray(tibia.vertices)
+    talus_vertices = np.asarray(talus.vertices)
+    talus_cutoff = np.quantile(talus_vertices[:, 1], 0.86)
+    proximal_talus_y = float(
+        talus_vertices[talus_vertices[:, 1] >= talus_cutoff, 1].mean()
+    )
+
+    # The fibula extends below the tibial plafond. Anchor vertical scaling to
+    # the tibia so that this real anatomical difference is retained.
+    source_min_y = float(tibia_vertices[:, 1].min())
+    source_max_y = float(leg_vertices[:, 1].max())
+    target_min_y = proximal_talus_y - 0.001
+    target_max_y = float(skin.bounds[1, 1] - 0.003)
+    y_scale = (target_max_y - target_min_y) / (source_max_y - source_min_y)
+
+    source_sample_y = np.linspace(float(leg_vertices[:, 1].min()), source_max_y, 18)
+    source_centers = np.asarray(
+        [cross_section_center(leg_vertices, y, 56) for y in source_sample_y]
+    )
+    target_sample_y = target_min_y + (source_sample_y - source_min_y) * y_scale
+    skin_vertices = np.asarray(skin.vertices)
+    target_centers = np.asarray(
+        [cross_section_center(skin_vertices, y, 128) for y in target_sample_y]
+    )
+
+    registered_bones: list[tuple[str, trimesh.Trimesh]] = []
+    reports: list[dict[str, float | int]] = []
+    for name, mesh in bones:
+        registered = mesh.copy()
+        vertices = np.asarray(registered.vertices).copy()
+        source_center_x = np.interp(
+            vertices[:, 1], source_sample_y, source_centers[:, 0]
+        )
+        source_center_z = np.interp(
+            vertices[:, 1], source_sample_y, source_centers[:, 1]
+        )
+        target_y = target_min_y + (vertices[:, 1] - source_min_y) * y_scale
+        target_center_x = np.interp(
+            target_y, target_sample_y, target_centers[:, 0]
+        )
+        target_center_z = np.interp(
+            target_y, target_sample_y, target_centers[:, 1]
+        )
+        # Leave a small soft-tissue margin around both shafts. This reduces
+        # corrective deformation at the malleoli while retaining their true
+        # medial/lateral ordering and relative spacing.
+        cross_section_scale = 0.93
+        vertices[:, 0] = target_center_x + (
+            vertices[:, 0] - source_center_x
+        ) * cross_section_scale
+        vertices[:, 2] = target_center_z + (
+            vertices[:, 2] - source_center_z
+        ) * cross_section_scale
+        vertices[:, 1] = target_y
+        registered.vertices = vertices
+
+        fitted_vertices, report = fit_face_interiors(
+            skin,
+            np.asarray(registered.vertices),
+            np.asarray(registered.faces),
+        )
+        registered.vertices = fitted_vertices
+        registered.fix_normals()
+        if int(report["outside_after"]) != 0:
+            raise ValueError(f"{name} remains outside the focused foot shell")
+        if float(report["maximum_iteration_correction"]) > 0.005:
+            raise ValueError(
+                f"{name} needs excessive lower-leg correction: "
+                f"{float(report['maximum_iteration_correction']):.6f}m"
+            )
+        registered_bones.append((name, registered))
+        reports.append(report)
+    return registered_bones, reports
+
+
 def shell_center_x_at_z(skin: trimesh.Trimesh, z: float) -> float:
     """Return a robust shell centerline sample at one plantar position."""
     skin_vertices = np.asarray(skin.vertices)
@@ -265,6 +393,39 @@ def validate_plantar_landmarks(
         "heel_offset_mm": heel_offset * 1000.0,
         "width_fill": width_fill,
         "length_fill": length_fill,
+    }
+
+
+def validate_side_landmarks(
+    bones: list[tuple[str, trimesh.Trimesh]],
+    side: str,
+) -> dict[str, float | int]:
+    """Reject a contained side assembly with swapped shafts or a detached ankle."""
+    by_name = dict(bones)
+    tibia = by_name.get("Tibia")
+    fibula = by_name.get("Fibula")
+    talus = by_name.get("Talus")
+    if tibia is None or fibula is None or talus is None:
+        raise ValueError("Focused side skeleton is missing tibia, fibula, or talus")
+
+    shaft_delta = float(tibia.centroid[0] - fibula.centroid[0])
+    shaft_order_is_correct = shaft_delta < 0 if side == "Left" else shaft_delta > 0
+    if not shaft_order_is_correct:
+        raise ValueError(
+            f"{side} tibia/fibula are laterally swapped: delta={shaft_delta:.6f}"
+        )
+
+    tibia_vertices = np.asarray(tibia.vertices)
+    talus_vertices = np.asarray(talus.vertices)
+    tibia_to_talus, _ = cKDTree(talus_vertices).query(tibia_vertices, k=1)
+    ankle_gap = float(tibia_to_talus.min())
+    if ankle_gap > 0.006:
+        raise ValueError(
+            f"{side} tibia is detached from the talus by {ankle_gap:.6f}m"
+        )
+    return {
+        "shaft_delta_mm": shaft_delta * 1000.0,
+        "ankle_gap_mm": ankle_gap * 1000.0,
     }
 
 
@@ -375,25 +536,18 @@ def generate(source: str, resources: Path) -> None:
                     for name, mesh in bones
                     if name not in {"Tibia", "Fibula"}
                 ]
+                source_lower_leg_bones = [
+                    (name, mesh.copy())
+                    for name, mesh in bones
+                    if name in {"Tibia", "Fibula"}
+                ]
                 validate_bone_inventory(source_foot_bones)
-                fitted_bones, side_report = fit_bones_to_skin(bones, skin)
-                face_fitted_bones: list[tuple[str, trimesh.Trimesh]] = []
-                for bone_name, bone in fitted_bones:
-                    fitted_vertices, _ = fit_face_interiors(
-                        skin,
-                        np.asarray(bone.vertices),
-                        np.asarray(bone.faces),
-                    )
-                    fitted = bone.copy()
-                    fitted.vertices = fitted_vertices
-                    face_fitted_bones.append((bone_name, fitted))
-                fitted_bones = face_fitted_bones
 
                 target_sole_skin = usd_to_mesh(
                     resources / f"FootSoleSurface{variant}{side}.usdc",
                     temporary_directory,
                 )
-                sole_skin, _ = internal_sole_presentation(
+                sole_skin, sole_warp = internal_sole_presentation(
                     skin,
                     target_sole_skin,
                     variant,
@@ -428,8 +582,39 @@ def generate(source: str, resources: Path) -> None:
                     side,
                 )
 
+                # Use the validated plantar assembly as the canonical foot for
+                # the side view. Inverting the exact shell presentation warp
+                # preserves all five rays and their depth when the user drags
+                # away from the default lateral camera.
+                side_foot_bones = transform_bone_assembly(
+                    sole_bones,
+                    np.linalg.inv(sole_warp.matrix),
+                )
+                registered_lower_leg_bones, lower_leg_reports = (
+                    register_lower_leg_to_skin(
+                        source_lower_leg_bones,
+                        side_foot_bones,
+                        skin,
+                    )
+                )
+                side_bones = side_foot_bones + registered_lower_leg_bones
+                side_landmark_report = validate_side_landmarks(side_bones, side)
+                side_report = {
+                    "inverse_plantar_registration": 1,
+                    "lower_leg_face_fits": len(lower_leg_reports),
+                    "lower_leg_outside_after": sum(
+                        int(report["outside_after"])
+                        for report in lower_leg_reports
+                    ),
+                    "lower_leg_maximum_correction": max(
+                        float(report["maximum_iteration_correction"])
+                        for report in lower_leg_reports
+                    ),
+                    **side_landmark_report,
+                }
+
                 for prefix, presentation_bones, presentation_skin, report in (
-                    ("Foot", fitted_bones, skin, side_report),
+                    ("Foot", side_bones, skin, side_report),
                     ("FootSole", sole_bones, sole_skin, sole_report),
                 ):
                     skeleton = trimesh.util.concatenate(
