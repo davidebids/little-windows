@@ -156,24 +156,6 @@ def fit_bones_to_skin(
     return final_bones, report
 
 
-def mirror_bone_assembly_x(
-    bones: list[tuple[str, trimesh.Trimesh]],
-) -> list[tuple[str, trimesh.Trimesh]]:
-    """Mirror one complete assembly without changing inter-bone spacing."""
-    combined = trimesh.util.concatenate([mesh for _, mesh in bones])
-    center_x = float(combined.bounds[:, 0].mean())
-    mirrored_bones: list[tuple[str, trimesh.Trimesh]] = []
-    for name, mesh in bones:
-        mirrored = mesh.copy()
-        vertices = np.asarray(mirrored.vertices).copy()
-        vertices[:, 0] = center_x * 2.0 - vertices[:, 0]
-        mirrored.vertices = vertices
-        mirrored.faces = np.asarray(mirrored.faces)[:, ::-1]
-        mirrored.fix_normals()
-        mirrored_bones.append((name, mirrored))
-    return mirrored_bones
-
-
 def center_hindfoot_assembly(
     bones: list[tuple[str, trimesh.Trimesh]],
     skin: trimesh.Trimesh,
@@ -243,10 +225,13 @@ def validate_plantar_landmarks(
     )
     medial_delta = hallux_x - fifth_x
     minimum_medial_delta = float(skin.extents[0] * 0.38)
+    # Global X increases toward the body's left. The hallux must therefore be
+    # closer to the midline than the fifth toe: lower X on the left foot and
+    # higher X on the right foot.
     medial_is_correct = (
-        medial_delta >= minimum_medial_delta
+        medial_delta <= -minimum_medial_delta
         if side == "Left"
-        else medial_delta <= -minimum_medial_delta
+        else medial_delta >= minimum_medial_delta
     )
     if not medial_is_correct:
         raise ValueError(
@@ -416,10 +401,11 @@ def generate(source: str, resources: Path) -> None:
                 # The side-view skin affine can be fully contained while still
                 # leaving the plantar skeleton short and shifted to one side.
                 # Fit the complete named foot-bone assembly directly to the
-                # actual sole shell so all five rays retain their relationship
-                # and use the available plantar width and length.
+                # actual sole shell without mirroring it. The source already
+                # has the hallux on the medial side of each foot; mirroring the
+                # assembly places the great-toe bones under the little-toe skin.
                 sole_bones, sole_report = fit_bones_to_skin(
-                    mirror_bone_assembly_x(source_foot_bones),
+                    source_foot_bones,
                     sole_skin,
                 )
                 sole_bones = center_hindfoot_assembly(sole_bones, sole_skin)
