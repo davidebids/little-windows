@@ -1095,7 +1095,7 @@ struct BodyVisualizationView: UIViewRepresentable {
 
         private var defaultPitch: Float {
             guard isShowingFootDetail else { return 0 }
-            return parent.orientation == .front ? 0.04 : -.pi / 2
+            return parent.orientation == .front ? 0 : -.pi / 2
         }
 
         private var defaultYaw: Float {
@@ -1103,14 +1103,10 @@ struct BodyVisualizationView: UIViewRepresentable {
                 return parent.orientation == .front ? 0 : .pi
             }
             guard parent.orientation == .front else { return 0 }
-            // A perfectly lateral foot view projects all five toe rays onto the
-            // same line, making correct phalanges look like a malformed stack.
-            // Keep the presentation side-facing while exposing enough of the
-            // dorsal plane to show each metatarsal and toe distinctly.
-            let threeQuarterLateralYaw = Float.pi * 0.34
-            return parent.footDetailFocus == .right
-                ? threeQuarterLateralYaw
-                : -threeQuarterLateralYaw
+            // Side means a true lateral projection. A three-quarter view makes
+            // the longitudinal axis appear to hang downward and compresses the
+            // metatarsals into an anatomically misleading cluster.
+            return parent.footDetailFocus == .right ? .pi / 2 : -.pi / 2
         }
 
         private func prepareForLayerTransition(
