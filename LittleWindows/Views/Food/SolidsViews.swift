@@ -1846,6 +1846,7 @@ struct SolidsDigestiveSupportView: View {
     @Environment(\.modelContext) private var modelContext
 
     let profile: CareProfile
+    let careEvents: [CareEvent]
     let eventItems: [SolidFoodEventItem]
     let profileState: SolidsProfileState?
     let openFood: (String) -> Void
@@ -1857,6 +1858,7 @@ struct SolidsDigestiveSupportView: View {
     @State private var stateWriter: SolidsProfileStateWriter?
     @State private var errorMessage: String?
     @State private var showingCheckInHistory = false
+    @State private var showingAllTimelineEntries = false
 
     private var ageMonths: Int { SolidsTrackingService.ageMonths(for: profile) }
 
@@ -1873,9 +1875,19 @@ struct SolidsDigestiveSupportView: View {
         Array((profileState?.digestiveCheckIns ?? []).lazy.filter { !$0.isActive }.prefix(5))
     }
 
+    private var timelineEntries: [SolidsDigestiveTimelineEntry] {
+        SolidsDigestiveSupportService.timeline(
+            profileID: profile.id,
+            events: careEvents,
+            eventItems: eventItems,
+            checkIns: profileState?.digestiveCheckIns ?? []
+        )
+    }
+
     var body: some View {
         let currentAssessment = assessment
         let currentResolvedCheckIns = recentResolvedCheckIns
+        let currentTimelineEntries = timelineEntries
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 header
@@ -1885,6 +1897,7 @@ struct SolidsDigestiveSupportView: View {
                 if !currentResolvedCheckIns.isEmpty {
                     checkInHistoryCard(currentResolvedCheckIns)
                 }
+                timelineCard(currentTimelineEntries)
                 balanceCard(currentAssessment)
                 insightsSection(currentAssessment)
                 suggestionsSection(currentAssessment)
@@ -1926,6 +1939,71 @@ struct SolidsDigestiveSupportView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
+        }
+    }
+
+    private func timelineCard(_ entries: [SolidsDigestiveTimelineEntry]) -> some View {
+        let visibleEntries = showingAllTimelineEntries ? entries : Array(entries.prefix(12))
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("What changed?", systemImage: "clock.arrow.circlepath")
+                .font(.headline)
+            Text("Stool observations appear beside recent solids, health, medicine, and caregiver context logs. Being close in time does not mean one caused another.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if visibleEntries.isEmpty {
+                Text("Log a poo diaper, solids meal, or relevant care note to build this 7-day view.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(visibleEntries) { entry in
+                    timelineRow(entry)
+                }
+                if entries.count > 12 {
+                    Button(showingAllTimelineEntries ? "Show less" : "Show all \(entries.count)") {
+                        withAnimation(.snappy) {
+                            showingAllTimelineEntries.toggle()
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
+        }
+        .padding(16)
+        .appSurface()
+        .accessibilityIdentifier("solids.digestive.timeline")
+    }
+
+    private func timelineRow(_ entry: SolidsDigestiveTimelineEntry) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: entry.kind.systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(timelineColor(entry.kind))
+                .frame(width: 28, height: 28)
+                .background(timelineColor(entry.kind).opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(entry.title)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(entry.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Text(entry.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func timelineColor(_ kind: SolidsDigestiveTimelineKind) -> Color {
+        switch kind {
+        case .stool: .brown
+        case .solids: .orange
+        case .health: .red
+        case .medicine: .purple
+        case .context: .blue
         }
     }
 

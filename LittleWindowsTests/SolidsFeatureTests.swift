@@ -493,6 +493,241 @@ final class SolidsFeatureTests: XCTestCase {
     }
 
     @MainActor
+    func testLinkedDiaperObservationCreatesUpdatesAndRemovesDigestiveConcern() async throws {
+        let container = try ModelContainer(
+            for: SolidsProfileState.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profileID = UUID()
+        let eventID = UUID()
+        let writer = SolidsProfileStateWriter(modelContainer: container)
+        let recordedAt = Date(timeIntervalSince1970: 10_000)
+
+        let createError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: eventID,
+            recordedAt: recordedAt,
+            hardStool: true,
+            difficultOrPainful: false,
+            prolongedStraining: true,
+            visibleBlood: false,
+            notes: "Observed during diaper change",
+            isIncluded: true,
+            now: recordedAt
+        )
+        XCTAssertNil(createError)
+
+        var context = ModelContext(container)
+        var state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        XCTAssertEqual(state.activeDigestiveCheckIn?.id, eventID)
+        XCTAssertTrue(state.activeDigestiveCheckIn?.hardStool == true)
+        XCTAssertTrue(state.activeDigestiveCheckIn?.prolongedStraining == true)
+
+        let updateError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: eventID,
+            recordedAt: recordedAt,
+            hardStool: false,
+            difficultOrPainful: true,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "Updated observation",
+            isIncluded: true,
+            now: recordedAt.addingTimeInterval(60)
+        )
+        XCTAssertNil(updateError)
+
+        context = ModelContext(container)
+        state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        XCTAssertEqual(state.digestiveCheckIns.count, 1)
+        XCTAssertTrue(state.activeDigestiveCheckIn?.difficultOrPainful == true)
+        XCTAssertFalse(state.activeDigestiveCheckIn?.hardStool == true)
+
+        let removeError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: eventID,
+            recordedAt: recordedAt,
+            hardStool: false,
+            difficultOrPainful: false,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "",
+            isIncluded: false,
+            now: recordedAt.addingTimeInterval(120)
+        )
+        XCTAssertNil(removeError)
+
+        context = ModelContext(container)
+        state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        XCTAssertTrue(state.digestiveCheckIns.isEmpty)
+        XCTAssertNil(state.activeDigestiveCheckIn)
+    }
+
+    @MainActor
+    func testEditingResolvedLinkedDiaperDoesNotReopenItOrReplaceNewerConcern() async throws {
+        let container = try ModelContainer(
+            for: SolidsProfileState.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profileID = UUID()
+        let eventID = UUID()
+        let writer = SolidsProfileStateWriter(modelContainer: container)
+        let recordedAt = Date(timeIntervalSince1970: 20_000)
+        _ = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: eventID,
+            recordedAt: recordedAt,
+            hardStool: true,
+            difficultOrPainful: false,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "Original observation",
+            isIncluded: true,
+            now: recordedAt
+        )
+        _ = await writer.resolveDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: eventID,
+            now: recordedAt.addingTimeInterval(300)
+        )
+        let newer = SolidsDigestiveCheckIn(
+            recordedAt: recordedAt.addingTimeInterval(600),
+            hardStool: false,
+            prolongedStraining: true
+        )
+        _ = await writer.saveDigestiveCheckIn(
+            profileID: profileID,
+            checkIn: newer,
+            loggingCoverage: .someMeals,
+            reminderAt: nil,
+            now: newer.recordedAt
+        )
+
+        let editError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: eventID,
+            recordedAt: recordedAt,
+            hardStool: true,
+            difficultOrPainful: true,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "Edited old diaper",
+            isIncluded: true,
+            now: newer.recordedAt.addingTimeInterval(60)
+        )
+        XCTAssertNil(editError)
+
+        let context = ModelContext(container)
+        let state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        XCTAssertEqual(state.activeDigestiveCheckIn?.id, newer.id)
+        XCTAssertNotNil(state.digestiveCheckIns.first { $0.id == eventID }?.resolvedAt)
+        XCTAssertTrue(
+            state.digestiveCheckIns.first { $0.id == eventID }?.difficultOrPainful == true
+        )
+    }
+
+    @MainActor
+    func testDigestiveTimelineCombinesStoolFoodAndContextWithoutClaimingCause() {
+        let profileID = UUID()
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let firstMeal = CareEvent(
+            profileID: profileID,
+            type: .feed,
+            startDate: now.addingTimeInterval(-7_200)
+        )
+        firstMeal.feedKind = .solid
+        firstMeal.solidFoodDetails = [
+            SolidFoodLogDetail(foodID: "banana", foodName: "Banana")
+        ]
+        let stool = CareEvent(
+            profileID: profileID,
+            type: .diaper,
+            startDate: now.addingTimeInterval(-3_600)
+        )
+        stool.profileTypeSnapshot = .child
+        stool.diaperKind = .dirty
+        stool.pooTexture = .hard
+        stool.pooDifficultOrPainful = true
+        stool.linksDigestiveConcern = true
+        let secondMeal = CareEvent(
+            profileID: profileID,
+            type: .feed,
+            startDate: now.addingTimeInterval(-1_800)
+        )
+        secondMeal.feedKind = .solid
+        secondMeal.solidFoodDetails = [
+            SolidFoodLogDetail(foodID: "banana", foodName: "Banana"),
+            SolidFoodLogDetail(foodID: "pear", foodName: "Pear")
+        ]
+        let manualCheckIn = SolidsDigestiveCheckIn(
+            recordedAt: now.addingTimeInterval(-900),
+            hardStool: false,
+            prolongedStraining: true
+        )
+        let linkedCheckIn = SolidsDigestiveCheckIn(
+            id: stool.id,
+            recordedAt: stool.startDate,
+            hardStool: true,
+            difficultOrPainful: true
+        )
+
+        let timeline = SolidsDigestiveSupportService.timeline(
+            profileID: profileID,
+            events: [secondMeal, stool, firstMeal],
+            eventItems: [],
+            checkIns: [manualCheckIn, linkedCheckIn],
+            now: now
+        )
+
+        XCTAssertEqual(timeline.filter { $0.kind == .stool }.count, 2)
+        XCTAssertEqual(timeline.filter { $0.kind == .solids }.count, 2)
+        XCTAssertFalse(timeline.contains { $0.id == "check-in-\(stool.id.uuidString)" })
+        let laterMeal = timeline.first { $0.id == "solids-\(secondMeal.id.uuidString)" }
+        XCTAssertTrue(laterMeal?.detail.contains("First logged in this 7-day view: Pear") == true)
+        XCTAssertTrue(laterMeal?.detail.contains("Also logged earlier in this view: Banana") == true)
+        XCTAssertEqual(timeline.first?.id, "check-in-\(manualCheckIn.id.uuidString)")
+    }
+
+    @MainActor
+    func testDigestiveTimelineIsProfileDateScopedAndCapped() {
+        let profileID = UUID()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let recentEvents = (0..<100).map { index in
+            CareEvent(
+                profileID: profileID,
+                type: .custom,
+                title: "Context \(index)",
+                startDate: now.addingTimeInterval(Double(-index * 60))
+            )
+        }
+        let otherProfileEvent = CareEvent(
+            profileID: UUID(),
+            type: .custom,
+            title: "Other profile",
+            startDate: now
+        )
+        let oldEvent = CareEvent(
+            profileID: profileID,
+            type: .custom,
+            title: "Outside window",
+            startDate: now.addingTimeInterval(-8 * 86_400)
+        )
+
+        let timeline = SolidsDigestiveSupportService.timeline(
+            profileID: profileID,
+            events: recentEvents + [otherProfileEvent, oldEvent],
+            eventItems: [],
+            checkIns: [],
+            now: now
+        )
+
+        XCTAssertEqual(timeline.count, SolidsDigestiveSupportService.timelineEntryLimit)
+        XCTAssertEqual(timeline.first?.title, "Context 0")
+        XCTAssertFalse(timeline.contains { $0.title == "Other profile" })
+        XCTAssertFalse(timeline.contains { $0.title == "Outside window" })
+    }
+
+    @MainActor
     func testEveryBuiltInFoodHasCompleteQuantitativeNutritionCoverage() throws {
         let foods = SolidsReferenceCatalog.foodSummaries
         let foodIDs = Set(foods.map(\.id))
@@ -3749,6 +3984,14 @@ final class SolidsFeatureTests: XCTestCase {
                 notes: "Soft spears"
             )
         ]
+        let diaperEvent = CareEvent(profileID: profile.id, type: .diaper)
+        diaperEvent.profileTypeSnapshot = .child
+        diaperEvent.diaperKind = .dirty
+        diaperEvent.pooTexture = .hard
+        diaperEvent.pooDifficultOrPainful = true
+        diaperEvent.pooProlongedStraining = true
+        diaperEvent.pooVisibleBlood = true
+        diaperEvent.linksDigestiveConcern = true
         let plan = PlannedSolidMeal(
             profileID: profile.id,
             scheduledAt: Date(),
@@ -3766,6 +4009,7 @@ final class SolidsFeatureTests: XCTestCase {
         )
         sourceContext.insert(profile)
         sourceContext.insert(event)
+        sourceContext.insert(diaperEvent)
         sourceContext.insert(plan)
         sourceContext.insert(SolidAllergenProgress(
             profileID: profile.id,
@@ -3818,6 +4062,15 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(try destination.mainContext.fetchCount(FetchDescriptor<SolidFoodProgress>()), 1)
         XCTAssertEqual(try destination.mainContext.fetchCount(FetchDescriptor<SolidFoodEventItem>()), 1)
         XCTAssertEqual(try destination.mainContext.fetchCount(FetchDescriptor<PlannedSolidMeal>()), 1)
+        let importedDiaper = try XCTUnwrap(
+            destination.mainContext.fetch(FetchDescriptor<CareEvent>()).first {
+                $0.id == diaperEvent.id
+            }
+        )
+        XCTAssertTrue(importedDiaper.pooDifficultOrPainful == true)
+        XCTAssertTrue(importedDiaper.pooProlongedStraining == true)
+        XCTAssertTrue(importedDiaper.pooVisibleBlood == true)
+        XCTAssertTrue(importedDiaper.linksDigestiveConcern == true)
         let importedPlan = try XCTUnwrap(
             destination.mainContext.fetch(FetchDescriptor<PlannedSolidMeal>()).first
         )

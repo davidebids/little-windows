@@ -1101,6 +1101,76 @@ actor SolidsProfileStateWriter {
         return nil
     }
 
+    func reconcileLinkedDigestiveCheckIn(
+        profileID: UUID,
+        checkInID: UUID,
+        recordedAt: Date,
+        hardStool: Bool,
+        difficultOrPainful: Bool,
+        prolongedStraining: Bool,
+        visibleBlood: Bool,
+        notes: String,
+        isIncluded: Bool,
+        now: Date = Date()
+    ) async -> String? {
+        let state = state(for: profileID)
+        if !isIncluded {
+            guard state.modelContext != nil else { return nil }
+            let existing = state.digestiveCheckIns
+            let removedActive = existing.contains { $0.id == checkInID && $0.isActive }
+            let remaining = existing.filter { $0.id != checkInID }
+            guard remaining.count != existing.count else { return nil }
+            state.digestiveCheckIns = remaining
+            if removedActive {
+                state.digestiveReminderEnabled = false
+                state.digestiveReminderAt = nil
+            }
+            state.updatedAt = now
+            if let error = save() { return error }
+            if removedActive {
+                await NotificationManager.shared.scheduleSolidsDigestiveReminder(
+                    snapshot: .init(
+                        profileID: profileID,
+                        reminderAt: nil,
+                        isEnabled: false,
+                        hasActiveConcern: false
+                    )
+                )
+            }
+            return nil
+        }
+
+        guard hardStool || difficultOrPainful || prolongedStraining || visibleBlood else {
+            return nil
+        }
+        if state.modelContext == nil { modelContext.insert(state) }
+        let existingLinkedCheckIn = state.digestiveCheckIns.first { $0.id == checkInID }
+        let remainsResolved = existingLinkedCheckIn?.resolvedAt
+        var checkIns = state.digestiveCheckIns.filter { $0.id != checkInID }
+        if remainsResolved == nil {
+            checkIns = checkIns.map { existing in
+                guard existing.isActive else { return existing }
+                var resolved = existing
+                resolved.resolvedAt = now
+                return resolved
+            }
+        }
+        checkIns.append(SolidsDigestiveCheckIn(
+            id: checkInID,
+            recordedAt: recordedAt,
+            hardStool: hardStool,
+            difficultOrPainful: difficultOrPainful,
+            prolongedStraining: prolongedStraining,
+            visibleBlood: visibleBlood,
+            notes: notes,
+            resolvedAt: remainsResolved
+        ))
+        state.digestiveCheckIns = checkIns
+        state.updatedAt = now
+        if let error = save() { return error }
+        return nil
+    }
+
     func setDigestiveLoggingCoverage(
         profileID: UUID,
         coverage: SolidsLoggingCoverage,
@@ -2431,8 +2501,35 @@ struct SolidsBalanceAssessment: Equatable, Sendable {
     var activeConcern: SolidsDigestiveCheckIn?
 }
 
+enum SolidsDigestiveTimelineKind: String, Equatable, Sendable {
+    case stool
+    case solids
+    case health
+    case medicine
+    case context
+
+    var systemImage: String {
+        switch self {
+        case .stool: "circle.hexagongrid.fill"
+        case .solids: "carrot.fill"
+        case .health: "cross.case.fill"
+        case .medicine: "pills.fill"
+        case .context: "note.text"
+        }
+    }
+}
+
+struct SolidsDigestiveTimelineEntry: Identifiable, Equatable, Sendable {
+    var id: String
+    var recordedAt: Date
+    var kind: SolidsDigestiveTimelineKind
+    var title: String
+    var detail: String
+}
+
 enum SolidsDigestiveSupportService {
     static let defaultLookbackDays = 7
+    static let timelineEntryLimit = 80
 
     static let sourceURLs = [
         SolidsSourceLibrary.aapInfantConstipation,
@@ -2519,6 +2616,163 @@ enum SolidsDigestiveSupportService {
             },
             sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt, order: .reverse)]
         )
+    }
+
+    @MainActor
+    static func timeline(
+        profileID: UUID,
+        events: [CareEvent],
+        eventItems: [SolidFoodEventItem],
+        checkIns: [SolidsDigestiveCheckIn],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        lookbackDays: Int = defaultLookbackDays
+    ) -> [SolidsDigestiveTimelineEntry] {
+        let start = calendar.date(byAdding: .day, value: -lookbackDays, to: now) ?? now
+        let scopedEvents = events.filter {
+            $0.profileID == profileID && $0.startDate >= start && $0.startDate <= now
+        }
+        let eventIDs = Set(scopedEvents.map(\.id))
+        let itemsByEventID = Dictionary(grouping: eventItems.filter {
+            $0.profileID == profileID && $0.createdAt >= start && $0.createdAt <= now
+        }, by: \.eventID)
+        var seenFoodIDs = Set<String>()
+        var entries = [SolidsDigestiveTimelineEntry]()
+        entries.reserveCapacity(min(timelineEntryLimit, scopedEvents.count + checkIns.count))
+
+        for event in scopedEvents.sorted(by: { $0.startDate < $1.startDate }) {
+            switch event.type {
+            case .diaper where event.diaperKind?.hasPoo == true:
+                entries.append(stoolTimelineEntry(event))
+            case .potty where event.profileTypeSnapshot != .dog
+                && event.childPottyKind?.hasPoo == true:
+                entries.append(stoolTimelineEntry(event))
+            case .feed where event.feedKind == .solid:
+                let itemFoods = (itemsByEventID[event.id] ?? []).map {
+                    ($0.foodID, $0.foodNameSnapshot)
+                }
+                let detailFoods = event.solidFoodDetails.map { ($0.foodID, $0.foodName) }
+                let foods = itemFoods.isEmpty ? detailFoods : itemFoods
+                var firstInView = [String]()
+                var repeatedInView = [String]()
+                for (foodID, name) in foods {
+                    if seenFoodIDs.insert(foodID).inserted {
+                        firstInView.append(name)
+                    } else {
+                        repeatedInView.append(name)
+                    }
+                }
+                var details = [String]()
+                if !firstInView.isEmpty {
+                    details.append("First logged in this \(lookbackDays)-day view: \(orderedUnique(firstInView).joined(separator: ", "))")
+                }
+                if !repeatedInView.isEmpty {
+                    details.append("Also logged earlier in this view: \(orderedUnique(repeatedInView).joined(separator: ", "))")
+                }
+                if details.isEmpty,
+                   let description = event.foodDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !description.isEmpty {
+                    details.append("Foods logged: \(description)")
+                }
+                entries.append(.init(
+                    id: "solids-\(event.id.uuidString)",
+                    recordedAt: event.startDate,
+                    kind: .solids,
+                    title: "Solids meal",
+                    detail: details.isEmpty ? "Solid foods were logged." : details.joined(separator: " • ")
+                ))
+            case .symptom, .temperature:
+                entries.append(.init(
+                    id: "health-\(event.id.uuidString)",
+                    recordedAt: event.startDate,
+                    kind: .health,
+                    title: event.displayTitle,
+                    detail: timelineNotes(event.notes, fallback: "Health context logged near this time.")
+                ))
+            case .medicine:
+                var detail = [String]()
+                if let reason = event.reason?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !reason.isEmpty {
+                    detail.append("Reason: \(reason)")
+                }
+                if let notes = event.notes?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !notes.isEmpty {
+                    detail.append(notes)
+                }
+                entries.append(.init(
+                    id: "medicine-\(event.id.uuidString)",
+                    recordedAt: event.startDate,
+                    kind: .medicine,
+                    title: event.displayTitle,
+                    detail: detail.isEmpty ? "Medication context logged near this time." : detail.joined(separator: " • ")
+                ))
+            case .custom:
+                entries.append(.init(
+                    id: "context-\(event.id.uuidString)",
+                    recordedAt: event.startDate,
+                    kind: .context,
+                    title: event.displayTitle,
+                    detail: timelineNotes(event.notes, fallback: "Caregiver context note.")
+                ))
+            default:
+                break
+            }
+        }
+
+        for checkIn in checkIns where checkIn.recordedAt >= start
+            && checkIn.recordedAt <= now
+            && !eventIDs.contains(checkIn.id) {
+            var details = checkIn.observationLabels
+            if !checkIn.notes.isEmpty { details.append(checkIn.notes) }
+            if let resolvedAt = checkIn.resolvedAt {
+                details.append("Marked resolved \(resolvedAt.formatted(date: .abbreviated, time: .shortened))")
+            }
+            entries.append(.init(
+                id: "check-in-\(checkIn.id.uuidString)",
+                recordedAt: checkIn.recordedAt,
+                kind: .stool,
+                title: checkIn.isActive ? "Digestive concern recorded" : "Digestive check-in",
+                detail: details.joined(separator: " • ")
+            ))
+        }
+
+        return Array(entries.sorted { lhs, rhs in
+            if lhs.recordedAt == rhs.recordedAt { return lhs.id < rhs.id }
+            return lhs.recordedAt > rhs.recordedAt
+        }.prefix(timelineEntryLimit))
+    }
+
+    @MainActor
+    private static func stoolTimelineEntry(_ event: CareEvent) -> SolidsDigestiveTimelineEntry {
+        var details = [String]()
+        if let amount = event.pooAmount, amount != .unknown {
+            details.append("Amount: \(amount.displayName.lowercased())")
+        }
+        if let color = event.pooColor, color != .unknown {
+            details.append("Color: \(color.displayName.lowercased())")
+        }
+        if event.pooTexture != .hard,
+           let texture = event.pooTexture,
+           texture != .unknown {
+            details.append("Consistency: \(texture.displayName.lowercased())")
+        }
+        details.append(contentsOf: event.digestiveStoolObservationLabels)
+        if event.linksDigestiveConcern == true {
+            details.append("Linked to Feeding balance")
+        }
+        return .init(
+            id: "stool-\(event.id.uuidString)",
+            recordedAt: event.startDate,
+            kind: .stool,
+            title: event.type == .diaper ? "Poo diaper" : "Poo observation",
+            detail: details.isEmpty ? "Poo logged without optional details." : details.joined(separator: " • ")
+        )
+    }
+
+    private static func timelineNotes(_ notes: String?, fallback: String) -> String {
+        guard let notes = notes?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !notes.isEmpty else { return fallback }
+        return notes
     }
 
     static func assessment(

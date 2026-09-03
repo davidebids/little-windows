@@ -309,6 +309,10 @@ private struct EventDTO: Codable {
     var pooAmountRawValue: String?
     var pooColorRawValue: String?
     var pooTextureRawValue: String?
+    var pooDifficultOrPainful: Bool?
+    var pooProlongedStraining: Bool?
+    var pooVisibleBlood: Bool?
+    var linksDigestiveConcern: Bool?
     var stoolColor: String?
     var stoolTexture: String?
     var bookTitle: String?
@@ -1306,6 +1310,10 @@ enum DataExportImportService {
                 pooAmountRawValue: $0.pooAmountRawValue,
                 pooColorRawValue: $0.pooColorRawValue,
                 pooTextureRawValue: $0.pooTextureRawValue,
+                pooDifficultOrPainful: $0.pooDifficultOrPainful,
+                pooProlongedStraining: $0.pooProlongedStraining,
+                pooVisibleBlood: $0.pooVisibleBlood,
+                linksDigestiveConcern: $0.linksDigestiveConcern,
                 stoolColor: $0.stoolColor,
                 stoolTexture: $0.stoolTexture, bookTitle: $0.bookTitle,
                 medicineName: $0.medicineName, dose: $0.dose, doseUnit: $0.doseUnit,
@@ -2581,6 +2589,10 @@ enum DataExportImportService {
             event.pooAmountRawValue = value.pooAmountRawValue
             event.pooColorRawValue = value.pooColorRawValue
             event.pooTextureRawValue = value.pooTextureRawValue
+            event.pooDifficultOrPainful = value.pooDifficultOrPainful
+            event.pooProlongedStraining = value.pooProlongedStraining
+            event.pooVisibleBlood = value.pooVisibleBlood
+            event.linksDigestiveConcern = value.linksDigestiveConcern
             event.stoolColor = value.stoolColor
             event.stoolTexture = value.stoolTexture
             event.bookTitle = value.bookTitle

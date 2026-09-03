@@ -58,6 +58,22 @@ final class CareReportExportServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testChildStoolObservationsAppearInCareReport() {
+        let event = CareEvent(type: .diaper)
+        event.diaperKind = .dirty
+        event.pooTexture = .hard
+        event.pooDifficultOrPainful = true
+        event.pooProlongedStraining = true
+        event.pooVisibleBlood = true
+
+        let details = CareReportExportService.detailsText(for: event)
+        XCTAssertTrue(details.contains("Poo texture: Hard"))
+        XCTAssertTrue(details.contains("Difficult or painful to pass"))
+        XCTAssertTrue(details.contains("Prolonged straining"))
+        XCTAssertTrue(details.contains("Visible blood"))
+    }
+
+    @MainActor
     func testSolidNutritionExportReportsIncompleteFoodCoverage() {
         let event = CareEvent(type: .feed)
         event.feedKind = .solid

@@ -272,6 +272,7 @@ struct FoodHomeView: View {
                     || selectedSolidsState?.activeDigestiveCheckIn != nil) {
                 SolidsDigestiveSupportView(
                     profile: selectedProfile,
+                    careEvents: careEvents,
                     eventItems: solidFoodEventItems,
                     profileState: selectedSolidsState,
                     openFood: { path.append(.solidFood($0)) },

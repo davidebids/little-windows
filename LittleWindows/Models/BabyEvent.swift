@@ -240,6 +240,10 @@ final class CareEvent {
     var pooAmountRawValue: String?
     var pooColorRawValue: String?
     var pooTextureRawValue: String?
+    var pooDifficultOrPainful: Bool?
+    var pooProlongedStraining: Bool?
+    var pooVisibleBlood: Bool?
+    var linksDigestiveConcern: Bool?
     var stoolColor: String?
     var stoolTexture: String?
     var bookTitle: String?
@@ -487,6 +491,22 @@ final class CareEvent {
                 ?? stoolTexture.flatMap { PooTexture(rawValue: $0.lowercased()) }
         }
         set { pooTextureRawValue = newValue?.rawValue }
+    }
+
+    var hasDigestiveStoolObservation: Bool {
+        pooTexture == .hard
+            || pooDifficultOrPainful == true
+            || pooProlongedStraining == true
+            || pooVisibleBlood == true
+    }
+
+    var digestiveStoolObservationLabels: [String] {
+        [
+            pooTexture == .hard ? "Hard or dry stool" : nil,
+            pooDifficultOrPainful == true ? "Difficult or painful to pass" : nil,
+            pooProlongedStraining == true ? "Prolonged straining" : nil,
+            pooVisibleBlood == true ? "Visible blood" : nil
+        ].compactMap { $0 }
     }
 
     var activityType: ActivityType? {
@@ -792,6 +812,15 @@ final class CareEvent {
         }
         if let pooTexture, pooTexture != .unknown {
             values.append(pooTexture.displayName.lowercased())
+        }
+        if pooDifficultOrPainful == true {
+            values.append("difficult or painful")
+        }
+        if pooProlongedStraining == true {
+            values.append("prolonged straining")
+        }
+        if pooVisibleBlood == true {
+            values.append("visible blood")
         }
         return values
     }

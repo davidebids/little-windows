@@ -426,6 +426,7 @@ struct CareView: View {
                     || solidsProfileState?.activeDigestiveCheckIn != nil) {
                 SolidsDigestiveSupportView(
                     profile: profile,
+                    careEvents: data.careEvents,
                     eventItems: solidFoodEventItems,
                     profileState: solidsProfileState,
                     openFood: { appendFoodRoute(.solidFood($0)) },
@@ -663,7 +664,7 @@ private struct CareSolidsDataScope {
 
     var loadsEvents: Bool {
         switch route {
-        case .solidsTracker, .solidMeal: true
+        case .solidsDigestive, .solidsTracker, .solidMeal: true
         default: false
         }
     }
@@ -755,7 +756,7 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
         let planProfileID = scope.loadsPlans ? selectedProfileID : unloadedID
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
-        let careEventDescriptor: FetchDescriptor<CareEvent>
+        var careEventDescriptor: FetchDescriptor<CareEvent>
         if case .solidMeal(let eventID) = activeRoute {
             careEventDescriptor = FetchDescriptor<CareEvent>(
                 predicate: #Predicate { event in
@@ -766,6 +767,30 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
                 },
                 sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
             )
+        } else if case .solidsDigestive = activeRoute {
+            let timelineStart = Calendar.current.date(
+                byAdding: .day,
+                value: -SolidsDigestiveSupportService.defaultLookbackDays,
+                to: Date()
+            ) ?? Date()
+            let timelineEventRawValues = [
+                EventType.diaper.rawValue,
+                EventType.potty.rawValue,
+                EventType.feed.rawValue,
+                EventType.symptom.rawValue,
+                EventType.temperature.rawValue,
+                EventType.medicine.rawValue,
+                EventType.custom.rawValue
+            ]
+            careEventDescriptor = FetchDescriptor<CareEvent>(
+                predicate: #Predicate { event in
+                    event.profileID == eventProfileID
+                        && event.startDate >= timelineStart
+                        && timelineEventRawValues.contains(event.typeRawValue)
+                },
+                sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
+            )
+            careEventDescriptor.fetchLimit = 250
         } else {
             careEventDescriptor = FetchDescriptor<CareEvent>(
                 predicate: #Predicate { event in
