@@ -1101,6 +1101,34 @@ actor SolidsProfileStateWriter {
         return nil
     }
 
+    func setDigestiveReminder(
+        profileID: UUID,
+        checkInID: UUID,
+        reminderAt: Date?,
+        now: Date = Date()
+    ) async -> String? {
+        let state = state(for: profileID)
+        guard state.modelContext != nil,
+              state.activeDigestiveCheckIn?.id == checkInID else {
+            return "The digestive concern is no longer active."
+        }
+        let scheduledAt = reminderAt.flatMap { $0 > now ? $0 : nil }
+        state.digestiveReminderEnabled = scheduledAt != nil
+        state.digestiveReminderAt = scheduledAt
+        state.updatedAt = now
+        if let error = save() { return error }
+        await NotificationManager.shared.scheduleSolidsDigestiveReminder(
+            snapshot: .init(
+                profileID: profileID,
+                reminderAt: scheduledAt,
+                isEnabled: scheduledAt != nil,
+                hasActiveConcern: true
+            ),
+            now: now
+        )
+        return nil
+    }
+
     func reconcileLinkedDigestiveCheckIn(
         profileID: UUID,
         checkInID: UUID,
@@ -2535,6 +2563,7 @@ enum SolidsDigestiveSupportService {
         SolidsSourceLibrary.aapInfantConstipation,
         SolidsSourceLibrary.aapInfantBowelMovements,
         SolidsSourceLibrary.aapInfantDrinks,
+        SolidsSourceLibrary.cdcIntroduction,
         SolidsSourceLibrary.cdcFoodsToEncourage,
         SolidsSourceLibrary.cdcFeedingFrequency,
         SolidsSourceLibrary.cdcIron,
@@ -2549,7 +2578,8 @@ enum SolidsDigestiveSupportService {
     ) -> SolidsDigestiveFoodGuidance {
         let stage: String
         switch ageMonths {
-        case ..<9: stage = "At 6–8 months"
+        case ..<6: stage = "At \(ageMonths) months"
+        case 6..<9: stage = "At 6–8 months"
         case 9...12: stage = "At 9–12 months"
         default: stage = "At \(ageMonths) months"
         }
@@ -2592,7 +2622,20 @@ enum SolidsDigestiveSupportService {
     }
 
     static func generalFoodWarning(ageMonths: Int) -> String {
-        "At \(ageMonths) months, possible digestive effects while introducing solids can include stool changes, including constipation. A change after one food does not prove that food caused it."
+        if ageMonths < 6 {
+            return "Before 6 months, if solids have already started based on readiness and clinician guidance, possible digestive effects can include stool changes, including constipation. A change after one food does not prove that food caused it."
+        }
+        return "At \(ageMonths) months, possible digestive effects while introducing solids can include stool changes, including constipation. A change after one food does not prove that food caused it."
+    }
+
+    static func isSupportAvailable(
+        ageMonths: Int,
+        state: SolidsProfileState?,
+        assessment: SolidsBalanceAssessment
+    ) -> Bool {
+        (6...12).contains(ageMonths)
+            || state?.digestiveCheckIns.isEmpty == false
+            || assessment.shouldSurfaceProactively
     }
 
     static func eventItemFetchDescriptor(
@@ -2820,12 +2863,12 @@ enum SolidsDigestiveSupportService {
         var loggedDayStarts = Set<Date>()
         var uniqueFoodIDs = Set<String>()
         var foods = [String: SolidsReferenceFood]()
-        var foodCounts = [String: Int]()
+        var foodMealIDs = [String: Set<UUID>]()
         var hasUnclassifiedFoods = false
         for item in items {
             eventIDs.insert(item.eventID)
             loggedDayStarts.insert(calendar.startOfDay(for: item.createdAt))
-            foodCounts[item.foodID, default: 0] += 1
+            foodMealIDs[item.foodID, default: []].insert(item.eventID)
             guard uniqueFoodIDs.insert(item.foodID).inserted else { continue }
             if let food = SolidsReferenceCatalog.food(id: item.foodID) {
                 foods[item.foodID] = food
@@ -2846,6 +2889,15 @@ enum SolidsDigestiveSupportService {
             ? .usefulPattern
             : (items.isEmpty ? .notEnoughData : .partial)
         let activeConcern = state?.activeDigestiveCheckIn
+        let dominantFood = foodMealIDs.sorted {
+            if $0.value.count == $1.value.count { return $0.key < $1.key }
+            return $0.value.count > $1.value.count
+        }.first
+        let hasRepeatedFoodPattern = mealCount >= 4
+            && loggedDays >= 2
+            && dominantFood.map { Double($0.value.count) / Double(mealCount) >= 0.6 } == true
+        let hasEarlyRepeatedFoodPattern = (4..<6).contains(ageMonths)
+            && hasRepeatedFoodPattern
 
         var strengths = [SolidsBalanceInsight]()
         var opportunities = [SolidsBalanceInsight]()
@@ -2926,12 +2978,8 @@ enum SolidsDigestiveSupportService {
             ))
         }
 
-        if enoughForPattern,
-           items.count >= 4,
-           let dominant = foodCounts.sorted(by: {
-               $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
-           }).first,
-           Double(dominant.value) / Double(items.count) >= 0.6,
+        if (enoughForPattern || hasEarlyRepeatedFoodPattern),
+           let dominant = dominantFood,
            let dominantItem = items.first(where: { $0.foodID == dominant.key }) {
             let food = foods[dominant.key]
             let foodName = food?.name ?? dominantItem.foodNameSnapshot
@@ -2948,6 +2996,10 @@ enum SolidsDigestiveSupportService {
                 suggestedFoodIDs: safeSuggestions(categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain])
                     .filter { $0 != dominant.key }
             ))
+        }
+
+        if activeConcern?.needsPromptMedicalAdvice == true {
+            opportunities.removeAll()
         }
 
         let suggestedFoodIDs = Array(orderedUnique(opportunities.flatMap(\.suggestedFoodIDs)).prefix(8))
@@ -2995,9 +3047,9 @@ enum SolidsDigestiveSupportService {
             opportunities: opportunities,
             suggestedFoodIDs: suggestedFoodIDs,
             suggestedRecipeIDs: Array(orderedUnique(recipeIDs).prefix(6)),
-            shouldSurfaceProactively: (6...12).contains(ageMonths)
-                && enoughForPattern
-                && !opportunities.isEmpty,
+            shouldSurfaceProactively: !opportunities.isEmpty
+                && (((6...12).contains(ageMonths) && enoughForPattern)
+                    || hasEarlyRepeatedFoodPattern),
             activeConcern: activeConcern
         )
     }

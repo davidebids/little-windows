@@ -1058,6 +1058,7 @@ struct EventEditorView: View {
                     ForEach(DiaperKind.allCases) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .accessibilityIdentifier("diaper-kind-picker")
 
                 DisclosureGroup(
                     "Optional details",
@@ -1078,6 +1079,7 @@ struct EventEditorView: View {
                         Picker("Stool consistency", selection: $pooTexture) {
                             ForEach(PooTexture.allCases) { Text($0.displayName).tag($0) }
                         }
+                        .accessibilityIdentifier("diaper-poo-consistency-picker")
                         Toggle("Difficult or painful to pass", isOn: $pooDifficultOrPainful)
                             .accessibilityIdentifier("diaper-poo-painful-toggle")
                         Toggle("Prolonged straining", isOn: $pooProlongedStraining)

@@ -265,16 +265,29 @@ struct FoodHomeView: View {
                 MissingFoodRouteView()
             }
         case .solidsDigestive:
+            let assessment = selectedProfile.map {
+                SolidsDigestiveSupportService.assessment(
+                    profileID: $0.id,
+                    ageMonths: SolidsTrackingService.ageMonths(for: $0),
+                    eventItems: solidFoodEventItems,
+                    state: selectedSolidsState
+                )
+            }
             if let selectedProfile,
+               let assessment,
                selectedProfile.profileType == .child,
                solidsAccessLevel == .full,
-               ((6...12).contains(SolidsTrackingService.ageMonths(for: selectedProfile))
-                    || selectedSolidsState?.activeDigestiveCheckIn != nil) {
+               SolidsDigestiveSupportService.isSupportAvailable(
+                    ageMonths: SolidsTrackingService.ageMonths(for: selectedProfile),
+                    state: selectedSolidsState,
+                    assessment: assessment
+               ) {
                 SolidsDigestiveSupportView(
                     profile: selectedProfile,
                     careEvents: careEvents,
                     eventItems: solidFoodEventItems,
                     profileState: selectedSolidsState,
+                    assessment: assessment,
                     openFood: { path.append(.solidFood($0)) },
                     openRecipe: { path.append(.solidsRecipe($0)) }
                 )

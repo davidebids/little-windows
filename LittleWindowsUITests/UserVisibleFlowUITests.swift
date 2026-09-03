@@ -1926,9 +1926,12 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         let scrollingStartedAt = ContinuousClock.now
         app.swipeUp(velocity: .fast)
+        // XCUI includes simulator gesture deceleration in this wall-clock
+        // duration. Leave enough headroom for that variance while still
+        // catching a blocked main thread or an unresponsive scroll view.
         XCTAssertLessThan(
             scrollingStartedAt.duration(to: .now),
-            .seconds(3.5),
+            .seconds(4.5),
             "Digestive guidance should remain scrollable with a production-scale history."
         )
         XCTAssertTrue(app.staticTexts["Age-aware balance"].exists)
@@ -3875,6 +3878,25 @@ final class UserVisibleFlowUITests: XCTestCase {
             object: rashToggle
         )
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 2), .completed)
+
+        let kindPicker = app.segmentedControls["diaper-kind-picker"]
+        XCTAssertTrue(kindPicker.waitForExistence(timeout: 2))
+        kindPicker.buttons["Poo"].tap()
+        XCTAssertTrue(
+            app.otherElements["diaper-poo-consistency-picker"].waitForExistence(timeout: 2)
+                || app.buttons["diaper-poo-consistency-picker"].waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(app.switches["diaper-poo-painful-toggle"].exists)
+        let strainingToggle = app.switches["diaper-poo-straining-toggle"]
+        for _ in 0..<3 where !strainingToggle.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(strainingToggle.waitForExistence(timeout: 2))
+        let bloodToggle = app.switches["diaper-poo-blood-toggle"]
+        for _ in 0..<3 where !bloodToggle.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(bloodToggle.waitForExistence(timeout: 2))
     }
 
     func testStoreSectionsHaveVisibleAddReorderAndRemoveControls() {

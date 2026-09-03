@@ -166,20 +166,19 @@ struct SolidsHomeView: View {
     private var dashboard: some View {
         let visibleProgress = scopedProgress
         let visiblePlans = upcomingPlans
-        let activeDigestiveConcern = profileState?.activeDigestiveCheckIn
-        let showsDigestiveSupport = (6...12).contains(ageMonths)
-            || activeDigestiveConcern != nil
-        let digestiveAssessment = showsDigestiveSupport
-            ? SolidsDigestiveSupportService.assessment(
-                profileID: profile.id,
-                ageMonths: ageMonths,
-                eventItems: eventItems,
-                state: profileState
-            )
-            : nil
+        let digestiveAssessment = SolidsDigestiveSupportService.assessment(
+            profileID: profile.id,
+            ageMonths: ageMonths,
+            eventItems: eventItems,
+            state: profileState
+        )
+        let showsDigestiveSupport = SolidsDigestiveSupportService.isSupportAvailable(
+            ageMonths: ageMonths,
+            state: profileState,
+            assessment: digestiveAssessment
+        )
         return VStack(alignment: .leading, spacing: 16) {
-            if let digestiveAssessment,
-               digestiveAssessment.activeConcern != nil
+            if digestiveAssessment.activeConcern != nil
                     || digestiveAssessment.shouldSurfaceProactively {
                 Button { open(.solidsDigestive) } label: {
                     HStack(alignment: .top, spacing: 12) {
@@ -1849,6 +1848,7 @@ struct SolidsDigestiveSupportView: View {
     let careEvents: [CareEvent]
     let eventItems: [SolidFoodEventItem]
     let profileState: SolidsProfileState?
+    let assessment: SolidsBalanceAssessment
     let openFood: (String) -> Void
     let openRecipe: (String) -> Void
 
@@ -1859,17 +1859,10 @@ struct SolidsDigestiveSupportView: View {
     @State private var errorMessage: String?
     @State private var showingCheckInHistory = false
     @State private var showingAllTimelineEntries = false
+    @State private var updatingReminder = false
 
+    private let timelinePreviewLimit = 6
     private var ageMonths: Int { SolidsTrackingService.ageMonths(for: profile) }
-
-    private var assessment: SolidsBalanceAssessment {
-        SolidsDigestiveSupportService.assessment(
-            profileID: profile.id,
-            ageMonths: ageMonths,
-            eventItems: eventItems,
-            state: profileState
-        )
-    }
 
     private var recentResolvedCheckIns: [SolidsDigestiveCheckIn] {
         Array((profileState?.digestiveCheckIns ?? []).lazy.filter { !$0.isActive }.prefix(5))
@@ -1885,22 +1878,21 @@ struct SolidsDigestiveSupportView: View {
     }
 
     var body: some View {
-        let currentAssessment = assessment
         let currentResolvedCheckIns = recentResolvedCheckIns
         let currentTimelineEntries = timelineEntries
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 header
-                if let concern = currentAssessment.activeConcern {
+                if let concern = assessment.activeConcern {
                     activeConcernCard(concern)
                 }
                 if !currentResolvedCheckIns.isEmpty {
                     checkInHistoryCard(currentResolvedCheckIns)
                 }
                 timelineCard(currentTimelineEntries)
-                balanceCard(currentAssessment)
-                insightsSection(currentAssessment)
-                suggestionsSection(currentAssessment)
+                balanceCard(assessment)
+                insightsSection(assessment)
+                suggestionsSection(assessment)
                 practicalGuidance
                 safetyCard
                 sources
@@ -1943,7 +1935,9 @@ struct SolidsDigestiveSupportView: View {
     }
 
     private func timelineCard(_ entries: [SolidsDigestiveTimelineEntry]) -> some View {
-        let visibleEntries = showingAllTimelineEntries ? entries : Array(entries.prefix(12))
+        let visibleEntries = showingAllTimelineEntries
+            ? entries
+            : Array(entries.prefix(timelinePreviewLimit))
         return VStack(alignment: .leading, spacing: 12) {
             Label("What changed?", systemImage: "clock.arrow.circlepath")
                 .font(.headline)
@@ -1958,7 +1952,7 @@ struct SolidsDigestiveSupportView: View {
                 ForEach(visibleEntries) { entry in
                     timelineRow(entry)
                 }
-                if entries.count > 12 {
+                if entries.count > timelinePreviewLimit {
                     Button(showingAllTimelineEntries ? "Show less" : "Show all \(entries.count)") {
                         withAnimation(.snappy) {
                             showingAllTimelineEntries.toggle()
@@ -2059,10 +2053,30 @@ struct SolidsDigestiveSupportView: View {
                 Text(concern.notes)
                     .font(.subheadline)
             }
+            if profileState?.digestiveReminderEnabled == true,
+               let reminderAt = profileState?.digestiveReminderAt,
+               reminderAt > Date() {
+                Label(
+                    "Follow-up reminder: \(reminderAt.formatted(date: .abbreviated, time: .shortened))",
+                    systemImage: "bell.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Button("Cancel follow-up reminder") {
+                    Task { await updateReminder(for: concern, reminderAt: nil) }
+                }
+                .disabled(updatingReminder)
+            } else {
+                Button("Remind me tomorrow") {
+                    Task { await addTomorrowReminder(for: concern) }
+                }
+                .disabled(updatingReminder)
+            }
             Button("Mark concern resolved") {
                 Task { await resolve(concern) }
             }
             .buttonStyle(.bordered)
+            .disabled(updatingReminder)
         }
         .padding(16)
         .appSurface()
@@ -2221,7 +2235,9 @@ struct SolidsDigestiveSupportView: View {
 
     private var ageBalanceGuidance: String {
         switch ageMonths {
-        case ..<9:
+        case ..<6:
+            "Before about 6 months, use this review only if solids have already started based on readiness and clinician guidance. Breast milk or formula remains central; do not increase solid meals because of this screen."
+        case 6..<9:
             "For 6–8 months, WHO guidance commonly describes 2–3 complementary-food meals a day, while breast milk or formula remains central. Build variety gradually and follow hunger and fullness cues."
         case 9...11:
             "For 9–11 months, WHO guidance commonly describes 3–4 complementary-food meals a day, while breast milk or formula remains important. Keep broadening textures and food groups at the child’s pace."
@@ -2292,6 +2308,41 @@ struct SolidsDigestiveSupportView: View {
         ) {
             errorMessage = error
         }
+    }
+
+    @MainActor
+    private func addTomorrowReminder(for concern: SolidsDigestiveCheckIn) async {
+        updatingReminder = true
+        let authorized = await NotificationManager.shared.ensureAuthorization()
+        guard authorized else {
+            updatingReminder = false
+            errorMessage = "Notifications are off. Enable them in Settings to add a follow-up reminder."
+            return
+        }
+        let reminderAt = Calendar.current.date(byAdding: .day, value: 1, to: Date())
+            ?? Date().addingTimeInterval(86_400)
+        await updateReminder(for: concern, reminderAt: reminderAt)
+    }
+
+    @MainActor
+    private func updateReminder(
+        for concern: SolidsDigestiveCheckIn,
+        reminderAt: Date?
+    ) async {
+        updatingReminder = true
+        guard let stateWriter else {
+            updatingReminder = false
+            errorMessage = "The solids store is still loading. Try again."
+            return
+        }
+        if let error = await stateWriter.setDigestiveReminder(
+            profileID: profile.id,
+            checkInID: concern.id,
+            reminderAt: reminderAt
+        ) {
+            errorMessage = error
+        }
+        updatingReminder = false
     }
 }
 

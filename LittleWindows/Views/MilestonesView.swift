@@ -419,16 +419,35 @@ struct CareView: View {
                 CareUnavailableView()
             }
         case .solidsDigestive:
+            let digestiveAssessment = profile.map {
+                SolidsDigestiveSupportService.assessment(
+                    profileID: $0.id,
+                    ageMonths: SolidsTrackingService.ageMonths(for: $0),
+                    eventItems: solidFoodEventItems,
+                    state: solidsProfileState
+                )
+            }
+            let isDigestiveSupportAvailable = if let profile,
+                                                 let digestiveAssessment {
+                SolidsDigestiveSupportService.isSupportAvailable(
+                    ageMonths: SolidsTrackingService.ageMonths(for: profile),
+                    state: solidsProfileState,
+                    assessment: digestiveAssessment
+                )
+            } else {
+                false
+            }
             if let profile,
+               let digestiveAssessment,
                profile.profileType == .child,
                solidsAccessLevel == .full,
-               ((6...12).contains(SolidsTrackingService.ageMonths(for: profile))
-                    || solidsProfileState?.activeDigestiveCheckIn != nil) {
+               isDigestiveSupportAvailable {
                 SolidsDigestiveSupportView(
                     profile: profile,
                     careEvents: data.careEvents,
                     eventItems: solidFoodEventItems,
                     profileState: solidsProfileState,
+                    assessment: digestiveAssessment,
                     openFood: { appendFoodRoute(.solidFood($0)) },
                     openRecipe: { appendFoodRoute(.solidsRecipe($0)) }
                 )
