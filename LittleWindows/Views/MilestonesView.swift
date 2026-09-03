@@ -787,11 +787,12 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
                 sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
             )
         } else if case .solidsDigestive = activeRoute {
+            let timelineEnd = Date()
             let timelineStart = Calendar.current.date(
                 byAdding: .day,
                 value: -SolidsDigestiveSupportService.defaultLookbackDays,
-                to: Date()
-            ) ?? Date()
+                to: timelineEnd
+            ) ?? timelineEnd
             let timelineEventRawValues = [
                 EventType.diaper.rawValue,
                 EventType.potty.rawValue,
@@ -805,6 +806,7 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
                 predicate: #Predicate { event in
                     event.profileID == eventProfileID
                         && event.startDate >= timelineStart
+                        && event.startDate <= timelineEnd
                         && timelineEventRawValues.contains(event.typeRawValue)
                 },
                 sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]

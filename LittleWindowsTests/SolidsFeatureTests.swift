@@ -328,7 +328,9 @@ final class SolidsFeatureTests: XCTestCase {
         )
 
         XCTAssertTrue(assessment.opportunities.contains {
-            $0.id == "repeated-food-pattern" && $0.title == "Banana appears often"
+            $0.id == "repeated-food-pattern"
+                && $0.title == "Banana appears often"
+                && $0.detail.contains("most recorded meals")
         })
 
         let partialState = SolidsProfileState(
@@ -581,6 +583,8 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(replacedState.activeDigestiveCheckIn?.id, replacement.id)
         XCTAssertEqual(replacedState.digestiveCheckIns.filter(\.isActive).count, 1)
         XCTAssertNotNil(replacedState.digestiveCheckIns.first { $0.id == checkIn.id }?.resolvedAt)
+        XCTAssertTrue(replacedState.digestiveReminderEnabled)
+        XCTAssertEqual(replacedState.digestiveReminderAt, reminderAt)
 
         let resolveError = await writer.resolveDigestiveCheckIn(
             profileID: profileID,
@@ -715,11 +719,12 @@ final class SolidsFeatureTests: XCTestCase {
             hardStool: false,
             prolongedStraining: true
         )
+        let reminderAt = newer.recordedAt.addingTimeInterval(86_400)
         _ = await writer.saveDigestiveCheckIn(
             profileID: profileID,
             checkIn: newer,
             loggingCoverage: .someMeals,
-            reminderAt: nil,
+            reminderAt: reminderAt,
             now: newer.recordedAt
         )
 
@@ -737,13 +742,268 @@ final class SolidsFeatureTests: XCTestCase {
         )
         XCTAssertNil(editError)
 
-        let context = ModelContext(container)
-        let state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        var context = ModelContext(container)
+        var state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
         XCTAssertEqual(state.activeDigestiveCheckIn?.id, newer.id)
         XCTAssertNotNil(state.digestiveCheckIns.first { $0.id == eventID }?.resolvedAt)
         XCTAssertTrue(
             state.digestiveCheckIns.first { $0.id == eventID }?.difficultOrPainful == true
         )
+        XCTAssertTrue(state.digestiveReminderEnabled)
+        XCTAssertEqual(state.digestiveReminderAt, reminderAt)
+
+        let staleResolveError = await writer.resolveDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: eventID,
+            now: newer.recordedAt.addingTimeInterval(120)
+        )
+        XCTAssertNil(staleResolveError)
+        context = ModelContext(container)
+        state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        XCTAssertEqual(state.activeDigestiveCheckIn?.id, newer.id)
+        XCTAssertTrue(state.digestiveReminderEnabled)
+        XCTAssertEqual(state.digestiveReminderAt, reminderAt)
+    }
+
+    @MainActor
+    func testBackdatedCheckInsDoNotReplaceNewerConcernOrInheritItsReminder() async throws {
+        let container = try ModelContainer(
+            for: SolidsProfileState.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profileID = UUID()
+        let writer = SolidsProfileStateWriter(modelContainer: container)
+        let current = SolidsDigestiveCheckIn(
+            recordedAt: Date(timeIntervalSince1970: 40_000),
+            hardStool: true
+        )
+        let reminderAt = current.recordedAt.addingTimeInterval(86_400)
+        let currentSaveError = await writer.saveDigestiveCheckIn(
+            profileID: profileID,
+            checkIn: current,
+            loggingCoverage: .mostMeals,
+            reminderAt: reminderAt,
+            now: current.recordedAt
+        )
+        XCTAssertNil(currentSaveError)
+
+        let backdatedManual = SolidsDigestiveCheckIn(
+            recordedAt: current.recordedAt.addingTimeInterval(-7_200),
+            hardStool: false,
+            prolongedStraining: true
+        )
+        let backdatedSaveError = await writer.saveDigestiveCheckIn(
+            profileID: profileID,
+            checkIn: backdatedManual,
+            loggingCoverage: .someMeals,
+            reminderAt: backdatedManual.recordedAt.addingTimeInterval(300),
+            now: current.recordedAt.addingTimeInterval(60)
+        )
+        XCTAssertNil(backdatedSaveError)
+
+        let linkedEventID = UUID()
+        let backdatedLinkError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: linkedEventID,
+            recordedAt: current.recordedAt.addingTimeInterval(-3_600),
+            hardStool: true,
+            difficultOrPainful: true,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "Backdated diaper",
+            isIncluded: true,
+            now: current.recordedAt.addingTimeInterval(120)
+        )
+        XCTAssertNil(backdatedLinkError)
+
+        let context = ModelContext(container)
+        let state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        XCTAssertEqual(state.activeDigestiveCheckIn?.id, current.id)
+        XCTAssertEqual(state.digestiveCheckIns.filter(\.isActive).count, 1)
+        XCTAssertEqual(
+            state.digestiveCheckIns.first { $0.id == backdatedManual.id }?.resolvedAt,
+            current.recordedAt
+        )
+        XCTAssertEqual(
+            state.digestiveCheckIns.first { $0.id == linkedEventID }?.resolvedAt,
+            current.recordedAt
+        )
+        XCTAssertTrue(state.digestiveReminderEnabled)
+        XCTAssertEqual(state.digestiveReminderAt, reminderAt)
+    }
+
+    @MainActor
+    func testNewLinkedObservationPreservesCurrentFollowUpReminder() async throws {
+        let container = try ModelContainer(
+            for: SolidsProfileState.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profileID = UUID()
+        let first = SolidsDigestiveCheckIn(
+            recordedAt: Date(timeIntervalSince1970: 50_000),
+            hardStool: true
+        )
+        let writer = SolidsProfileStateWriter(modelContainer: container)
+        let firstSaveError = await writer.saveDigestiveCheckIn(
+            profileID: profileID,
+            checkIn: first,
+            loggingCoverage: .mostMeals,
+            reminderAt: first.recordedAt.addingTimeInterval(86_400),
+            now: first.recordedAt
+        )
+        XCTAssertNil(firstSaveError)
+
+        let linkedEventID = UUID()
+        let linkError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: linkedEventID,
+            recordedAt: first.recordedAt.addingTimeInterval(600),
+            hardStool: false,
+            difficultOrPainful: true,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "New observation",
+            isIncluded: true,
+            now: first.recordedAt.addingTimeInterval(660)
+        )
+        XCTAssertNil(linkError)
+
+        let context = ModelContext(container)
+        let state = try XCTUnwrap(context.fetch(FetchDescriptor<SolidsProfileState>()).first)
+        XCTAssertEqual(state.activeDigestiveCheckIn?.id, linkedEventID)
+        XCTAssertEqual(
+            state.digestiveCheckIns.first { $0.id == first.id }?.resolvedAt,
+            first.recordedAt.addingTimeInterval(600)
+        )
+        XCTAssertTrue(state.digestiveReminderEnabled)
+        XCTAssertEqual(
+            state.digestiveReminderAt,
+            first.recordedAt.addingTimeInterval(86_400)
+        )
+
+        let afterReminderEventID = UUID()
+        let afterReminderError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: afterReminderEventID,
+            recordedAt: first.recordedAt.addingTimeInterval(90_000),
+            hardStool: true,
+            difficultOrPainful: false,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "Observation after follow-up",
+            isIncluded: true,
+            now: first.recordedAt.addingTimeInterval(90_060)
+        )
+        XCTAssertNil(afterReminderError)
+
+        let afterReminderContext = ModelContext(container)
+        let afterReminderState = try XCTUnwrap(
+            afterReminderContext.fetch(FetchDescriptor<SolidsProfileState>()).first
+        )
+        XCTAssertEqual(afterReminderState.activeDigestiveCheckIn?.id, afterReminderEventID)
+        XCTAssertFalse(afterReminderState.digestiveReminderEnabled)
+        XCTAssertNil(afterReminderState.digestiveReminderAt)
+    }
+
+    @MainActor
+    func testRemovingNonCurrentActiveConcernPreservesCurrentReminder() async throws {
+        let container = try ModelContainer(
+            for: SolidsProfileState.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profileID = UUID()
+        let current = SolidsDigestiveCheckIn(
+            recordedAt: Date(timeIntervalSince1970: 60_000),
+            hardStool: false,
+            difficultOrPainful: true
+        )
+        let olderActive = SolidsDigestiveCheckIn(
+            recordedAt: current.recordedAt.addingTimeInterval(-600),
+            hardStool: true
+        )
+        let reminderAt = current.recordedAt.addingTimeInterval(90_000)
+        let context = ModelContext(container)
+        let storedState = SolidsProfileState(
+            profileID: profileID,
+            digestiveCheckIns: [olderActive, current],
+            digestiveReminderEnabled: true,
+            digestiveReminderAt: reminderAt
+        )
+        context.insert(storedState)
+        try context.save()
+        XCTAssertEqual(storedState.activeDigestiveCheckIn?.id, current.id)
+        XCTAssertEqual(storedState.digestiveCheckIns.filter(\.isActive).count, 1)
+        XCTAssertEqual(
+            storedState.digestiveCheckIns.first { $0.id == olderActive.id }?.resolvedAt,
+            current.recordedAt
+        )
+
+        let writer = SolidsProfileStateWriter(modelContainer: container)
+        let removeError = await writer.reconcileLinkedDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: olderActive.id,
+            recordedAt: olderActive.recordedAt,
+            hardStool: false,
+            difficultOrPainful: false,
+            prolongedStraining: false,
+            visibleBlood: false,
+            notes: "",
+            isIncluded: false,
+            now: current.recordedAt.addingTimeInterval(720)
+        )
+        XCTAssertNil(removeError)
+
+        let refreshedContext = ModelContext(container)
+        let refreshedState = try XCTUnwrap(
+            refreshedContext.fetch(FetchDescriptor<SolidsProfileState>()).first
+        )
+        XCTAssertEqual(refreshedState.activeDigestiveCheckIn?.id, current.id)
+        XCTAssertTrue(refreshedState.digestiveReminderEnabled)
+        XCTAssertEqual(refreshedState.digestiveReminderAt, reminderAt)
+    }
+
+    func testDigestiveStateNormalizesRestoredHistoryAndOrphanedReminder() {
+        let current = SolidsDigestiveCheckIn(
+            recordedAt: Date(timeIntervalSince1970: 70_000),
+            hardStool: true
+        )
+        let older = SolidsDigestiveCheckIn(
+            recordedAt: current.recordedAt.addingTimeInterval(-600),
+            hardStool: false,
+            prolongedStraining: true
+        )
+        let duplicateOlder = SolidsDigestiveCheckIn(
+            id: older.id,
+            recordedAt: older.recordedAt.addingTimeInterval(-60),
+            hardStool: true
+        )
+        let restored = SolidsProfileState(
+            profileID: UUID(),
+            digestiveCheckIns: [older, duplicateOlder, current],
+            digestiveReminderEnabled: true,
+            digestiveReminderAt: current.recordedAt.addingTimeInterval(86_400)
+        )
+
+        XCTAssertEqual(restored.activeDigestiveCheckIn?.id, current.id)
+        XCTAssertEqual(restored.digestiveCheckIns.filter(\.isActive).count, 1)
+        XCTAssertEqual(restored.digestiveCheckIns.filter { $0.id == older.id }.count, 1)
+        XCTAssertEqual(
+            restored.digestiveCheckIns.first { $0.id == older.id }?.resolvedAt,
+            current.recordedAt
+        )
+        XCTAssertTrue(restored.digestiveReminderEnabled)
+
+        let orphaned = SolidsProfileState(
+            profileID: UUID(),
+            digestiveCheckIns: [SolidsDigestiveCheckIn(
+                hardStool: true,
+                resolvedAt: Date()
+            )],
+            digestiveReminderEnabled: true,
+            digestiveReminderAt: Date().addingTimeInterval(86_400)
+        )
+        XCTAssertFalse(orphaned.digestiveReminderEnabled)
+        XCTAssertNil(orphaned.digestiveReminderAt)
     }
 
     @MainActor

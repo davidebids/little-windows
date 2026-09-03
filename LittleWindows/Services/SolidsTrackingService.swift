@@ -1048,28 +1048,53 @@ actor SolidsProfileStateWriter {
     ) async -> String? {
         let state = state(for: profileID)
         if state.modelContext == nil { modelContext.insert(state) }
-        var checkIns = state.digestiveCheckIns.filter { $0.id != checkIn.id }
-        checkIns = checkIns.map { existing in
-            guard existing.isActive else { return existing }
-            var resolved = existing
-            resolved.resolvedAt = checkIn.recordedAt
-            return resolved
+        var savedCheckIn = checkIn
+        if let priorResolution = state.digestiveCheckIns
+            .first(where: { $0.id == checkIn.id })?.resolvedAt {
+            savedCheckIn.resolvedAt = priorResolution
         }
-        checkIns.append(checkIn)
+        let currentConcernID = state.activeDigestiveCheckIn?.id
+        let pendingReminderAt = state.digestiveReminderEnabled
+            ? state.digestiveReminderAt.flatMap { $0 > now ? $0 : nil }
+            : nil
+        var checkIns = state.digestiveCheckIns.filter { $0.id != checkIn.id }
+        let newerActive = checkIns
+            .filter { $0.isActive && $0.recordedAt > savedCheckIn.recordedAt }
+            .max { $0.recordedAt < $1.recordedAt }
+        let becomesActive = savedCheckIn.resolvedAt == nil && newerActive == nil
+        if becomesActive {
+            checkIns = checkIns.map { existing in
+                guard existing.isActive else { return existing }
+                var resolved = existing
+                resolved.resolvedAt = savedCheckIn.recordedAt
+                return resolved
+            }
+        } else if savedCheckIn.resolvedAt == nil {
+            savedCheckIn.resolvedAt = newerActive?.recordedAt ?? now
+        }
+        checkIns.append(savedCheckIn)
         state.digestiveCheckIns = checkIns
         state.digestiveLoggingCoverage = loggingCoverage
-        state.digestiveReminderEnabled = reminderAt != nil
-        state.digestiveReminderAt = reminderAt
+        let requestedReminderAt = reminderAt.flatMap { $0 > now ? $0 : nil }
+        let scheduledAt = requestedReminderAt
+            ?? (currentConcernID == nil ? nil : pendingReminderAt)
+        if becomesActive {
+            state.digestiveReminderEnabled = scheduledAt != nil
+            state.digestiveReminderAt = scheduledAt
+        }
         state.updatedAt = now
         if let error = save() { return error }
-        await NotificationManager.shared.scheduleSolidsDigestiveReminder(
-            snapshot: .init(
-                profileID: profileID,
-                reminderAt: reminderAt,
-                isEnabled: reminderAt != nil,
-                hasActiveConcern: true
+        if becomesActive {
+            await NotificationManager.shared.scheduleSolidsDigestiveReminder(
+                snapshot: .init(
+                    profileID: profileID,
+                    reminderAt: scheduledAt,
+                    isEnabled: scheduledAt != nil,
+                    hasActiveConcern: true
+                ),
+                now: now
             )
-        )
+        }
         return nil
     }
 
@@ -1084,20 +1109,26 @@ actor SolidsProfileStateWriter {
         guard let index = checkIns.firstIndex(where: { $0.id == checkInID }) else {
             return "Digestive check-in not found."
         }
-        checkIns[index].resolvedAt = now
+        guard checkIns[index].isActive else { return nil }
+        let resolvedCurrentConcern = state.activeDigestiveCheckIn?.id == checkInID
+        checkIns[index].resolvedAt = max(now, checkIns[index].recordedAt)
         state.digestiveCheckIns = checkIns
-        state.digestiveReminderEnabled = false
-        state.digestiveReminderAt = nil
+        if resolvedCurrentConcern {
+            state.digestiveReminderEnabled = false
+            state.digestiveReminderAt = nil
+        }
         state.updatedAt = now
         if let error = save() { return error }
-        await NotificationManager.shared.scheduleSolidsDigestiveReminder(
-            snapshot: .init(
-                profileID: profileID,
-                reminderAt: nil,
-                isEnabled: false,
-                hasActiveConcern: false
+        if resolvedCurrentConcern {
+            await NotificationManager.shared.scheduleSolidsDigestiveReminder(
+                snapshot: .init(
+                    profileID: profileID,
+                    reminderAt: nil,
+                    isEnabled: false,
+                    hasActiveConcern: checkIns.contains(where: \.isActive)
+                )
             )
-        )
+        }
         return nil
     }
 
@@ -1145,23 +1176,23 @@ actor SolidsProfileStateWriter {
         if !isIncluded {
             guard state.modelContext != nil else { return nil }
             let existing = state.digestiveCheckIns
-            let removedActive = existing.contains { $0.id == checkInID && $0.isActive }
+            let removedCurrentConcern = state.activeDigestiveCheckIn?.id == checkInID
             let remaining = existing.filter { $0.id != checkInID }
             guard remaining.count != existing.count else { return nil }
             state.digestiveCheckIns = remaining
-            if removedActive {
+            if removedCurrentConcern {
                 state.digestiveReminderEnabled = false
                 state.digestiveReminderAt = nil
             }
             state.updatedAt = now
             if let error = save() { return error }
-            if removedActive {
+            if removedCurrentConcern {
                 await NotificationManager.shared.scheduleSolidsDigestiveReminder(
                     snapshot: .init(
                         profileID: profileID,
                         reminderAt: nil,
                         isEnabled: false,
-                        hasActiveConcern: false
+                        hasActiveConcern: remaining.contains(where: \.isActive)
                     )
                 )
             }
@@ -1172,15 +1203,23 @@ actor SolidsProfileStateWriter {
             return nil
         }
         if state.modelContext == nil { modelContext.insert(state) }
+        let currentConcernID = state.activeDigestiveCheckIn?.id
         let existingLinkedCheckIn = state.digestiveCheckIns.first { $0.id == checkInID }
-        let remainsResolved = existingLinkedCheckIn?.resolvedAt
+        var resolvedAt = existingLinkedCheckIn?.resolvedAt
         var checkIns = state.digestiveCheckIns.filter { $0.id != checkInID }
-        if remainsResolved == nil {
-            checkIns = checkIns.map { existing in
-                guard existing.isActive else { return existing }
-                var resolved = existing
-                resolved.resolvedAt = now
-                return resolved
+        if resolvedAt == nil {
+            let newerActive = checkIns
+                .filter { $0.isActive && $0.recordedAt > recordedAt }
+                .max { $0.recordedAt < $1.recordedAt }
+            if let newerActive {
+                resolvedAt = newerActive.recordedAt
+            } else {
+                checkIns = checkIns.map { existing in
+                    guard existing.isActive else { return existing }
+                    var resolved = existing
+                    resolved.resolvedAt = recordedAt
+                    return resolved
+                }
             }
         }
         checkIns.append(SolidsDigestiveCheckIn(
@@ -1191,11 +1230,35 @@ actor SolidsProfileStateWriter {
             prolongedStraining: prolongedStraining,
             visibleBlood: visibleBlood,
             notes: notes,
-            resolvedAt: remainsResolved
+            resolvedAt: resolvedAt
         ))
         state.digestiveCheckIns = checkIns
+        let hasReminderState = state.digestiveReminderEnabled
+            || state.digestiveReminderAt != nil
+        let keepsPendingReminder = currentConcernID != nil
+            && state.activeDigestiveCheckIn != nil
+            && state.digestiveReminderEnabled
+            && state.digestiveReminderAt.map { $0 > now } == true
+        let clearsStaleReminder = hasReminderState && !keepsPendingReminder
+        if clearsStaleReminder {
+            // Preserve a pending follow-up when this is another observation
+            // for the current concern, but do not revive expired or orphaned
+            // reminder state.
+            state.digestiveReminderEnabled = false
+            state.digestiveReminderAt = nil
+        }
         state.updatedAt = now
         if let error = save() { return error }
+        if clearsStaleReminder {
+            await NotificationManager.shared.scheduleSolidsDigestiveReminder(
+                snapshot: .init(
+                    profileID: profileID,
+                    reminderAt: nil,
+                    isEnabled: false,
+                    hasActiveConcern: state.activeDigestiveCheckIn != nil
+                )
+            )
+        }
         return nil
     }
 
@@ -2991,7 +3054,7 @@ enum SolidsDigestiveSupportService {
                 id: "repeated-food-pattern",
                 title: "\(foodName) appears often",
                 detail: activeCaution.map { "A digestive concern is active. \($0)" }
-                    ?? "It appears in most recorded servings. That does not prove it caused a symptom; rotate other age-appropriate foods for variety when practical.",
+                    ?? "It appears in most recorded meals. That does not prove it caused a symptom; rotate other age-appropriate foods for variety when practical.",
                 systemImage: "arrow.triangle.2.circlepath",
                 suggestedFoodIDs: safeSuggestions(categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain])
                     .filter { $0 != dominant.key }

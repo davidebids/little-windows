@@ -3861,12 +3861,12 @@ final class UserVisibleFlowUITests: XCTestCase {
     func testDiaperEditorOffersOptionalRashDetail() {
         continueAfterFailure = false
 
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/diaper"
-        ]
-        app.launch()
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-smoke",
+            additionalEnvironment: ["LITTLE_WINDOWS_MARKETING_CAPTURE": "1"]
+        )
+        launch(startURL: "littlewindows://quick-log/diaper")
 
         XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 8))
         let rashToggle = app.switches["diaper-rash-toggle"]
@@ -3882,11 +3882,18 @@ final class UserVisibleFlowUITests: XCTestCase {
         let kindPicker = app.segmentedControls["diaper-kind-picker"]
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 2))
         kindPicker.buttons["Poo"].tap()
-        XCTAssertTrue(
-            app.otherElements["diaper-poo-consistency-picker"].waitForExistence(timeout: 2)
-                || app.buttons["diaper-poo-consistency-picker"].waitForExistence(timeout: 2)
-        )
-        XCTAssertTrue(app.switches["diaper-poo-painful-toggle"].exists)
+        let consistencyPicker = app.buttons["diaper-poo-consistency-picker"]
+        XCTAssertTrue(consistencyPicker.waitForExistence(timeout: 4))
+        consistencyPicker.tap()
+        let hardConsistency = app.buttons["Hard"]
+        XCTAssertTrue(hardConsistency.waitForExistence(timeout: 2))
+        hardConsistency.tap()
+        let painfulToggle = app.switches["diaper-poo-painful-toggle"]
+        for _ in 0..<3 where !painfulToggle.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(painfulToggle.waitForExistence(timeout: 2))
+        XCTAssertTrue(painfulToggle.isHittable)
         let strainingToggle = app.switches["diaper-poo-straining-toggle"]
         for _ in 0..<3 where !strainingToggle.exists {
             app.swipeUp()
@@ -3897,6 +3904,16 @@ final class UserVisibleFlowUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(bloodToggle.waitForExistence(timeout: 2))
+        let digestiveLinkToggle = app.switches["diaper-link-digestive-toggle"]
+        for _ in 0..<3 where !digestiveLinkToggle.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(digestiveLinkToggle.waitForExistence(timeout: 2))
+        XCTAssertEqual(digestiveLinkToggle.value as? String, "0")
+        digestiveLinkToggle.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)
+        ).tap()
+        XCTAssertEqual(digestiveLinkToggle.value as? String, "1")
     }
 
     func testStoreSectionsHaveVisibleAddReorderAndRemoveControls() {

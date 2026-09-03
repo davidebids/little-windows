@@ -284,22 +284,22 @@ struct EventEditorView: View {
         let selectedProfileID = event?.profileID
             ?? ProfileService.shared.selectedProfileID
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let unloadedID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let loadsSolidData = selectedType == .feed
             || event?.feedKind == .solid
             || solidPreset != nil
-        let solidEventProfileID = loadsSolidData ? selectedProfileID : unloadedID
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
         var recentSolidEventDescriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate<CareEvent> { event in
-                event.profileID == solidEventProfileID
+                event.profileID == selectedProfileID
                     && event.typeRawValue == feedRawValue
                     && event.feedKindRawValue == solidRawValue
             },
             sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
-        recentSolidEventDescriptor.fetchLimit = 120
+        // Non-feed editors only need to know whether solids history exists so
+        // early imported users can link a diaper observation to Feeding balance.
+        recentSolidEventDescriptor.fetchLimit = loadsSolidData ? 120 : 1
         _allEvents = Query(recentSolidEventDescriptor)
         _solidsProfileStates = Query(FetchDescriptor<SolidsProfileState>(
             predicate: #Predicate { $0.profileID == selectedProfileID },
