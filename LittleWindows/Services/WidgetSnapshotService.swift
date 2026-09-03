@@ -577,7 +577,16 @@ enum WidgetSnapshotService {
 
             sections = (try? context.fetch(FetchDescriptor<FoodStoreSection>())) ?? []
         }
-        let sectionNames = Dictionary(uniqueKeysWithValues: sections.map { ($0.id, $0.name) })
+        // CloudKit can briefly surface two SwiftData rows with the same logical ID
+        // while an export/import reconciliation is in flight. Widget generation
+        // must remain safe during that window; the startup repair removes the
+        // redundant stored row separately.
+        let sectionNames = Dictionary(
+            sections.map { ($0.id, $0) },
+            uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            }
+        ).mapValues(\.name)
         let snapshots = lists.map { list in
             shoppingListSnapshot(
                 list: list,

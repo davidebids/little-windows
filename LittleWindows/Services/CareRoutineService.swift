@@ -284,7 +284,12 @@ enum CareRoutineService {
         routine.updatedAt = Date()
 
         let routineSteps = existingSteps.filter { $0.routineID == routine.id }
-        let stepsByID = Dictionary(uniqueKeysWithValues: routineSteps.map { ($0.id, $0) })
+        let stepsByID = Dictionary(
+            routineSteps.map { ($0.id, $0) },
+            uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            }
+        )
         let retainedIDs = Set(validSteps.map(\.id))
 
         for step in routineSteps where !retainedIDs.contains(step.id) {

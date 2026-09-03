@@ -129,6 +129,7 @@ struct HealthObservationDetails: Codable, Equatable {
     var symptomName: String?
     var symptomSeverity: Int?
     var symptomBodyLocation: String?
+    var symptomBodyLocationRecord: BodyLocationRecord?
     var symptomResolved: Bool?
     var systolicBloodPressure: Int?
     var diastolicBloodPressure: Int?
@@ -140,11 +141,13 @@ struct HealthObservationDetails: Codable, Equatable {
     var bloodGlucoseContextRawValue: String?
     var painScore: Int?
     var painLocation: String?
+    var painBodyLocationRecord: BodyLocationRecord?
 
     init(
         symptomName: String? = nil,
         symptomSeverity: Int? = nil,
         symptomBodyLocation: String? = nil,
+        symptomBodyLocationRecord: BodyLocationRecord? = nil,
         symptomResolved: Bool? = nil,
         systolicBloodPressure: Int? = nil,
         diastolicBloodPressure: Int? = nil,
@@ -155,11 +158,13 @@ struct HealthObservationDetails: Codable, Equatable {
         bloodGlucoseUnitRawValue: String? = nil,
         bloodGlucoseContextRawValue: String? = nil,
         painScore: Int? = nil,
-        painLocation: String? = nil
+        painLocation: String? = nil,
+        painBodyLocationRecord: BodyLocationRecord? = nil
     ) {
         self.symptomName = symptomName
         self.symptomSeverity = symptomSeverity
         self.symptomBodyLocation = symptomBodyLocation
+        self.symptomBodyLocationRecord = symptomBodyLocationRecord
         self.symptomResolved = symptomResolved
         self.systolicBloodPressure = systolicBloodPressure
         self.diastolicBloodPressure = diastolicBloodPressure
@@ -171,6 +176,7 @@ struct HealthObservationDetails: Codable, Equatable {
         self.bloodGlucoseContextRawValue = bloodGlucoseContextRawValue
         self.painScore = painScore
         self.painLocation = painLocation
+        self.painBodyLocationRecord = painBodyLocationRecord
     }
 
     var bloodGlucoseUnit: BloodGlucoseUnit? {
@@ -181,6 +187,14 @@ struct HealthObservationDetails: Codable, Equatable {
     var bloodGlucoseContext: BloodGlucoseContext? {
         get { bloodGlucoseContextRawValue.flatMap(BloodGlucoseContext.init(rawValue:)) }
         set { bloodGlucoseContextRawValue = newValue?.rawValue }
+    }
+
+    var symptomLocationSummary: String? {
+        symptomBodyLocationRecord?.summary ?? symptomBodyLocation?.nilIfBlank
+    }
+
+    var painLocationSummary: String? {
+        painBodyLocationRecord?.summary ?? painLocation?.nilIfBlank
     }
 }
 
@@ -958,7 +972,7 @@ final class CareEvent {
         if let severity = details.symptomSeverity {
             parts.append("\(severity)/10")
         }
-        if let location = details.symptomBodyLocation?.nilIfBlank {
+        if let location = details.symptomLocationSummary {
             parts.append(location)
         }
         if details.symptomResolved == true {
@@ -994,7 +1008,7 @@ final class CareEvent {
         if let score = details.painScore {
             parts.append("\(score)/10")
         }
-        if let location = details.painLocation?.nilIfBlank {
+        if let location = details.painLocationSummary {
             parts.append(location)
         }
         return parts.isEmpty ? "Pain" : parts.joined(separator: " · ")

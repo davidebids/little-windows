@@ -369,7 +369,7 @@ enum MedicationRefillStatus: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum MedicationSupplyProjectionConfidence: String, Equatable {
+enum MedicationSupplyProjectionConfidence: String, Equatable, Sendable {
     case limited
     case developing
     case established
@@ -383,7 +383,7 @@ enum MedicationSupplyProjectionConfidence: String, Equatable {
     }
 }
 
-struct MedicationSupplyProjection: Equatable {
+struct MedicationSupplyProjection: Equatable, Sendable {
     var estimatedRunOutDate: Date
     var estimatedDaysRemaining: Double
     var averageDailyUse: Double

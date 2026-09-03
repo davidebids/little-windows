@@ -2174,9 +2174,10 @@ private struct PackingTravelersEditorView: View {
         _currentBags = State(initialValue: bags)
         _currentItems = State(initialValue: items)
         _adultNames = State(initialValue: Dictionary(
-            uniqueKeysWithValues: sortedTravelers
+            sortedTravelers
                 .filter { $0.kind == .adult }
-                .map { ($0.id, $0.displayName) }
+                .map { ($0.id, $0.displayName) },
+            uniquingKeysWith: { current, _ in current }
         ))
     }
 

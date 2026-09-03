@@ -6567,6 +6567,17 @@ final class SleepPredictionEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testURLRoutePublishesOneConsolidatedNavigationRevision() throws {
+        let router = DeepLinkRouter.shared
+        let initialRevision = router.navigationRequestRevision
+
+        router.route(try XCTUnwrap(URL(string: "littlewindows://quick-log/sleep")))
+
+        XCTAssertEqual(router.navigationRequestRevision, initialRevision + 1)
+        XCTAssertEqual(router.consumeAction(), .startTimer(.sleep, nil))
+    }
+
+    @MainActor
     func testDeepLinkActionCanRemainQueuedUntilDataIsReady() {
         let router = DeepLinkRouter.shared
         router.isDataReady = false
@@ -8322,6 +8333,198 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(metrics.first(where: { $0.title == "Completed To-Dos" })?.value, "1")
         XCTAssertEqual(metrics.first(where: { $0.title == "Returns" })?.value, "2")
         XCTAssertEqual(metrics.first(where: { $0.title == "Returns" })?.detail, "1 need action, 1 ready.")
+    }
+
+    @MainActor
+    func testTodayHomeSummaryCoalescesDuplicateListAndItemIdentifiers() throws {
+        let household = Household(name: "Test Home")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let listID = UUID()
+        let itemID = UUID()
+        let oldList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Old Tasks",
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let currentList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Current Tasks",
+            updatedAt: now
+        )
+        let oldItem = HomeTodoItem(
+            id: itemID,
+            householdID: household.id,
+            todoListID: listID,
+            title: "Old title",
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let currentItem = HomeTodoItem(
+            id: itemID,
+            householdID: household.id,
+            todoListID: listID,
+            title: "Current title",
+            updatedAt: now
+        )
+
+        let summary = TodayHomeSummaryService.summary(
+            householdID: household.id,
+            currentCaregiverName: "",
+            todoLists: [oldList, currentList],
+            todoItems: [oldItem, currentItem],
+            shoppingLists: [],
+            shoppingItems: [],
+            inventoryItems: [],
+            mealPrepItems: [],
+            mealPrepUsages: [],
+            packingTrips: [],
+            packingItems: [],
+            itineraryItems: [],
+            returnRequests: [],
+            returnItems: [],
+            returnPackages: [],
+            reminders: [],
+            now: now
+        )
+
+        let todos = try XCTUnwrap(summary.sections.first { $0.category == .todos })
+        XCTAssertEqual(todos.summary, "1 active list · 0 completed today")
+        XCTAssertEqual(todos.countLabel, "1 open")
+        XCTAssertEqual(todos.items.map(\.title), ["Current title"])
+        XCTAssertEqual(todos.items.first?.detail, "Current Tasks")
+    }
+
+    @MainActor
+    func testFoodHomeDuplicateRepairKeepsNewestRowsAndLinkedItems() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let household = Household(name: "Test Home")
+        let listID = UUID()
+        let linkedItem = HomeTodoItem(
+            householdID: household.id,
+            todoListID: listID,
+            title: "Preserved task"
+        )
+        let oldList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Old Tasks",
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+        let currentList = HomeTodoList(
+            id: listID,
+            householdID: household.id,
+            name: "Current Tasks",
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 300)
+        )
+        context.insert(household)
+        context.insert(linkedItem)
+        context.insert(oldList)
+        context.insert(currentList)
+        try context.save()
+
+        XCTAssertEqual(FoodHomeDuplicateRepairService.repair(context: context), 1)
+
+        let lists = try context.fetch(FetchDescriptor<HomeTodoList>())
+        let items = try context.fetch(FetchDescriptor<HomeTodoItem>())
+        XCTAssertEqual(lists.count, 1)
+        XCTAssertEqual(lists.first?.name, "Current Tasks")
+        XCTAssertEqual(items.map(\.title), ["Preserved task"])
+        XCTAssertEqual(items.first?.todoListID, listID)
+    }
+
+    @MainActor
+    func testFoodHomeDuplicateRepairBoundsEachLaunchCleanup() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let listID = UUID()
+
+        for revision in 0..<41 {
+            context.insert(HomeTodoList(
+                id: listID,
+                householdID: householdID,
+                name: "Tasks \(revision)",
+                createdAt: Date(timeIntervalSince1970: 100),
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(200 + revision))
+            ))
+        }
+        try context.save()
+
+        XCTAssertEqual(FoodHomeDuplicateRepairService.repair(context: context), 32)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<HomeTodoList>()).count, 9)
+    }
+
+    func testFoodHomeDuplicateRepairLaunchMaintenanceIsThrottled() {
+        let now = Date(timeIntervalSinceReferenceDate: 900_000)
+
+        XCTAssertTrue(FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+            lastCompletedAt: nil,
+            now: now
+        ))
+        XCTAssertFalse(FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+            lastCompletedAt: now.addingTimeInterval(-60),
+            now: now
+        ))
+        XCTAssertTrue(FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+            lastCompletedAt: now.addingTimeInterval(-24 * 60 * 60),
+            now: now
+        ))
+    }
+
+    @MainActor
+    func testFoodHomeDuplicateRepairDoesNotSweepUnrelatedSyncedModels() throws {
+        let container = try makeInMemoryContainer()
+        let context = container.mainContext
+        let householdID = UUID()
+        let sectionID = UUID()
+        let routineID = UUID()
+        let oldDate = Date(timeIntervalSince1970: 100)
+        let currentDate = Date(timeIntervalSince1970: 200)
+
+        context.insert(FoodStoreSection(
+            id: sectionID,
+            householdID: householdID,
+            storeID: UUID(),
+            name: "Old Section",
+            createdAt: oldDate,
+            updatedAt: oldDate
+        ))
+        context.insert(FoodStoreSection(
+            id: sectionID,
+            householdID: householdID,
+            storeID: UUID(),
+            name: "Current Section",
+            createdAt: oldDate,
+            updatedAt: currentDate
+        ))
+        context.insert(CareRoutine(
+            id: routineID,
+            scope: .household,
+            householdID: householdID,
+            title: "Old Routine",
+            createdAt: oldDate,
+            updatedAt: oldDate
+        ))
+        context.insert(CareRoutine(
+            id: routineID,
+            scope: .household,
+            householdID: householdID,
+            title: "Current Routine",
+            createdAt: oldDate,
+            updatedAt: currentDate
+        ))
+        try context.save()
+
+        XCTAssertEqual(FoodHomeDuplicateRepairService.repair(context: context), 0)
+
+        let sections = try context.fetch(FetchDescriptor<FoodStoreSection>())
+        let routines = try context.fetch(FetchDescriptor<CareRoutine>())
+        XCTAssertEqual(sections.count, 2)
+        XCTAssertEqual(routines.count, 2)
     }
 
     @MainActor

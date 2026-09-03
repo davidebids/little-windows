@@ -272,6 +272,7 @@ struct ProfileEditorView: View {
     @State private var profilePhotoLoadToken = UUID()
     @State private var profilePhotoDraft: PhotoAttachmentDraft?
     @State private var removesProfilePhoto = false
+    @State private var isSaving = false
     @Query(sort: \PhotoAttachment.createdAt) private var photoAttachments: [PhotoAttachment]
 
     init(profile: CareProfile? = nil, defaultType: CareProfileType = .child) {
@@ -446,6 +447,7 @@ struct ProfileEditorView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }
                     .fontWeight(.semibold)
+                    .disabled(isSaving)
             }
         }
         .alert("Check profile", isPresented: Binding(
@@ -488,11 +490,13 @@ struct ProfileEditorView: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             validationMessage = "Enter a name for this profile."
             return
         }
+        isSaving = true
 
         if let profile {
             profile.name = trimmed
@@ -552,7 +556,10 @@ struct ProfileEditorView: View {
             )
             applyProfilePhoto(to: createdProfile)
         }
-        guard PersistenceService.save(context: modelContext) else { return }
+        guard PersistenceService.save(context: modelContext) else {
+            isSaving = false
+            return
+        }
         dismiss()
     }
 

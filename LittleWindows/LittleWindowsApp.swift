@@ -196,6 +196,34 @@ struct LittleWindowsApp: App {
 
     @MainActor
     private func scheduleLaunchMaintenance(container modelContainer: ModelContainer) {
+        let operationalDefaults = PersistenceService.operationalDefaults()
+        let lastDuplicateRepairAt = operationalDefaults.object(
+            forKey: FoodHomeDuplicateRepairService.lastLaunchMaintenanceAtKey
+        ) as? Date
+        if FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+            lastCompletedAt: lastDuplicateRepairAt
+        ) {
+            Task(priority: .utility) { @MainActor in
+                // Duplicate rows are already coalesced defensively in the UI.
+                // Keep this physical cleanup away from store opening and the
+                // initial CloudKit import, and do not repeat it every launch.
+                do {
+                    try await Task.sleep(for: .seconds(20))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled,
+                      UIApplication.shared.applicationState == .active else { return }
+                let worker = FoodHomeDuplicateRepairWorker(modelContainer: modelContainer)
+                _ = await worker.repair()
+                guard !Task.isCancelled else { return }
+                operationalDefaults.set(
+                    Date(),
+                    forKey: FoodHomeDuplicateRepairService.lastLaunchMaintenanceAtKey
+                )
+            }
+        }
+
         Task(priority: .utility) { @MainActor in
             await Task.yield()
             await NotificationManager.shared.configure()

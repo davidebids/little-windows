@@ -252,7 +252,7 @@ struct EventEditorView: View {
     @State private var dogGlucoseMealRelation: DogMealRelation
     @State private var symptomName: String
     @State private var symptomSeverity: Int
-    @State private var symptomBodyLocation: String
+    @State private var symptomBodyLocationRecord: BodyLocationRecord
     @State private var symptomResolved: Bool
     @State private var systolicBloodPressure: Int
     @State private var diastolicBloodPressure: Int
@@ -263,10 +263,11 @@ struct EventEditorView: View {
     @State private var bloodGlucoseUnit: BloodGlucoseUnit
     @State private var bloodGlucoseContext: BloodGlucoseContext
     @State private var painScore: Int
-    @State private var painLocation: String
+    @State private var painBodyLocationRecord: BodyLocationRecord
     @State private var recentMedicineNames: [String]
     @State private var growthMeasurementEditor: GrowthMeasurementEditorKind?
     @State private var showingSolidFoodPicker: Bool
+    @State private var showingBodyLocationPicker: Bool
     @State private var validationMessage: String?
 
     init(
@@ -431,7 +432,13 @@ struct EventEditorView: View {
         let health = event?.healthObservationDetails ?? HealthObservationDetails()
         _symptomName = State(initialValue: health.symptomName ?? "")
         _symptomSeverity = State(initialValue: health.symptomSeverity ?? 5)
-        _symptomBodyLocation = State(initialValue: health.symptomBodyLocation ?? "")
+        _symptomBodyLocationRecord = State(initialValue:
+            health.symptomBodyLocationRecord
+                ?? BodyLocationRecord(
+                    modelVariant: .neutral,
+                    customText: health.symptomBodyLocation
+                )
+        )
         _symptomResolved = State(initialValue: health.symptomResolved ?? false)
         _systolicBloodPressure = State(initialValue: health.systolicBloodPressure ?? 120)
         _diastolicBloodPressure = State(initialValue: health.diastolicBloodPressure ?? 80)
@@ -442,10 +449,17 @@ struct EventEditorView: View {
         _bloodGlucoseUnit = State(initialValue: health.bloodGlucoseUnit ?? .milligramsPerDeciliter)
         _bloodGlucoseContext = State(initialValue: health.bloodGlucoseContext ?? .unspecified)
         _painScore = State(initialValue: health.painScore ?? 0)
-        _painLocation = State(initialValue: health.painLocation ?? "")
+        _painBodyLocationRecord = State(initialValue:
+            health.painBodyLocationRecord
+                ?? BodyLocationRecord(
+                    modelVariant: .neutral,
+                    customText: health.painLocation
+                )
+        )
         _recentMedicineNames = State(initialValue: [])
         _growthMeasurementEditor = State(initialValue: nil)
         _showingSolidFoodPicker = State(initialValue: false)
+        _showingBodyLocationPicker = State(initialValue: false)
     }
 
     private var selectedProfile: CareProfile? {
@@ -464,6 +478,15 @@ struct EventEditorView: View {
     }
     private var isDogProfile: Bool {
         activeProfileType == .dog
+    }
+    private var canPresentBodyLocationPicker: Bool {
+        activeProfileType == .adult && (type == .symptom || type == .pain)
+    }
+    private var bodyLocationPickerPresentation: Binding<Bool> {
+        Binding(
+            get: { canPresentBodyLocationPicker && showingBodyLocationPicker },
+            set: { showingBodyLocationPicker = canPresentBodyLocationPicker && $0 }
+        )
     }
     private var solidsAccessLevel: SolidsAccessLevel {
         SolidsTrackingService.accessLevel(
@@ -771,6 +794,22 @@ struct EventEditorView: View {
                 ) { names in
                     foodDescription = SolidFoodSelection.description(from: names) ?? ""
                     syncSolidFoodDetails(names: names)
+                }
+            }
+            .sheet(isPresented: bodyLocationPickerPresentation) {
+                if canPresentBodyLocationPicker {
+                    BodyLocationPickerView(
+                        profileSex: activeProfile?.sex ?? .unknown,
+                        initialRecord: type == .pain
+                            ? painBodyLocationRecord
+                            : symptomBodyLocationRecord
+                    ) { updatedRecord in
+                        if type == .pain {
+                            painBodyLocationRecord = updatedRecord
+                        } else {
+                            symptomBodyLocationRecord = updatedRecord
+                        }
+                    }
                 }
             }
             .sheet(isPresented: Binding(
@@ -1312,9 +1351,15 @@ struct EventEditorView: View {
                             .multilineTextAlignment(.trailing)
                     }
                     Stepper("Severity: \(symptomSeverity)/10", value: $symptomSeverity, in: 0...10)
-                    LabeledContent("Body location") {
-                        TextField("Optional", text: $symptomBodyLocation)
-                            .multilineTextAlignment(.trailing)
+                    if canPresentBodyLocationPicker {
+                        BodyLocationEditorButton(
+                            title: "Body location",
+                            summary: symptomBodyLocationRecord.summary,
+                            selectionCount: symptomBodyLocationRecord.selections.count
+                        ) {
+                            showingBodyLocationPicker = true
+                        }
+                        .accessibilityIdentifier("event.symptom-body-location")
                     }
                     Toggle("Resolved", isOn: $symptomResolved)
                     healthTrackingFooter
@@ -1419,9 +1464,15 @@ struct EventEditorView: View {
         case .pain:
             Section("Pain") {
                 Stepper("Pain: \(painScore)/10", value: $painScore, in: 0...10)
-                LabeledContent("Location") {
-                    TextField("Optional", text: $painLocation)
-                        .multilineTextAlignment(.trailing)
+                if canPresentBodyLocationPicker {
+                    BodyLocationEditorButton(
+                        title: "Body location",
+                        summary: painBodyLocationRecord.summary,
+                        selectionCount: painBodyLocationRecord.selections.count
+                    ) {
+                        showingBodyLocationPicker = true
+                    }
+                    .accessibilityIdentifier("event.pain-body-location")
                 }
                 healthTrackingFooter
             }
@@ -1811,7 +1862,12 @@ struct EventEditorView: View {
         case .symptom:
             details.symptomName = symptomName.nilIfBlank
             details.symptomSeverity = symptomSeverity
-            details.symptomBodyLocation = symptomBodyLocation.nilIfBlank
+            var locationRecord = symptomBodyLocationRecord
+            locationRecord.normalizeForPattern()
+            details.symptomBodyLocation = locationRecord.summary
+            details.symptomBodyLocationRecord = locationRecord.hasValue
+                ? locationRecord
+                : nil
             details.symptomResolved = symptomResolved
         case .bloodPressure:
             details.systolicBloodPressure = systolicBloodPressure
@@ -1828,7 +1884,12 @@ struct EventEditorView: View {
             details.bloodGlucoseContext = bloodGlucoseContext
         case .pain:
             details.painScore = painScore
-            details.painLocation = painLocation.nilIfBlank
+            var locationRecord = painBodyLocationRecord
+            locationRecord.normalizeForPattern()
+            details.painLocation = locationRecord.summary
+            details.painBodyLocationRecord = locationRecord.hasValue
+                ? locationRecord
+                : nil
         default:
             break
         }

@@ -1,20 +1,190 @@
 import SwiftData
 import SwiftUI
 
-private struct MedicationDashboard {
-    var medications: [Medication]
-    var archivedMedications: [Medication]
-    var activeRegimens: [MedicationRegimen]
-    var regimensByMedicationID: [UUID: [MedicationRegimen]]
-    var phasesByRegimenID: [UUID: [MedicationSchedulePhase]]
-    var medicationByID: [UUID: Medication]
-    var regimenByID: [UUID: MedicationRegimen]
-    var recordByOccurrenceKey: [String: MedicationDoseRecord]
-    var records: [MedicationDoseRecord]
-    var todayOccurrences: [MedicationOccurrence]
-    var overdueOccurrences: [MedicationOccurrence]
-    var futureOccurrences: [MedicationOccurrence]
-    var asNeededRegimens: [MedicationRegimen]
+private struct MedicationDashboardMedication: Identifiable, Sendable {
+    let id: UUID
+    let name: String
+    let strengthDescription: String?
+    let needsRefill: Bool
+    let isArchived: Bool
+    let isConfirmedCurrent: Bool
+    let lastReviewedAt: Date?
+}
+
+private struct MedicationDashboardRegimen: Identifiable, Sendable {
+    let id: UUID
+    let medicationID: UUID
+    let scheduleKindRawValue: String
+    let doseAmount: Double
+    let doseUnit: String
+    let scheduleSummary: String
+    let minimumHoursBetweenDoses: Double?
+    let maximumDosesPerDay: Int?
+
+    var scheduleKind: MedicationScheduleKind {
+        MedicationScheduleKind(rawValue: scheduleKindRawValue) ?? .daily
+    }
+}
+
+private struct MedicationDashboard: Sendable {
+    let medications: [MedicationDashboardMedication]
+    let archivedMedications: [MedicationDashboardMedication]
+    let regimensByMedicationID: [UUID: [MedicationDashboardRegimen]]
+    let medicationByID: [UUID: MedicationDashboardMedication]
+    let regimenByID: [UUID: MedicationDashboardRegimen]
+    let recordByOccurrenceKey: [String: MedicationDoseHistoryRow]
+    let todayOccurrences: [MedicationOccurrence]
+    let overdueOccurrences: [MedicationOccurrence]
+    let futureOccurrences: [MedicationOccurrence]
+    let asNeededRegimens: [MedicationDashboardRegimen]
+}
+
+@ModelActor
+private actor MedicationDashboardWorker {
+    func snapshot(
+        profileID: UUID,
+        recentDoseStart: Date,
+        now: Date
+    ) -> MedicationDashboard {
+        var descriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.loggedAt >= recentDoseStart
+            },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1_024
+        let modelDoseRecords = (try? modelContext.fetch(descriptor)) ?? []
+        let doseRecords = modelDoseRecords.map {
+            MedicationDoseHistoryRow(
+                id: $0.id,
+                regimenID: $0.regimenID,
+                occurrenceKey: $0.occurrenceKey,
+                statusRawValue: $0.statusRawValue,
+                loggedAt: $0.loggedAt,
+                takenAt: $0.takenAt,
+                scheduledAt: $0.scheduledAt,
+                actualDoseAmount: $0.actualDoseAmount,
+                timingRawValue: $0.timingRawValue,
+                reasonRawValue: $0.reasonRawValue,
+                doseAmount: $0.doseAmount,
+                doseUnit: $0.doseUnit,
+                notes: $0.notes
+            )
+        }
+
+        let medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\Medication.name)]
+        )
+        let regimenDescriptor = FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationRegimen.createdAt)]
+        )
+        let phaseDescriptor = FetchDescriptor<MedicationSchedulePhase>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
+        )
+        let revisionDescriptor = FetchDescriptor<MedicationPlanRevision>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationPlanRevision.effectiveFrom)]
+        )
+        let allMedications = (try? modelContext.fetch(medicationDescriptor)) ?? []
+        let medications = allMedications.filter { !$0.isArchived }
+        let allRegimens = (try? modelContext.fetch(regimenDescriptor)) ?? []
+        let activeRegimens = allRegimens.filter(\.isActive)
+        let phases = (try? modelContext.fetch(phaseDescriptor)) ?? []
+        let revisions = (try? modelContext.fetch(revisionDescriptor)) ?? []
+        let phasesByRegimenID = Dictionary(grouping: phases, by: \.regimenID)
+        let regimensByMedicationID = Dictionary(grouping: allRegimens, by: \.medicationID)
+        let revisionsByMedicationID = Dictionary(grouping: revisions, by: \.medicationID)
+        let recordKeys = Set(doseRecords.compactMap(\.occurrenceKey))
+        let calendar = MedicationScheduleDate.currentCalendar()
+        let start = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: 7, to: now) ?? now
+        let occurrences = activeRegimens.flatMap { regimen in
+            MedicationScheduleEngine.occurrences(
+                regimen: regimen,
+                phases: phasesByRegimenID[regimen.id] ?? [],
+                from: start,
+                through: end
+            )
+        }.sorted { $0.scheduledAt < $1.scheduledAt }
+        let overdueStart = calendar.date(byAdding: .day, value: -7, to: start) ?? start
+        let overdueOccurrences = medications.flatMap { medication in
+            let medicationRegimens = regimensByMedicationID[medication.id] ?? []
+            return MedicationScheduleEngine.versionedOccurrences(
+                medicationID: medication.id,
+                regimens: medicationRegimens,
+                phases: medicationRegimens.flatMap { phasesByRegimenID[$0.id] ?? [] },
+                revisions: revisionsByMedicationID[medication.id] ?? [],
+                from: overdueStart,
+                through: start.addingTimeInterval(-0.001),
+                calendar: calendar
+            )
+        }.filter {
+            !recordKeys.contains($0.occurrenceKey)
+        }.sorted { $0.scheduledAt > $1.scheduledAt }
+
+        let medicationRows = allMedications.map {
+            MedicationDashboardMedication(
+                id: $0.id,
+                name: $0.name,
+                strengthDescription: $0.strengthDescription,
+                needsRefill: $0.needsRefill,
+                isArchived: $0.isArchived,
+                isConfirmedCurrent: $0.isConfirmedCurrent,
+                lastReviewedAt: $0.lastReviewedAt
+            )
+        }
+        let activeRegimenRows = activeRegimens.map {
+            MedicationDashboardRegimen(
+                id: $0.id,
+                medicationID: $0.medicationID,
+                scheduleKindRawValue: $0.scheduleKindRawValue,
+                doseAmount: $0.doseAmount,
+                doseUnit: $0.doseUnit,
+                scheduleSummary: $0.scheduleSummary,
+                minimumHoursBetweenDoses: $0.minimumHoursBetweenDoses,
+                maximumDosesPerDay: $0.maximumDosesPerDay
+            )
+        }
+        let activeMedicationRows = medicationRows.filter { !$0.isArchived }
+        let activeMedicationByID = Dictionary(
+            uniqueKeysWithValues: activeMedicationRows.map { ($0.id, $0) }
+        )
+        let activeRegimenByID = Dictionary(
+            uniqueKeysWithValues: activeRegimenRows.map { ($0.id, $0) }
+        )
+        let activeRegimensByMedicationID = Dictionary(
+            grouping: activeRegimenRows,
+            by: \.medicationID
+        )
+        let recordByOccurrenceKey = Dictionary(
+            doseRecords.compactMap { record in
+                record.occurrenceKey.map { ($0, record) }
+            },
+            uniquingKeysWith: { first, second in
+                first.loggedAt >= second.loggedAt ? first : second
+            }
+        )
+
+        return MedicationDashboard(
+            medications: activeMedicationRows,
+            archivedMedications: medicationRows.filter(\.isArchived),
+            regimensByMedicationID: activeRegimensByMedicationID,
+            medicationByID: activeMedicationByID,
+            regimenByID: activeRegimenByID,
+            recordByOccurrenceKey: recordByOccurrenceKey,
+            todayOccurrences: occurrences.filter {
+                calendar.isDate($0.scheduledAt, inSameDayAs: now)
+            },
+            overdueOccurrences: overdueOccurrences,
+            futureOccurrences: occurrences.filter {
+                $0.scheduledAt > now && !calendar.isDate($0.scheduledAt, inSameDayAs: now)
+            },
+            asNeededRegimens: activeRegimenRows.filter { $0.scheduleKind == .asNeeded }
+        )
+    }
 }
 
 private struct MedicationDoseEditorConfiguration: Identifiable {
@@ -258,11 +428,6 @@ private struct MedicationDoseEditorView: View {
 
 struct MedicationsView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var allMedications: [Medication]
-    @Query private var allRegimens: [MedicationRegimen]
-    @Query private var allPhases: [MedicationSchedulePhase]
-    @Query private var allPlanRevisions: [MedicationPlanRevision]
-    @Query private var allDoseRecords: [MedicationDoseRecord]
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
 
     let profile: CareProfile
@@ -271,119 +436,34 @@ struct MedicationsView: View {
     @State private var actionMessage: String?
     @State private var doseEditorConfiguration: MedicationDoseEditorConfiguration?
     @State private var selectedMedicationID: UUID?
-
-    init(profile: CareProfile) {
-        self.profile = profile
-        let profileID = profile.id
-        let calendar = MedicationScheduleDate.currentCalendar()
-        let currentDay = calendar.startOfDay(for: Date())
-        let relevantRecordStart = calendar.date(byAdding: .day, value: -8, to: currentDay) ?? currentDay
-        _allMedications = Query(FetchDescriptor<Medication>(
-            predicate: #Predicate { $0.profileID == profileID },
-            sortBy: [SortDescriptor(\Medication.name)]
-        ))
-        _allRegimens = Query(FetchDescriptor<MedicationRegimen>(
-            predicate: #Predicate { $0.profileID == profileID },
-            sortBy: [SortDescriptor(\MedicationRegimen.createdAt)]
-        ))
-        _allPhases = Query(FetchDescriptor<MedicationSchedulePhase>(
-            predicate: #Predicate { $0.profileID == profileID },
-            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
-        ))
-        _allPlanRevisions = Query(FetchDescriptor<MedicationPlanRevision>(
-            predicate: #Predicate { $0.profileID == profileID },
-            sortBy: [SortDescriptor(\MedicationPlanRevision.effectiveFrom)]
-        ))
-        _allDoseRecords = Query(FetchDescriptor<MedicationDoseRecord>(
-            predicate: #Predicate {
-                $0.profileID == profileID && $0.loggedAt >= relevantRecordStart
-            },
-            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
-        ))
-    }
+    @State private var dashboard: MedicationDashboard?
+    @State private var dashboardRevision = 0
 
     private var scheduleCalendar: Calendar {
         MedicationScheduleDate.currentCalendar()
     }
 
-    private func makeDashboard(now: Date = Date()) -> MedicationDashboard {
-        let medications = allMedications.filter { !$0.isArchived }
-        let archivedMedications = allMedications.filter(\.isArchived)
-        let activeRegimens = allRegimens.filter(\.isActive)
-        let medicationByID = Dictionary(uniqueKeysWithValues: medications.map { ($0.id, $0) })
-        let regimenByID = Dictionary(uniqueKeysWithValues: allRegimens.map { ($0.id, $0) })
-        let regimensByMedicationID = Dictionary(grouping: activeRegimens, by: \.medicationID)
-        let allRegimensByMedicationID = Dictionary(grouping: allRegimens, by: \.medicationID)
-        let phasesByRegimenID = Dictionary(grouping: allPhases, by: \.regimenID)
-        let revisionsByMedicationID = Dictionary(grouping: allPlanRevisions, by: \.medicationID)
-        let recordByOccurrenceKey = Dictionary(
-            allDoseRecords.compactMap { record in
-                record.occurrenceKey.map { ($0, record) }
-            },
-            uniquingKeysWith: { first, second in
-                first.loggedAt >= second.loggedAt ? first : second
-            }
-        )
-        let start = scheduleCalendar.startOfDay(for: now)
-        let end = scheduleCalendar.date(byAdding: .day, value: 7, to: now) ?? now
-        let occurrences = activeRegimens.flatMap { regimen in
-            MedicationScheduleEngine.occurrences(
-                regimen: regimen,
-                phases: phasesByRegimenID[regimen.id] ?? [],
-                from: start,
-                through: end
-            )
-        }.sorted { $0.scheduledAt < $1.scheduledAt }
-        let overdueStart = scheduleCalendar.date(
-            byAdding: .day,
-            value: -7,
-            to: start
-        ) ?? start
-        let overdueOccurrences = medications.flatMap { medication in
-            let medicationRegimens = allRegimensByMedicationID[medication.id] ?? []
-            return MedicationScheduleEngine.versionedOccurrences(
-                medicationID: medication.id,
-                regimens: medicationRegimens,
-                phases: medicationRegimens.flatMap { phasesByRegimenID[$0.id] ?? [] },
-                revisions: revisionsByMedicationID[medication.id] ?? [],
-                from: overdueStart,
-                through: start.addingTimeInterval(-0.001),
-                calendar: scheduleCalendar
-            )
-        }.filter {
-            recordByOccurrenceKey[$0.occurrenceKey] == nil
-        }.sorted { $0.scheduledAt > $1.scheduledAt }
-        return MedicationDashboard(
-            medications: medications,
-            archivedMedications: archivedMedications,
-            activeRegimens: activeRegimens,
-            regimensByMedicationID: regimensByMedicationID,
-            phasesByRegimenID: phasesByRegimenID,
-            medicationByID: medicationByID,
-            regimenByID: regimenByID,
-            recordByOccurrenceKey: recordByOccurrenceKey,
-            records: allDoseRecords,
-            todayOccurrences: occurrences.filter {
-                scheduleCalendar.isDate($0.scheduledAt, inSameDayAs: now)
-            },
-            overdueOccurrences: overdueOccurrences,
-            futureOccurrences: occurrences.filter {
-                $0.scheduledAt > now && !scheduleCalendar.isDate($0.scheduledAt, inSameDayAs: now)
-            },
-            asNeededRegimens: activeRegimens.filter { $0.scheduleKind == .asNeeded }
-        )
-    }
-
     var body: some View {
-        let dashboard = makeDashboard()
         List {
-            todaySection(dashboard)
-            asNeededSection(dashboard)
-            medicationSection(dashboard)
-            overdueSection(dashboard)
-            upcomingSection(dashboard)
-            archivedSection(dashboard)
-            safetySection
+            if let dashboard {
+                todaySection(dashboard)
+                asNeededSection(dashboard)
+                medicationSection(dashboard)
+                overdueSection(dashboard)
+                upcomingSection(dashboard)
+                archivedSection(dashboard)
+                safetySection
+            } else {
+                Section {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading medications…")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    AppSectionHeader(title: "Today", subtitle: profile.name)
+                }
+            }
         }
         .navigationTitle("Medications")
         .toolbar {
@@ -398,12 +478,12 @@ struct MedicationsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingEditor) {
+        .sheet(isPresented: $showingEditor, onDismiss: refreshDashboard) {
             NavigationStack {
                 MedicationEditorView(profile: profile)
             }
         }
-        .sheet(isPresented: $showingReconciliation) {
+        .sheet(isPresented: $showingReconciliation, onDismiss: refreshDashboard) {
             NavigationStack {
                 MedicationReconciliationView(profile: profile)
             }
@@ -423,35 +503,21 @@ struct MedicationsView: View {
         } message: {
             Text(actionMessage ?? "")
         }
+        .task(id: dashboardRevision) {
+            await loadDashboard()
+        }
         .task(id: deepLinkRouter.pendingMedicationDoseCommand?.id) {
             applyPendingDoseCommand()
         }
         .task(id: deepLinkRouter.pendingMedicationDetailID) {
-            guard let medicationID = deepLinkRouter.pendingMedicationDetailID else { return }
-            defer { deepLinkRouter.pendingMedicationDetailID = nil }
-            guard dashboard.medicationByID[medicationID] != nil else {
-                actionMessage = "That medication is no longer current."
-                return
-            }
-            selectedMedicationID = medicationID
+            applyPendingMedicationDetailIfReady()
         }
         .navigationDestination(item: $selectedMedicationID) { medicationID in
-            if let medication = dashboard.medicationByID[medicationID] {
-                MedicationDetailView(
-                    profile: profile,
-                    medication: medication,
-                    regimens: dashboard.regimensByMedicationID[medication.id] ?? [],
-                    phases: (dashboard.regimensByMedicationID[medication.id] ?? []).flatMap {
-                        dashboard.phasesByRegimenID[$0.id] ?? []
-                    }
-                )
-            } else {
-                ContentUnavailableView(
-                    "Medication unavailable",
-                    systemImage: "pills",
-                    description: Text("This medication may have been archived or removed.")
-                )
-            }
+            MedicationDetailDestination(
+                profile: profile,
+                medicationID: medicationID,
+                onChange: refreshDashboard
+            )
         }
     }
 
@@ -535,18 +601,19 @@ struct MedicationsView: View {
                 }
             } else {
                 ForEach(dashboard.medications) { medication in
-                    NavigationLink {
-                        MedicationDetailView(
-                            profile: profile,
-                            medication: medication,
-                            regimens: dashboard.regimensByMedicationID[medication.id] ?? [],
-                            phases: (dashboard.regimensByMedicationID[medication.id] ?? []).flatMap {
-                                dashboard.phasesByRegimenID[$0.id] ?? []
-                            }
-                        )
+                    Button {
+                        selectedMedicationID = medication.id
                     } label: {
-                        medicationRow(medication, dashboard: dashboard)
+                        HStack {
+                            medicationRow(medication, dashboard: dashboard)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.forward")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             }
         } header: {
@@ -575,14 +642,7 @@ struct MedicationsView: View {
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button("Restore") {
-                            guard MedicationService.restore(
-                                medication: medication,
-                                regimens: allRegimens,
-                                context: modelContext
-                            ) else {
-                                actionMessage = "This medication could not be restored. Review its plan history and try again."
-                                return
-                            }
+                            restoreMedication(id: medication.id)
                         }
                         .buttonStyle(.bordered)
                     }
@@ -655,7 +715,10 @@ struct MedicationsView: View {
         }
     }
 
-    private func medicationRow(_ medication: Medication, dashboard: MedicationDashboard) -> some View {
+    private func medicationRow(
+        _ medication: MedicationDashboardMedication,
+        dashboard: MedicationDashboard
+    ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: medication.needsRefill ? "pills.circle.fill" : "pills.fill")
                 .foregroundStyle(medication.needsRefill ? .orange : .red)
@@ -696,7 +759,7 @@ struct MedicationsView: View {
         "\(DateFormatting.dayString(from: date, timeZone: scheduleCalendar.timeZone)) at \(DateFormatting.timeString(from: date, timeZone: scheduleCalendar.timeZone))"
     }
 
-    private func asNeededSubtitle(_ regimen: MedicationRegimen) -> String {
+    private func asNeededSubtitle(_ regimen: MedicationDashboardRegimen) -> String {
         var parts = ["\(doseText(regimen.doseAmount)) \(regimen.doseUnit)"]
         if let gap = regimen.minimumHoursBetweenDoses {
             parts.append("at least \(doseText(gap)) hr apart")
@@ -708,20 +771,38 @@ struct MedicationsView: View {
     }
 
     private func presentDoseEditor(
-        medication: Medication,
-        regimen: MedicationRegimen,
+        medication: MedicationDashboardMedication,
+        regimen: MedicationDashboardRegimen,
         occurrence: MedicationOccurrence?
     ) {
-        let scheduledAmount = occurrence?.doseAmount ?? regimen.doseAmount
-        doseEditorConfiguration = MedicationDoseEditorConfiguration(
+        presentDoseEditor(
             medicationID: medication.id,
+            medicationName: medication.name,
             regimenID: regimen.id,
+            regimenDoseAmount: regimen.doseAmount,
+            regimenDoseUnit: regimen.doseUnit,
+            occurrence: occurrence
+        )
+    }
+
+    private func presentDoseEditor(
+        medicationID: UUID,
+        medicationName: String,
+        regimenID: UUID,
+        regimenDoseAmount: Double,
+        regimenDoseUnit: String,
+        occurrence: MedicationOccurrence?
+    ) {
+        let scheduledAmount = occurrence?.doseAmount ?? regimenDoseAmount
+        doseEditorConfiguration = MedicationDoseEditorConfiguration(
+            medicationID: medicationID,
+            regimenID: regimenID,
             phaseID: occurrence?.phaseID,
             occurrenceKey: occurrence?.occurrenceKey,
             scheduledAt: occurrence?.scheduledAt,
             scheduledDoseAmount: scheduledAmount,
-            doseUnit: occurrence?.doseUnit ?? regimen.doseUnit,
-            medicationName: medication.name,
+            doseUnit: occurrence?.doseUnit ?? regimenDoseUnit,
+            medicationName: medicationName,
             recordID: nil,
             initialEntry: MedicationDoseEntry(
                 status: .taken,
@@ -739,17 +820,20 @@ struct MedicationsView: View {
         entry: MedicationDoseEntry
     ) -> String? {
         guard let regimenID = configuration.regimenID,
-              let medication = allMedications.first(where: { $0.id == configuration.medicationID }),
-              let regimen = allRegimens.first(where: { $0.id == regimenID }) else {
+              let medication = medication(id: configuration.medicationID),
+              let regimen = regimen(id: regimenID) else {
             return "This medication changed. Close this form and try again."
         }
         if regimen.scheduleKind == .asNeeded {
             let actualTime = entry.takenAt ?? Date()
-            switch MedicationScheduleEngine.asNeededDecision(
+            guard let decision = MedicationService.asNeededDecision(
                 regimen: regimen,
-                records: allDoseRecords,
-                at: actualTime
-            ) {
+                at: actualTime,
+                context: modelContext
+            ) else {
+                return "The recent dose history could not be checked. Please try again."
+            }
+            switch decision {
             case .allowed:
                 break
             case .waitUntil(let date):
@@ -771,6 +855,7 @@ struct MedicationsView: View {
             ) != nil else {
                 return "This dose could not be saved. Please try again."
             }
+            refreshDashboard()
             return nil
         }
 
@@ -800,6 +885,7 @@ struct MedicationsView: View {
         )
         switch result {
         case .applied:
+            refreshDashboard()
             return nil
         case .duplicate(let medicationName):
             return "\(medicationName) already has an outcome for this dose."
@@ -810,8 +896,8 @@ struct MedicationsView: View {
 
     private func recordScheduledDose(
         _ occurrence: MedicationOccurrence,
-        medication: Medication,
-        regimen: MedicationRegimen,
+        medication: MedicationDashboardMedication,
+        regimen: MedicationDashboardRegimen,
         status: MedicationDoseStatus
     ) {
         let result = MedicationService.recordScheduledDose(
@@ -828,7 +914,12 @@ struct MedicationsView: View {
             status: status,
             context: modelContext
         )
-        if case .rejected(let message) = result {
+        switch result {
+        case .applied:
+            refreshDashboard()
+        case .duplicate:
+            break
+        case .rejected(let message):
             actionMessage = message
         }
     }
@@ -854,8 +945,11 @@ struct MedicationsView: View {
                     actionMessage = "This dose was already recorded as \(existingRecord.outcomeDisplayName.lowercased())."
                 } else {
                     presentDoseEditor(
-                        medication: medication,
-                        regimen: regimen,
+                        medicationID: medication.id,
+                        medicationName: medication.name,
+                        regimenID: regimen.id,
+                        regimenDoseAmount: regimen.doseAmount,
+                        regimenDoseUnit: regimen.doseUnit,
                         occurrence: occurrence
                     )
                 }
@@ -871,12 +965,145 @@ struct MedicationsView: View {
             context: modelContext
         ) {
         case .applied(let medicationName):
+            refreshDashboard()
             actionMessage = "Recorded \(medicationName) as \(status.displayName.lowercased())."
         case .duplicate(let medicationName):
             actionMessage = "\(medicationName) was already recorded as \(status.displayName.lowercased())."
         case .rejected(let message):
             actionMessage = message
         }
+    }
+
+    private func loadDashboard() async {
+        let requestedProfileID = profile.id
+        let now = Date()
+        let currentDay = scheduleCalendar.startOfDay(for: now)
+        let startingAt = scheduleCalendar.date(
+            byAdding: .day,
+            value: -8,
+            to: currentDay
+        ) ?? currentDay
+        let worker = MedicationDashboardWorker(
+            modelContainer: modelContext.container
+        )
+        let snapshot = await worker.snapshot(
+            profileID: requestedProfileID,
+            recentDoseStart: startingAt,
+            now: now
+        )
+        guard !Task.isCancelled, profile.id == requestedProfileID else { return }
+        dashboard = snapshot
+        applyPendingMedicationDetailIfReady()
+    }
+
+    private func refreshDashboard() {
+        dashboardRevision &+= 1
+    }
+
+    private func applyPendingMedicationDetailIfReady() {
+        guard let dashboard,
+              let medicationID = deepLinkRouter.pendingMedicationDetailID else { return }
+        deepLinkRouter.pendingMedicationDetailID = nil
+        guard dashboard.medicationByID[medicationID] != nil else {
+            actionMessage = "That medication is no longer current."
+            return
+        }
+        selectedMedicationID = medicationID
+    }
+
+    private func medication(id: UUID) -> Medication? {
+        var descriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+        return (try? modelContext.fetch(descriptor))?.first
+    }
+
+    private func regimen(id: UUID) -> MedicationRegimen? {
+        var descriptor = FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.id == id }
+        )
+        descriptor.fetchLimit = 1
+        return (try? modelContext.fetch(descriptor))?.first
+    }
+
+    private func restoreMedication(id: UUID) {
+        guard let medication = medication(id: id) else {
+            actionMessage = "This medication changed. Reload the list and try again."
+            return
+        }
+        let profileID = profile.id
+        let regimens = (try? modelContext.fetch(FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.medicationID == id
+            }
+        ))) ?? []
+        guard MedicationService.restore(
+            medication: medication,
+            regimens: regimens,
+            context: modelContext
+        ) else {
+            actionMessage = "This medication could not be restored. Review its plan history and try again."
+            return
+        }
+        refreshDashboard()
+    }
+}
+
+private struct MedicationDetailDestination: View {
+    @Query private var medications: [Medication]
+    @Query private var regimens: [MedicationRegimen]
+    @Query private var phases: [MedicationSchedulePhase]
+
+    let profile: CareProfile
+    let medicationID: UUID
+    let onChange: () -> Void
+
+    init(
+        profile: CareProfile,
+        medicationID: UUID,
+        onChange: @escaping () -> Void
+    ) {
+        self.profile = profile
+        self.medicationID = medicationID
+        self.onChange = onChange
+        let profileID = profile.id
+        var medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.id == medicationID }
+        )
+        medicationDescriptor.fetchLimit = 1
+        _medications = Query(medicationDescriptor)
+        _regimens = Query(FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate {
+                $0.profileID == profileID && $0.medicationID == medicationID
+            },
+            sortBy: [SortDescriptor(\MedicationRegimen.createdAt)]
+        ))
+        _phases = Query(FetchDescriptor<MedicationSchedulePhase>(
+            predicate: #Predicate { $0.profileID == profileID },
+            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
+        ))
+    }
+
+    var body: some View {
+        Group {
+            if let medication = medications.first {
+                let regimenIDs = Set(regimens.map(\.id))
+                MedicationDetailView(
+                    profile: profile,
+                    medication: medication,
+                    regimens: regimens,
+                    phases: phases.filter { regimenIDs.contains($0.regimenID) }
+                )
+            } else {
+                ContentUnavailableView(
+                    "Medication unavailable",
+                    systemImage: "pills",
+                    description: Text("This medication may have been removed.")
+                )
+            }
+        }
+        .onDisappear(perform: onChange)
     }
 }
 
@@ -976,6 +1203,8 @@ private struct MedicationHistorySnapshot: Sendable {
     let doseRecords: [MedicationDoseHistoryRow]
     let supplyLogs: [MedicationSupplyHistoryRow]
     let planRevisions: [MedicationPlanRevisionHistoryRow]
+    let adherence: MedicationAdherenceSummary?
+    let supplyProjection: MedicationSupplyProjection?
 }
 
 private struct MedicationTripSupplyWarning: Identifiable {
@@ -995,7 +1224,8 @@ private actor MedicationHistoryWorker {
         // Keep the fetch bounded while retaining the prior 30-day adherence
         // headroom for schedules restored from older or external backups.
         doseDescriptor.fetchLimit = 750
-        let doseRecords = ((try? modelContext.fetch(doseDescriptor)) ?? []).map {
+        let modelDoseRecords = (try? modelContext.fetch(doseDescriptor)) ?? []
+        let doseRecords = modelDoseRecords.map {
             MedicationDoseHistoryRow(
                 id: $0.id,
                 regimenID: $0.regimenID,
@@ -1032,7 +1262,8 @@ private actor MedicationHistoryWorker {
             predicate: #Predicate { $0.medicationID == medicationID },
             sortBy: [SortDescriptor(\MedicationPlanRevision.changedAt, order: .reverse)]
         )
-        let planRevisions = ((try? modelContext.fetch(revisionDescriptor)) ?? []).map { revision in
+        let modelPlanRevisions = (try? modelContext.fetch(revisionDescriptor)) ?? []
+        let planRevisions = modelPlanRevisions.map { revision in
             MedicationPlanRevisionHistoryRow(
                 id: revision.id,
                 changeKindRawValue: revision.changeKindRawValue,
@@ -1049,10 +1280,107 @@ private actor MedicationHistoryWorker {
             )
         }
 
+        let medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { $0.id == medicationID }
+        )
+        let medication = (try? modelContext.fetch(medicationDescriptor))?.first
+        let regimenDescriptor = FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.medicationID == medicationID }
+        )
+        let regimens = (try? modelContext.fetch(regimenDescriptor)) ?? []
+        let profileID = medication?.profileID
+        let phaseDescriptor = FetchDescriptor<MedicationSchedulePhase>(
+            predicate: #Predicate { $0.profileID == profileID }
+        )
+        let phases = (try? modelContext.fetch(phaseDescriptor)) ?? []
+        let now = Date()
+        let calendar = MedicationScheduleDate.currentCalendar()
+        let adherence: MedicationAdherenceSummary?
+        if regimens.contains(where: { $0.scheduleKind.isScheduled }) {
+            let start = calendar.date(byAdding: .day, value: -30, to: now) ?? now
+            let occurrences = MedicationScheduleEngine.versionedOccurrences(
+                medicationID: medicationID,
+                regimens: regimens,
+                phases: phases,
+                revisions: modelPlanRevisions,
+                from: start,
+                through: now,
+                calendar: calendar
+            )
+            adherence = MedicationScheduleEngine.adherence(
+                occurrences: occurrences,
+                records: modelDoseRecords,
+                through: now
+            )
+        } else {
+            adherence = nil
+        }
+        let supplyProjection = supplyProjection(
+            currentSupply: medication?.currentSupply,
+            doseRecords: modelDoseRecords,
+            now: now,
+            calendar: calendar
+        )
+
         return MedicationHistorySnapshot(
             doseRecords: doseRecords,
             supplyLogs: supplyLogs,
-            planRevisions: planRevisions
+            planRevisions: planRevisions,
+            adherence: adherence,
+            supplyProjection: supplyProjection
+        )
+    }
+
+    private func supplyProjection(
+        currentSupply: Double?,
+        doseRecords: [MedicationDoseRecord],
+        now: Date,
+        calendar: Calendar
+    ) -> MedicationSupplyProjection? {
+        guard let currentSupply, currentSupply.isFinite, currentSupply >= 0 else {
+            return nil
+        }
+        let lookbackStart = calendar.date(byAdding: .day, value: -60, to: now)
+            ?? now.addingTimeInterval(-60 * 86_400)
+        var firstDate: Date?
+        var consumed = 0.0
+        var doseCount = 0
+        for record in doseRecords {
+            guard record.status == .taken,
+                  let amount = record.effectiveActualDoseAmount,
+                  amount.isFinite,
+                  amount > 0 else { continue }
+            let date = record.takenAt ?? record.scheduledAt ?? record.loggedAt
+            guard date >= lookbackStart, date <= now else { continue }
+            firstDate = firstDate.map { min($0, date) } ?? date
+            consumed += amount
+            doseCount += 1
+        }
+        guard let firstDate else { return nil }
+        let firstDay = calendar.startOfDay(for: firstDate)
+        let currentDay = calendar.startOfDay(for: now)
+        let observedDayCount = max(
+            1,
+            (calendar.dateComponents([.day], from: firstDay, to: currentDay).day ?? 0) + 1
+        )
+        let averageDailyUse = consumed / Double(observedDayCount)
+        guard averageDailyUse.isFinite, averageDailyUse > 0 else { return nil }
+        let estimatedDaysRemaining = currentSupply / averageDailyUse
+        let confidence: MedicationSupplyProjectionConfidence = if doseCount < 3
+            || observedDayCount < 3 {
+            .limited
+        } else if observedDayCount < 7 {
+            .developing
+        } else {
+            .established
+        }
+        return MedicationSupplyProjection(
+            estimatedRunOutDate: now.addingTimeInterval(estimatedDaysRemaining * 86_400),
+            estimatedDaysRemaining: estimatedDaysRemaining,
+            averageDailyUse: averageDailyUse,
+            observedDoseCount: doseCount,
+            observedDayCount: observedDayCount,
+            confidence: confidence
         )
     }
 
@@ -1164,8 +1492,6 @@ private struct MedicationDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Query private var liveRegimens: [MedicationRegimen]
     @Query private var livePhases: [MedicationSchedulePhase]
-    @Query private var liveDoseRecords: [MedicationDoseRecord]
-    @Query private var livePlanRevisions: [MedicationPlanRevision]
     @Query private var refillTasks: [MedicationRefillTask]
     @Query private var upcomingTrips: [PackingTrip]
     @Query private var tripTravelers: [TripTraveler]
@@ -1175,12 +1501,16 @@ private struct MedicationDetailView: View {
     let phases: [MedicationSchedulePhase]
     @State private var showingSupplyEditor = false
     @State private var showingEditor = false
-    @State private var supply = 0.0
+    @State private var supply: Double?
+    @State private var supplyThreshold = 5.0
+    @State private var supplyLeadDays = 7
     @State private var supplyReason: MedicationSupplyReason = .correction
     @State private var supplyNotes = ""
     @State private var records: [MedicationDoseHistoryRow] = []
     @State private var supplyLogs: [MedicationSupplyHistoryRow] = []
     @State private var planRevisions: [MedicationPlanRevisionHistoryRow] = []
+    @State private var adherenceSummary: MedicationAdherenceSummary?
+    @State private var projectedSupply: MedicationSupplyProjection?
     @State private var isLoadingHistory = true
     @State private var historyRevision = 0
     @State private var doseRecordToDelete: MedicationDoseHistoryRow?
@@ -1203,11 +1533,6 @@ private struct MedicationDetailView: View {
         self.phases = phases
         let profileID = profile.id
         let medicationID = medication.id
-        let recentDoseStart = Calendar.current.date(
-            byAdding: .day,
-            value: -62,
-            to: Date()
-        ) ?? Date().addingTimeInterval(-62 * 86_400)
         _liveRegimens = Query(FetchDescriptor<MedicationRegimen>(
             predicate: #Predicate {
                 $0.profileID == profileID && $0.medicationID == medicationID
@@ -1217,18 +1542,6 @@ private struct MedicationDetailView: View {
         _livePhases = Query(FetchDescriptor<MedicationSchedulePhase>(
             predicate: #Predicate { $0.profileID == profileID },
             sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
-        ))
-        var liveDoseDescriptor = FetchDescriptor<MedicationDoseRecord>(
-            predicate: #Predicate {
-                $0.medicationID == medicationID && $0.loggedAt >= recentDoseStart
-            },
-            sortBy: [SortDescriptor(\MedicationDoseRecord.loggedAt, order: .reverse)]
-        )
-        liveDoseDescriptor.fetchLimit = 5_000
-        _liveDoseRecords = Query(liveDoseDescriptor)
-        _livePlanRevisions = Query(FetchDescriptor<MedicationPlanRevision>(
-            predicate: #Predicate { $0.medicationID == medicationID },
-            sortBy: [SortDescriptor(\MedicationPlanRevision.effectiveFrom)]
         ))
         _refillTasks = Query(FetchDescriptor<MedicationRefillTask>(
             predicate: #Predicate { $0.medicationID == medicationID },
@@ -1265,33 +1578,6 @@ private struct MedicationDetailView: View {
         MedicationScheduleDate.currentCalendar()
     }
 
-    private var adherence: MedicationAdherenceSummary? {
-        guard displayedRegimens.contains(where: { $0.scheduleKind.isScheduled }) else { return nil }
-        let now = Date()
-        let start = scheduleCalendar.date(byAdding: .day, value: -30, to: now) ?? now
-        let occurrences = MedicationScheduleEngine.versionedOccurrences(
-            medicationID: medication.id,
-            regimens: displayedRegimens,
-            phases: displayedPhases,
-            revisions: livePlanRevisions,
-            from: start,
-            through: now,
-            calendar: scheduleCalendar
-        )
-        return MedicationScheduleEngine.adherence(
-            occurrences: occurrences,
-            records: liveDoseRecords,
-            through: now
-        )
-    }
-
-    private var supplyProjection: MedicationSupplyProjection? {
-        MedicationService.supplyProjection(
-            medication: medication,
-            doseRecords: liveDoseRecords
-        )
-    }
-
     private var activeRefillTask: MedicationRefillTask? {
         refillTasks.first(where: \.isOpen)
     }
@@ -1312,8 +1598,6 @@ private struct MedicationDetailView: View {
     }
 
     var body: some View {
-        let adherenceSummary = adherence
-        let projectedSupply = supplyProjection
         let refillTask = activeRefillTask
         let tripRisks = tripSupplyRisks(projection: projectedSupply)
         List {
@@ -1592,11 +1876,24 @@ private struct MedicationDetailView: View {
             if let current = medication.currentSupply {
                 LabeledContent(
                     "Remaining",
-                    value: current.formatted(.number.precision(.fractionLength(0...2)))
+                    value: formattedSupplyQuantity(current)
                 )
+                if let threshold = medication.refillThreshold {
+                    LabeledContent(
+                        "Refill alert",
+                        value: formattedSupplyQuantity(threshold)
+                    )
+                }
             } else {
-                Text("Supply tracking is off")
+                Label("Supply tracking is off", systemImage: "shippingbox")
+                    .font(.subheadline.weight(.semibold))
+                Text("Track quantity on hand, subtract taken doses automatically, and estimate when a refill will be needed.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Set Up Supply Tracking", systemImage: "plus.circle.fill") {
+                    presentSupplyEditor()
+                }
+                .accessibilityIdentifier("medication.supply.setup")
             }
             if let projection {
                 LabeledContent(
@@ -1678,11 +1975,10 @@ private struct MedicationDetailView: View {
                     showingRefillEditor = true
                 }
             }
-            Button("Update supply") {
-                supply = medication.currentSupply ?? 0
-                supplyReason = .correction
-                supplyNotes = ""
-                showingSupplyEditor = true
+            if medication.currentSupply != nil {
+                Button("Update supply") {
+                    presentSupplyEditor()
+                }
             }
         }
     }
@@ -1857,40 +2153,86 @@ private struct MedicationDetailView: View {
     }
 
     private var supplyEditor: some View {
-        NavigationStack {
+        let isSettingUp = medication.currentSupply == nil
+        return NavigationStack {
             Form {
+                if isSettingUp {
+                    Section {
+                        Label(
+                            "Taken doses will reduce the quantity on hand automatically.",
+                            systemImage: "checkmark.circle.fill"
+                        )
+                        Label(
+                            "Recent use will estimate a run-out date and help plan refills.",
+                            systemImage: "calendar.badge.clock"
+                        )
+                    }
+                    .font(.subheadline)
+                }
                 Section {
                     LabeledContent("Quantity on hand") {
-                        TextField("Required", value: $supply, format: .number)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                    }
-                    Picker("Reason", selection: $supplyReason) {
-                        ForEach(supplyUpdateReasons) { reason in
-                            Text(reason.displayName).tag(reason)
+                        HStack(spacing: 6) {
+                            TextField("Enter quantity", value: $supply, format: .number)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .accessibilityIdentifier("medication.supply.quantity")
+                            Text(supplyUnitLabel(for: supply))
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    PersistentMultilineFormField(
-                        title: "Notes",
-                        prompt: "Optional",
-                        text: $supplyNotes,
-                        lineLimit: 2...4,
-                        accessibilityIdentifier: "medication.supply.notes"
-                    )
+                    if isSettingUp {
+                        LabeledContent("Refill alert at") {
+                            HStack(spacing: 6) {
+                                TextField("Required", value: $supplyThreshold, format: .number)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .accessibilityIdentifier("medication.supply.threshold")
+                                Text(supplyUnitLabel(for: supplyThreshold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Stepper(
+                            "Start refill \(supplyLeadDays) day\(supplyLeadDays == 1 ? "" : "s") early",
+                            value: $supplyLeadDays,
+                            in: 0...60
+                        )
+                    } else {
+                        Picker("Reason", selection: $supplyReason) {
+                            ForEach(supplyUpdateReasons) { reason in
+                                Text(reason.displayName).tag(reason)
+                            }
+                        }
+                        PersistentMultilineFormField(
+                            title: "Notes",
+                            prompt: "Optional",
+                            text: $supplyNotes,
+                            lineLimit: 2...4,
+                            accessibilityIdentifier: "medication.supply.notes"
+                        )
+                    }
                 } header: {
-                    Text("Supply on hand")
+                    Text(isSettingUp ? "Starting quantity" : "Supply on hand")
                 } footer: {
-                    Text("Enter the total quantity on hand after this change.")
+                    if isSettingUp {
+                        Text("Use the same units as the dose, such as tablets, capsules, or milliliters. You can correct this total anytime.")
+                    } else {
+                        Text("Enter the total quantity on hand after this change.")
+                    }
                 }
             }
-            .navigationTitle("Update Supply")
+            .navigationTitle(isSettingUp ? "Supply Tracking" : "Update Supply")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showingSupplyEditor = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: saveSupplyUpdate)
-                        .disabled(supply < 0)
+                    Button(isSettingUp ? "Turn On" : "Save", action: saveSupplyUpdate)
+                        .fontWeight(.semibold)
+                        .disabled(
+                            supply.map { !$0.isFinite || $0 < 0 } ?? true
+                                || (isSettingUp && supplyThreshold < 0)
+                        )
+                        .accessibilityIdentifier("medication.supply.save")
                 }
             }
         }
@@ -1901,14 +2243,53 @@ private struct MedicationDetailView: View {
         [.correction, .discarded]
     }
 
+    private func formattedSupplyQuantity(_ quantity: Double) -> String {
+        "\(quantity.formatted(.number.precision(.fractionLength(0...2)))) \(supplyUnitLabel(for: quantity))"
+    }
+
+    private func supplyUnitLabel(for quantity: Double?) -> String {
+        let rawUnit = activeRegimen?.doseUnit ?? MedicationDoseUnit.units.rawValue
+        let isSingular = quantity == 1
+        switch MedicationDoseUnit(rawValue: rawUnit) {
+        case .milliliters, .milligrams, .micrograms, .grams, .teaspoons, .tablespoons:
+            return rawUnit
+        case .suppositories:
+            return isSingular ? "suppository" : "suppositories"
+        case .none:
+            return isSingular || rawUnit.hasSuffix("s") ? rawUnit : "\(rawUnit)s"
+        default:
+            return isSingular ? rawUnit : "\(rawUnit)s"
+        }
+    }
+
+    private func presentSupplyEditor() {
+        supply = medication.currentSupply ?? medication.fillQuantity
+        supplyThreshold = medication.refillThreshold ?? 5
+        supplyLeadDays = medication.refillLeadDays
+        supplyReason = .correction
+        supplyNotes = ""
+        showingSupplyEditor = true
+    }
+
     private func saveSupplyUpdate() {
-        MedicationService.updateSupply(
-            medication: medication,
-            newSupply: supply,
-            reason: supplyReason,
-            notes: supplyNotes,
-            context: modelContext
-        )
+        guard let supply else { return }
+        if medication.currentSupply == nil {
+            guard MedicationService.configureSupplyTracking(
+                medication: medication,
+                currentSupply: supply,
+                refillThreshold: supplyThreshold,
+                refillLeadDays: supplyLeadDays,
+                context: modelContext
+            ) else { return }
+        } else {
+            MedicationService.updateSupply(
+                medication: medication,
+                newSupply: supply,
+                reason: supplyReason,
+                notes: supplyNotes,
+                context: modelContext
+            )
+        }
         showingSupplyEditor = false
         historyRevision += 1
     }
@@ -1922,6 +2303,8 @@ private struct MedicationDetailView: View {
         records = snapshot.doseRecords
         supplyLogs = snapshot.supplyLogs
         planRevisions = snapshot.planRevisions
+        adherenceSummary = snapshot.adherence
+        projectedSupply = snapshot.supplyProjection
         isLoadingHistory = false
     }
 

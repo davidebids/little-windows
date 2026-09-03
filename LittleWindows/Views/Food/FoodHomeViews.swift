@@ -1229,12 +1229,28 @@ private struct FoodHomeDataLoader<Content: View>: View {
     var body: some View {
         content(FoodHomeRouteData(
             scopeKey: scope.key,
-            shoppingLists: shoppingLists,
-            shoppingItems: shoppingItems,
+            shoppingLists: latestUniqueValues(
+                shoppingLists,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
+            shoppingItems: latestUniqueValues(
+                shoppingItems,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
             stores: stores,
             storeSections: storeSections,
-            todoLists: todoLists,
-            todoItems: todoItems,
+            todoLists: latestUniqueValues(
+                todoLists,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
+            todoItems: latestUniqueValues(
+                todoItems,
+                id: \.id,
+                updatedAt: \.updatedAt
+            ),
             locations: locations,
             inventoryItems: inventoryItems,
             foodItems: [],
@@ -1255,15 +1271,39 @@ private struct FoodHomeDataLoader<Content: View>: View {
         ))
     }
 
+    private func latestUniqueValues<Value>(
+        _ values: [Value],
+        id: KeyPath<Value, UUID>,
+        updatedAt: KeyPath<Value, Date>
+    ) -> [Value] {
+        var order = [UUID]()
+        var valuesByID = [UUID: Value]()
+        for value in values {
+            let valueID = value[keyPath: id]
+            if let current = valuesByID[valueID] {
+                if value[keyPath: updatedAt] > current[keyPath: updatedAt] {
+                    valuesByID[valueID] = value
+                }
+            } else {
+                order.append(valueID)
+                valuesByID[valueID] = value
+            }
+        }
+        return order.compactMap { valuesByID[$0] }
+    }
+
     private func sortedRequests() -> [ReturnRequest] {
         let packagesByReturnID = Dictionary(grouping: returnPackages, by: \.returnRequestID)
         let itemsByReturnID = Dictionary(grouping: returnItems, by: \.returnRequestID)
-        let statusesByReturnID = Dictionary(uniqueKeysWithValues: returnRequests.map { request in
-            (request.id, ReturnTrackingService.status(
-                for: request,
-                packages: packagesByReturnID[request.id] ?? []
-            ))
-        })
+        let statusesByReturnID = Dictionary(
+            returnRequests.map { request in
+                (request.id, ReturnTrackingService.status(
+                    for: request,
+                    packages: packagesByReturnID[request.id] ?? []
+                ))
+            },
+            uniquingKeysWith: { current, _ in current }
+        )
         return returnRequests.sorted { lhs, rhs in
             let lhsPackages = packagesByReturnID[lhs.id] ?? []
             let rhsPackages = packagesByReturnID[rhs.id] ?? []
@@ -4765,12 +4805,18 @@ private struct FoodInsightsView: View {
         let todoItemsByListID = Dictionary(grouping: todoItems, by: \.todoListID)
         let returnItemsByRequestID = Dictionary(grouping: returnItems, by: \.returnRequestID)
         let returnPackagesByRequestID = Dictionary(grouping: returnPackages, by: \.returnRequestID)
-        let returnStatusesByRequestID = Dictionary(uniqueKeysWithValues: returnRequests.map { request in
-            (
-                request.id,
-                ReturnTrackingService.status(for: request, packages: returnPackagesByRequestID[request.id] ?? [])
-            )
-        })
+        let returnStatusesByRequestID = Dictionary(
+            returnRequests.map { request in
+                (
+                    request.id,
+                    ReturnTrackingService.status(
+                        for: request,
+                        packages: returnPackagesByRequestID[request.id] ?? []
+                    )
+                )
+            },
+            uniquingKeysWith: { current, _ in current }
+        )
         let activeReturnRequests = returnRequests.filter {
             returnStatusesByRequestID[$0.id] != .completed
         }
@@ -4943,12 +4989,18 @@ private struct ReturnsHomeView: View {
     var body: some View {
         let itemsByReturnID = Dictionary(grouping: items, by: \.returnRequestID)
         let packagesByReturnID = Dictionary(grouping: packages, by: \.returnRequestID)
-        let statusByReturnID = Dictionary(uniqueKeysWithValues: requests.map { request in
-            (
-                request.id,
-                ReturnTrackingService.status(for: request, packages: packagesByReturnID[request.id] ?? [])
-            )
-        })
+        let statusByReturnID = Dictionary(
+            requests.map { request in
+                (
+                    request.id,
+                    ReturnTrackingService.status(
+                        for: request,
+                        packages: packagesByReturnID[request.id] ?? []
+                    )
+                )
+            },
+            uniquingKeysWith: { current, _ in current }
+        )
         let activeRequests = requests.filter {
             statusByReturnID[$0.id] != .completed
         }

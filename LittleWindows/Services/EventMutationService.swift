@@ -648,6 +648,13 @@ private actor EventPersistenceWorker {
         profileID: UUID?,
         settings: PredictionSettings
     ) -> EventPersistenceResult {
+        guard !Task.isCancelled else {
+            return EventPersistenceResult(
+                didSave: false,
+                prediction: nil,
+                refreshesSleepPrediction: false
+            )
+        }
         let profile = fetchProfile(profileID: profileID)
         let events: [CareEvent]
         do {
@@ -660,7 +667,21 @@ private actor EventPersistenceWorker {
                 errorDescription: error.localizedDescription
             )
         }
+        guard !Task.isCancelled else {
+            return EventPersistenceResult(
+                didSave: false,
+                prediction: nil,
+                refreshesSleepPrediction: false
+            )
+        }
         let records = fetchPredictionRecords(profileID: profileID)
+        guard !Task.isCancelled else {
+            return EventPersistenceResult(
+                didSave: false,
+                prediction: nil,
+                refreshesSleepPrediction: false
+            )
+        }
         let prediction = currentPrediction(in: records)
         let isSleeping = events.contains { $0.isSleepBlock && $0.isTimerRunning }
         let widgetSnapshot = makeWidgetSnapshot(
