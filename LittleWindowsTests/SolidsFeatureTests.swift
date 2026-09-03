@@ -288,6 +288,115 @@ final class SolidsFeatureTests: XCTestCase {
     }
 
     @MainActor
+    func testDigestiveFetchDescriptorKeepsOnlyRecentItemsAndUnresolvedReactions() throws {
+        let container = try ModelContainer(
+            for: SolidFoodEventItem.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        let now = Date()
+        let profileID = UUID()
+        let recent = SolidFoodEventItem(
+            eventID: UUID(),
+            profileID: profileID,
+            foodID: "pear",
+            foodNameSnapshot: "Pear",
+            createdAt: now.addingTimeInterval(-86_400)
+        )
+        let oldUnresolvedReaction = SolidFoodEventItem(
+            eventID: UUID(),
+            profileID: profileID,
+            foodID: "egg",
+            foodNameSnapshot: "Egg",
+            suspectedReaction: true,
+            followUp: .discussWithClinician,
+            createdAt: now.addingTimeInterval(-30 * 86_400)
+        )
+        let oldResolvedReaction = SolidFoodEventItem(
+            eventID: UUID(),
+            profileID: profileID,
+            foodID: "milk",
+            foodNameSnapshot: "Milk",
+            suspectedReaction: true,
+            followUp: .resolved,
+            createdAt: now.addingTimeInterval(-30 * 86_400)
+        )
+        let oldOrdinaryItem = SolidFoodEventItem(
+            eventID: UUID(),
+            profileID: profileID,
+            foodID: "banana",
+            foodNameSnapshot: "Banana",
+            createdAt: now.addingTimeInterval(-30 * 86_400)
+        )
+        let otherProfileItem = SolidFoodEventItem(
+            eventID: UUID(),
+            profileID: UUID(),
+            foodID: "oatmeal",
+            foodNameSnapshot: "Oatmeal",
+            suspectedReaction: true,
+            createdAt: now
+        )
+        [recent, oldUnresolvedReaction, oldResolvedReaction, oldOrdinaryItem, otherProfileItem]
+            .forEach { context.insert($0) }
+        try context.save()
+
+        let fetched = try context.fetch(
+            SolidsDigestiveSupportService.eventItemFetchDescriptor(
+                profileID: profileID,
+                now: now
+            )
+        )
+
+        XCTAssertEqual(Set(fetched.map(\.id)), Set([recent.id, oldUnresolvedReaction.id]))
+    }
+
+    @MainActor
+    func testDigestiveAssessmentLargeHistoryPerformance() {
+        let now = Date()
+        let profileID = UUID()
+        var items = [SolidFoodEventItem]()
+        items.reserveCapacity(50_060)
+        for index in 0..<50_000 {
+            items.append(SolidFoodEventItem(
+                eventID: UUID(),
+                profileID: profileID,
+                foodID: index.isMultiple(of: 2) ? "banana" : "oatmeal",
+                foodNameSnapshot: index.isMultiple(of: 2) ? "Banana" : "Oatmeal",
+                createdAt: now.addingTimeInterval(Double(-10 - index) * 86_400)
+            ))
+        }
+        for index in 0..<60 {
+            items.append(SolidFoodEventItem(
+                eventID: UUID(),
+                profileID: profileID,
+                foodID: index.isMultiple(of: 3) ? "pear" : "lentil",
+                foodNameSnapshot: index.isMultiple(of: 3) ? "Pear" : "Lentil",
+                createdAt: now.addingTimeInterval(Double(-(index % 7)) * 86_400)
+            ))
+        }
+        items[25_000].suspectedReaction = true
+        items[25_000].followUp = .discussWithClinician
+        let state = SolidsProfileState(
+            profileID: profileID,
+            digestiveLoggingCoverage: .mostMeals
+        )
+        var assessment: SolidsBalanceAssessment?
+
+        measure(metrics: [XCTClockMetric()]) {
+            assessment = SolidsDigestiveSupportService.assessment(
+                profileID: profileID,
+                ageMonths: 8,
+                eventItems: items,
+                state: state,
+                now: now
+            )
+        }
+
+        XCTAssertEqual(assessment?.mealCount, 60)
+        XCTAssertEqual(assessment?.loggedDayCount, 7)
+    }
+
+    @MainActor
     func testDigestiveConcernOffersGeneralHelpWithoutLogsAndPrioritizesRedFlags() {
         let profileID = UUID()
         let state = SolidsProfileState(

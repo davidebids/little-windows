@@ -1906,6 +1906,34 @@ final class UserVisibleFlowUITests: XCTestCase {
         }
     }
 
+    func testProductionScaleDigestiveSupportKeepsNavigationAndScrollingResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-performance",
+            additionalEnvironment: ["LITTLE_WINDOWS_MARKETING_CAPTURE": "1"]
+        )
+
+        let navigationStartedAt = ContinuousClock.now
+        app.open(URL(string: "littlewindows://care/solids/digestive")!)
+        XCTAssertTrue(app.navigationBars["Feeding balance"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            navigationStartedAt.duration(to: .now),
+            .seconds(4),
+            "A production-scale solids history should not delay feeding-balance guidance."
+        )
+
+        let scrollingStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        XCTAssertLessThan(
+            scrollingStartedAt.duration(to: .now),
+            .seconds(3.5),
+            "Digestive guidance should remain scrollable with a production-scale history."
+        )
+        XCTAssertTrue(app.staticTexts["Age-aware balance"].exists)
+    }
+
     func testProductionScaleInputEditorsAcceptTypingPromptly() {
         continueAfterFailure = false
 

@@ -593,6 +593,23 @@ struct SolidsDigestiveCheckIn: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+private final class SolidsDigestiveCheckInCacheEntry {
+    let checkIns: [SolidsDigestiveCheckIn]
+
+    init(_ checkIns: [SolidsDigestiveCheckIn]) {
+        self.checkIns = checkIns
+    }
+}
+
+private enum SolidsDigestiveCheckInDecodeCache {
+    static let shared: NSCache<NSString, SolidsDigestiveCheckInCacheEntry> = {
+        let cache = NSCache<NSString, SolidsDigestiveCheckInCacheEntry>()
+        cache.countLimit = 128
+        cache.totalCostLimit = 2 * 1_024 * 1_024
+        return cache
+    }()
+}
+
 private final class SolidNutritionSnapshotCacheEntry {
     let snapshot: SolidNutritionSnapshot
 
@@ -687,7 +704,16 @@ final class SolidsProfileState {
 
     var digestiveCheckIns: [SolidsDigestiveCheckIn] {
         get { Self.decodeCheckIns(digestiveCheckInsJSON) }
-        set { digestiveCheckInsJSON = Self.encode(Array(newValue.sorted { $0.recordedAt > $1.recordedAt }.prefix(180))) }
+        set {
+            let limited = Array(newValue.sorted { $0.recordedAt > $1.recordedAt }.prefix(180))
+            let encoded = Self.encode(limited)
+            digestiveCheckInsJSON = encoded
+            SolidsDigestiveCheckInDecodeCache.shared.setObject(
+                SolidsDigestiveCheckInCacheEntry(limited),
+                forKey: encoded as NSString,
+                cost: encoded.utf8.count
+            )
+        }
     }
 
     var digestiveLoggingCoverage: SolidsLoggingCoverage {
@@ -728,8 +754,18 @@ final class SolidsProfileState {
     }
 
     private static func decodeCheckIns(_ value: String) -> [SolidsDigestiveCheckIn] {
+        let key = value as NSString
+        if let cached = SolidsDigestiveCheckInDecodeCache.shared.object(forKey: key) {
+            return cached.checkIns
+        }
         guard let data = value.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([SolidsDigestiveCheckIn].self, from: data)) ?? []
+        let decoded = (try? JSONDecoder().decode([SolidsDigestiveCheckIn].self, from: data)) ?? []
+        SolidsDigestiveCheckInDecodeCache.shared.setObject(
+            SolidsDigestiveCheckInCacheEntry(decoded),
+            forKey: key,
+            cost: value.utf8.count
+        )
+        return decoded
     }
 }
 

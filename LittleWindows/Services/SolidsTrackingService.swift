@@ -2432,6 +2432,8 @@ struct SolidsBalanceAssessment: Equatable, Sendable {
 }
 
 enum SolidsDigestiveSupportService {
+    static let defaultLookbackDays = 7
+
     static let sourceURLs = [
         SolidsSourceLibrary.aapInfantConstipation,
         SolidsSourceLibrary.aapInfantBowelMovements,
@@ -2496,6 +2498,29 @@ enum SolidsDigestiveSupportService {
         "At \(ageMonths) months, possible digestive effects while introducing solids can include stool changes, including constipation. A change after one food does not prove that food caused it."
     }
 
+    static func eventItemFetchDescriptor(
+        profileID: UUID,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        lookbackDays: Int = defaultLookbackDays
+    ) -> FetchDescriptor<SolidFoodEventItem> {
+        let start = calendar.date(byAdding: .day, value: -lookbackDays, to: now) ?? now
+        let resolvedFollowUp = SolidReactionFollowUp.resolved.rawValue
+        let avoidFollowUp = SolidReactionFollowUp.avoidPendingAdvice.rawValue
+        let discussFollowUp = SolidReactionFollowUp.discussWithClinician.rawValue
+        return FetchDescriptor<SolidFoodEventItem>(
+            predicate: #Predicate { item in
+                item.profileID == profileID
+                    && (item.createdAt >= start
+                        || (item.followUpRawValue != resolvedFollowUp
+                            && (item.suspectedReaction
+                                || item.followUpRawValue == avoidFollowUp
+                                || item.followUpRawValue == discussFollowUp)))
+            },
+            sortBy: [SortDescriptor(\SolidFoodEventItem.createdAt, order: .reverse)]
+        )
+    }
+
     static func assessment(
         profileID: UUID,
         ageMonths: Int,
@@ -2503,21 +2528,28 @@ enum SolidsDigestiveSupportService {
         state: SolidsProfileState?,
         now: Date = Date(),
         calendar: Calendar = .current,
-        lookbackDays: Int = 7
+        lookbackDays: Int = defaultLookbackDays
     ) -> SolidsBalanceAssessment {
         let start = calendar.date(byAdding: .day, value: -lookbackDays, to: now) ?? now
-        let items = eventItems.filter {
-            $0.profileID == profileID && $0.createdAt >= start && $0.createdAt <= now
+        let resolvedFollowUp = SolidReactionFollowUp.resolved.rawValue
+        let avoidFollowUp = SolidReactionFollowUp.avoidPendingAdvice.rawValue
+        let discussFollowUp = SolidReactionFollowUp.discussWithClinician.rawValue
+        var items = [SolidFoodEventItem]()
+        items.reserveCapacity(min(eventItems.count, 128))
+        var excludedFoodIDs = Set<String>()
+        var excludedAllergenIDs = Set<String>()
+        for item in eventItems where item.profileID == profileID {
+            if item.createdAt >= start && item.createdAt <= now {
+                items.append(item)
+            }
+            if item.followUpRawValue != resolvedFollowUp,
+               item.suspectedReaction
+                    || item.followUpRawValue == avoidFollowUp
+                    || item.followUpRawValue == discussFollowUp {
+                excludedFoodIDs.insert(item.foodID)
+                excludedAllergenIDs.formUnion(item.allergenIDs)
+            }
         }
-        let reactionItems = eventItems.filter {
-            $0.profileID == profileID
-                && $0.followUp != .resolved
-                && ($0.suspectedReaction
-                    || $0.followUp == .avoidPendingAdvice
-                    || $0.followUp == .discussWithClinician)
-        }
-        let excludedFoodIDs = Set(reactionItems.map(\.foodID))
-        let excludedAllergenIDs = Set(reactionItems.flatMap(\.allergenIDs))
         func safeSuggestions(
             categories: Set<SolidsFoodCategory>? = nil,
             ironRichOnly: Bool = false
@@ -2530,15 +2562,26 @@ enum SolidsDigestiveSupportService {
                 excludingAllergenIDs: excludedAllergenIDs
             )
         }
-        let mealCount = Set(items.map(\.eventID)).count
-        let loggedDays = Set(items.map { calendar.startOfDay(for: $0.createdAt) }).count
-        let foods = Dictionary(
-            items.compactMap { item in SolidsReferenceCatalog.food(id: item.foodID).map { (item.foodID, $0) } },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let uniqueFoodCount = Set(items.map(\.foodID)).count
-        let hasUnclassifiedFoods = items.contains { SolidsReferenceCatalog.food(id: $0.foodID) == nil }
-        let foodCounts = Dictionary(grouping: items, by: \.foodID).mapValues(\.count)
+        var eventIDs = Set<UUID>()
+        var loggedDayStarts = Set<Date>()
+        var uniqueFoodIDs = Set<String>()
+        var foods = [String: SolidsReferenceFood]()
+        var foodCounts = [String: Int]()
+        var hasUnclassifiedFoods = false
+        for item in items {
+            eventIDs.insert(item.eventID)
+            loggedDayStarts.insert(calendar.startOfDay(for: item.createdAt))
+            foodCounts[item.foodID, default: 0] += 1
+            guard uniqueFoodIDs.insert(item.foodID).inserted else { continue }
+            if let food = SolidsReferenceCatalog.food(id: item.foodID) {
+                foods[item.foodID] = food
+            } else {
+                hasUnclassifiedFoods = true
+            }
+        }
+        let mealCount = eventIDs.count
+        let loggedDays = loggedDayStarts.count
+        let uniqueFoodCount = uniqueFoodIDs.count
         let categories = Set(foods.values.map(\.category))
         let produceCategories: Set<SolidsFoodCategory> = [.fruit, .vegetable, .beanAndPlantProtein]
         let hasProduce = !categories.isDisjoint(with: produceCategories)

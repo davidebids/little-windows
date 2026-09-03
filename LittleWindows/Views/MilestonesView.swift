@@ -783,6 +783,10 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
         ))
         let eventItemDescriptor: FetchDescriptor<SolidFoodEventItem>
         switch activeRoute {
+        case .solidsHome, .solidsDigestive:
+            eventItemDescriptor = SolidsDigestiveSupportService.eventItemFetchDescriptor(
+                profileID: eventItemProfileID
+            )
         case .solidFoodHistory(let foodID, _):
             eventItemDescriptor = FetchDescriptor<SolidFoodEventItem>(
                 predicate: #Predicate {

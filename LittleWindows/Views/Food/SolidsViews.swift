@@ -59,19 +59,6 @@ struct SolidsHomeView: View {
             .sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
-    private var digestiveAssessment: SolidsBalanceAssessment {
-        SolidsDigestiveSupportService.assessment(
-            profileID: profile.id,
-            ageMonths: ageMonths,
-            eventItems: eventItems,
-            state: profileState
-        )
-    }
-
-    private var showsDigestiveSupport: Bool {
-        (6...12).contains(ageMonths) || digestiveAssessment.activeConcern != nil
-    }
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
@@ -179,9 +166,21 @@ struct SolidsHomeView: View {
     private var dashboard: some View {
         let visibleProgress = scopedProgress
         let visiblePlans = upcomingPlans
+        let activeDigestiveConcern = profileState?.activeDigestiveCheckIn
+        let showsDigestiveSupport = (6...12).contains(ageMonths)
+            || activeDigestiveConcern != nil
+        let digestiveAssessment = showsDigestiveSupport
+            ? SolidsDigestiveSupportService.assessment(
+                profileID: profile.id,
+                ageMonths: ageMonths,
+                eventItems: eventItems,
+                state: profileState
+            )
+            : nil
         return VStack(alignment: .leading, spacing: 16) {
-            if showsDigestiveSupport,
-               digestiveAssessment.activeConcern != nil || digestiveAssessment.shouldSurfaceProactively {
+            if let digestiveAssessment,
+               digestiveAssessment.activeConcern != nil
+                    || digestiveAssessment.shouldSurfaceProactively {
                 Button { open(.solidsDigestive) } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: digestiveAssessment.activeConcern == nil
@@ -1854,6 +1853,7 @@ struct SolidsDigestiveSupportView: View {
 
     @State private var showingCheckIn = false
     @State private var loggingCoverage: SolidsLoggingCoverage = .unknown
+    @State private var persistedLoggingCoverage: SolidsLoggingCoverage = .unknown
     @State private var stateWriter: SolidsProfileStateWriter?
     @State private var errorMessage: String?
     @State private var showingCheckInHistory = false
@@ -1870,22 +1870,24 @@ struct SolidsDigestiveSupportView: View {
     }
 
     private var recentResolvedCheckIns: [SolidsDigestiveCheckIn] {
-        Array((profileState?.digestiveCheckIns ?? []).filter { !$0.isActive }.prefix(5))
+        Array((profileState?.digestiveCheckIns ?? []).lazy.filter { !$0.isActive }.prefix(5))
     }
 
     var body: some View {
+        let currentAssessment = assessment
+        let currentResolvedCheckIns = recentResolvedCheckIns
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 header
-                if let concern = assessment.activeConcern {
+                if let concern = currentAssessment.activeConcern {
                     activeConcernCard(concern)
                 }
-                if !recentResolvedCheckIns.isEmpty {
-                    checkInHistoryCard
+                if !currentResolvedCheckIns.isEmpty {
+                    checkInHistoryCard(currentResolvedCheckIns)
                 }
-                balanceCard
-                insightsSection
-                suggestionsSection
+                balanceCard(currentAssessment)
+                insightsSection(currentAssessment)
+                suggestionsSection(currentAssessment)
                 practicalGuidance
                 safetyCard
                 sources
@@ -1901,7 +1903,9 @@ struct SolidsDigestiveSupportView: View {
                     for: modelContext.container
                 )
             }
-            loggingCoverage = profileState?.digestiveLoggingCoverage ?? .unknown
+            let storedCoverage = profileState?.digestiveLoggingCoverage ?? .unknown
+            persistedLoggingCoverage = storedCoverage
+            loggingCoverage = storedCoverage
         }
         .sheet(isPresented: $showingCheckIn) {
             SolidsDigestiveCheckInSheet(
@@ -1909,6 +1913,7 @@ struct SolidsDigestiveSupportView: View {
                 initialCoverage: loggingCoverage,
                 writer: stateWriter,
                 onSaved: { coverage in
+                    persistedLoggingCoverage = coverage
                     loggingCoverage = coverage
                     showingCheckIn = false
                 }
@@ -1985,13 +1990,13 @@ struct SolidsDigestiveSupportView: View {
         .appSurface()
     }
 
-    private var checkInHistoryCard: some View {
+    private func checkInHistoryCard(_ checkIns: [SolidsDigestiveCheckIn]) -> some View {
         DisclosureGroup(
-            "Recent check-ins (\(recentResolvedCheckIns.count))",
+            "Recent check-ins (\(checkIns.count))",
             isExpanded: $showingCheckInHistory
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                ForEach(recentResolvedCheckIns) { concern in
+                ForEach(checkIns) { concern in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(concern.recordedAt.formatted(date: .abbreviated, time: .omitted))
                             .font(.subheadline.weight(.semibold))
@@ -2013,7 +2018,7 @@ struct SolidsDigestiveSupportView: View {
         .appSurface()
     }
 
-    private var balanceCard: some View {
+    private func balanceCard(_ assessment: SolidsBalanceAssessment) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("7-day solids review")
@@ -2038,6 +2043,7 @@ struct SolidsDigestiveSupportView: View {
                 .pickerStyle(.menu)
             }
             .onChange(of: loggingCoverage) { _, coverage in
+                guard coverage != persistedLoggingCoverage else { return }
                 Task { await saveCoverage(coverage) }
             }
             Text(loggingCoverage.assessmentNote)
@@ -2049,7 +2055,7 @@ struct SolidsDigestiveSupportView: View {
     }
 
     @ViewBuilder
-    private var insightsSection: some View {
+    private func insightsSection(_ assessment: SolidsBalanceAssessment) -> some View {
         if !assessment.strengths.isEmpty || !assessment.opportunities.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("What the log shows")
@@ -2080,7 +2086,7 @@ struct SolidsDigestiveSupportView: View {
     }
 
     @ViewBuilder
-    private var suggestionsSection: some View {
+    private func suggestionsSection(_ assessment: SolidsBalanceAssessment) -> some View {
         if !assessment.suggestedFoodIDs.isEmpty || !assessment.suggestedRecipeIDs.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Ideas for the next meals")
@@ -2193,6 +2199,9 @@ struct SolidsDigestiveSupportView: View {
             coverage: coverage
         ) {
             errorMessage = error
+            loggingCoverage = persistedLoggingCoverage
+        } else {
+            persistedLoggingCoverage = coverage
         }
     }
 
