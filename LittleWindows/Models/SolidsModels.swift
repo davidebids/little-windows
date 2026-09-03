@@ -579,6 +579,18 @@ struct SolidsDigestiveCheckIn: Codable, Hashable, Identifiable, Sendable {
     var needsPromptMedicalAdvice: Bool {
         visibleBlood || vomiting || swollenBelly || poorFeeding
     }
+
+    var observationLabels: [String] {
+        [
+            hardStool ? "Hard or dry stool" : nil,
+            difficultOrPainful ? "Difficult or painful to pass" : nil,
+            prolongedStraining ? "Prolonged straining" : nil,
+            visibleBlood ? "Visible blood" : nil,
+            vomiting ? "Vomiting" : nil,
+            swollenBelly ? "Swollen belly" : nil,
+            poorFeeding ? "Poor feeding" : nil
+        ].compactMap { $0 }
+    }
 }
 
 private final class SolidNutritionSnapshotCacheEntry {

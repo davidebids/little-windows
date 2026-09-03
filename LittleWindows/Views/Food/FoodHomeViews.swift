@@ -265,7 +265,11 @@ struct FoodHomeView: View {
                 MissingFoodRouteView()
             }
         case .solidsDigestive:
-            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+            if let selectedProfile,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               ((6...12).contains(SolidsTrackingService.ageMonths(for: selectedProfile))
+                    || selectedSolidsState?.activeDigestiveCheckIn != nil) {
                 SolidsDigestiveSupportView(
                     profile: selectedProfile,
                     eventItems: solidFoodEventItems,

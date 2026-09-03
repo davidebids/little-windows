@@ -419,7 +419,11 @@ struct CareView: View {
                 CareUnavailableView()
             }
         case .solidsDigestive:
-            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+            if let profile,
+               profile.profileType == .child,
+               solidsAccessLevel == .full,
+               ((6...12).contains(SolidsTrackingService.ageMonths(for: profile))
+                    || solidsProfileState?.activeDigestiveCheckIn != nil) {
                 SolidsDigestiveSupportView(
                     profile: profile,
                     eventItems: solidFoodEventItems,

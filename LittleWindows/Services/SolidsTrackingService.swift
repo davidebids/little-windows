@@ -1049,6 +1049,12 @@ actor SolidsProfileStateWriter {
         let state = state(for: profileID)
         if state.modelContext == nil { modelContext.insert(state) }
         var checkIns = state.digestiveCheckIns.filter { $0.id != checkIn.id }
+        checkIns = checkIns.map { existing in
+            guard existing.isActive else { return existing }
+            var resolved = existing
+            resolved.resolvedAt = checkIn.recordedAt
+            return resolved
+        }
         checkIns.append(checkIn)
         state.digestiveCheckIns = checkIns
         state.digestiveLoggingCoverage = loggingCoverage
@@ -2442,7 +2448,12 @@ enum SolidsDigestiveSupportService {
         for food: SolidsReferenceFood,
         ageMonths: Int
     ) -> SolidsDigestiveFoodGuidance {
-        let stage = ageMonths < 9 ? "At 6–8 months" : "At 9–12 months"
+        let stage: String
+        switch ageMonths {
+        case ..<9: stage = "At 6–8 months"
+        case 9...12: stage = "At 9–12 months"
+        default: stage = "At \(ageMonths) months"
+        }
         let base: String
         switch food.category {
         case .fruit, .vegetable, .beanAndPlantProtein:
@@ -2460,6 +2471,7 @@ enum SolidsDigestiveSupportService {
         case .preparedFood:
             base = "\(stage), review the ingredients and use this within a varied pattern. Individual stool responses differ, so look at the overall pattern instead of blaming one food automatically."
         }
+        let generalWarning = generalFoodWarning(ageMonths: ageMonths)
 
         let caution: String?
         switch food.id {
@@ -2472,12 +2484,16 @@ enum SolidsDigestiveSupportService {
         }
 
         return SolidsDigestiveFoodGuidance(
-            note: base,
+            note: "\(base) \(generalWarning)",
             caution: caution,
             sourceURLs: caution == nil
                 ? [SolidsSourceLibrary.cdcFoodsToEncourage, SolidsSourceLibrary.niddkChildConstipationEating]
                 : [SolidsSourceLibrary.aapInfantBowelMovements, SolidsSourceLibrary.aapInfantConstipation]
         )
+    }
+
+    static func generalFoodWarning(ageMonths: Int) -> String {
+        "At \(ageMonths) months, possible digestive effects while introducing solids can include stool changes, including constipation. A change after one food does not prove that food caused it."
     }
 
     static func assessment(
@@ -2493,12 +2509,35 @@ enum SolidsDigestiveSupportService {
         let items = eventItems.filter {
             $0.profileID == profileID && $0.createdAt >= start && $0.createdAt <= now
         }
+        let reactionItems = eventItems.filter {
+            $0.profileID == profileID
+                && $0.followUp != .resolved
+                && ($0.suspectedReaction
+                    || $0.followUp == .avoidPendingAdvice
+                    || $0.followUp == .discussWithClinician)
+        }
+        let excludedFoodIDs = Set(reactionItems.map(\.foodID))
+        let excludedAllergenIDs = Set(reactionItems.flatMap(\.allergenIDs))
+        func safeSuggestions(
+            categories: Set<SolidsFoodCategory>? = nil,
+            ironRichOnly: Bool = false
+        ) -> [String] {
+            suggestions(
+                ageMonths: ageMonths,
+                categories: categories,
+                ironRichOnly: ironRichOnly,
+                excludingFoodIDs: excludedFoodIDs,
+                excludingAllergenIDs: excludedAllergenIDs
+            )
+        }
         let mealCount = Set(items.map(\.eventID)).count
         let loggedDays = Set(items.map { calendar.startOfDay(for: $0.createdAt) }).count
         let foods = Dictionary(
             items.compactMap { item in SolidsReferenceCatalog.food(id: item.foodID).map { (item.foodID, $0) } },
             uniquingKeysWith: { first, _ in first }
         )
+        let uniqueFoodCount = Set(items.map(\.foodID)).count
+        let hasUnclassifiedFoods = items.contains { SolidsReferenceCatalog.food(id: $0.foodID) == nil }
         let foodCounts = Dictionary(grouping: items, by: \.foodID).mapValues(\.count)
         let categories = Set(foods.values.map(\.category))
         let produceCategories: Set<SolidsFoodCategory> = [.fruit, .vegetable, .beanAndPlantProtein]
@@ -2513,11 +2552,11 @@ enum SolidsDigestiveSupportService {
 
         var strengths = [SolidsBalanceInsight]()
         var opportunities = [SolidsBalanceInsight]()
-        if foods.count >= 5 {
+        if uniqueFoodCount >= 5 {
             strengths.append(.init(
                 id: "variety-strength",
                 title: "A varied week",
-                detail: "\(foods.count) different foods were recorded across \(mealCount) meals.",
+                detail: "\(uniqueFoodCount) different foods were recorded across \(mealCount) meals.",
                 systemImage: "checkmark.circle.fill"
             ))
         } else if enoughForPattern {
@@ -2526,7 +2565,7 @@ enum SolidsDigestiveSupportService {
                 title: "Add variety gradually",
                 detail: "A few foods are carrying most of the logged week. Add one familiar or new age-appropriate food at a time.",
                 systemImage: "square.grid.2x2",
-                suggestedFoodIDs: suggestions(ageMonths: ageMonths, categories: [.fruit, .vegetable, .beanAndPlantProtein])
+                suggestedFoodIDs: safeSuggestions(categories: [.fruit, .vegetable, .beanAndPlantProtein])
             ))
         }
         if hasProduce {
@@ -2536,13 +2575,13 @@ enum SolidsDigestiveSupportService {
                 detail: "The log includes fruit, vegetables, or beans. There is no numeric fiber target for babies under 1, so variety matters more than a score.",
                 systemImage: "leaf.fill"
             ))
-        } else if enoughForPattern {
+        } else if enoughForPattern && !hasUnclassifiedFoods {
             opportunities.append(.init(
                 id: "produce-opportunity",
                 title: "Include produce or beans",
                 detail: "No fruit, vegetable, or bean was recorded in this window. Offer an age-safe option alongside familiar foods.",
                 systemImage: "leaf",
-                suggestedFoodIDs: suggestions(ageMonths: ageMonths, categories: produceCategories)
+                suggestedFoodIDs: safeSuggestions(categories: produceCategories)
             ))
         }
         if hasIronRich {
@@ -2552,16 +2591,16 @@ enum SolidsDigestiveSupportService {
                 detail: "Iron needs rise around 6 months, so continuing to rotate iron-rich foods is useful.",
                 systemImage: "bolt.heart.fill"
             ))
-        } else if enoughForPattern {
+        } else if enoughForPattern && !hasUnclassifiedFoods {
             opportunities.append(.init(
                 id: "iron-opportunity",
                 title: "Add an iron-rich option",
                 detail: "No iron-rich food was recognized in the logged week. Pair one with a familiar food when practical.",
                 systemImage: "bolt.heart",
-                suggestedFoodIDs: suggestions(ageMonths: ageMonths, ironRichOnly: true)
+                suggestedFoodIDs: safeSuggestions(ironRichOnly: true)
             ))
         }
-        if activeConcern != nil {
+        if let activeConcern, !activeConcern.needsPromptMedicalAdvice {
             let cautiousFoods = foods.values.compactMap { food -> (SolidsReferenceFood, String)? in
                 guard let caution = foodGuidance(for: food, ageMonths: ageMonths).caution else {
                     return nil
@@ -2574,63 +2613,94 @@ enum SolidsDigestiveSupportService {
                     title: "Review \(food.name) while stools are hard",
                     detail: caution,
                     systemImage: "pause.circle",
-                    suggestedFoodIDs: suggestions(
-                        ageMonths: ageMonths,
+                    suggestedFoodIDs: safeSuggestions(
                         categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain]
                     ).filter { $0 != food.id }
                 ))
             }
+            opportunities.append(.init(
+                id: "digestive-support-options",
+                title: "Gentle variety while stools are hard",
+                detail: "If already tolerated, age-safe fruits, vegetables, beans, or whole grains can broaden the pattern. Introduce unfamiliar foods one at a time and keep usual milk feeds central.",
+                systemImage: "leaf.circle",
+                suggestedFoodIDs: safeSuggestions(
+                    categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain]
+                )
+            ))
         }
 
         if enoughForPattern,
            items.count >= 4,
-           let dominant = foodCounts.max(by: { $0.value < $1.value }),
+           let dominant = foodCounts.sorted(by: {
+               $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
+           }).first,
            Double(dominant.value) / Double(items.count) >= 0.6,
-           let food = foods[dominant.key] {
-            let digestive = foodGuidance(for: food, ageMonths: ageMonths)
+           let dominantItem = items.first(where: { $0.foodID == dominant.key }) {
+            let food = foods[dominant.key]
+            let foodName = food?.name ?? dominantItem.foodNameSnapshot
+            let digestive = food.map { foodGuidance(for: $0, ageMonths: ageMonths) }
+            let activeCaution = activeConcern?.needsPromptMedicalAdvice == false
+                ? digestive?.caution
+                : nil
             opportunities.append(.init(
                 id: "repeated-food-pattern",
-                title: "\(food.name) appears often",
-                detail: activeConcern != nil && digestive.caution != nil
-                    ? "A digestive concern is active. \(digestive.caution!)"
-                    : "It appears in most recorded servings. That does not prove it caused a symptom; rotate other age-appropriate foods for variety when practical.",
+                title: "\(foodName) appears often",
+                detail: activeCaution.map { "A digestive concern is active. \($0)" }
+                    ?? "It appears in most recorded servings. That does not prove it caused a symptom; rotate other age-appropriate foods for variety when practical.",
                 systemImage: "arrow.triangle.2.circlepath",
-                suggestedFoodIDs: suggestions(ageMonths: ageMonths, categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain])
-                    .filter { $0 != food.id }
+                suggestedFoodIDs: safeSuggestions(categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain])
+                    .filter { $0 != dominant.key }
             ))
         }
 
-        let suggestedFoodIDs = Array(Set(opportunities.flatMap(\.suggestedFoodIDs))).prefix(8)
+        let suggestedFoodIDs = Array(orderedUnique(opportunities.flatMap(\.suggestedFoodIDs)).prefix(8))
         let recipeIDs = suggestedFoodIDs.flatMap {
             SolidsReferenceCatalog.recipes(containingFoodID: $0)
-                .filter { $0.minimumAgeMonths <= ageMonths }
+                .filter { recipe in
+                    guard recipe.minimumAgeMonths <= ageMonths,
+                          Set(recipe.allergenIDs).isDisjoint(with: excludedAllergenIDs) else {
+                        return false
+                    }
+                    let recipeFoodIDs = Set(recipe.ingredients.compactMap {
+                        SolidsReferenceCatalog.food(named: $0.foodName)?.id
+                    })
+                    return recipeFoodIDs.isDisjoint(with: excludedFoodIDs)
+                }
                 .prefix(2)
                 .map(\.id)
         }
         let summary: String
-        switch confidence {
-        case .notEnoughData:
-            summary = "Log a few solid meals and set logging coverage to receive pattern-based feedback."
-        case .partial:
-            summary = "Here is what appears in the log. Missing foods are treated as unknown—not as a dietary gap."
-        case .usefulPattern:
-            summary = opportunities.isEmpty
-                ? "The logged week shows useful variety across key food groups. Keep rotating familiar foods and follow hunger and fullness cues."
-                : "The logged week suggests a few gentle ways to broaden the pattern. These are ideas, not a diagnosis or required intake target."
+        if activeConcern?.needsPromptMedicalAdvice == true {
+            summary = "A symptom needing prompt medical advice is recorded. Contact the child’s clinician; this feeding review cannot assess the cause or urgency."
+        } else if activeConcern != nil && items.isEmpty {
+            summary = "A digestive concern is active. Add recent solid meals when you can; the ideas below stay general until there is enough log history to review a pattern."
+        } else {
+            switch confidence {
+            case .notEnoughData:
+                summary = "Log a few solid meals and set logging coverage to receive pattern-based feedback."
+            case .partial:
+                summary = "Here is what appears in the log. Missing foods are treated as unknown—not as a dietary gap."
+            case .usefulPattern:
+                summary = opportunities.isEmpty
+                    ? "The logged week shows useful variety across key food groups. Keep rotating familiar foods and follow hunger and fullness cues."
+                    : "The logged week suggests a few gentle ways to broaden the pattern. These are ideas, not a diagnosis or required intake target."
+            }
         }
 
         return SolidsBalanceAssessment(
             lookbackDays: lookbackDays,
             mealCount: mealCount,
             loggedDayCount: loggedDays,
-            uniqueFoodCount: foods.count,
+            uniqueFoodCount: uniqueFoodCount,
             confidence: confidence,
             summary: summary,
             strengths: strengths,
             opportunities: opportunities,
-            suggestedFoodIDs: Array(suggestedFoodIDs),
-            suggestedRecipeIDs: Array(Set(recipeIDs)).prefix(6).map { $0 },
-            shouldSurfaceProactively: enoughForPattern && !opportunities.isEmpty,
+            suggestedFoodIDs: suggestedFoodIDs,
+            suggestedRecipeIDs: Array(orderedUnique(recipeIDs).prefix(6)),
+            shouldSurfaceProactively: (6...12).contains(ageMonths)
+                && enoughForPattern
+                && !opportunities.isEmpty,
             activeConcern: activeConcern
         )
     }
@@ -2638,7 +2708,9 @@ enum SolidsDigestiveSupportService {
     private static func suggestions(
         ageMonths: Int,
         categories: Set<SolidsFoodCategory>? = nil,
-        ironRichOnly: Bool = false
+        ironRichOnly: Bool = false,
+        excludingFoodIDs: Set<String> = [],
+        excludingAllergenIDs: Set<String> = []
     ) -> [String] {
         let preferredIDs = [
             "pear", "prune", "peach", "plum", "peas", "lentils", "oatmeal",
@@ -2649,6 +2721,8 @@ enum SolidsDigestiveSupportService {
             food.minimumAgeMonths <= ageMonths
                 && (categories == nil || categories?.contains(food.category) == true)
                 && (!ironRichOnly || food.isIronRich)
+                && !excludingFoodIDs.contains(food.id)
+                && Set(food.allergenIDs).isDisjoint(with: excludingAllergenIDs)
         }
         if !eligible.isEmpty { return Array(eligible.prefix(6).map(\.id)) }
         return SolidsReferenceCatalog.foods.lazy.filter { food in
@@ -2656,7 +2730,14 @@ enum SolidsDigestiveSupportService {
                 && food.isEligibleForGuidedPath
                 && (categories == nil || categories?.contains(food.category) == true)
                 && (!ironRichOnly || food.isIronRich)
+                && !excludingFoodIDs.contains(food.id)
+                && Set(food.allergenIDs).isDisjoint(with: excludingAllergenIDs)
         }.prefix(6).map(\.id)
+    }
+
+    private static func orderedUnique<Value: Hashable>(_ values: [Value]) -> [Value] {
+        var seen = Set<Value>()
+        return values.filter { seen.insert($0).inserted }
     }
 }
 

@@ -44,6 +44,10 @@ final class SolidsFeatureTests: XCTestCase {
             let food = try XCTUnwrap(SolidsReferenceCatalog.food(id: summary.id))
             let guidance = SolidsDigestiveSupportService.foodGuidance(for: food, ageMonths: 8)
             XCTAssertFalse(guidance.note.isEmpty, food.name)
+            XCTAssertTrue(
+                guidance.note.localizedCaseInsensitiveContains("constipation"),
+                "Every food detail should carry the age-aware general digestive warning: \(food.name)"
+            )
             XCTAssertFalse(guidance.sourceURLs.isEmpty, food.name)
         }
 
@@ -56,6 +60,21 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertNil(
             SolidsDigestiveSupportService.foodGuidance(for: applesauce, ageMonths: 7).caution,
             "Applesauce should not receive a food-specific constipation claim without direct support."
+        )
+        let riceCereal = try XCTUnwrap(
+            SolidsReferenceCatalog.food(id: "infant-rice-cereal")
+        )
+        XCTAssertTrue(
+            SolidsDigestiveSupportService.foodGuidance(for: riceCereal, ageMonths: 7)
+                .caution?.localizedCaseInsensitiveContains("constipation") == true
+        )
+        XCTAssertTrue(
+            SolidsDigestiveSupportService.foodGuidance(for: applesauce, ageMonths: 18)
+                .note.contains("At 18 months")
+        )
+        XCTAssertTrue(
+            SolidsDigestiveSupportService.generalFoodWarning(ageMonths: 7)
+                .contains("At 7 months")
         )
     }
 
@@ -133,6 +152,171 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertTrue(activeConcern.opportunities.contains {
             $0.id == "digestive-caution-banana" && $0.detail.contains("underripe")
         })
+
+        let olderAssessment = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 13,
+            eventItems: items,
+            state: state,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertFalse(olderAssessment.shouldSurfaceProactively)
+    }
+
+    @MainActor
+    func testDigestiveSuggestionsExcludeUnresolvedReactionsButNotResolvedOnes() throws {
+        let now = Date()
+        let profileID = UUID()
+        let meals = (0..<3).map { index in
+            SolidFoodEventItem(
+                eventID: UUID(),
+                profileID: profileID,
+                foodID: "banana",
+                foodNameSnapshot: "Banana",
+                createdAt: now.addingTimeInterval(Double(-index) * 86_400)
+            )
+        }
+        let state = SolidsProfileState(
+            profileID: profileID,
+            digestiveLoggingCoverage: .mostMeals
+        )
+        let unresolvedPear = SolidFoodEventItem(
+            eventID: UUID(),
+            profileID: profileID,
+            foodID: "pear",
+            foodNameSnapshot: "Pear",
+            suspectedReaction: true,
+            followUp: .discussWithClinician,
+            createdAt: now.addingTimeInterval(-20 * 86_400)
+        )
+
+        let excluded = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: meals + [unresolvedPear],
+            state: state,
+            now: now
+        )
+        XCTAssertFalse(excluded.suggestedFoodIDs.contains("pear"))
+        XCTAssertEqual(
+            excluded.suggestedFoodIDs,
+            SolidsDigestiveSupportService.assessment(
+                profileID: profileID,
+                ageMonths: 8,
+                eventItems: meals + [unresolvedPear],
+                state: state,
+                now: now
+            ).suggestedFoodIDs,
+            "Suggestion order should remain stable across identical assessments."
+        )
+
+        unresolvedPear.followUp = .resolved
+        let resolved = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: meals + [unresolvedPear],
+            state: state,
+            now: now
+        )
+        XCTAssertTrue(resolved.suggestedFoodIDs.contains("pear"))
+    }
+
+    @MainActor
+    func testDigestiveAssessmentCountsCustomFoodsWithoutInventingCategoryGaps() {
+        let now = Date()
+        let profileID = UUID()
+        let items = (0..<5).map { index in
+            SolidFoodEventItem(
+                eventID: UUID(),
+                profileID: profileID,
+                foodID: "custom-food-\(index)",
+                foodNameSnapshot: "Custom food \(index)",
+                createdAt: now.addingTimeInterval(Double(-(index % 2)) * 86_400)
+            )
+        }
+        let state = SolidsProfileState(
+            profileID: profileID,
+            digestiveLoggingCoverage: .mostMeals
+        )
+
+        let assessment = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: items,
+            state: state,
+            now: now
+        )
+
+        XCTAssertEqual(assessment.uniqueFoodCount, 5)
+        XCTAssertTrue(assessment.strengths.contains { $0.id == "variety-strength" })
+        XCTAssertFalse(assessment.opportunities.contains { $0.id == "produce-opportunity" })
+        XCTAssertFalse(assessment.opportunities.contains { $0.id == "iron-opportunity" })
+    }
+
+    @MainActor
+    func testDigestiveAssessmentFlagsRepeatedCustomFoodWithoutClaimingCausation() {
+        let now = Date()
+        let profileID = UUID()
+        let items = (0..<5).map { index in
+            SolidFoodEventItem(
+                eventID: UUID(),
+                profileID: profileID,
+                foodID: "custom-test-porridge",
+                foodNameSnapshot: "Test porridge",
+                createdAt: now.addingTimeInterval(Double(-(index % 2)) * 86_400)
+            )
+        }
+        let state = SolidsProfileState(
+            profileID: profileID,
+            digestiveLoggingCoverage: .mostMeals
+        )
+
+        let assessment = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: items,
+            state: state,
+            now: now
+        )
+        let repeated = assessment.opportunities.first { $0.id == "repeated-food-pattern" }
+
+        XCTAssertEqual(repeated?.title, "Test porridge appears often")
+        XCTAssertTrue(repeated?.detail.contains("does not prove it caused a symptom") == true)
+        XCTAssertFalse(assessment.opportunities.contains { $0.id == "produce-opportunity" })
+        XCTAssertFalse(assessment.opportunities.contains { $0.id == "iron-opportunity" })
+    }
+
+    @MainActor
+    func testDigestiveConcernOffersGeneralHelpWithoutLogsAndPrioritizesRedFlags() {
+        let profileID = UUID()
+        let state = SolidsProfileState(
+            profileID: profileID,
+            digestiveCheckIns: [SolidsDigestiveCheckIn(hardStool: true)]
+        )
+
+        let general = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: [],
+            state: state
+        )
+        XCTAssertTrue(general.opportunities.contains { $0.id == "digestive-support-options" })
+        XCTAssertFalse(general.suggestedFoodIDs.isEmpty)
+        XCTAssertTrue(general.summary.contains("ideas below stay general"))
+
+        state.digestiveCheckIns = [SolidsDigestiveCheckIn(
+            hardStool: true,
+            visibleBlood: true
+        )]
+        let redFlag = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: [],
+            state: state
+        )
+        XCTAssertFalse(redFlag.opportunities.contains { $0.id == "digestive-support-options" })
+        XCTAssertTrue(redFlag.summary.contains("prompt medical advice"))
     }
 
     @MainActor
@@ -165,9 +349,29 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(state.digestiveLoggingCoverage, .mostMeals)
         XCTAssertTrue(state.digestiveReminderEnabled)
 
+        let replacement = SolidsDigestiveCheckIn(
+            recordedAt: checkIn.recordedAt.addingTimeInterval(3_600),
+            hardStool: false,
+            prolongedStraining: true
+        )
+        let replacementError = await writer.saveDigestiveCheckIn(
+            profileID: profileID,
+            checkIn: replacement,
+            loggingCoverage: .mostMeals,
+            reminderAt: nil
+        )
+        XCTAssertNil(replacementError)
+        context = ModelContext(container)
+        let replacedState = try XCTUnwrap(
+            context.fetch(FetchDescriptor<SolidsProfileState>()).first
+        )
+        XCTAssertEqual(replacedState.activeDigestiveCheckIn?.id, replacement.id)
+        XCTAssertEqual(replacedState.digestiveCheckIns.filter(\.isActive).count, 1)
+        XCTAssertNotNil(replacedState.digestiveCheckIns.first { $0.id == checkIn.id }?.resolvedAt)
+
         let resolveError = await writer.resolveDigestiveCheckIn(
             profileID: profileID,
-            checkInID: checkIn.id
+            checkInID: replacement.id
         )
         XCTAssertNil(resolveError)
         context = ModelContext(container)

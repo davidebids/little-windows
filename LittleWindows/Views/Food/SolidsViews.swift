@@ -68,6 +68,10 @@ struct SolidsHomeView: View {
         )
     }
 
+    private var showsDigestiveSupport: Bool {
+        (6...12).contains(ageMonths) || digestiveAssessment.activeConcern != nil
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
@@ -176,7 +180,8 @@ struct SolidsHomeView: View {
         let visibleProgress = scopedProgress
         let visiblePlans = upcomingPlans
         return VStack(alignment: .leading, spacing: 16) {
-            if digestiveAssessment.activeConcern != nil || digestiveAssessment.shouldSurfaceProactively {
+            if showsDigestiveSupport,
+               digestiveAssessment.activeConcern != nil || digestiveAssessment.shouldSurfaceProactively {
                 Button { open(.solidsDigestive) } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: digestiveAssessment.activeConcern == nil
@@ -247,17 +252,21 @@ struct SolidsHomeView: View {
                 destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker(.all))
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
                 destinationCard("Recipes", "400+ simple ideas", "fork.knife", .solidsRecipes)
-                destinationCard("Feeding balance", "Comfort & variety", "leaf.circle.fill", .solidsDigestive)
+                if showsDigestiveSupport {
+                    destinationCard("Feeding balance", "Comfort & variety", "leaf.circle.fill", .solidsDigestive)
+                }
             }
 
-            Button { open(.solidsDigestive) } label: {
-                Label("Constipation concern today", systemImage: "cross.case.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
+            if showsDigestiveSupport {
+                Button { open(.solidsDigestive) } label: {
+                    Label("Constipation concern today", systemImage: "cross.case.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+                .accessibilityIdentifier("solids.digestive.check-in")
             }
-            .buttonStyle(.bordered)
-            .tint(.orange)
-            .accessibilityIdentifier("solids.digestive.check-in")
 
             Button {
                 openFeedingReport()
@@ -1847,6 +1856,7 @@ struct SolidsDigestiveSupportView: View {
     @State private var loggingCoverage: SolidsLoggingCoverage = .unknown
     @State private var stateWriter: SolidsProfileStateWriter?
     @State private var errorMessage: String?
+    @State private var showingCheckInHistory = false
 
     private var ageMonths: Int { SolidsTrackingService.ageMonths(for: profile) }
 
@@ -1859,12 +1869,19 @@ struct SolidsDigestiveSupportView: View {
         )
     }
 
+    private var recentResolvedCheckIns: [SolidsDigestiveCheckIn] {
+        Array((profileState?.digestiveCheckIns ?? []).filter { !$0.isActive }.prefix(5))
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 header
                 if let concern = assessment.activeConcern {
                     activeConcernCard(concern)
+                }
+                if !recentResolvedCheckIns.isEmpty {
+                    checkInHistoryCard
                 }
                 balanceCard
                 insightsSection
@@ -1948,6 +1965,8 @@ struct SolidsDigestiveSupportView: View {
             Text("Recorded \(concern.recordedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Text(concern.observationLabels.joined(separator: " • "))
+                .font(.subheadline)
             if concern.needsPromptMedicalAdvice {
                 Text("One or more symptoms selected here warrant prompt medical advice. Use urgent care for severe or rapidly worsening symptoms.")
                     .font(.subheadline.weight(.semibold))
@@ -1962,6 +1981,34 @@ struct SolidsDigestiveSupportView: View {
             }
             .buttonStyle(.bordered)
         }
+        .padding(16)
+        .appSurface()
+    }
+
+    private var checkInHistoryCard: some View {
+        DisclosureGroup(
+            "Recent check-ins (\(recentResolvedCheckIns.count))",
+            isExpanded: $showingCheckInHistory
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(recentResolvedCheckIns) { concern in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(concern.recordedAt.formatted(date: .abbreviated, time: .omitted))
+                            .font(.subheadline.weight(.semibold))
+                        Text(concern.observationLabels.joined(separator: " • "))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let resolvedAt = concern.resolvedAt {
+                            Text("Resolved \(resolvedAt.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 10)
+        }
+        .font(.headline)
         .padding(16)
         .appSurface()
     }
@@ -2078,16 +2125,34 @@ struct SolidsDigestiveSupportView: View {
             Label("Age-aware balance", systemImage: "scalemass.fill")
                 .font(.headline)
                 .foregroundStyle(.orange)
-            Text(ageMonths < 9
-                ? "For 6–8 months, WHO guidance commonly describes 2–3 complementary-food meals a day, while breast milk or formula remains central. Build variety gradually and follow hunger and fullness cues."
-                : "For 9–11 months, WHO guidance commonly describes 3–4 complementary-food meals a day, while breast milk or formula remains important. Keep broadening textures and food groups at the child’s pace.")
+            Text(ageBalanceGuidance)
                 .font(.subheadline)
-            Text("From about 6 months, small amounts of plain water can be offered with meals; the AAP describes about 4–8 oz total per day for 6–12 months. Do not use this screen to restrict breast milk or formula.")
+            Text(hydrationGuidance)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(16)
         .appSurface()
+    }
+
+    private var ageBalanceGuidance: String {
+        switch ageMonths {
+        case ..<9:
+            "For 6–8 months, WHO guidance commonly describes 2–3 complementary-food meals a day, while breast milk or formula remains central. Build variety gradually and follow hunger and fullness cues."
+        case 9...11:
+            "For 9–11 months, WHO guidance commonly describes 3–4 complementary-food meals a day, while breast milk or formula remains important. Keep broadening textures and food groups at the child’s pace."
+        case 12:
+            "At 12 months, keep offering varied family foods in age-safe textures and follow hunger and fullness cues. Ask the child’s clinician about the family’s transition from infant feeding guidance."
+        default:
+            "After 12 months, keep offering varied family foods in age-safe textures and follow hunger and fullness cues. Ask the child’s clinician for age-specific feeding guidance."
+        }
+    }
+
+    private var hydrationGuidance: String {
+        if (6...12).contains(ageMonths) {
+            return "From about 6 months, small amounts of plain water can be offered with meals; the AAP describes about 4–8 oz total per day for 6–12 months. Do not use this screen to restrict breast milk or formula."
+        }
+        return "Offer drinks according to the child’s current age and their clinician’s guidance. Do not use this screen to restrict milk feeds or fluids."
     }
 
     private var safetyCard: some View {
@@ -2160,8 +2225,9 @@ private struct SolidsDigestiveCheckInSheet: View {
     @State private var poorFeeding = false
     @State private var notes = ""
     @State private var loggingCoverage: SolidsLoggingCoverage
-    @State private var reminderEnabled = true
+    @State private var reminderEnabled = false
     @State private var reminderAt = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var checkingReminderPermission = false
     @State private var saving = false
     @State private var errorMessage: String?
 
@@ -2207,8 +2273,10 @@ private struct SolidsDigestiveCheckInSheet: View {
                 }
                 Section {
                     Toggle("Remind me to check again", isOn: $reminderEnabled)
+                        .disabled(checkingReminderPermission)
                     if reminderEnabled {
                         DatePicker("Reminder", selection: $reminderAt, in: Date()...)
+                            .disabled(checkingReminderPermission)
                     }
                 } header: {
                     Text("Follow up")
@@ -2218,6 +2286,10 @@ private struct SolidsDigestiveCheckInSheet: View {
             }
             .navigationTitle("Digestive check-in")
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: reminderEnabled) { _, isEnabled in
+                guard isEnabled else { return }
+                Task { await authorizeReminder() }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -2226,11 +2298,12 @@ private struct SolidsDigestiveCheckInSheet: View {
                     Button(saving ? "Saving…" : "Save") {
                         Task { await save() }
                     }
-                    .disabled(saving || !(hardStool || difficultOrPainful || prolongedStraining
+                    .disabled(saving || checkingReminderPermission
+                        || !(hardStool || difficultOrPainful || prolongedStraining
                         || visibleBlood || vomiting || swollenBelly || poorFeeding))
                 }
             }
-            .alert("Couldn’t save", isPresented: Binding(
+            .alert("Needs attention", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
             )) {
@@ -2242,12 +2315,31 @@ private struct SolidsDigestiveCheckInSheet: View {
     }
 
     @MainActor
+    private func authorizeReminder() async {
+        checkingReminderPermission = true
+        let authorized = await NotificationManager.shared.ensureAuthorization()
+        checkingReminderPermission = false
+        guard !authorized else { return }
+        reminderEnabled = false
+        errorMessage = "Notifications are off. You can save the concern without a reminder or enable notifications in Settings."
+    }
+
+    @MainActor
     private func save() async {
         guard let writer else {
             errorMessage = "The solids store is still loading. Try again."
             return
         }
         saving = true
+        if reminderEnabled {
+            let authorized = await NotificationManager.shared.ensureAuthorization()
+            guard authorized else {
+                reminderEnabled = false
+                saving = false
+                errorMessage = "Notifications are off. The concern has not been saved yet. Save again without a reminder or enable notifications in Settings."
+                return
+            }
+        }
         let checkIn = SolidsDigestiveCheckIn(
             hardStool: hardStool,
             difficultOrPainful: difficultOrPainful,
@@ -2739,6 +2831,7 @@ struct CustomSolidFoodDetailView: View {
     private var isPlannedForTomorrow: Bool {
         locallyPlannedTomorrowID != nil || plannedTomorrowMeal != nil
     }
+    private var ageMonths: Int { SolidsTrackingService.ageMonths(for: profile) }
 
     var body: some View {
         let visibleTrackingID = trackingID
@@ -2788,6 +2881,19 @@ struct CustomSolidFoodDetailView: View {
                         Label("Add nutrition label", systemImage: "plus.circle.fill")
                     }
                     .accessibilityIdentifier("solids.custom-food.add-nutrition")
+                }
+            }
+            Section("Digestive notes") {
+                Text(SolidsDigestiveSupportService.generalFoodWarning(ageMonths: ageMonths))
+                Text("Consider the whole feeding pattern and contact the child’s clinician for persistent or concerning symptoms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Link(destination: SolidsSourceLibrary.niddkChildConstipationEating) {
+                    Label(
+                        SolidsSourceLibrary.displayName(for: SolidsSourceLibrary.niddkChildConstipationEating),
+                        systemImage: "arrow.up.right.square"
+                    )
+                    .font(.caption)
                 }
             }
             Section {
