@@ -242,6 +242,7 @@ struct FoodHomeView: View {
                     accessLevel: solidsAccessLevel,
                     progress: solidFoodProgress,
                     plans: plannedSolidMeals,
+                    eventItems: solidFoodEventItems,
                     profileState: selectedSolidsState,
                     open: { path.append($0) }
                 )
@@ -259,6 +260,18 @@ struct FoodHomeView: View {
                     openFood: { path.append(.solidFood($0)) },
                     openRecipe: { path.append(.solidsRecipe($0)) },
                     openPlan: { path.append(.plannedSolidMeal($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsDigestive:
+            if let selectedProfile, selectedProfile.profileType == .child, solidsAccessLevel == .full {
+                SolidsDigestiveSupportView(
+                    profile: selectedProfile,
+                    eventItems: solidFoodEventItems,
+                    profileState: selectedSolidsState,
+                    openFood: { path.append(.solidFood($0)) },
+                    openRecipe: { path.append(.solidsRecipe($0)) }
                 )
             } else {
                 MissingFoodRouteView()
@@ -673,6 +686,8 @@ struct FoodHomeView: View {
             openSolidsRoute(.solidsDatabase)
         case .solidsGuided:
             openSolidsRoute(.solidsGuided)
+        case .solidsDigestive:
+            openSolidsRoute(.solidsDigestive)
         case .solidFood(let id):
             openSolidsRoute(.solidFood(id))
         case .customSolidFood(let id):
@@ -779,7 +794,7 @@ struct FoodHomeView: View {
         switch command {
         case .food, .todos, .shopping, .trips, .inventory, .mealPrep, .returns, .quickAdd:
             return false
-        case .solids, .solidsDatabase, .solidsGuided, .solidsPlan, .solidsTracker, .solidsAllergens, .solidsRecipes:
+        case .solids, .solidsDatabase, .solidsGuided, .solidsDigestive, .solidsPlan, .solidsTracker, .solidsAllergens, .solidsRecipes:
             return solidsAccessLevel == .hidden
         case .solidFood(let id):
             return solidsAccessLevel == .hidden || SolidsReferenceCatalog.food(id: id) == nil
@@ -840,7 +855,7 @@ struct FoodHomeView: View {
         switch command {
         case .food, .todos, .todoList:
             return .todos
-        case .solids, .solidsDatabase, .solidsGuided, .solidFood, .customSolidFood,
+        case .solids, .solidsDatabase, .solidsGuided, .solidsDigestive, .solidFood, .customSolidFood,
              .solidsPlan, .plannedSolidMeal, .solidsTracker, .solidMeal,
              .solidsAllergens, .solidAllergen, .solidsRecipes, .solidsRecipe:
             return .solids

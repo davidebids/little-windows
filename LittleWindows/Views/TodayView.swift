@@ -1606,6 +1606,7 @@ struct TodayView: View {
                     accessLevel: accessLevel,
                     progress: [],
                     plans: plannedSolidMeals,
+                    eventItems: [],
                     profileState: profileState,
                     open: openSolidsInCare
                 )
@@ -1668,6 +1669,7 @@ struct TodayView: View {
         case .solidsHome: .solids
         case .solidsDatabase: .solidsDatabase
         case .solidsGuided: .solidsGuided
+        case .solidsDigestive: .solidsDigestive
         case .solidFood(let id): .solidFood(id)
         case .customSolidFood(let id): .customSolidFood(id)
         case .solidsPlan: .solidsPlan

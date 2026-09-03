@@ -39,6 +39,146 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertTrue(foods.allSatisfy { !$0.name.isEmpty })
     }
 
+    func testEveryBuiltInFoodHasAgeAwareDigestiveNotes() throws {
+        for summary in SolidsReferenceCatalog.foodSummaries {
+            let food = try XCTUnwrap(SolidsReferenceCatalog.food(id: summary.id))
+            let guidance = SolidsDigestiveSupportService.foodGuidance(for: food, ageMonths: 8)
+            XCTAssertFalse(guidance.note.isEmpty, food.name)
+            XCTAssertFalse(guidance.sourceURLs.isEmpty, food.name)
+        }
+
+        let banana = try XCTUnwrap(SolidsReferenceCatalog.food(id: "banana"))
+        let bananaGuidance = SolidsDigestiveSupportService.foodGuidance(for: banana, ageMonths: 7)
+        XCTAssertTrue(bananaGuidance.caution?.localizedCaseInsensitiveContains("underripe") == true)
+        XCTAssertTrue(bananaGuidance.caution?.localizedCaseInsensitiveContains("hard stools") == true)
+
+        let applesauce = try XCTUnwrap(SolidsReferenceCatalog.food(id: "applesauce"))
+        XCTAssertNil(
+            SolidsDigestiveSupportService.foodGuidance(for: applesauce, ageMonths: 7).caution,
+            "Applesauce should not receive a food-specific constipation claim without direct support."
+        )
+    }
+
+    @MainActor
+    func testDigestiveAssessmentScopesLogsAndSurfacesConservativePattern() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 20, hour: 12
+        )))
+        let profileID = UUID()
+        let otherProfileID = UUID()
+        let items = [
+            SolidFoodEventItem(
+                eventID: UUID(), profileID: profileID, foodID: "banana",
+                foodNameSnapshot: "Banana", createdAt: now.addingTimeInterval(-3_600)
+            ),
+            SolidFoodEventItem(
+                eventID: UUID(), profileID: profileID, foodID: "banana",
+                foodNameSnapshot: "Banana", createdAt: now.addingTimeInterval(-86_400)
+            ),
+            SolidFoodEventItem(
+                eventID: UUID(), profileID: profileID, foodID: "banana",
+                foodNameSnapshot: "Banana", createdAt: now.addingTimeInterval(-90_000)
+            ),
+            SolidFoodEventItem(
+                eventID: UUID(), profileID: otherProfileID, foodID: "beef",
+                foodNameSnapshot: "Beef", createdAt: now.addingTimeInterval(-3_600)
+            )
+        ]
+        let state = SolidsProfileState(
+            profileID: profileID,
+            digestiveLoggingCoverage: .mostMeals
+        )
+
+        let assessment = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: items,
+            state: state,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(assessment.mealCount, 3)
+        XCTAssertEqual(assessment.loggedDayCount, 2)
+        XCTAssertEqual(assessment.uniqueFoodCount, 1)
+        XCTAssertEqual(assessment.confidence, .usefulPattern)
+        XCTAssertTrue(assessment.shouldSurfaceProactively)
+        XCTAssertTrue(assessment.opportunities.contains { $0.id == "variety-opportunity" })
+        XCTAssertTrue(assessment.opportunities.contains { $0.id == "iron-opportunity" })
+
+        state.digestiveLoggingCoverage = .someMeals
+        let partial = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: items,
+            state: state,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(partial.confidence, .partial)
+        XCTAssertFalse(partial.shouldSurfaceProactively)
+        XCTAssertTrue(partial.opportunities.isEmpty)
+
+        state.digestiveCheckIns = [SolidsDigestiveCheckIn(hardStool: true)]
+        let activeConcern = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: items,
+            state: state,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertTrue(activeConcern.opportunities.contains {
+            $0.id == "digestive-caution-banana" && $0.detail.contains("underripe")
+        })
+    }
+
+    @MainActor
+    func testDigestiveCheckInWriterSavesAndResolvesConcern() async throws {
+        let container = try ModelContainer(
+            for: SolidsProfileState.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let profileID = UUID()
+        let writer = SolidsProfileStateWriter(modelContainer: container)
+        let checkIn = SolidsDigestiveCheckIn(
+            hardStool: true,
+            difficultOrPainful: true,
+            notes: "Caregiver-observed hard stool"
+        )
+        let reminderAt = Date().addingTimeInterval(86_400)
+
+        let saveError = await writer.saveDigestiveCheckIn(
+            profileID: profileID,
+            checkIn: checkIn,
+            loggingCoverage: .mostMeals,
+            reminderAt: reminderAt
+        )
+        XCTAssertNil(saveError)
+        var context = ModelContext(container)
+        let state = try XCTUnwrap(
+            context.fetch(FetchDescriptor<SolidsProfileState>()).first
+        )
+        XCTAssertEqual(state.activeDigestiveCheckIn?.id, checkIn.id)
+        XCTAssertEqual(state.digestiveLoggingCoverage, .mostMeals)
+        XCTAssertTrue(state.digestiveReminderEnabled)
+
+        let resolveError = await writer.resolveDigestiveCheckIn(
+            profileID: profileID,
+            checkInID: checkIn.id
+        )
+        XCTAssertNil(resolveError)
+        context = ModelContext(container)
+        let resolvedState = try XCTUnwrap(
+            context.fetch(FetchDescriptor<SolidsProfileState>()).first
+        )
+        XCTAssertNil(resolvedState.activeDigestiveCheckIn)
+        XCTAssertFalse(resolvedState.digestiveReminderEnabled)
+        XCTAssertNil(resolvedState.digestiveReminderAt)
+    }
+
     @MainActor
     func testEveryBuiltInFoodHasCompleteQuantitativeNutritionCoverage() throws {
         let foods = SolidsReferenceCatalog.foodSummaries
@@ -3212,6 +3352,9 @@ final class SolidsFeatureTests: XCTestCase {
         router.route(URL(string: "littlewindows://food/solids/allergens/egg")!)
         XCTAssertEqual(router.pendingSolidsCommand, .solidAllergen("egg"))
 
+        router.route(URL(string: "littlewindows://care/solids/digestive")!)
+        XCTAssertEqual(router.pendingSolidsCommand, .solidsDigestive)
+
         router.route(URL(string: "littlewindows://quick-log/solids")!)
         XCTAssertEqual(router.consumeAction(), .logSolidFeed(.empty))
 
@@ -3338,6 +3481,14 @@ final class SolidsFeatureTests: XCTestCase {
             SolidRecipeCollection(name: "Breakfasts", recipeIDs: ["apple-oatmeal"])
         ]
         sourceState.completedFeedingSkillIDs = [SolidsFeedingSkill.usesPreloadedSpoon.rawValue]
+        sourceState.digestiveCheckIns = [SolidsDigestiveCheckIn(
+            hardStool: true,
+            difficultOrPainful: true,
+            notes: "Caregiver observation"
+        )]
+        sourceState.digestiveLoggingCoverage = .mostMeals
+        sourceState.digestiveReminderEnabled = true
+        sourceState.digestiveReminderAt = Date().addingTimeInterval(86_400)
 
         let data = try DataExportImportService.exportData(context: sourceContext)
         let destination = try ModelContainer(
@@ -3379,6 +3530,11 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertEqual(importedState.recipeCollections.first?.name, "Breakfasts")
         XCTAssertEqual(importedState.recipeCollections.first?.recipeIDs, ["apple-oatmeal"])
         XCTAssertEqual(importedState.completedFeedingSkillIDs, [SolidsFeedingSkill.usesPreloadedSpoon.rawValue])
+        XCTAssertEqual(importedState.digestiveCheckIns.count, 1)
+        XCTAssertEqual(importedState.activeDigestiveCheckIn?.notes, "Caregiver observation")
+        XCTAssertEqual(importedState.digestiveLoggingCoverage, .mostMeals)
+        XCTAssertTrue(importedState.digestiveReminderEnabled)
+        XCTAssertNotNil(importedState.digestiveReminderAt)
         let importedAllergen = try XCTUnwrap(
             destination.mainContext.fetch(FetchDescriptor<SolidAllergenProgress>()).first
         )

@@ -37,6 +37,7 @@ struct SolidsHomeView: View {
     let accessLevel: SolidsAccessLevel
     let progress: [SolidFoodProgress]
     let plans: [PlannedSolidMeal]
+    let eventItems: [SolidFoodEventItem]
     let profileState: SolidsProfileState?
     let open: (FoodRoute) -> Void
 
@@ -56,6 +57,15 @@ struct SolidsHomeView: View {
     private var upcomingPlans: [PlannedSolidMeal] {
         plans.filter { $0.profileID == profile.id && !$0.isCompleted }
             .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    private var digestiveAssessment: SolidsBalanceAssessment {
+        SolidsDigestiveSupportService.assessment(
+            profileID: profile.id,
+            ageMonths: ageMonths,
+            eventItems: eventItems,
+            state: profileState
+        )
     }
 
     var body: some View {
@@ -166,6 +176,37 @@ struct SolidsHomeView: View {
         let visibleProgress = scopedProgress
         let visiblePlans = upcomingPlans
         return VStack(alignment: .leading, spacing: 16) {
+            if digestiveAssessment.activeConcern != nil || digestiveAssessment.shouldSurfaceProactively {
+                Button { open(.solidsDigestive) } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: digestiveAssessment.activeConcern == nil
+                            ? "leaf.circle.fill"
+                            : "cross.case.fill")
+                            .font(.title3)
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(digestiveAssessment.activeConcern == nil
+                                ? "A feeding pattern to review"
+                                : "Digestive concern is active")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(digestiveAssessment.activeConcern == nil
+                                ? "See gentle ideas for broadening the foods logged this week."
+                                : "Review comfort, safety signs, and follow-up suggestions.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(14)
+                    .appSurface(cornerRadius: 17)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("solids.digestive.proactive")
+            }
+
             HStack(spacing: 10) {
                 metric(
                     value: "\(visibleProgress.lazy.filter { $0.status == .tried }.count)",
@@ -206,7 +247,17 @@ struct SolidsHomeView: View {
                 destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker(.all))
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
                 destinationCard("Recipes", "400+ simple ideas", "fork.knife", .solidsRecipes)
+                destinationCard("Feeding balance", "Comfort & variety", "leaf.circle.fill", .solidsDigestive)
             }
+
+            Button { open(.solidsDigestive) } label: {
+                Label("Constipation concern today", systemImage: "cross.case.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.orange)
+            .accessibilityIdentifier("solids.digestive.check-in")
 
             Button {
                 openFeedingReport()
@@ -1783,6 +1834,444 @@ private struct SolidFoodNutritionFactsView: View {
     }
 }
 
+struct SolidsDigestiveSupportView: View {
+    @Environment(\.modelContext) private var modelContext
+
+    let profile: CareProfile
+    let eventItems: [SolidFoodEventItem]
+    let profileState: SolidsProfileState?
+    let openFood: (String) -> Void
+    let openRecipe: (String) -> Void
+
+    @State private var showingCheckIn = false
+    @State private var loggingCoverage: SolidsLoggingCoverage = .unknown
+    @State private var stateWriter: SolidsProfileStateWriter?
+    @State private var errorMessage: String?
+
+    private var ageMonths: Int { SolidsTrackingService.ageMonths(for: profile) }
+
+    private var assessment: SolidsBalanceAssessment {
+        SolidsDigestiveSupportService.assessment(
+            profileID: profile.id,
+            ageMonths: ageMonths,
+            eventItems: eventItems,
+            state: profileState
+        )
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                header
+                if let concern = assessment.activeConcern {
+                    activeConcernCard(concern)
+                }
+                balanceCard
+                insightsSection
+                suggestionsSection
+                practicalGuidance
+                safetyCard
+                sources
+            }
+            .padding(16)
+        }
+        .background(AppTheme.background)
+        .navigationTitle("Feeding balance")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if stateWriter == nil {
+                stateWriter = await SolidsWriterPool.shared.profileStateWriter(
+                    for: modelContext.container
+                )
+            }
+            loggingCoverage = profileState?.digestiveLoggingCoverage ?? .unknown
+        }
+        .sheet(isPresented: $showingCheckIn) {
+            SolidsDigestiveCheckInSheet(
+                profile: profile,
+                initialCoverage: loggingCoverage,
+                writer: stateWriter,
+                onSaved: { coverage in
+                    loggingCoverage = coverage
+                    showingCheckIn = false
+                }
+            )
+        }
+        .alert("Couldn’t save", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "leaf.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(Color.orange.gradient, in: RoundedRectangle(cornerRadius: 15))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Comfort and balance")
+                        .font(.title2.bold())
+                    Text("A gentle review of \(profile.name)’s recent solids log")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            Text("Hard, dry, or painful stools are more useful signs of constipation than the number of bowel movements alone. This tool records a caregiver concern; it does not diagnose constipation.")
+                .font(.subheadline)
+            Button {
+                showingCheckIn = true
+            } label: {
+                Label("Constipation concern today", systemImage: "plus.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .accessibilityIdentifier("solids.digestive.add-check-in")
+        }
+        .padding(16)
+        .appSurface()
+    }
+
+    private func activeConcernCard(_ concern: SolidsDigestiveCheckIn) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Concern recorded", systemImage: "cross.case.fill")
+                .font(.headline)
+                .foregroundStyle(concern.needsPromptMedicalAdvice ? .red : .orange)
+            Text("Recorded \(concern.recordedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if concern.needsPromptMedicalAdvice {
+                Text("One or more symptoms selected here warrant prompt medical advice. Use urgent care for severe or rapidly worsening symptoms.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.red)
+            }
+            if !concern.notes.isEmpty {
+                Text(concern.notes)
+                    .font(.subheadline)
+            }
+            Button("Mark concern resolved") {
+                Task { await resolve(concern) }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(16)
+        .appSurface()
+    }
+
+    private var balanceCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("7-day solids review")
+                    .font(.headline)
+                Spacer()
+                Text("\(assessment.mealCount) meals")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text(assessment.summary)
+                .font(.subheadline)
+            HStack {
+                Text("Logging coverage")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Picker("Logging coverage", selection: $loggingCoverage) {
+                    ForEach(SolidsLoggingCoverage.allCases) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+            }
+            .onChange(of: loggingCoverage) { _, coverage in
+                Task { await saveCoverage(coverage) }
+            }
+            Text(loggingCoverage.assessmentNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .appSurface()
+    }
+
+    @ViewBuilder
+    private var insightsSection: some View {
+        if !assessment.strengths.isEmpty || !assessment.opportunities.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("What the log shows")
+                    .font(.headline)
+                ForEach(assessment.strengths) { insight in
+                    insightRow(insight, color: .green)
+                }
+                ForEach(assessment.opportunities) { insight in
+                    insightRow(insight, color: .orange)
+                }
+            }
+        }
+    }
+
+    private func insightRow(_ insight: SolidsBalanceInsight, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: insight.systemImage)
+                .foregroundStyle(color)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(insight.title).font(.subheadline.weight(.semibold))
+                Text(insight.detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .appSurface(cornerRadius: 17)
+    }
+
+    @ViewBuilder
+    private var suggestionsSection: some View {
+        if !assessment.suggestedFoodIDs.isEmpty || !assessment.suggestedRecipeIDs.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Ideas for the next meals")
+                    .font(.headline)
+                Text("Open a food to see age-safe preparation, recipes, and the existing shopping-list actions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(assessment.suggestedFoodIDs, id: \.self) { foodID in
+                    if let food = SolidsReferenceCatalog.food(id: foodID) {
+                        Button { openFood(food.id) } label: {
+                            HStack {
+                                Text(food.visualEmoji)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(food.name).foregroundStyle(.primary)
+                                    Text(food.category.displayName).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            }
+                            .padding(12)
+                            .appSurface(cornerRadius: 15)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                ForEach(assessment.suggestedRecipeIDs, id: \.self) { recipeID in
+                    if let recipe = SolidsReferenceCatalog.recipe(id: recipeID) {
+                        Button { openRecipe(recipe.id) } label: {
+                            Label(recipe.title, systemImage: "fork.knife")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    }
+                }
+            }
+        }
+    }
+
+    private var practicalGuidance: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Age-aware balance", systemImage: "scalemass.fill")
+                .font(.headline)
+                .foregroundStyle(.orange)
+            Text(ageMonths < 9
+                ? "For 6–8 months, WHO guidance commonly describes 2–3 complementary-food meals a day, while breast milk or formula remains central. Build variety gradually and follow hunger and fullness cues."
+                : "For 9–11 months, WHO guidance commonly describes 3–4 complementary-food meals a day, while breast milk or formula remains important. Keep broadening textures and food groups at the child’s pace.")
+                .font(.subheadline)
+            Text("From about 6 months, small amounts of plain water can be offered with meals; the AAP describes about 4–8 oz total per day for 6–12 months. Do not use this screen to restrict breast milk or formula.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .appSurface()
+    }
+
+    private var safetyCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("When to get medical help", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(.red)
+            Text("Contact the child’s clinician promptly for blood in the stool or rectal bleeding, a swollen belly, constant abdominal pain, vomiting, poor feeding, weight loss, or symptoms that are severe, worsening, or not improving.")
+                .font(.subheadline)
+            Text("Do not give laxatives, mineral oil, enemas, or suppositories to a baby unless their clinician recommends it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .appSurface()
+    }
+
+    private var sources: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Clinical and feeding sources")
+                .font(.headline)
+            ForEach(SolidsDigestiveSupportService.sourceURLs, id: \.absoluteString) { url in
+                Link(destination: url) {
+                    Label(SolidsSourceLibrary.displayName(for: url), systemImage: "arrow.up.right.square")
+                        .font(.subheadline)
+                }
+            }
+        }
+        .padding(16)
+        .appSurface()
+    }
+
+    @MainActor
+    private func saveCoverage(_ coverage: SolidsLoggingCoverage) async {
+        guard let stateWriter else { return }
+        if let error = await stateWriter.setDigestiveLoggingCoverage(
+            profileID: profile.id,
+            coverage: coverage
+        ) {
+            errorMessage = error
+        }
+    }
+
+    @MainActor
+    private func resolve(_ concern: SolidsDigestiveCheckIn) async {
+        guard let stateWriter else { return }
+        if let error = await stateWriter.resolveDigestiveCheckIn(
+            profileID: profile.id,
+            checkInID: concern.id
+        ) {
+            errorMessage = error
+        }
+    }
+}
+
+private struct SolidsDigestiveCheckInSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let profile: CareProfile
+    let initialCoverage: SolidsLoggingCoverage
+    let writer: SolidsProfileStateWriter?
+    let onSaved: (SolidsLoggingCoverage) -> Void
+
+    @State private var hardStool = true
+    @State private var difficultOrPainful = false
+    @State private var prolongedStraining = false
+    @State private var visibleBlood = false
+    @State private var vomiting = false
+    @State private var swollenBelly = false
+    @State private var poorFeeding = false
+    @State private var notes = ""
+    @State private var loggingCoverage: SolidsLoggingCoverage
+    @State private var reminderEnabled = true
+    @State private var reminderAt = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var saving = false
+    @State private var errorMessage: String?
+
+    init(
+        profile: CareProfile,
+        initialCoverage: SolidsLoggingCoverage,
+        writer: SolidsProfileStateWriter?,
+        onSaved: @escaping (SolidsLoggingCoverage) -> Void
+    ) {
+        self.profile = profile
+        self.initialCoverage = initialCoverage
+        self.writer = writer
+        self.onSaved = onSaved
+        _loggingCoverage = State(initialValue: initialCoverage)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("What are you noticing?") {
+                    Toggle("Hard or dry stool", isOn: $hardStool)
+                    Toggle("Difficult or painful to pass", isOn: $difficultOrPainful)
+                    Toggle("Prolonged straining", isOn: $prolongedStraining)
+                }
+                Section {
+                    Toggle("Visible blood", isOn: $visibleBlood)
+                    Toggle("Vomiting", isOn: $vomiting)
+                    Toggle("Swollen belly", isOn: $swollenBelly)
+                    Toggle("Poor feeding", isOn: $poorFeeding)
+                } header: {
+                    Text("Contact a clinician promptly if present")
+                } footer: {
+                    Text("Use urgent care for severe or rapidly worsening symptoms. This check-in does not replace medical care.")
+                }
+                Section("Context") {
+                    Picker("Solids logging", selection: $loggingCoverage) {
+                        ForEach(SolidsLoggingCoverage.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                    TextField("Optional notes", text: $notes, axis: .vertical)
+                        .lineLimit(2...5)
+                }
+                Section {
+                    Toggle("Remind me to check again", isOn: $reminderEnabled)
+                    if reminderEnabled {
+                        DatePicker("Reminder", selection: $reminderAt, in: Date()...)
+                    }
+                } header: {
+                    Text("Follow up")
+                } footer: {
+                    Text("The concern stays active until you mark it resolved.")
+                }
+            }
+            .navigationTitle("Digestive check-in")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Saving…" : "Save") {
+                        Task { await save() }
+                    }
+                    .disabled(saving || !(hardStool || difficultOrPainful || prolongedStraining
+                        || visibleBlood || vomiting || swollenBelly || poorFeeding))
+                }
+            }
+            .alert("Couldn’t save", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK") { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+        }
+    }
+
+    @MainActor
+    private func save() async {
+        guard let writer else {
+            errorMessage = "The solids store is still loading. Try again."
+            return
+        }
+        saving = true
+        let checkIn = SolidsDigestiveCheckIn(
+            hardStool: hardStool,
+            difficultOrPainful: difficultOrPainful,
+            prolongedStraining: prolongedStraining,
+            visibleBlood: visibleBlood,
+            vomiting: vomiting,
+            swollenBelly: swollenBelly,
+            poorFeeding: poorFeeding,
+            notes: notes
+        )
+        if let error = await writer.saveDigestiveCheckIn(
+            profileID: profile.id,
+            checkIn: checkIn,
+            loggingCoverage: loggingCoverage,
+            reminderAt: reminderEnabled ? reminderAt : nil
+        ) {
+            errorMessage = error
+            saving = false
+        } else {
+            onSaved(loggingCoverage)
+        }
+    }
+}
+
 struct SolidsFoodDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
@@ -1810,6 +2299,10 @@ struct SolidsFoodDetailView: View {
     var body: some View {
         let visibleRecord = record
         let visibleAgeMonths = ageMonths
+        let digestiveGuidance = SolidsDigestiveSupportService.foodGuidance(
+            for: food,
+            ageMonths: visibleAgeMonths
+        )
         let matchingRecipes = SolidsReferenceCatalog.recipes(containingFoodID: food.id)
         List {
             Section {
@@ -1851,6 +2344,27 @@ struct SolidsFoodDetailView: View {
             }
 
             nutritionSections
+
+            Section("Digestive notes") {
+                Text(digestiveGuidance.note)
+                if let caution = digestiveGuidance.caution {
+                    Label {
+                        Text(caution)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                Text("Stool response varies. Consider the whole feeding pattern and contact the child’s clinician for persistent or concerning symptoms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(digestiveGuidance.sourceURLs, id: \.absoluteString) { url in
+                    Link(destination: url) {
+                        Label(SolidsSourceLibrary.displayName(for: url), systemImage: "arrow.up.right.square")
+                            .font(.caption)
+                    }
+                }
+            }
 
             Section("Preparation by age") {
                 ForEach(Array(food.preparations.enumerated()), id: \.element.id) { index, stage in

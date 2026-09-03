@@ -1038,6 +1038,93 @@ actor SolidsProfileStateWriter {
             return error.localizedDescription
         }
     }
+
+    func saveDigestiveCheckIn(
+        profileID: UUID,
+        checkIn: SolidsDigestiveCheckIn,
+        loggingCoverage: SolidsLoggingCoverage,
+        reminderAt: Date?,
+        now: Date = Date()
+    ) async -> String? {
+        let state = state(for: profileID)
+        if state.modelContext == nil { modelContext.insert(state) }
+        var checkIns = state.digestiveCheckIns.filter { $0.id != checkIn.id }
+        checkIns.append(checkIn)
+        state.digestiveCheckIns = checkIns
+        state.digestiveLoggingCoverage = loggingCoverage
+        state.digestiveReminderEnabled = reminderAt != nil
+        state.digestiveReminderAt = reminderAt
+        state.updatedAt = now
+        if let error = save() { return error }
+        await NotificationManager.shared.scheduleSolidsDigestiveReminder(
+            snapshot: .init(
+                profileID: profileID,
+                reminderAt: reminderAt,
+                isEnabled: reminderAt != nil,
+                hasActiveConcern: true
+            )
+        )
+        return nil
+    }
+
+    func resolveDigestiveCheckIn(
+        profileID: UUID,
+        checkInID: UUID,
+        now: Date = Date()
+    ) async -> String? {
+        let state = state(for: profileID)
+        guard state.modelContext != nil else { return "Digestive check-in not found." }
+        var checkIns = state.digestiveCheckIns
+        guard let index = checkIns.firstIndex(where: { $0.id == checkInID }) else {
+            return "Digestive check-in not found."
+        }
+        checkIns[index].resolvedAt = now
+        state.digestiveCheckIns = checkIns
+        state.digestiveReminderEnabled = false
+        state.digestiveReminderAt = nil
+        state.updatedAt = now
+        if let error = save() { return error }
+        await NotificationManager.shared.scheduleSolidsDigestiveReminder(
+            snapshot: .init(
+                profileID: profileID,
+                reminderAt: nil,
+                isEnabled: false,
+                hasActiveConcern: false
+            )
+        )
+        return nil
+    }
+
+    func setDigestiveLoggingCoverage(
+        profileID: UUID,
+        coverage: SolidsLoggingCoverage,
+        now: Date = Date()
+    ) -> String? {
+        let state = state(for: profileID)
+        if state.modelContext == nil { modelContext.insert(state) }
+        state.digestiveLoggingCoverage = coverage
+        state.updatedAt = now
+        return save()
+    }
+
+    private func state(for profileID: UUID) -> SolidsProfileState {
+        let descriptor = FetchDescriptor<SolidsProfileState>(
+            predicate: #Predicate { $0.profileID == profileID }
+        )
+        return (try? modelContext.fetch(descriptor).first)
+            ?? SolidsProfileState(profileID: profileID)
+    }
+
+    private func save() -> String? {
+        do {
+            try modelContext.save()
+            PersistenceService.recordLocalSave()
+            return nil
+        } catch {
+            modelContext.rollback()
+            return error.localizedDescription
+        }
+    }
 }
 
 @ModelActor
@@ -2300,6 +2387,276 @@ enum SolidsNutritionService {
         }
         let expectedDescription = "\(amount.formatted(.number.precision(.fractionLength(0...2)))) \(unit.abbreviatedName)"
         return snapshot.amountDescription == expectedDescription
+    }
+}
+
+struct SolidsDigestiveFoodGuidance: Equatable, Sendable {
+    var note: String
+    var caution: String?
+    var sourceURLs: [URL]
+}
+
+enum SolidsBalanceConfidence: String, Sendable {
+    case notEnoughData
+    case partial
+    case usefulPattern
+}
+
+struct SolidsBalanceInsight: Identifiable, Equatable, Sendable {
+    var id: String
+    var title: String
+    var detail: String
+    var systemImage: String
+    var suggestedFoodIDs: [String] = []
+}
+
+struct SolidsBalanceAssessment: Equatable, Sendable {
+    var lookbackDays: Int
+    var mealCount: Int
+    var loggedDayCount: Int
+    var uniqueFoodCount: Int
+    var confidence: SolidsBalanceConfidence
+    var summary: String
+    var strengths: [SolidsBalanceInsight]
+    var opportunities: [SolidsBalanceInsight]
+    var suggestedFoodIDs: [String]
+    var suggestedRecipeIDs: [String]
+    var shouldSurfaceProactively: Bool
+    var activeConcern: SolidsDigestiveCheckIn?
+}
+
+enum SolidsDigestiveSupportService {
+    static let sourceURLs = [
+        SolidsSourceLibrary.aapInfantConstipation,
+        SolidsSourceLibrary.aapInfantBowelMovements,
+        SolidsSourceLibrary.aapInfantDrinks,
+        SolidsSourceLibrary.cdcFoodsToEncourage,
+        SolidsSourceLibrary.cdcFeedingFrequency,
+        SolidsSourceLibrary.cdcIron,
+        SolidsSourceLibrary.niddkChildConstipationEating,
+        SolidsSourceLibrary.niddkChildConstipationSymptoms,
+        SolidsSourceLibrary.whoComplementaryFeeding
+    ]
+
+    static func foodGuidance(
+        for food: SolidsReferenceFood,
+        ageMonths: Int
+    ) -> SolidsDigestiveFoodGuidance {
+        let stage = ageMonths < 9 ? "At 6–8 months" : "At 9–12 months"
+        let base: String
+        switch food.category {
+        case .fruit, .vegetable, .beanAndPlantProtein:
+            base = "\(stage), this can contribute variety and naturally occurring fiber. Offer an age-safe texture and keep breast milk or formula as the main drink."
+        case .grain:
+            base = "\(stage), grains can be part of a varied pattern. Rotate grain types and pair them with fruit, vegetables, beans, or another iron-rich food when practical."
+        case .meat, .seafood, .egg:
+            base = "\(stage), this can add protein and important nutrients. Balance it across the week with age-safe fruits, vegetables, beans, and grains."
+        case .dairy:
+            base = "\(stage), this food can add energy and nutrients, but it should complement—not replace—breast milk or formula and a varied set of solid foods."
+        case .nutAndSeed:
+            base = "\(stage), serve this only in the age-safe form shown here. Pair it with other food groups over time rather than relying on one repeated combination."
+        case .herbAndFlavor:
+            base = "\(stage), use this to build flavor variety in an age-safe preparation; it does not replace the fruits, vegetables, grains, proteins, and iron-rich foods in a balanced pattern."
+        case .preparedFood:
+            base = "\(stage), review the ingredients and use this within a varied pattern. Individual stool responses differ, so look at the overall pattern instead of blaming one food automatically."
+        }
+
+        let caution: String?
+        switch food.id {
+        case "banana":
+            caution = "Possible digestive effect: underripe banana may contribute to hard stools for some babies. Choose fully ripe, soft banana and consider pausing it while hard stools are present if the pattern seems connected."
+        case "infant-rice-cereal", "rice-cereal":
+            caution = "Possible digestive effect: rice cereal may contribute to constipation for some babies. If hard stools appear, ask the child's clinician whether rotating to oatmeal or barley cereal makes sense."
+        default:
+            caution = nil
+        }
+
+        return SolidsDigestiveFoodGuidance(
+            note: base,
+            caution: caution,
+            sourceURLs: caution == nil
+                ? [SolidsSourceLibrary.cdcFoodsToEncourage, SolidsSourceLibrary.niddkChildConstipationEating]
+                : [SolidsSourceLibrary.aapInfantBowelMovements, SolidsSourceLibrary.aapInfantConstipation]
+        )
+    }
+
+    static func assessment(
+        profileID: UUID,
+        ageMonths: Int,
+        eventItems: [SolidFoodEventItem],
+        state: SolidsProfileState?,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        lookbackDays: Int = 7
+    ) -> SolidsBalanceAssessment {
+        let start = calendar.date(byAdding: .day, value: -lookbackDays, to: now) ?? now
+        let items = eventItems.filter {
+            $0.profileID == profileID && $0.createdAt >= start && $0.createdAt <= now
+        }
+        let mealCount = Set(items.map(\.eventID)).count
+        let loggedDays = Set(items.map { calendar.startOfDay(for: $0.createdAt) }).count
+        let foods = Dictionary(
+            items.compactMap { item in SolidsReferenceCatalog.food(id: item.foodID).map { (item.foodID, $0) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let foodCounts = Dictionary(grouping: items, by: \.foodID).mapValues(\.count)
+        let categories = Set(foods.values.map(\.category))
+        let produceCategories: Set<SolidsFoodCategory> = [.fruit, .vegetable, .beanAndPlantProtein]
+        let hasProduce = !categories.isDisjoint(with: produceCategories)
+        let hasIronRich = foods.values.contains(where: \.isIronRich)
+        let coverage = state?.digestiveLoggingCoverage ?? .unknown
+        let enoughForPattern = coverage == .mostMeals && mealCount >= 3 && loggedDays >= 2
+        let confidence: SolidsBalanceConfidence = enoughForPattern
+            ? .usefulPattern
+            : (items.isEmpty ? .notEnoughData : .partial)
+        let activeConcern = state?.activeDigestiveCheckIn
+
+        var strengths = [SolidsBalanceInsight]()
+        var opportunities = [SolidsBalanceInsight]()
+        if foods.count >= 5 {
+            strengths.append(.init(
+                id: "variety-strength",
+                title: "A varied week",
+                detail: "\(foods.count) different foods were recorded across \(mealCount) meals.",
+                systemImage: "checkmark.circle.fill"
+            ))
+        } else if enoughForPattern {
+            opportunities.append(.init(
+                id: "variety-opportunity",
+                title: "Add variety gradually",
+                detail: "A few foods are carrying most of the logged week. Add one familiar or new age-appropriate food at a time.",
+                systemImage: "square.grid.2x2",
+                suggestedFoodIDs: suggestions(ageMonths: ageMonths, categories: [.fruit, .vegetable, .beanAndPlantProtein])
+            ))
+        }
+        if hasProduce {
+            strengths.append(.init(
+                id: "produce-strength",
+                title: "Fiber-containing foods are present",
+                detail: "The log includes fruit, vegetables, or beans. There is no numeric fiber target for babies under 1, so variety matters more than a score.",
+                systemImage: "leaf.fill"
+            ))
+        } else if enoughForPattern {
+            opportunities.append(.init(
+                id: "produce-opportunity",
+                title: "Include produce or beans",
+                detail: "No fruit, vegetable, or bean was recorded in this window. Offer an age-safe option alongside familiar foods.",
+                systemImage: "leaf",
+                suggestedFoodIDs: suggestions(ageMonths: ageMonths, categories: produceCategories)
+            ))
+        }
+        if hasIronRich {
+            strengths.append(.init(
+                id: "iron-strength",
+                title: "An iron-rich food is in the mix",
+                detail: "Iron needs rise around 6 months, so continuing to rotate iron-rich foods is useful.",
+                systemImage: "bolt.heart.fill"
+            ))
+        } else if enoughForPattern {
+            opportunities.append(.init(
+                id: "iron-opportunity",
+                title: "Add an iron-rich option",
+                detail: "No iron-rich food was recognized in the logged week. Pair one with a familiar food when practical.",
+                systemImage: "bolt.heart",
+                suggestedFoodIDs: suggestions(ageMonths: ageMonths, ironRichOnly: true)
+            ))
+        }
+        if activeConcern != nil {
+            let cautiousFoods = foods.values.compactMap { food -> (SolidsReferenceFood, String)? in
+                guard let caution = foodGuidance(for: food, ageMonths: ageMonths).caution else {
+                    return nil
+                }
+                return (food, caution)
+            }.sorted { $0.0.name < $1.0.name }
+            for (food, caution) in cautiousFoods.prefix(3) {
+                opportunities.append(.init(
+                    id: "digestive-caution-\(food.id)",
+                    title: "Review \(food.name) while stools are hard",
+                    detail: caution,
+                    systemImage: "pause.circle",
+                    suggestedFoodIDs: suggestions(
+                        ageMonths: ageMonths,
+                        categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain]
+                    ).filter { $0 != food.id }
+                ))
+            }
+        }
+
+        if enoughForPattern,
+           items.count >= 4,
+           let dominant = foodCounts.max(by: { $0.value < $1.value }),
+           Double(dominant.value) / Double(items.count) >= 0.6,
+           let food = foods[dominant.key] {
+            let digestive = foodGuidance(for: food, ageMonths: ageMonths)
+            opportunities.append(.init(
+                id: "repeated-food-pattern",
+                title: "\(food.name) appears often",
+                detail: activeConcern != nil && digestive.caution != nil
+                    ? "A digestive concern is active. \(digestive.caution!)"
+                    : "It appears in most recorded servings. That does not prove it caused a symptom; rotate other age-appropriate foods for variety when practical.",
+                systemImage: "arrow.triangle.2.circlepath",
+                suggestedFoodIDs: suggestions(ageMonths: ageMonths, categories: [.fruit, .vegetable, .beanAndPlantProtein, .grain])
+                    .filter { $0 != food.id }
+            ))
+        }
+
+        let suggestedFoodIDs = Array(Set(opportunities.flatMap(\.suggestedFoodIDs))).prefix(8)
+        let recipeIDs = suggestedFoodIDs.flatMap {
+            SolidsReferenceCatalog.recipes(containingFoodID: $0)
+                .filter { $0.minimumAgeMonths <= ageMonths }
+                .prefix(2)
+                .map(\.id)
+        }
+        let summary: String
+        switch confidence {
+        case .notEnoughData:
+            summary = "Log a few solid meals and set logging coverage to receive pattern-based feedback."
+        case .partial:
+            summary = "Here is what appears in the log. Missing foods are treated as unknown—not as a dietary gap."
+        case .usefulPattern:
+            summary = opportunities.isEmpty
+                ? "The logged week shows useful variety across key food groups. Keep rotating familiar foods and follow hunger and fullness cues."
+                : "The logged week suggests a few gentle ways to broaden the pattern. These are ideas, not a diagnosis or required intake target."
+        }
+
+        return SolidsBalanceAssessment(
+            lookbackDays: lookbackDays,
+            mealCount: mealCount,
+            loggedDayCount: loggedDays,
+            uniqueFoodCount: foods.count,
+            confidence: confidence,
+            summary: summary,
+            strengths: strengths,
+            opportunities: opportunities,
+            suggestedFoodIDs: Array(suggestedFoodIDs),
+            suggestedRecipeIDs: Array(Set(recipeIDs)).prefix(6).map { $0 },
+            shouldSurfaceProactively: enoughForPattern && !opportunities.isEmpty,
+            activeConcern: activeConcern
+        )
+    }
+
+    private static func suggestions(
+        ageMonths: Int,
+        categories: Set<SolidsFoodCategory>? = nil,
+        ironRichOnly: Bool = false
+    ) -> [String] {
+        let preferredIDs = [
+            "pear", "prune", "peach", "plum", "peas", "lentils", "oatmeal",
+            "avocado", "beef", "chicken", "egg", "salmon", "plain-whole-milk-yogurt"
+        ]
+        let preferred = preferredIDs.compactMap(SolidsReferenceCatalog.foodSummary(id:))
+        let eligible = preferred.filter { food in
+            food.minimumAgeMonths <= ageMonths
+                && (categories == nil || categories?.contains(food.category) == true)
+                && (!ironRichOnly || food.isIronRich)
+        }
+        if !eligible.isEmpty { return Array(eligible.prefix(6).map(\.id)) }
+        return SolidsReferenceCatalog.foods.lazy.filter { food in
+            food.minimumAgeMonths <= ageMonths
+                && food.isEligibleForGuidedPath
+                && (categories == nil || categories?.contains(food.category) == true)
+                && (!ironRichOnly || food.isIronRich)
+        }.prefix(6).map(\.id)
     }
 }
 

@@ -333,6 +333,7 @@ struct CareView: View {
         case .solids: .solidsHome
         case .solidsDatabase: .solidsDatabase
         case .solidsGuided: .solidsGuided
+        case .solidsDigestive: .solidsDigestive
         case .solidFood(let id): .solidFood(id)
         case .customSolidFood(let id): .customSolidFood(id)
         case .solidsPlan: .solidsPlan
@@ -395,6 +396,7 @@ struct CareView: View {
                     accessLevel: solidsAccessLevel,
                     progress: solidFoodProgress,
                     plans: plannedSolidMeals,
+                    eventItems: solidFoodEventItems,
                     profileState: solidsProfileState,
                     open: { appendFoodRoute($0) }
                 )
@@ -412,6 +414,18 @@ struct CareView: View {
                     openFood: { appendFoodRoute(.solidFood($0)) },
                     openRecipe: { appendFoodRoute(.solidsRecipe($0)) },
                     openPlan: { appendFoodRoute(.plannedSolidMeal($0)) }
+                )
+            } else {
+                CareUnavailableView()
+            }
+        case .solidsDigestive:
+            if let profile, profile.profileType == .child, solidsAccessLevel == .full {
+                SolidsDigestiveSupportView(
+                    profile: profile,
+                    eventItems: solidFoodEventItems,
+                    profileState: solidsProfileState,
+                    openFood: { appendFoodRoute(.solidFood($0)) },
+                    openRecipe: { appendFoodRoute(.solidsRecipe($0)) }
                 )
             } else {
                 CareUnavailableView()
@@ -660,7 +674,7 @@ private struct CareSolidsDataScope {
 
     var loadsEventItems: Bool {
         switch route {
-        case .solidsTracker, .solidFoodHistory, .solidMeal, .solidAllergen: true
+        case .solidsHome, .solidsDigestive, .solidsTracker, .solidFoodHistory, .solidMeal, .solidAllergen: true
         default: false
         }
     }

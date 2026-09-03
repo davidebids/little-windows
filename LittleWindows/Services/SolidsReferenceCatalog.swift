@@ -2988,6 +2988,9 @@ enum SolidsSourceLibrary {
     static let foodDataCentral = URL(string: "https://fdc.nal.usda.gov/api-guide/")!
     static let cdcIntroduction = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/when-what-and-how-to-introduce-solid-foods.html")!
     static let cdcChoking = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/choking-hazards.html")!
+    static let cdcFoodsToEncourage = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/foods-and-drinks-to-encourage.html")!
+    static let cdcFeedingFrequency = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/how-much-and-how-often-to-feed.html")!
+    static let cdcIron = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/vitamins-minerals/iron.html")!
     static let fdaAllergens = URL(string: "https://www.fda.gov/industry/fda-basics-industry/what-major-food-allergen")!
     static let fdaFishAdvice = URL(string: "https://www.fda.gov/food/consumers/advice-about-eating-fish")!
     static let fdaProduceSafety = URL(string: "https://www.fda.gov/food/buy-store-serve-safe-food/selecting-and-serving-produce-safely")!
@@ -2999,6 +3002,11 @@ enum SolidsSourceLibrary {
     static let whoComplementaryFeeding = URL(string: "https://www.who.int/publications/i/item/9789240081864")!
     static let espghanSugarPosition = URL(string: "https://doi.org/10.1097/MPG.0000000000001733")!
     static let aapStartingSolids = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/Starting-Solid-Foods.aspx")!
+    static let aapInfantConstipation = URL(string: "https://www.healthychildren.org/english/ages-stages/baby/diapers-clothing/pages/infant-constipation.aspx")!
+    static let aapInfantBowelMovements = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/Pages/babys-first-days-bowel-movements-and-urination.aspx")!
+    static let aapInfantDrinks = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/Recommended-Drinks-for-Young-Children-Ages-0-5.aspx")!
+    static let niddkChildConstipationEating = URL(string: "https://www.niddk.nih.gov/health-information/digestive-diseases/constipation-children/eating-diet-nutrition")!
+    static let niddkChildConstipationSymptoms = URL(string: "https://www.niddk.nih.gov/health-information/digestive-diseases/constipation-children/symptoms-causes")!
     static let aapAllergenIntroduction = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/when-to-introduce-egg-peanut-butter-and-other-common-food-allergens-to-your-baby-food-allergy-prevention-tips.aspx")!
     static let niaidPeanutGuidance = URL(string: "https://www.niaid.nih.gov/sites/default/files/peanut-allergy-prevention-guidelines-parent-summary.pdf")!
 
@@ -3006,8 +3014,16 @@ enum SolidsSourceLibrary {
         let source = url.absoluteString.lowercased()
         if url == cdcIntroduction { return "CDC — Starting solid foods" }
         if url == cdcChoking { return "CDC — Choking prevention" }
+        if url == cdcFoodsToEncourage { return "CDC — Foods and drinks to encourage" }
+        if url == cdcFeedingFrequency { return "CDC — Feeding from 6 to 24 months" }
+        if url == cdcIron { return "CDC — Iron for babies and children" }
         if url == aapFruitJuice { return "AAP — Fruit juice guidance" }
         if url == aapStartingSolids { return "AAP — Starting solids and portions" }
+        if url == aapInfantConstipation { return "AAP — Infant constipation" }
+        if url == aapInfantBowelMovements { return "AAP — Infant bowel movements" }
+        if url == aapInfantDrinks { return "AAP — Drinks for babies and young children" }
+        if url == niddkChildConstipationEating { return "NIDDK — Eating and constipation" }
+        if url == niddkChildConstipationSymptoms { return "NIDDK — Constipation signs and care" }
         if url == aapAllergenIntroduction { return "AAP — Allergen introduction guidance" }
         if url == fdaProduceSafety { return "FDA — Produce and sprout safety" }
         if url.host?.contains("healthychildren") == true { return "American Academy of Pediatrics" }

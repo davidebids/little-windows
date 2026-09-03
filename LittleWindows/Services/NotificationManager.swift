@@ -196,6 +196,34 @@ struct SolidAllergenReminderSnapshot: Sendable {
     }
 }
 
+struct SolidsDigestiveReminderSnapshot: Sendable {
+    var profileID: UUID
+    var reminderAt: Date?
+    var isEnabled: Bool
+    var hasActiveConcern: Bool
+
+    init(
+        profileID: UUID,
+        reminderAt: Date?,
+        isEnabled: Bool,
+        hasActiveConcern: Bool
+    ) {
+        self.profileID = profileID
+        self.reminderAt = reminderAt
+        self.isEnabled = isEnabled
+        self.hasActiveConcern = hasActiveConcern
+    }
+
+    init(state: SolidsProfileState) {
+        self.init(
+            profileID: state.profileID,
+            reminderAt: state.digestiveReminderAt,
+            isEnabled: state.digestiveReminderEnabled,
+            hasActiveConcern: state.activeDigestiveCheckIn != nil
+        )
+    }
+}
+
 enum PackingTripReminderScheduleResult: Equatable {
     case notEligible
     case permissionRequired
@@ -1122,6 +1150,44 @@ final class NotificationManager: NSObject, ObservableObject {
         )
     }
 
+    func scheduleSolidsDigestiveReminder(
+        snapshot: SolidsDigestiveReminderSnapshot,
+        now: Date = Date()
+    ) async {
+        await cancelSolidsDigestiveReminder(profileID: snapshot.profileID)
+        guard snapshot.isEnabled,
+              snapshot.hasActiveConcern,
+              let fireDate = snapshot.reminderAt,
+              fireDate > now else { return }
+        let status = await getAuthorizationStatus()
+        authorizationStatus = status
+        guard status == .authorized || status == .provisional || status == .ephemeral else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Check digestive comfort"
+        content.body = "How are stools and comfort today? Review the concern and mark it resolved if it has passed."
+        content.sound = .default
+        content.categoryIdentifier = Self.foodReminderCategoryID
+        content.userInfo = [
+            "profileID": snapshot.profileID.uuidString,
+            "deepLink": Self.deepLink(
+                path: "care/solids/digestive",
+                profileID: snapshot.profileID
+            )
+        ]
+        let request = UNNotificationRequest(
+            identifier: Self.solidsDigestiveReminderNotificationID(profileID: snapshot.profileID),
+            content: content,
+            trigger: Self.oneShotTrigger(at: fireDate, now: now)
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    func cancelSolidsDigestiveReminder(profileID: UUID) async {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.solidsDigestiveReminderNotificationID(profileID: profileID)]
+        )
+    }
+
     @discardableResult
     func reschedulePackingTripReminders(
         trip: PackingTrip,
@@ -1471,6 +1537,7 @@ final class NotificationManager: NSObject, ObservableObject {
         foodReminders: [FoodReminder],
         plannedSolidMeals: [SolidMealReminderSnapshot],
         solidAllergenProgress: [SolidAllergenReminderSnapshot],
+        solidsDigestiveReminders: [SolidsDigestiveReminderSnapshot],
         packingTrips: [PackingTrip],
         packingTripReminders: [PackingTripReminderSnapshot],
         itineraryChoiceGroups: [TripItineraryChoiceGroup],
@@ -1514,6 +1581,9 @@ final class NotificationManager: NSObject, ObservableObject {
                 allergenID: $0.allergenID
             )
         })
+        let solidsDigestiveIDs = Set(solidsDigestiveReminders.filter {
+            $0.isEnabled && $0.hasActiveConcern && $0.reminderAt.map { $0 > Date() } == true
+        }.map { Self.solidsDigestiveReminderNotificationID(profileID: $0.profileID) })
         let routineIDs = Set(routines.filter {
             !$0.isArchived && $0.reminderEnabled
         }.map { Self.routineReminderNotificationID(routineID: $0.id) })
@@ -1565,6 +1635,9 @@ final class NotificationManager: NSObject, ObservableObject {
             }
             if identifier.hasPrefix("solids.allergen.") {
                 return !solidAllergenIDs.contains(identifier)
+            }
+            if identifier.hasPrefix("solids.digestive.") {
+                return !solidsDigestiveIDs.contains(identifier)
             }
             if identifier.hasPrefix("routine.reminder.") {
                 return !routineIDs.contains(identifier)
@@ -1635,6 +1708,9 @@ final class NotificationManager: NSObject, ObservableObject {
         }
         for progress in solidAllergenProgress {
             await scheduleSolidAllergenReminder(snapshot: progress)
+        }
+        for reminder in solidsDigestiveReminders {
+            await scheduleSolidsDigestiveReminder(snapshot: reminder)
         }
         for snapshot in packingTripReminders {
             await reschedulePackingTripReminders(snapshot: snapshot)
@@ -2223,6 +2299,10 @@ final class NotificationManager: NSObject, ObservableObject {
         "solids.allergen.\(profileID.uuidString).\(allergenID)"
     }
 
+    static func solidsDigestiveReminderNotificationID(profileID: UUID) -> String {
+        "solids.digestive.\(profileID.uuidString)"
+    }
+
     static func routineReminderNotificationID(routineID: UUID) -> String {
         "routine.reminder.\(routineID.uuidString)"
     }
@@ -2325,6 +2405,7 @@ final class NotificationManager: NSObject, ObservableObject {
 private struct SystemIntegrationReminderSnapshots: Sendable {
     var plannedSolidMeals: [SolidMealReminderSnapshot]
     var solidAllergens: [SolidAllergenReminderSnapshot]
+    var solidsDigestive: [SolidsDigestiveReminderSnapshot]
     var packingTrips: [PackingTripReminderSnapshot]
 }
 
@@ -2357,6 +2438,12 @@ private actor SystemIntegrationSnapshotWorker {
             .filter { activeProfileIDs.contains($0.profileID) }
             .map(SolidAllergenReminderSnapshot.init(progress:))
 
+        let solidsDigestive = ((try? modelContext.fetch(
+            FetchDescriptor<SolidsProfileState>()
+        )) ?? [])
+            .filter { activeProfileIDs.contains($0.profileID) }
+            .map(SolidsDigestiveReminderSnapshot.init(state:))
+
         let upcomingStatus = PackingTripStatus.upcoming.rawValue
         let trips = (try? modelContext.fetch(FetchDescriptor<PackingTrip>(
             predicate: #Predicate {
@@ -2381,6 +2468,7 @@ private actor SystemIntegrationSnapshotWorker {
         return SystemIntegrationReminderSnapshots(
             plannedSolidMeals: plannedSolidMeals,
             solidAllergens: solidAllergens,
+            solidsDigestive: solidsDigestive,
             packingTrips: packingTrips
         )
     }
@@ -2615,6 +2703,7 @@ enum SystemIntegrationReconciler {
             foodReminders: foodReminders,
             plannedSolidMeals: reminderSnapshots.plannedSolidMeals,
             solidAllergenProgress: reminderSnapshots.solidAllergens,
+            solidsDigestiveReminders: reminderSnapshots.solidsDigestive,
             packingTrips: packingTrips,
             packingTripReminders: reminderSnapshots.packingTrips,
             itineraryChoiceGroups: itineraryChoiceGroups,
