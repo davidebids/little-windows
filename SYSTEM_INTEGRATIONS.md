@@ -387,6 +387,8 @@ Live Activities, Dynamic Island, Control Center controls, App Groups, CloudKit s
 
 Simulator app launches use the local validation store by default so unsigned simulator builds do not initialize the CloudKit-backed SwiftData store. Set `LW_CLOUDKIT_SYNC_SMOKE` when intentionally running the manual CloudKit simulator smoke test.
 
+Debug simulator builds launched with `--little-windows-ui-testing` support `littlewindows://debug/seed-digestive` for a focused Feeding balance demo. It creates an eight-month child profile, six recent solids meals with a repeated rice-cereal pattern and varied foods, one resolved stool check-in, and one current hard-stool concern. Use the simulator-only `littlewindows://debug/reset-empty` route first when a clean demo is required.
+
 Family Sync also needs two signed physical devices or simulator/device installs with different Apple Accounts. Verify share creation, invitation acceptance, start/stop timer handoff, offline edits that sync later, and local widget/Live Activity refresh after synced changes arrive.
 
 ## Apple references
