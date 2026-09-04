@@ -177,6 +177,10 @@ private struct SolidsProfileStateDTO: Codable {
     var wantToTryRecipeIDsJSON: String?
     var recipeCollectionsJSON: String?
     var completedFeedingSkillIDsJSON: String?
+    var digestiveCheckInsJSON: String?
+    var digestiveLoggingCoverageRawValue: String?
+    var digestiveReminderEnabled: Bool?
+    var digestiveReminderAt: Date?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -305,6 +309,10 @@ private struct EventDTO: Codable {
     var pooAmountRawValue: String?
     var pooColorRawValue: String?
     var pooTextureRawValue: String?
+    var pooDifficultOrPainful: Bool?
+    var pooProlongedStraining: Bool?
+    var pooVisibleBlood: Bool?
+    var linksDigestiveConcern: Bool?
     var stoolColor: String?
     var stoolTexture: String?
     var bookTitle: String?
@@ -1169,6 +1177,10 @@ enum DataExportImportService {
                 wantToTryRecipeIDsJSON: $0.wantToTryRecipeIDsJSON,
                 recipeCollectionsJSON: $0.recipeCollectionsJSON,
                 completedFeedingSkillIDsJSON: $0.completedFeedingSkillIDsJSON,
+                digestiveCheckInsJSON: $0.digestiveCheckInsJSON,
+                digestiveLoggingCoverageRawValue: $0.digestiveLoggingCoverageRawValue,
+                digestiveReminderEnabled: $0.digestiveReminderEnabled,
+                digestiveReminderAt: $0.digestiveReminderAt,
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt
             )
@@ -1298,6 +1310,10 @@ enum DataExportImportService {
                 pooAmountRawValue: $0.pooAmountRawValue,
                 pooColorRawValue: $0.pooColorRawValue,
                 pooTextureRawValue: $0.pooTextureRawValue,
+                pooDifficultOrPainful: $0.pooDifficultOrPainful,
+                pooProlongedStraining: $0.pooProlongedStraining,
+                pooVisibleBlood: $0.pooVisibleBlood,
+                linksDigestiveConcern: $0.linksDigestiveConcern,
                 stoolColor: $0.stoolColor,
                 stoolTexture: $0.stoolTexture, bookTitle: $0.bookTitle,
                 medicineName: $0.medicineName, dose: $0.dose, doseUnit: $0.doseUnit,
@@ -2417,6 +2433,15 @@ enum DataExportImportService {
                         try? JSONDecoder().decode([String].self, from: $0)
                     }
                 } ?? [],
+                digestiveCheckIns: value.digestiveCheckInsJSON.flatMap { dataString in
+                    dataString.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode([SolidsDigestiveCheckIn].self, from: $0)
+                    }
+                } ?? [],
+                digestiveLoggingCoverage: value.digestiveLoggingCoverageRawValue
+                    .flatMap(SolidsLoggingCoverage.init(rawValue:)) ?? .unknown,
+                digestiveReminderEnabled: value.digestiveReminderEnabled ?? false,
+                digestiveReminderAt: value.digestiveReminderAt,
                 createdAt: value.createdAt,
                 updatedAt: value.updatedAt
             ))
@@ -2564,6 +2589,10 @@ enum DataExportImportService {
             event.pooAmountRawValue = value.pooAmountRawValue
             event.pooColorRawValue = value.pooColorRawValue
             event.pooTextureRawValue = value.pooTextureRawValue
+            event.pooDifficultOrPainful = value.pooDifficultOrPainful
+            event.pooProlongedStraining = value.pooProlongedStraining
+            event.pooVisibleBlood = value.pooVisibleBlood
+            event.linksDigestiveConcern = value.linksDigestiveConcern
             event.stoolColor = value.stoolColor
             event.stoolTexture = value.stoolTexture
             event.bookTitle = value.bookTitle
@@ -4191,7 +4220,16 @@ enum DataExportImportService {
               Set(solidFoodEventItems.map(\.id)).count == solidFoodEventItems.count,
               Set(solidAllergenProgress.map(\.id)).count == solidAllergenProgress.count,
               Set(plannedSolidMeals.map(\.id)).count == plannedSolidMeals.count,
-              solidsProfileStates.allSatisfy({ profileIDs.contains($0.profileID) }),
+              solidsProfileStates.allSatisfy({ state in
+                  guard profileIDs.contains(state.profileID),
+                        state.digestiveLoggingCoverageRawValue
+                            .flatMap(SolidsLoggingCoverage.init(rawValue:)) != nil
+                            || state.digestiveLoggingCoverageRawValue == nil else { return false }
+                  guard let json = state.digestiveCheckInsJSON else { return true }
+                  return json.data(using: .utf8).flatMap {
+                      try? JSONDecoder().decode([SolidsDigestiveCheckIn].self, from: $0)
+                  } != nil
+              }),
               solidFoodProgress.allSatisfy({ profileIDs.contains($0.profileID) && !$0.foodID.isEmpty }),
               solidFoodEventItems.allSatisfy({ item in
                   guard profileIDs.contains(item.profileID), eventIDs.contains(item.eventID), !item.foodID.isEmpty,

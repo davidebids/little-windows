@@ -883,6 +883,13 @@ struct RootView: View {
             router.selectTodayCare()
             return
         }
+        if DebugSimulatorSmokeSeedService.isDigestiveDemoSeed(url),
+           DebugSimulatorSmokeSeedService.isEnabled {
+            DebugSimulatorSmokeSeedService.seedDigestiveDemo(context: modelContext)
+            hasCompletedInitialOnboarding = true
+            router.selectTodayCare()
+            return
+        }
         if DebugSimulatorSmokeSeedService.canHandle(url), DebugSimulatorSmokeSeedService.isEnabled {
             DebugSimulatorSmokeSeedService.seedIfNeeded(context: modelContext)
             hasCompletedInitialOnboarding = true
@@ -1713,6 +1720,13 @@ enum DebugSimulatorSmokeSeedService {
         return components == ["debug", "seed-performance"]
     }
 
+    static func isDigestiveDemoSeed(_ url: URL) -> Bool {
+        guard url.scheme == "littlewindows" else { return false }
+        let components = [url.host].compactMap { $0 }
+            + url.pathComponents.filter { $0 != "/" }
+        return components == ["debug", "seed-digestive"]
+    }
+
     @MainActor
     static func resetEmpty(context: ModelContext) {
         try? DataExportImportService.deleteAll(context: context)
@@ -1957,6 +1971,186 @@ enum DebugSimulatorSmokeSeedService {
         if PersistenceService.save(context: context) {
             UserDefaults.standard.set(true, forKey: performanceSeededKey)
         }
+    }
+
+    @MainActor
+    static func seedDigestiveDemo(
+        context: ModelContext,
+        now: Date = Date()
+    ) {
+        seedIfNeeded(context: context, now: now)
+        guard let profile = fetch(CareProfile.self, id: childProfileID, context: context) else {
+            return
+        }
+
+        let calendar = Calendar.current
+        profile.birthDate = calendar.date(byAdding: .month, value: -8, to: now)
+        profile.updatedAt = now
+
+        let state = SolidsTrackingService.activate(
+            profileID: profile.id,
+            existingState: nil,
+            context: context,
+            now: now,
+            persist: false
+        )
+        state.guidedStartDate = calendar.date(byAdding: .month, value: -2, to: now)
+        state.digestiveLoggingCoverage = .mostMeals
+        state.digestiveReminderEnabled = false
+        state.digestiveReminderAt = nil
+
+        let mealIDs = [
+            "00000000-0000-0000-0000-000000009901",
+            "00000000-0000-0000-0000-000000009902",
+            "00000000-0000-0000-0000-000000009903",
+            "00000000-0000-0000-0000-000000009904",
+            "00000000-0000-0000-0000-000000009905",
+            "00000000-0000-0000-0000-000000009906"
+        ].compactMap(UUID.init(uuidString:))
+        let mealFoodIDs = [
+            ["infant-rice-cereal", "pear"],
+            ["infant-rice-cereal", "plain-whole-milk-yogurt"],
+            ["infant-rice-cereal", "broccoli"],
+            ["infant-rice-cereal"],
+            ["lentils", "pear"],
+            ["egg", "broccoli"]
+        ]
+
+        for (mealIndex, eventID) in mealIDs.enumerated() {
+            let foods = mealFoodIDs[mealIndex].compactMap(SolidsReferenceCatalog.food(id:))
+            let loggedAt = calendar.date(
+                byAdding: .day,
+                value: -(6 - mealIndex),
+                to: now
+            ) ?? now
+            upsertEvent(
+                id: eventID,
+                profile: profile,
+                type: .feed,
+                startDate: loggedAt,
+                endDate: loggedAt,
+                title: nil,
+                notes: mealIndex == 3 ? "A familiar, simple meal." : nil,
+                context: context
+            ) { event in
+                event.feedKind = .solid
+                event.foodDescription = foods.map(\.name).joined(separator: ", ")
+                event.solidFoodDetails = foods.map { food in
+                    SolidFoodLogDetail(
+                        foodID: food.id,
+                        foodName: food.name,
+                        allergenIDs: food.allergenIDs,
+                        preference: .liked,
+                        servingAmount: "A small age-appropriate serving"
+                    )
+                }
+            }
+
+            for (foodIndex, food) in foods.enumerated() {
+                let itemID = UUID(uuidString: String(
+                    format: "00000000-0000-0000-0000-%012d",
+                    99_100 + mealIndex * 10 + foodIndex
+                ))!
+                let item = fetch(SolidFoodEventItem.self, id: itemID, context: context)
+                    ?? SolidFoodEventItem(
+                        id: itemID,
+                        eventID: eventID,
+                        profileID: profile.id,
+                        foodID: food.id,
+                        foodNameSnapshot: food.name,
+                        allergenIDs: food.allergenIDs,
+                        reactionRawValue: SolidReaction.liked.rawValue,
+                        servingAmount: "A small age-appropriate serving",
+                        createdAt: loggedAt,
+                        updatedAt: now
+                    )
+                if item.modelContext == nil { context.insert(item) }
+                item.eventID = eventID
+                item.profileID = profile.id
+                item.foodID = food.id
+                item.foodNameSnapshot = food.name
+                item.allergenIDs = food.allergenIDs
+                item.reactionRawValue = SolidReaction.liked.rawValue
+                item.servingAmount = "A small age-appropriate serving"
+                item.suspectedReaction = false
+                item.followUp = .none
+                item.createdAt = loggedAt
+                item.updatedAt = now
+            }
+        }
+
+        let priorStoolID = UUID(uuidString: "00000000-0000-0000-0000-000000009971")!
+        let currentStoolID = UUID(uuidString: "00000000-0000-0000-0000-000000009972")!
+        let priorStoolAt = calendar.date(byAdding: .day, value: -4, to: now) ?? now
+        let currentStoolAt = calendar.date(byAdding: .hour, value: -12, to: now) ?? now
+        upsertEvent(
+            id: priorStoolID,
+            profile: profile,
+            type: .diaper,
+            startDate: priorStoolAt,
+            endDate: nil,
+            title: nil,
+            notes: "Earlier hard-stool observation.",
+            context: context
+        ) { event in
+            event.diaperKind = .dirty
+            event.pooTexture = .hard
+            event.pooDifficultOrPainful = false
+            event.pooProlongedStraining = true
+            event.pooVisibleBlood = false
+            event.linksDigestiveConcern = true
+        }
+        upsertEvent(
+            id: currentStoolID,
+            profile: profile,
+            type: .diaper,
+            startDate: currentStoolAt,
+            endDate: nil,
+            title: nil,
+            notes: "Hard and uncomfortable stool today.",
+            context: context
+        ) { event in
+            event.diaperKind = .dirty
+            event.pooTexture = .hard
+            event.pooDifficultOrPainful = true
+            event.pooProlongedStraining = false
+            event.pooVisibleBlood = false
+            event.linksDigestiveConcern = true
+        }
+        state.digestiveCheckIns = [
+            SolidsDigestiveCheckIn(
+                id: priorStoolID,
+                recordedAt: priorStoolAt,
+                hardStool: true,
+                prolongedStraining: true,
+                notes: "Earlier hard-stool observation.",
+                resolvedAt: calendar.date(byAdding: .day, value: -3, to: now)
+            ),
+            SolidsDigestiveCheckIn(
+                id: currentStoolID,
+                recordedAt: currentStoolAt,
+                hardStool: true,
+                difficultOrPainful: true,
+                notes: "Hard and uncomfortable stool today."
+            )
+        ]
+        state.updatedAt = now
+
+        let contextEventID = UUID(uuidString: "00000000-0000-0000-0000-000000009981")!
+        let contextLoggedAt = calendar.date(byAdding: .day, value: -2, to: now) ?? now
+        upsertEvent(
+            id: contextEventID,
+            profile: profile,
+            type: .custom,
+            startDate: contextLoggedAt,
+            endDate: contextLoggedAt,
+            title: "Routine changed",
+            notes: "Travel day; fewer meal details were recorded.",
+            context: context
+        ) { _ in }
+
+        _ = PersistenceService.save(context: context)
+        ProfileService.shared.switchProfile(profile)
     }
 
     @MainActor
@@ -2410,6 +2604,12 @@ enum DebugSimulatorSmokeSeedService {
         event.endTimeZoneIdentifier = resolvedEndDate == nil
             ? nil
             : (event.endTimeZoneIdentifier ?? timeZoneIdentifier)
+        if resolvedEndDate != nil {
+            event.timerState = nil
+            event.timerAccumulatedSeconds = nil
+            event.activeTimerSegmentStartDate = nil
+            event.activeNursingSide = nil
+        }
         event.caregiverName = "Sample Caregiver"
         event.notes = notes
         event.updatedAt = Date()

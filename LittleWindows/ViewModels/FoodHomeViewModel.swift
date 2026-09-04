@@ -113,6 +113,7 @@ enum FoodRoute: Hashable, Codable {
     case solidsHome
     case solidsDatabase
     case solidsGuided
+    case solidsDigestive
     case solidFood(String)
     case customSolidFood(UUID)
     case solidsPlan
@@ -138,7 +139,7 @@ enum FoodRoute: Hashable, Codable {
 
     var isSolidsWorkspaceRoute: Bool {
         switch self {
-        case .solidsHome, .solidsDatabase, .solidsGuided, .solidFood, .customSolidFood,
+        case .solidsHome, .solidsDatabase, .solidsGuided, .solidsDigestive, .solidFood, .customSolidFood,
              .solidsPlan, .plannedSolidMeal, .solidsTracker, .solidFoodHistory, .solidMeal,
              .solidsAllergens, .solidAllergen, .solidsRecipes, .solidsRecipe:
             true
@@ -179,6 +180,7 @@ enum FoodRouteCommand: Equatable {
     case solids
     case solidsDatabase
     case solidsGuided
+    case solidsDigestive
     case solidFood(String)
     case customSolidFood(UUID)
     case solidsPlan

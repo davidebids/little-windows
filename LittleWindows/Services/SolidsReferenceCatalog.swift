@@ -1876,6 +1876,14 @@ enum SolidsServingVisual: String, Hashable {
     }
 }
 
+private enum SolidsGuidedFoodEligibility {
+    private static let excludedFoodIDs: Set<String> = ["mackerel", "swordfish", "tuna"]
+
+    static func includes(foodID: String) -> Bool {
+        !excludedFoodIDs.contains(foodID)
+    }
+}
+
 struct SolidsReferenceFood: Identifiable, Hashable {
     var id: String
     var name: String
@@ -1895,7 +1903,7 @@ struct SolidsReferenceFood: Identifiable, Hashable {
     var isEligibleForGuidedPath: Bool {
         // Keep foods with useful educational pages but an explicit young-child
         // avoidance recommendation out of generated meal suggestions.
-        !["mackerel", "swordfish", "tuna"].contains(id)
+        SolidsGuidedFoodEligibility.includes(foodID: id)
     }
 
     var visualEmoji: String {
@@ -2370,6 +2378,10 @@ struct SolidsReferenceFoodSummary: Identifiable, Hashable, Sendable {
     var possibleAllergenIDs: [String]
     var visualEmoji: String
     var normalizedSearchTerms: [String]
+
+    var isEligibleForGuidedPath: Bool {
+        SolidsGuidedFoodEligibility.includes(foodID: id)
+    }
 }
 
 enum SolidsFoodTypeFilter: String, CaseIterable, Identifiable, Hashable {
@@ -2988,6 +3000,9 @@ enum SolidsSourceLibrary {
     static let foodDataCentral = URL(string: "https://fdc.nal.usda.gov/api-guide/")!
     static let cdcIntroduction = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/when-what-and-how-to-introduce-solid-foods.html")!
     static let cdcChoking = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/choking-hazards.html")!
+    static let cdcFoodsToEncourage = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/foods-and-drinks-to-encourage.html")!
+    static let cdcFeedingFrequency = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/how-much-and-how-often-to-feed.html")!
+    static let cdcIron = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/vitamins-minerals/iron.html")!
     static let fdaAllergens = URL(string: "https://www.fda.gov/industry/fda-basics-industry/what-major-food-allergen")!
     static let fdaFishAdvice = URL(string: "https://www.fda.gov/food/consumers/advice-about-eating-fish")!
     static let fdaProduceSafety = URL(string: "https://www.fda.gov/food/buy-store-serve-safe-food/selecting-and-serving-produce-safely")!
@@ -2999,6 +3014,14 @@ enum SolidsSourceLibrary {
     static let whoComplementaryFeeding = URL(string: "https://www.who.int/publications/i/item/9789240081864")!
     static let espghanSugarPosition = URL(string: "https://doi.org/10.1097/MPG.0000000000001733")!
     static let aapStartingSolids = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/Starting-Solid-Foods.aspx")!
+    static let aapInfantConstipation = URL(string: "https://www.healthychildren.org/english/ages-stages/baby/diapers-clothing/pages/infant-constipation.aspx")!
+    static let aapInfantAbdominalPain = URL(string: "https://www.healthychildren.org/English/health-issues/conditions/abdominal/Pages/Abdominal-Pains-in-Infants.aspx")!
+    static let aapConstipationSymptomChecker = URL(string: "https://www.healthychildren.org/English/tips-tools/symptom-checker/Pages/symptomviewer.aspx?symptom=Constipation")!
+    static let aapInfantBowelMovements = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/Pages/babys-first-days-bowel-movements-and-urination.aspx")!
+    static let aapInfantDrinks = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/Recommended-Drinks-for-Young-Children-Ages-0-5.aspx")!
+    static let cdcFoodsToAvoid = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/foods-and-drinks-to-avoid-or-limit.html")!
+    static let niddkChildConstipationEating = URL(string: "https://www.niddk.nih.gov/health-information/digestive-diseases/constipation-children/eating-diet-nutrition")!
+    static let niddkChildConstipationSymptoms = URL(string: "https://www.niddk.nih.gov/health-information/digestive-diseases/constipation-children/symptoms-causes")!
     static let aapAllergenIntroduction = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/when-to-introduce-egg-peanut-butter-and-other-common-food-allergens-to-your-baby-food-allergy-prevention-tips.aspx")!
     static let niaidPeanutGuidance = URL(string: "https://www.niaid.nih.gov/sites/default/files/peanut-allergy-prevention-guidelines-parent-summary.pdf")!
 
@@ -3006,8 +3029,19 @@ enum SolidsSourceLibrary {
         let source = url.absoluteString.lowercased()
         if url == cdcIntroduction { return "CDC — Starting solid foods" }
         if url == cdcChoking { return "CDC — Choking prevention" }
+        if url == cdcFoodsToEncourage { return "CDC — Foods and drinks to encourage" }
+        if url == cdcFeedingFrequency { return "CDC — Feeding from 6 to 24 months" }
+        if url == cdcIron { return "CDC — Iron for babies and children" }
         if url == aapFruitJuice { return "AAP — Fruit juice guidance" }
         if url == aapStartingSolids { return "AAP — Starting solids and portions" }
+        if url == aapInfantConstipation { return "AAP — Infant constipation" }
+        if url == aapInfantAbdominalPain { return "AAP — Infant abdominal pain and constipation" }
+        if url == aapConstipationSymptomChecker { return "AAP — Constipation care guidance" }
+        if url == aapInfantBowelMovements { return "AAP — Infant bowel movements" }
+        if url == aapInfantDrinks { return "AAP — Drinks for babies and young children" }
+        if url == cdcFoodsToAvoid { return "CDC — Foods and drinks to avoid or limit" }
+        if url == niddkChildConstipationEating { return "NIDDK — Eating and constipation" }
+        if url == niddkChildConstipationSymptoms { return "NIDDK — Constipation signs and care" }
         if url == aapAllergenIntroduction { return "AAP — Allergen introduction guidance" }
         if url == fdaProduceSafety { return "FDA — Produce and sprout safety" }
         if url.host?.contains("healthychildren") == true { return "American Academy of Pediatrics" }
@@ -3033,6 +3067,10 @@ enum SolidsSourceLibrary {
 
 enum SolidsReferenceCatalog {
     static let version = 10
+    /// Lightweight metadata for surfaces that only display the bundled count.
+    /// Keep this value as the generation target below so reading it does not
+    /// construct every recipe and full food education page on the main thread.
+    static let recipeCount = 424
 
     private struct FoodSeed {
         var id: String
@@ -3044,6 +3082,20 @@ enum SolidsReferenceCatalog {
         var recipe: SolidsReferenceRecipe
         var normalizedText: String
     }
+
+    private final class FoodCacheEntry {
+        let food: SolidsReferenceFood
+
+        init(food: SolidsReferenceFood) {
+            self.food = food
+        }
+    }
+
+    private static let foodCache: NSCache<NSString, FoodCacheEntry> = {
+        let cache = NSCache<NSString, FoodCacheEntry>()
+        cache.countLimit = 128
+        return cache
+    }()
 
     private static let foodSeeds: [FoodSeed] = {
         let groups: [(SolidsFoodCategory, String)] = [
@@ -3069,6 +3121,10 @@ enum SolidsReferenceCatalog {
             }
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }()
+
+    /// Counts the compact name seeds without building aliases, visuals, or the
+    /// much larger educational records used by food detail screens.
+    static var foodCount: Int { foodSeeds.count }
 
     /// Compact immutable records used by search, filters, pickers, and plan
     /// selection. Building these does not create any educational page content.
@@ -3116,22 +3172,10 @@ enum SolidsReferenceCatalog {
         return result
     }()
 
-    private static let foodsByID: [String: SolidsReferenceFood] =
-        Dictionary(uniqueKeysWithValues: foods.map { ($0.id, $0) })
-
-    private static let foodsByLookupName: [String: SolidsReferenceFood] = {
-        var result: [String: SolidsReferenceFood] = [:]
-        for food in foods {
-            let nameKey = normalized(food.name)
-            if result[nameKey] == nil { result[nameKey] = food }
-            for alias in food.aliases where result[normalized(alias)] == nil {
-                result[normalized(alias)] = food
-            }
-        }
-        return result
-    }()
-
-    private static let foodsByCategory = Dictionary(grouping: foods, by: \SolidsReferenceFood.category)
+    private static let foodSummariesByCategory = Dictionary(
+        grouping: foodSummaries,
+        by: \SolidsReferenceFoodSummary.category
+    )
 
     private static let coreRecipes: [SolidsReferenceRecipe] = [
         recipe("avocado-bean-mash", "Avocado bean mash", ["Avocado", "Black bean"], 6, "Mash the cooked beans and ripe avocado until smooth enough for the child's current eating skills."),
@@ -3196,7 +3240,7 @@ enum SolidsReferenceCatalog {
                         ),
                         mealType: mealType
                     ))
-                    if results.count >= 424 { break outer }
+                    if results.count >= recipeCount { break outer }
                 }
             }
         }
@@ -3211,7 +3255,7 @@ enum SolidsReferenceCatalog {
         for recipe in recipes {
             var includedFoodIDs = Set<String>()
             for name in recipe.foodNames {
-                guard let foodID = food(named: name)?.id,
+                guard let foodID = foodSummary(named: name)?.id,
                       includedFoodIDs.insert(foodID).inserted else { continue }
                 result[foodID, default: []].append(recipe)
             }
@@ -3363,11 +3407,11 @@ enum SolidsReferenceCatalog {
     }
 
     static func food(id: String) -> SolidsReferenceFood? {
-        foodsByID[id]
+        foodSummariesByID[id].map(cachedFood(summary:))
     }
 
     static func food(named name: String) -> SolidsReferenceFood? {
-        foodsByLookupName[normalized(name)]
+        foodSummariesByLookupName[normalized(name)].map(cachedFood(summary:))
     }
 
     static func foodSummary(id: String) -> SolidsReferenceFoodSummary? {
@@ -3383,7 +3427,7 @@ enum SolidsReferenceCatalog {
     }
 
     static func search(_ query: String, category: SolidsFoodCategory? = nil) -> [SolidsReferenceFood] {
-        searchSummaries(query, category: category).compactMap { foodsByID[$0.id] }
+        searchSummaries(query, category: category).map(cachedFood(summary:))
     }
 
     static func searchSummaries(
@@ -3426,7 +3470,7 @@ enum SolidsReferenceCatalog {
         allergens: [String] = [],
         mealType: SolidsMealType = .breakfast
     ) -> SolidsReferenceRecipe {
-        let references = foodNames.compactMap(food(named:))
+        let references = foodNames.compactMap(foodSummary(named:))
         let resolvedAllergens = Set(allergens + references.flatMap(\.allergenIDs))
         let categories = Set(references.map(\.category))
         var tags = [SolidsDietaryTag]()
@@ -3503,6 +3547,16 @@ enum SolidsReferenceCatalog {
                 hasAllergens: !allergens.isEmpty || !possibleAllergens.isEmpty
             )
         )
+    }
+
+    private static func cachedFood(summary: SolidsReferenceFoodSummary) -> SolidsReferenceFood {
+        let key = summary.id as NSString
+        if let cached = foodCache.object(forKey: key) {
+            return cached.food
+        }
+        let food = makeFood(summary: summary)
+        foodCache.setObject(FoodCacheEntry(food: food), forKey: key)
+        return food
     }
 
     private static func foodDetails(
@@ -6843,7 +6897,7 @@ enum SolidsReferenceCatalog {
     }
 
     private static func ingredientQuantity(for name: String) -> String {
-        guard let food = food(named: name) else { return "As needed" }
+        guard let food = foodSummary(named: name) else { return "As needed" }
         switch food.category {
         case .herbAndFlavor:
             return flavorPreparationForm(name: name) == .bayLeaf
@@ -6861,8 +6915,8 @@ enum SolidsReferenceCatalog {
     }
 
     private static func substitutions(for name: String) -> [String] {
-        guard let food = food(named: name) else { return [] }
-        return (foodsByCategory[food.category] ?? []).filter { candidate in
+        guard let food = foodSummary(named: name) else { return [] }
+        return (foodSummariesByCategory[food.category] ?? []).filter { candidate in
             candidate.category == food.category
                 && candidate.id != food.id
                 && candidate.minimumAgeMonths <= food.minimumAgeMonths

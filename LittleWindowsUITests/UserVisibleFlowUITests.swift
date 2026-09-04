@@ -1864,6 +1864,16 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(solids.waitForExistence(timeout: 4))
         let solidsStartedAt = ContinuousClock.now
         solids.tap()
+        XCTAssertLessThan(
+            solidsStartedAt.duration(to: .now),
+            .seconds(1.5),
+            "The Solids row should acknowledge a single tap promptly."
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["care.solids.destination"]
+                .waitForExistence(timeout: 1.5),
+            "One tap should immediately leave Care, even while route data is still loading."
+        )
         XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 4))
         XCTAssertLessThan(
             solidsStartedAt.duration(to: .now),
@@ -1904,6 +1914,79 @@ final class UserVisibleFlowUITests: XCTestCase {
         ) {
             app.swipeUp(velocity: .fast)
         }
+    }
+
+    func testProductionScaleDigestiveSupportKeepsNavigationAndScrollingResponsive() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-performance",
+            additionalEnvironment: ["LITTLE_WINDOWS_MARKETING_CAPTURE": "1"]
+        )
+
+        let navigationStartedAt = ContinuousClock.now
+        app.open(URL(string: "littlewindows://care/solids/digestive")!)
+        XCTAssertTrue(app.navigationBars["Feeding balance"].waitForExistence(timeout: 4))
+        XCTAssertLessThan(
+            navigationStartedAt.duration(to: .now),
+            .seconds(4),
+            "A production-scale solids history should not delay feeding-balance guidance."
+        )
+
+        let scrollingStartedAt = ContinuousClock.now
+        app.swipeUp(velocity: .fast)
+        // XCUI includes simulator gesture deceleration in this wall-clock
+        // duration. Leave enough headroom for that variance while still
+        // catching a blocked main thread or an unresponsive scroll view.
+        XCTAssertLessThan(
+            scrollingStartedAt.duration(to: .now),
+            .seconds(4.5),
+            "Digestive guidance should remain scrollable with a production-scale history."
+        )
+        XCTAssertTrue(app.staticTexts["7-day solids review"].exists)
+        XCTAssertFalse(app.staticTexts["Age-aware balance"].exists)
+        XCTAssertFalse(app.staticTexts["When to get medical help"].exists)
+    }
+
+    func testDigestiveDashboardShowsStatusBannerAndPersistentEntryAndConcernCanBeResolvedAndRecordedAgain() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-digestive")
+        app.open(URL(string: "littlewindows://food/solids")!)
+        XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 4))
+
+        let statusBanner = app.buttons.matching(identifier: "solids.digestive.proactive")
+        XCTAssertTrue(statusBanner.firstMatch.waitForExistence(timeout: 4))
+        XCTAssertEqual(statusBanner.count, 1)
+        XCTAssertFalse(app.buttons["Constipation concern today"].exists)
+
+        let feedingBalance = app.buttons.matching(
+            identifier: "solids.dashboard.feeding-balance"
+        )
+        let entry = feedingBalance.firstMatch
+        for _ in 0..<6 where !entry.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(entry.waitForExistence(timeout: 4))
+        XCTAssertEqual(feedingBalance.count, 1)
+        entry.tap()
+        XCTAssertTrue(app.navigationBars["Feeding balance"].waitForExistence(timeout: 4))
+
+        let resolve = app.buttons["solids.digestive.resolve"]
+        XCTAssertTrue(resolve.waitForExistence(timeout: 4))
+        resolve.tap()
+        XCTAssertTrue(app.staticTexts["Concern recorded"].waitForNonExistence(timeout: 4))
+
+        let addCheckIn = app.buttons["solids.digestive.add-check-in"]
+        XCTAssertTrue(addCheckIn.waitForExistence(timeout: 4))
+        addCheckIn.tap()
+        XCTAssertTrue(app.navigationBars["Digestive check-in"].waitForExistence(timeout: 4))
+        app.buttons["Save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Feeding balance"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Concern recorded"].waitForExistence(timeout: 4))
     }
 
     func testProductionScaleInputEditorsAcceptTypingPromptly() {
@@ -3830,12 +3913,12 @@ final class UserVisibleFlowUITests: XCTestCase {
     func testDiaperEditorOffersOptionalRashDetail() {
         continueAfterFailure = false
 
-        app.terminate()
-        app.launchEnvironment = [
-            "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": "littlewindows://quick-log/diaper"
-        ]
-        app.launch()
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(
+            startURL: "littlewindows://debug/seed-smoke",
+            additionalEnvironment: ["LITTLE_WINDOWS_MARKETING_CAPTURE": "1"]
+        )
+        launch(startURL: "littlewindows://quick-log/diaper")
 
         XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 8))
         let rashToggle = app.switches["diaper-rash-toggle"]
@@ -3847,6 +3930,42 @@ final class UserVisibleFlowUITests: XCTestCase {
             object: rashToggle
         )
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 2), .completed)
+
+        let kindPicker = app.segmentedControls["diaper-kind-picker"]
+        XCTAssertTrue(kindPicker.waitForExistence(timeout: 2))
+        kindPicker.buttons["Poo"].tap()
+        let consistencyPicker = app.buttons["diaper-poo-consistency-picker"]
+        XCTAssertTrue(consistencyPicker.waitForExistence(timeout: 4))
+        consistencyPicker.tap()
+        let hardConsistency = app.buttons["Hard"]
+        XCTAssertTrue(hardConsistency.waitForExistence(timeout: 2))
+        hardConsistency.tap()
+        let painfulToggle = app.switches["diaper-poo-painful-toggle"]
+        for _ in 0..<3 where !painfulToggle.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(painfulToggle.waitForExistence(timeout: 2))
+        XCTAssertTrue(painfulToggle.isHittable)
+        let strainingToggle = app.switches["diaper-poo-straining-toggle"]
+        for _ in 0..<3 where !strainingToggle.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(strainingToggle.waitForExistence(timeout: 2))
+        let bloodToggle = app.switches["diaper-poo-blood-toggle"]
+        for _ in 0..<3 where !bloodToggle.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(bloodToggle.waitForExistence(timeout: 2))
+        let digestiveLinkToggle = app.switches["diaper-link-digestive-toggle"]
+        for _ in 0..<3 where !digestiveLinkToggle.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(digestiveLinkToggle.waitForExistence(timeout: 2))
+        XCTAssertEqual(digestiveLinkToggle.value as? String, "0")
+        digestiveLinkToggle.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)
+        ).tap()
+        XCTAssertEqual(digestiveLinkToggle.value as? String, "1")
     }
 
     func testStoreSectionsHaveVisibleAddReorderAndRemoveControls() {

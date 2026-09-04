@@ -114,6 +114,10 @@ struct CareEventPersistenceSnapshot: Sendable {
     var pooAmountRawValue: String?
     var pooColorRawValue: String?
     var pooTextureRawValue: String?
+    var pooDifficultOrPainful: Bool?
+    var pooProlongedStraining: Bool?
+    var pooVisibleBlood: Bool?
+    var linksDigestiveConcern: Bool?
     var stoolColor: String?
     var stoolTexture: String?
     var bookTitle: String?
@@ -179,6 +183,10 @@ struct CareEventPersistenceSnapshot: Sendable {
         pooAmountRawValue = event.pooAmountRawValue
         pooColorRawValue = event.pooColorRawValue
         pooTextureRawValue = event.pooTextureRawValue
+        pooDifficultOrPainful = event.pooDifficultOrPainful
+        pooProlongedStraining = event.pooProlongedStraining
+        pooVisibleBlood = event.pooVisibleBlood
+        linksDigestiveConcern = event.linksDigestiveConcern
         stoolColor = event.stoolColor
         stoolTexture = event.stoolTexture
         bookTitle = event.bookTitle
@@ -260,6 +268,10 @@ struct CareEventPersistenceSnapshot: Sendable {
         event.pooAmountRawValue = pooAmountRawValue
         event.pooColorRawValue = pooColorRawValue
         event.pooTextureRawValue = pooTextureRawValue
+        event.pooDifficultOrPainful = pooDifficultOrPainful
+        event.pooProlongedStraining = pooProlongedStraining
+        event.pooVisibleBlood = pooVisibleBlood
+        event.linksDigestiveConcern = linksDigestiveConcern
         event.stoolColor = stoolColor
         event.stoolTexture = stoolTexture
         event.bookTitle = bookTitle
@@ -1281,6 +1293,23 @@ enum EventMutationService {
             let writer = await SolidsWriterPool.shared.allergenProgressWriter(for: context.container)
             _ = await writer.reconcileDerivedProgress(profileID: profileID)
         }
+        if event.profileTypeSnapshot == .child,
+           let profileID = event.profileID {
+            let writer = await SolidsWriterPool.shared.profileStateWriter(for: context.container)
+            if let error = await writer.reconcileLinkedDigestiveCheckIn(
+                profileID: profileID,
+                checkInID: event.id,
+                recordedAt: event.startDate,
+                hardStool: false,
+                difficultOrPainful: false,
+                prolongedStraining: false,
+                visibleBlood: false,
+                notes: "",
+                isIncluded: false
+            ) {
+                PersistenceService.recordLocalSaveFailure(error)
+            }
+        }
         let container = context.container
         let revision = beginSystemIntegrationUpdate()
         pendingSystemIntegrationTask = Task { @MainActor [container] in
@@ -1344,6 +1373,27 @@ enum EventMutationService {
         if let error = solidsResult.error {
             PersistenceService.recordLocalSaveFailure(error)
             return EventMutationOutcome(didPersist: true, analysis: nil)
+        }
+        if event.profileTypeSnapshot == .child,
+           let profileID = event.profileID {
+            let writer = await SolidsWriterPool.shared.profileStateWriter(for: context.container)
+            if let error = await writer.reconcileLinkedDigestiveCheckIn(
+                profileID: profileID,
+                checkInID: event.id,
+                recordedAt: event.startDate,
+                hardStool: event.pooTexture == .hard,
+                difficultOrPainful: event.pooDifficultOrPainful == true,
+                prolongedStraining: event.pooProlongedStraining == true,
+                visibleBlood: event.pooVisibleBlood == true,
+                notes: event.notes ?? "",
+                isIncluded: event.type == .diaper
+                    && event.linksDigestiveConcern == true
+                    && event.diaperKind?.hasPoo == true
+                    && event.hasDigestiveStoolObservation,
+                now: eventUpdatedAt
+            ) {
+                PersistenceService.recordLocalSaveFailure(error)
+            }
         }
         if solidsResult.changedLinkedRecords,
            !solidsResult.allergenIDsToReconcile.isEmpty,
@@ -1474,6 +1524,10 @@ enum EventMutationService {
         event.pooAmount = source.pooAmount
         event.pooColor = source.pooColor
         event.pooTexture = source.pooTexture
+        event.pooDifficultOrPainful = source.pooDifficultOrPainful
+        event.pooProlongedStraining = source.pooProlongedStraining
+        event.pooVisibleBlood = source.pooVisibleBlood
+        event.linksDigestiveConcern = source.linksDigestiveConcern
         event.stoolColor = source.stoolColor
         event.stoolTexture = source.stoolTexture
         event.bookTitle = source.bookTitle

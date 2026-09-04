@@ -622,6 +622,9 @@ enum CareReportExportService {
             parts.appendIfPresent(event.pooAmount.map { "Poo amount: \($0.displayName)" })
             parts.appendIfPresent(event.pooColor.map { "Poo color: \($0.displayName)" })
             parts.appendIfPresent(event.pooTexture.map { "Poo texture: \($0.displayName)" })
+            if event.pooDifficultOrPainful == true { parts.append("Difficult or painful to pass") }
+            if event.pooProlongedStraining == true { parts.append("Prolonged straining") }
+            if event.pooVisibleBlood == true { parts.append("Visible blood") }
             if event.diaperRash == true { parts.append("Diaper rash") }
         case .potty:
             if event.profileTypeSnapshot == .dog {

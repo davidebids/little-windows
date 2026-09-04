@@ -193,6 +193,10 @@ struct EventEditorView: View {
     @State private var pooAmount: DiaperAmount
     @State private var pooColor: PooColor
     @State private var pooTexture: PooTexture
+    @State private var pooDifficultOrPainful: Bool
+    @State private var pooProlongedStraining: Bool
+    @State private var pooVisibleBlood: Bool
+    @State private var linksDigestiveConcern: Bool
     @State private var diaperDetailsExpanded: Bool
     @State private var medicineName: String
     @State private var dose: Double
@@ -280,25 +284,25 @@ struct EventEditorView: View {
         let selectedProfileID = event?.profileID
             ?? ProfileService.shared.selectedProfileID
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-        let unloadedID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         let loadsSolidData = selectedType == .feed
             || event?.feedKind == .solid
             || solidPreset != nil
-        let solidProfileID = loadsSolidData ? selectedProfileID : unloadedID
         let feedRawValue = EventType.feed.rawValue
         let solidRawValue = FeedKind.solid.rawValue
         var recentSolidEventDescriptor = FetchDescriptor<CareEvent>(
             predicate: #Predicate<CareEvent> { event in
-                event.profileID == solidProfileID
+                event.profileID == selectedProfileID
                     && event.typeRawValue == feedRawValue
                     && event.feedKindRawValue == solidRawValue
             },
             sortBy: [SortDescriptor(\CareEvent.startDate, order: .reverse)]
         )
-        recentSolidEventDescriptor.fetchLimit = 120
+        // Non-feed editors only need to know whether solids history exists so
+        // early imported users can link a diaper observation to Feeding balance.
+        recentSolidEventDescriptor.fetchLimit = loadsSolidData ? 120 : 1
         _allEvents = Query(recentSolidEventDescriptor)
         _solidsProfileStates = Query(FetchDescriptor<SolidsProfileState>(
-            predicate: #Predicate { $0.profileID == solidProfileID },
+            predicate: #Predicate { $0.profileID == selectedProfileID },
             sortBy: [SortDescriptor(\SolidsProfileState.updatedAt, order: .reverse)]
         ))
         if loadsSolidData {
@@ -356,6 +360,10 @@ struct EventEditorView: View {
         _pooAmount = State(initialValue: event?.pooAmount ?? .unknown)
         _pooColor = State(initialValue: event?.pooColor ?? .unknown)
         _pooTexture = State(initialValue: event?.pooTexture ?? .unknown)
+        _pooDifficultOrPainful = State(initialValue: event?.pooDifficultOrPainful == true)
+        _pooProlongedStraining = State(initialValue: event?.pooProlongedStraining == true)
+        _pooVisibleBlood = State(initialValue: event?.pooVisibleBlood == true)
+        _linksDigestiveConcern = State(initialValue: event?.linksDigestiveConcern == true)
         _diaperDetailsExpanded = State(initialValue: true)
         _medicineName = State(initialValue: event?.medicineName ?? "")
         _dose = State(initialValue: event?.dose ?? 0)
@@ -497,6 +505,15 @@ struct EventEditorView: View {
     }
     private var canLogSolidFeed: Bool {
         activeProfileType == .child && solidsAccessLevel == .full
+    }
+    private var canLinkDigestiveConcern: Bool {
+        activeProfileType == .child && solidsAccessLevel == .full
+    }
+    private var hasDigestiveStoolObservation: Bool {
+        pooTexture == .hard
+            || pooDifficultOrPainful
+            || pooProlongedStraining
+            || pooVisibleBlood
     }
     private var availableFeedKinds: [FeedKind] {
         FeedKind.allCases.filter { $0 != .solid || canLogSolidFeed }
@@ -1041,6 +1058,7 @@ struct EventEditorView: View {
                     ForEach(DiaperKind.allCases) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .accessibilityIdentifier("diaper-kind-picker")
 
                 DisclosureGroup(
                     "Optional details",
@@ -1058,8 +1076,30 @@ struct EventEditorView: View {
                         Picker("Color", selection: $pooColor) {
                             ForEach(PooColor.allCases) { Text($0.displayName).tag($0) }
                         }
-                        Picker("Texture", selection: $pooTexture) {
+                        Picker("Stool consistency", selection: $pooTexture) {
                             ForEach(PooTexture.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        .accessibilityIdentifier("diaper-poo-consistency-picker")
+                        Toggle("Difficult or painful to pass", isOn: $pooDifficultOrPainful)
+                            .accessibilityIdentifier("diaper-poo-painful-toggle")
+                        Toggle("Prolonged straining", isOn: $pooProlongedStraining)
+                            .accessibilityIdentifier("diaper-poo-straining-toggle")
+                        Toggle("Visible blood", isOn: $pooVisibleBlood)
+                            .accessibilityIdentifier("diaper-poo-blood-toggle")
+                        Text("Hard or dry stool, pain, and prolonged straining are more useful signs of constipation than frequency alone.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if pooVisibleBlood {
+                            Text("Visible blood warrants prompt advice from the child’s clinician. Use urgent care for severe or rapidly worsening symptoms.")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.red)
+                        }
+                        if canLinkDigestiveConcern && hasDigestiveStoolObservation {
+                            Toggle("Start or update concern in Feeding balance", isOn: $linksDigestiveConcern)
+                                .accessibilityIdentifier("diaper-link-digestive-toggle")
+                            Text("This uses the same observations in Feeding balance, so you do not need to enter them again.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     Toggle("Diaper rash", isOn: $diaperRash)
@@ -1740,6 +1780,13 @@ struct EventEditorView: View {
         event.pooAmount = (type == .diaper && diaperKind.hasPoo) || (type == .potty && !isDogProfile && childPottyKind.hasPoo) ? pooAmount : nil
         event.pooColor = (type == .diaper && diaperKind.hasPoo) || (type == .potty && !isDogProfile && childPottyKind.hasPoo) ? pooColor : nil
         event.pooTexture = (type == .diaper && diaperKind.hasPoo) || (type == .potty && !isDogProfile && childPottyKind.hasPoo) ? pooTexture : nil
+        let savesChildPoo = type == .diaper && activeProfileType == .child && diaperKind.hasPoo
+        event.pooDifficultOrPainful = savesChildPoo && pooDifficultOrPainful ? true : nil
+        event.pooProlongedStraining = savesChildPoo && pooProlongedStraining ? true : nil
+        event.pooVisibleBlood = savesChildPoo && pooVisibleBlood ? true : nil
+        event.linksDigestiveConcern = savesChildPoo
+            && hasDigestiveStoolObservation
+            && linksDigestiveConcern ? true : nil
         event.stoolColor = nil
         event.stoolTexture = nil
         event.bookTitle = nil

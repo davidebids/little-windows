@@ -242,6 +242,7 @@ struct FoodHomeView: View {
                     accessLevel: solidsAccessLevel,
                     progress: solidFoodProgress,
                     plans: plannedSolidMeals,
+                    eventItems: solidFoodEventItems,
                     profileState: selectedSolidsState,
                     open: { path.append($0) }
                 )
@@ -259,6 +260,36 @@ struct FoodHomeView: View {
                     openFood: { path.append(.solidFood($0)) },
                     openRecipe: { path.append(.solidsRecipe($0)) },
                     openPlan: { path.append(.plannedSolidMeal($0)) }
+                )
+            } else {
+                MissingFoodRouteView()
+            }
+        case .solidsDigestive:
+            let assessment = selectedProfile.map {
+                SolidsDigestiveSupportService.assessment(
+                    profileID: $0.id,
+                    ageMonths: SolidsTrackingService.ageMonths(for: $0),
+                    eventItems: solidFoodEventItems,
+                    state: selectedSolidsState
+                )
+            }
+            if let selectedProfile,
+               let assessment,
+               selectedProfile.profileType == .child,
+               solidsAccessLevel == .full,
+               SolidsDigestiveSupportService.isSupportAvailable(
+                    ageMonths: SolidsTrackingService.ageMonths(for: selectedProfile),
+                    state: selectedSolidsState,
+                    assessment: assessment
+               ) {
+                SolidsDigestiveSupportView(
+                    profile: selectedProfile,
+                    careEvents: careEvents,
+                    eventItems: solidFoodEventItems,
+                    profileState: selectedSolidsState,
+                    assessment: assessment,
+                    openFood: { path.append(.solidFood($0)) },
+                    openRecipe: { path.append(.solidsRecipe($0)) }
                 )
             } else {
                 MissingFoodRouteView()
@@ -673,6 +704,8 @@ struct FoodHomeView: View {
             openSolidsRoute(.solidsDatabase)
         case .solidsGuided:
             openSolidsRoute(.solidsGuided)
+        case .solidsDigestive:
+            openSolidsRoute(.solidsDigestive)
         case .solidFood(let id):
             openSolidsRoute(.solidFood(id))
         case .customSolidFood(let id):
@@ -779,10 +812,10 @@ struct FoodHomeView: View {
         switch command {
         case .food, .todos, .shopping, .trips, .inventory, .mealPrep, .returns, .quickAdd:
             return false
-        case .solids, .solidsDatabase, .solidsGuided, .solidsPlan, .solidsTracker, .solidsAllergens, .solidsRecipes:
+        case .solids, .solidsDatabase, .solidsGuided, .solidsDigestive, .solidsPlan, .solidsTracker, .solidsAllergens, .solidsRecipes:
             return solidsAccessLevel == .hidden
         case .solidFood(let id):
-            return solidsAccessLevel == .hidden || SolidsReferenceCatalog.food(id: id) == nil
+            return solidsAccessLevel == .hidden || SolidsReferenceCatalog.foodSummary(id: id) == nil
         case .customSolidFood(let id):
             return solidsAccessLevel == .hidden || !customSolidFoods.contains { $0.id == id }
         case .plannedSolidMeal(let id):
@@ -796,7 +829,7 @@ struct FoodHomeView: View {
         case .solidAllergen(let id):
             return solidsAccessLevel == .hidden || SolidsAllergen(rawValue: id) == nil
         case .solidsRecipe(let id):
-            return solidsAccessLevel == .hidden || !SolidsReferenceCatalog.recipes.contains { $0.id == id }
+            return solidsAccessLevel == .hidden || SolidsReferenceCatalog.recipe(id: id) == nil
         case .todoList(let id):
             return !data.todoLists.contains { $0.id == id }
         case .shoppingList(let id), .shoppingMode(let id):
@@ -840,7 +873,7 @@ struct FoodHomeView: View {
         switch command {
         case .food, .todos, .todoList:
             return .todos
-        case .solids, .solidsDatabase, .solidsGuided, .solidFood, .customSolidFood,
+        case .solids, .solidsDatabase, .solidsGuided, .solidsDigestive, .solidFood, .customSolidFood,
              .solidsPlan, .plannedSolidMeal, .solidsTracker, .solidMeal,
              .solidsAllergens, .solidAllergen, .solidsRecipes, .solidsRecipe:
             return .solids

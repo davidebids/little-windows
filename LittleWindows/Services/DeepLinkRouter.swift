@@ -453,6 +453,8 @@ final class DeepLinkRouter: ObservableObject {
             openSolids(.solidsDatabase, returningTo: nil)
         } else if components == ["food", "solids", "guided"] {
             openSolids(.solidsGuided, returningTo: nil)
+        } else if components == ["food", "solids", "digestive"] {
+            openSolids(.solidsDigestive, returningTo: nil)
         } else if components.count == 4,
                   components[0] == "food",
                   components[1] == "solids",

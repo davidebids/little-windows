@@ -509,6 +509,107 @@ struct SolidFeedEditorPreset: Equatable, @unchecked Sendable {
     static let empty = SolidFeedEditorPreset()
 }
 
+enum SolidsLoggingCoverage: String, CaseIterable, Codable, Identifiable, Sendable {
+    case unknown
+    case mostMeals
+    case someMeals
+    case notableOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .unknown: "Not set"
+        case .mostMeals: "Most solid meals"
+        case .someMeals: "Some solid meals"
+        case .notableOnly: "Only notable meals"
+        }
+    }
+
+    var assessmentNote: String {
+        switch self {
+        case .unknown: "Tell us how completely solids are logged so feedback can be framed accurately."
+        case .mostMeals: "Feedback can reflect the logged pattern, though unlogged foods may still change the picture."
+        case .someMeals: "Feedback is based only on the meals recorded here and may miss foods offered elsewhere."
+        case .notableOnly: "These logs are a partial diary, so they are not used to identify possible gaps."
+        }
+    }
+}
+
+struct SolidsDigestiveCheckIn: Codable, Hashable, Identifiable, Sendable {
+    var id: UUID
+    var recordedAt: Date
+    var hardStool: Bool
+    var difficultOrPainful: Bool
+    var prolongedStraining: Bool
+    var visibleBlood: Bool
+    var vomiting: Bool
+    var swollenBelly: Bool
+    var poorFeeding: Bool
+    var notes: String
+    var resolvedAt: Date?
+
+    init(
+        id: UUID = UUID(),
+        recordedAt: Date = Date(),
+        hardStool: Bool = true,
+        difficultOrPainful: Bool = false,
+        prolongedStraining: Bool = false,
+        visibleBlood: Bool = false,
+        vomiting: Bool = false,
+        swollenBelly: Bool = false,
+        poorFeeding: Bool = false,
+        notes: String = "",
+        resolvedAt: Date? = nil
+    ) {
+        self.id = id
+        self.recordedAt = recordedAt
+        self.hardStool = hardStool
+        self.difficultOrPainful = difficultOrPainful
+        self.prolongedStraining = prolongedStraining
+        self.visibleBlood = visibleBlood
+        self.vomiting = vomiting
+        self.swollenBelly = swollenBelly
+        self.poorFeeding = poorFeeding
+        self.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.resolvedAt = resolvedAt
+    }
+
+    var isActive: Bool { resolvedAt == nil }
+    var needsPromptMedicalAdvice: Bool {
+        visibleBlood || vomiting || swollenBelly || poorFeeding
+    }
+
+    var observationLabels: [String] {
+        [
+            hardStool ? "Hard or dry stool" : nil,
+            difficultOrPainful ? "Difficult or painful to pass" : nil,
+            prolongedStraining ? "Prolonged straining" : nil,
+            visibleBlood ? "Visible blood" : nil,
+            vomiting ? "Vomiting" : nil,
+            swollenBelly ? "Swollen belly" : nil,
+            poorFeeding ? "Poor feeding" : nil
+        ].compactMap { $0 }
+    }
+}
+
+private final class SolidsDigestiveCheckInCacheEntry {
+    let checkIns: [SolidsDigestiveCheckIn]
+
+    init(_ checkIns: [SolidsDigestiveCheckIn]) {
+        self.checkIns = checkIns
+    }
+}
+
+private enum SolidsDigestiveCheckInDecodeCache {
+    static let shared: NSCache<NSString, SolidsDigestiveCheckInCacheEntry> = {
+        let cache = NSCache<NSString, SolidsDigestiveCheckInCacheEntry>()
+        cache.countLimit = 128
+        cache.totalCostLimit = 2 * 1_024 * 1_024
+        return cache
+    }()
+}
+
 private final class SolidNutritionSnapshotCacheEntry {
     let snapshot: SolidNutritionSnapshot
 
@@ -538,6 +639,10 @@ final class SolidsProfileState {
     var wantToTryRecipeIDsJSON: String = "[]"
     var recipeCollectionsJSON: String = "[]"
     var completedFeedingSkillIDsJSON: String = "[]"
+    var digestiveCheckInsJSON: String = "[]"
+    var digestiveLoggingCoverageRawValue: String = SolidsLoggingCoverage.unknown.rawValue
+    var digestiveReminderEnabled: Bool = false
+    var digestiveReminderAt: Date?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -552,9 +657,17 @@ final class SolidsProfileState {
         wantToTryRecipeIDs: [String] = [],
         recipeCollections: [SolidRecipeCollection] = [],
         completedFeedingSkillIDs: [String] = [],
+        digestiveCheckIns: [SolidsDigestiveCheckIn] = [],
+        digestiveLoggingCoverage: SolidsLoggingCoverage = .unknown,
+        digestiveReminderEnabled: Bool = false,
+        digestiveReminderAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
+        let normalizedCheckIns = Self.normalizedCheckIns(digestiveCheckIns)
+        let keepsDigestiveReminder = digestiveReminderEnabled
+            && digestiveReminderAt != nil
+            && normalizedCheckIns.contains(where: \.isActive)
         self.id = id
         self.profileID = profileID
         self.isActivated = isActivated
@@ -565,6 +678,10 @@ final class SolidsProfileState {
         self.wantToTryRecipeIDsJSON = Self.encode(wantToTryRecipeIDs)
         self.recipeCollectionsJSON = Self.encode(recipeCollections)
         self.completedFeedingSkillIDsJSON = Self.encode(completedFeedingSkillIDs)
+        self.digestiveCheckInsJSON = Self.encode(normalizedCheckIns)
+        self.digestiveLoggingCoverageRawValue = digestiveLoggingCoverage.rawValue
+        self.digestiveReminderEnabled = keepsDigestiveReminder
+        self.digestiveReminderAt = keepsDigestiveReminder ? digestiveReminderAt : nil
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -589,6 +706,29 @@ final class SolidsProfileState {
         set { completedFeedingSkillIDsJSON = Self.encode(newValue) }
     }
 
+    var digestiveCheckIns: [SolidsDigestiveCheckIn] {
+        get { Self.decodeCheckIns(digestiveCheckInsJSON) }
+        set {
+            let limited = Self.normalizedCheckIns(newValue)
+            let encoded = Self.encode(limited)
+            digestiveCheckInsJSON = encoded
+            SolidsDigestiveCheckInDecodeCache.shared.setObject(
+                SolidsDigestiveCheckInCacheEntry(limited),
+                forKey: encoded as NSString,
+                cost: encoded.utf8.count
+            )
+        }
+    }
+
+    var digestiveLoggingCoverage: SolidsLoggingCoverage {
+        get { SolidsLoggingCoverage(rawValue: digestiveLoggingCoverageRawValue) ?? .unknown }
+        set { digestiveLoggingCoverageRawValue = newValue.rawValue }
+    }
+
+    var activeDigestiveCheckIn: SolidsDigestiveCheckIn? {
+        digestiveCheckIns.first(where: \.isActive)
+    }
+
     private static func encode(_ values: [String]) -> String {
         guard let data = try? JSONEncoder().encode(values),
               let string = String(data: data, encoding: .utf8) else { return "[]" }
@@ -596,6 +736,12 @@ final class SolidsProfileState {
     }
 
     private static func encode(_ values: [SolidRecipeCollection]) -> String {
+        guard let data = try? JSONEncoder().encode(values),
+              let string = String(data: data, encoding: .utf8) else { return "[]" }
+        return string
+    }
+
+    private static func encode(_ values: [SolidsDigestiveCheckIn]) -> String {
         guard let data = try? JSONEncoder().encode(values),
               let string = String(data: data, encoding: .utf8) else { return "[]" }
         return string
@@ -609,6 +755,49 @@ final class SolidsProfileState {
     private static func decodeCollections(_ value: String) -> [SolidRecipeCollection] {
         guard let data = value.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([SolidRecipeCollection].self, from: data)) ?? []
+    }
+
+    private static func decodeCheckIns(_ value: String) -> [SolidsDigestiveCheckIn] {
+        let key = value as NSString
+        if let cached = SolidsDigestiveCheckInDecodeCache.shared.object(forKey: key) {
+            return cached.checkIns
+        }
+        guard let data = value.data(using: .utf8) else { return [] }
+        let decoded = normalizedCheckIns(
+            (try? JSONDecoder().decode([SolidsDigestiveCheckIn].self, from: data)) ?? []
+        )
+        SolidsDigestiveCheckInDecodeCache.shared.setObject(
+            SolidsDigestiveCheckInCacheEntry(decoded),
+            forKey: key,
+            cost: value.utf8.count
+        )
+        return decoded
+    }
+
+    private static func normalizedCheckIns(
+        _ values: [SolidsDigestiveCheckIn]
+    ) -> [SolidsDigestiveCheckIn] {
+        var seenIDs = Set<UUID>()
+        var normalized = Array(values
+            .sorted { $0.recordedAt > $1.recordedAt }
+            .filter { seenIDs.insert($0.id).inserted }
+            .prefix(180))
+        var hasCurrentConcern = false
+        var currentConcernStartedAt: Date?
+        for index in normalized.indices {
+            if let resolvedAt = normalized[index].resolvedAt {
+                normalized[index].resolvedAt = max(resolvedAt, normalized[index].recordedAt)
+            } else if !hasCurrentConcern {
+                hasCurrentConcern = true
+                currentConcernStartedAt = normalized[index].recordedAt
+            } else {
+                normalized[index].resolvedAt = max(
+                    currentConcernStartedAt ?? normalized[index].recordedAt,
+                    normalized[index].recordedAt
+                )
+            }
+        }
+        return normalized
     }
 }
 
