@@ -1934,7 +1934,9 @@ final class UserVisibleFlowUITests: XCTestCase {
             .seconds(4.5),
             "Digestive guidance should remain scrollable with a production-scale history."
         )
-        XCTAssertTrue(app.staticTexts["Age-aware balance"].exists)
+        XCTAssertTrue(app.staticTexts["7-day solids review"].exists)
+        XCTAssertFalse(app.staticTexts["Age-aware balance"].exists)
+        XCTAssertFalse(app.staticTexts["When to get medical help"].exists)
     }
 
     func testDigestiveDashboardShowsStatusBannerAndPersistentEntryAndConcernCanBeResolvedAndRecordedAgain() {

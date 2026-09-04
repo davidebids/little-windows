@@ -1865,10 +1865,10 @@ struct SolidsDigestiveSupportView: View {
     @State private var errorMessage: String?
     @State private var showingCheckInHistory = false
     @State private var showingAllTimelineEntries = false
+    @State private var showingSources = false
     @State private var updatingReminder = false
 
-    private let timelinePreviewLimit = 6
-    private var ageMonths: Int { SolidsTrackingService.ageMonths(for: profile) }
+    private let timelinePreviewLimit = 4
 
     private var recentResolvedCheckIns: [SolidsDigestiveCheckIn] {
         Array((profileState?.digestiveCheckIns ?? []).lazy.filter { !$0.isActive }.prefix(5))
@@ -1906,8 +1906,6 @@ struct SolidsDigestiveSupportView: View {
                 balanceCard(assessment)
                 insightsSection(assessment)
                 suggestionsSection(assessment)
-                practicalGuidance
-                safetyCard
                 sources
             }
             .padding(16)
@@ -1954,7 +1952,7 @@ struct SolidsDigestiveSupportView: View {
         return VStack(alignment: .leading, spacing: 12) {
             Label("What changed?", systemImage: "clock.arrow.circlepath")
                 .font(.headline)
-            Text("Stool observations appear beside recent solids, health, medicine, and caregiver context logs. Being close in time does not mean one caused another.")
+            Text("Recent stool, solids, health, medicine, and care notes appear together. Timing alone doesn’t show cause.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if visibleEntries.isEmpty {
@@ -2025,13 +2023,13 @@ struct SolidsDigestiveSupportView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Comfort and balance")
                         .font(.title2.bold())
-                    Text("A gentle review of \(profile.name)’s recent solids log")
+                    Text("Recent solids for \(profile.name)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            Text("Hard, dry, or painful stools are more useful signs of constipation than the number of bowel movements alone. This tool records a caregiver concern; it does not diagnose constipation.")
+            Text("Hard, dry, or painful stools matter more than frequency alone. This records a caregiver concern; it does not diagnose constipation.")
                 .font(.subheadline)
             Button {
                 showingCheckIn = true
@@ -2292,14 +2290,11 @@ struct SolidsDigestiveSupportView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Ideas for the next meals")
                     .font(.headline)
-                Text("Foods and recipes are listed separately. Open a food for preparation and shopping, or a recipe for full instructions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 if !assessment.suggestedFoodIDs.isEmpty {
                     suggestionGroupHeader(
                         "Individual foods",
-                        detail: "Preparation guidance and shopping-list actions",
+                        detail: "Preparation and shopping",
                         systemImage: "carrot.fill",
                         tint: .green
                     )
@@ -2313,7 +2308,7 @@ struct SolidsDigestiveSupportView: View {
                 if !assessment.suggestedRecipeIDs.isEmpty {
                     suggestionGroupHeader(
                         "Recipe ideas",
-                        detail: "Complete meal ideas using suggested foods",
+                        detail: "Complete meals using suggested foods",
                         systemImage: "fork.knife",
                         tint: .orange
                     )
@@ -2406,71 +2401,24 @@ struct SolidsDigestiveSupportView: View {
         .buttonStyle(.plain)
     }
 
-    private var practicalGuidance: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Age-aware balance", systemImage: "scalemass.fill")
-                .font(.headline)
-                .foregroundStyle(.orange)
-            Text(ageBalanceGuidance)
-                .font(.subheadline)
-            Text(hydrationGuidance)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(16)
-        .appSurface()
-    }
-
-    private var ageBalanceGuidance: String {
-        switch ageMonths {
-        case ..<6:
-            "Before about 6 months, use this review only if solids have already started based on readiness and clinician guidance. Breast milk or formula remains central; do not increase solid meals because of this screen."
-        case 6..<9:
-            "For 6–8 months, WHO guidance commonly describes 2–3 complementary-food meals a day, while breast milk or formula remains central. Build variety gradually and follow hunger and fullness cues."
-        case 9...11:
-            "For 9–11 months, WHO guidance commonly describes 3–4 complementary-food meals a day, while breast milk or formula remains important. Keep broadening textures and food groups at the child’s pace."
-        case 12:
-            "At 12 months, keep offering varied family foods in age-safe textures and follow hunger and fullness cues. Ask the child’s clinician about the family’s transition from infant feeding guidance."
-        default:
-            "After 12 months, keep offering varied family foods in age-safe textures and follow hunger and fullness cues. Ask the child’s clinician for age-specific feeding guidance."
-        }
-    }
-
-    private var hydrationGuidance: String {
-        if (6...12).contains(ageMonths) {
-            return "From about 6 months, small amounts of plain water can be offered with meals; the AAP describes about 4–8 oz total per day for 6–12 months. Do not use this screen to restrict breast milk or formula."
-        }
-        return "Offer drinks according to the child’s current age and their clinician’s guidance. Do not use this screen to restrict milk feeds or fluids."
-    }
-
-    private var safetyCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("When to get medical help", systemImage: "exclamationmark.triangle.fill")
-                .font(.headline)
-                .foregroundStyle(.red)
-            Text("Contact the child’s clinician promptly for blood in the stool or rectal bleeding, a swollen belly, constant abdominal pain, vomiting, poor feeding, weight loss, or symptoms that are severe, worsening, or not improving.")
-                .font(.subheadline)
-            Text("Do not give laxatives, mineral oil, enemas, or suppositories to a baby unless their clinician recommends it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(16)
-        .appSurface()
-    }
-
     private var sources: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Clinical and feeding sources")
-                .font(.headline)
-            ForEach(SolidsDigestiveSupportService.sourceURLs, id: \.absoluteString) { url in
-                Link(destination: url) {
-                    Label(SolidsSourceLibrary.displayName(for: url), systemImage: "arrow.up.right.square")
-                        .font(.subheadline)
+        DisclosureGroup(isExpanded: $showingSources) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(SolidsDigestiveSupportService.sourceURLs, id: \.absoluteString) { url in
+                    Link(destination: url) {
+                        Label(SolidsSourceLibrary.displayName(for: url), systemImage: "arrow.up.right.square")
+                            .font(.subheadline)
+                    }
                 }
             }
+            .padding(.top, 12)
+        } label: {
+            Label("Sources", systemImage: "book.closed.fill")
+                .font(.headline)
         }
         .padding(16)
         .appSurface()
+        .accessibilityIdentifier("solids.digestive.sources")
     }
 
     @MainActor
