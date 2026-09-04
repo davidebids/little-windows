@@ -2078,6 +2078,7 @@ struct SolidsDigestiveSupportView: View {
             .buttonStyle(.bordered)
             .disabled(updatingReminder)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .appSurface()
     }
