@@ -2097,7 +2097,6 @@ struct SolidsDigestiveSupportView: View {
                 resolveAction(concern)
             }
         }
-        .controlSize(.large)
     }
 
     private func reminderAction(
@@ -2714,15 +2713,27 @@ struct SolidsFoodDetailView: View {
                             .foregroundStyle(.orange)
                     }
                 }
-                Text("Stool response varies. Consider the whole feeding pattern and contact the child’s clinician for persistent or concerning symptoms.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                ForEach(digestiveGuidance.sourceURLs, id: \.absoluteString) { url in
-                    Link(destination: url) {
-                        Label(SolidsSourceLibrary.displayName(for: url), systemImage: "arrow.up.right.square")
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Stool response varies. Consider the whole feeding pattern and contact the child’s clinician for persistent or concerning symptoms.")
                             .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(digestiveGuidance.sourceURLs, id: \.absoluteString) { url in
+                            Link(destination: url) {
+                                Label(
+                                    SolidsSourceLibrary.displayName(for: url),
+                                    systemImage: "arrow.up.right.square"
+                                )
+                                .font(.caption)
+                            }
+                        }
                     }
+                    .padding(.top, 8)
+                } label: {
+                    Label("Sources & context", systemImage: "book.closed.fill")
+                        .font(.subheadline.weight(.semibold))
                 }
+                .accessibilityIdentifier("solids.food.digestive-sources")
             }
 
             Section("Preparation by age") {

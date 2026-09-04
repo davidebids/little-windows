@@ -2286,6 +2286,7 @@ struct TodayView: View {
             switchNursingSide: nursingSideSwitcher(for: event),
             setNursingSide: nursingSideSetter(for: event)
         )
+        .padding(.vertical, 2)
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
