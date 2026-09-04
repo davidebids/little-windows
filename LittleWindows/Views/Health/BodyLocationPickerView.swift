@@ -74,6 +74,12 @@ struct BodyLocationEditorButton: View {
 }
 
 struct BodyLocationPickerView: View {
+    private enum VisualizationState {
+        case loading
+        case ready
+        case unavailable
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -93,6 +99,7 @@ struct BodyLocationPickerView: View {
     @State private var showingSelectionLimit = false
     @State private var reorderDropTargetID: UUID?
     @State private var isVisualizationActive = false
+    @State private var visualizationState: VisualizationState = .loading
 
     init(
         profileSex: ProfileSex,
@@ -184,7 +191,13 @@ struct BodyLocationPickerView: View {
                 Text("Remove a location before choosing another one.")
             }
         }
-        .onAppear {
+        .task {
+            visualizationState = .loading
+            // Let SwiftUI commit the sheet before RealityKit creates its Metal
+            // renderer. This keeps the first tap from stalling presentation on
+            // a cold launch while the card shows a lightweight loading state.
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             isVisualizationActive = true
         }
         .onDisappear {
@@ -335,13 +348,21 @@ struct BodyLocationPickerView: View {
                     reduceMotion: reduceMotion,
                     onSelect: { structureID in
                         selectStructure(id: structureID, updateOrientation: false)
+                    },
+                    onInitialLoad: { succeeded in
+                        visualizationState = succeeded ? .ready : .unavailable
                     }
                 )
+                .opacity(visualizationState == .ready ? 1 : 0)
+                .allowsHitTesting(visualizationState == .ready)
                 .accessibilityElement()
                 .accessibilityLabel("Interactive 3D body")
                 .accessibilityHint("Tap a body region, or use the anatomy list below")
                 .accessibilityIdentifier("body-location.visualization")
+                .accessibilityHidden(visualizationState != .ready)
             }
+
+            visualizationStatus
 
             VStack {
                 HStack {
@@ -372,6 +393,30 @@ struct BodyLocationPickerView: View {
         }
         .frame(height: 440)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var visualizationStatus: some View {
+        switch visualizationState {
+        case .loading:
+            VStack(spacing: 10) {
+                ProgressView()
+                    .tint(.white)
+                Text("Preparing 3D body…")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Preparing interactive 3D body")
+        case .unavailable:
+            Label("3D body unavailable", systemImage: "exclamationmark.triangle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .allowsHitTesting(false)
+        case .ready:
+            EmptyView()
+        }
     }
 
     private var scienceBackdrop: some View {

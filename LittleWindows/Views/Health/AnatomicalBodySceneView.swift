@@ -4,6 +4,11 @@ import SwiftUI
 import UIKit
 
 private let anatomySceneScale: Float = 2.55
+private let anatomySelectionCollisionGroup = CollisionGroup(rawValue: 1 << 12)
+private let anatomySelectionCollisionFilter = CollisionFilter(
+    group: anatomySelectionCollisionGroup,
+    mask: .all
+)
 
 private final class AnatomyWeakScrollViewReference {
     weak var value: UIScrollView?
@@ -82,6 +87,7 @@ struct BodyVisualizationView: UIViewRepresentable {
     let resetToken: UUID
     let reduceMotion: Bool
     let onSelect: (String) -> Void
+    let onInitialLoad: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -153,6 +159,9 @@ struct BodyVisualizationView: UIViewRepresentable {
         private var memoryWarningSubscription: Cancellable?
         private var applicationStateSubscription: Cancellable?
         private var performanceStateSubscription: Cancellable?
+        private var assetLoadRequests: Set<AnyCancellable> = []
+        private var pendingSurfaceAssetName: String?
+        private var pendingGhostAssetName: String?
         private var interactionRoot = Entity()
         private var breathingRoot = Entity()
         private var selectionProxyRoot = Entity()
@@ -213,6 +222,8 @@ struct BodyVisualizationView: UIViewRepresentable {
         private var isApplicationActive = true
         private var isPerformanceConstrained = false
         private var isMemoryConstrained = false
+        private var didReportInitialLoad = false
+        private let selectionFeedbackGenerator = UISelectionFeedbackGenerator()
 
         init(parent: BodyVisualizationView) {
             self.parent = parent
@@ -233,6 +244,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             view.addGestureRecognizer(tap)
             view.addGestureRecognizer(pan)
             view.addGestureRecognizer(pinch)
+            selectionFeedbackGenerator.prepare()
             rebuildScene(in: view)
             synchronize(in: view)
             DispatchQueue.main.async { [weak self, weak view] in
@@ -253,6 +265,12 @@ struct BodyVisualizationView: UIViewRepresentable {
             applicationStateSubscription = nil
             performanceStateSubscription?.cancel()
             performanceStateSubscription = nil
+            for request in assetLoadRequests {
+                request.cancel()
+            }
+            assetLoadRequests.removeAll()
+            pendingSurfaceAssetName = nil
+            pendingGhostAssetName = nil
         }
 
         func releaseSceneResources() {
@@ -347,6 +365,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             currentReduceMotion = nil
             configuredAnimationFrameRate = 0
             isMemoryConstrained = false
+            didReportInitialLoad = false
             prioritizedScrollViews.removeAll()
             prioritizedAncestorPanGestures.removeAll()
             modelTapGestureRecognizer = nil
@@ -375,10 +394,17 @@ struct BodyVisualizationView: UIViewRepresentable {
                 updateRegionVisibility()
                 updateMaterials()
                 updateSelectionMarkers()
+                if parent.activeLayer != .bodyAreas {
+                    prepareSelectionResources()
+                    reportInitialLoad(succeeded: true)
+                }
             }
             if currentSelectionIDs != parent.selectedStructureIDs {
+                let changedStructureIDs = currentSelectionIDs.symmetricDifference(
+                    parent.selectedStructureIDs
+                )
                 currentSelectionIDs = parent.selectedStructureIDs
-                updateMaterials()
+                updateMaterials(for: changedStructureIDs)
                 updateSelectionMarkers()
             }
             if currentOrientation != parent.orientation {
@@ -568,7 +594,11 @@ struct BodyVisualizationView: UIViewRepresentable {
         @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended, let view = arView else { return }
             let location = recognizer.location(in: view)
-            let hits = view.hitTest(location).enumerated().sorted { lhs, rhs in
+            let hits = view.hitTest(
+                location,
+                query: .all,
+                mask: anatomySelectionCollisionGroup
+            ).enumerated().sorted { lhs, rhs in
                 if parent.activeLayer == .organs {
                     // Organ proxies are inexpensive boxes and can overlap even
                     // where both rendered organs remain visible. Resolve those
@@ -627,7 +657,8 @@ struct BodyVisualizationView: UIViewRepresentable {
                     for: structureID,
                     rawHitPosition: localPosition
                 )
-                UISelectionFeedbackGenerator().selectionChanged()
+                selectionFeedbackGenerator.selectionChanged()
+                selectionFeedbackGenerator.prepare()
                 parent.onSelect(structureID)
                 return
             }
@@ -913,6 +944,7 @@ struct BodyVisualizationView: UIViewRepresentable {
             sphereMeshes = [:]
             configuredAnimationFrameRate = 0
             isMemoryConstrained = false
+            didReportInitialLoad = false
 
             currentVariant = parent.variant
             currentLayer = nil
@@ -1016,24 +1048,53 @@ struct BodyVisualizationView: UIViewRepresentable {
             updateMaterials()
             updateSelectionMarkers()
             applyInteractionTransform(animated: false)
+            if parent.activeLayer != .bodyAreas {
+                prepareSelectionResources()
+                reportInitialLoad(succeeded: true)
+            }
         }
 
         private func ensureSurfaceLoaded() {
-            guard surfaceRoot.children.isEmpty else { return }
+            guard surfaceRoot.children.isEmpty,
+                  pendingSurfaceAssetName == nil else { return }
             let fileNames = AnatomyAssetCatalog.skinFileNames(for: parent.variant)
-            guard let loaded = loadEntity(fileNames.surface) else { return }
-            loaded.name = "system:skin"
-            setMaterial(AnatomyMaterial.skin(selected: false), on: loaded)
-            surfaceRoot.addChild(loaded)
+            let requestedVariant = parent.variant
+            pendingSurfaceAssetName = fileNames.surface
+            loadEntityAsync(fileNames.surface) { [weak self] loaded in
+                guard let self else { return }
+                self.pendingSurfaceAssetName = nil
+                guard self.currentVariant == requestedVariant,
+                      let loaded else {
+                    if self.parent.activeLayer == .bodyAreas {
+                        self.reportInitialLoad(succeeded: false)
+                    }
+                    return
+                }
+                loaded.name = "system:skin"
+                self.setMaterial(AnatomyMaterial.skin(selected: false), on: loaded)
+                self.surfaceRoot.addChild(loaded)
+                if self.parent.activeLayer == .bodyAreas {
+                    self.prepareSelectionResources()
+                    self.reportInitialLoad(succeeded: true)
+                }
+            }
         }
 
         private func ensureGhostLoaded() {
-            guard ghostRoot.children.isEmpty else { return }
+            guard ghostRoot.children.isEmpty,
+                  pendingGhostAssetName == nil else { return }
             let fileNames = AnatomyAssetCatalog.skinFileNames(for: parent.variant)
-            guard let ghost = loadEntity(fileNames.ghost) else { return }
-            ghost.name = "system:ghost"
-            setMaterial(AnatomyMaterial.ghostSkin(opacity: 0.095), on: ghost)
-            ghostRoot.addChild(ghost)
+            let requestedVariant = parent.variant
+            pendingGhostAssetName = fileNames.ghost
+            loadEntityAsync(fileNames.ghost) { [weak self] ghost in
+                guard let self else { return }
+                self.pendingGhostAssetName = nil
+                guard self.currentVariant == requestedVariant,
+                      let ghost else { return }
+                ghost.name = "system:ghost"
+                self.setMaterial(AnatomyMaterial.ghostSkin(opacity: 0.095), on: ghost)
+                self.ghostRoot.addChild(ghost)
+            }
         }
 
         private func ensureLayerLoaded(_ layer: BodyAnatomyLayer) {
@@ -1269,13 +1330,15 @@ struct BodyVisualizationView: UIViewRepresentable {
             guard isShowingFootDetail else { return }
             let proxy = Entity()
             proxy.name = "system:foot-selection-proxy"
-            proxy.components.set(CollisionComponent(shapes: FootDetailStructureMapper
-                .selectionProxyShapes(
+            proxy.components.set(CollisionComponent(
+                shapes: FootDetailStructureMapper.selectionProxyShapes(
                     focus: parent.footDetailFocus,
                     variant: parent.variant,
                     soleView: parent.orientation == .back,
                     includesToeRegion: parent.orientation != .back
-                )))
+                ),
+                filter: anatomySelectionCollisionFilter
+            ))
             footDetailSelectionProxyRoot.addChild(proxy)
 
             guard parent.orientation == .back else { return }
@@ -1285,7 +1348,10 @@ struct BodyVisualizationView: UIViewRepresentable {
             ) {
                 let toeProxy = Entity()
                 toeProxy.name = "system:foot-toe:\(toe.id)"
-                toeProxy.components.set(CollisionComponent(shapes: [toe.shape]))
+                toeProxy.components.set(CollisionComponent(
+                    shapes: [toe.shape],
+                    filter: anatomySelectionCollisionFilter
+                ))
                 footDetailSelectionProxyRoot.addChild(toeProxy)
             }
         }
@@ -1377,7 +1443,10 @@ struct BodyVisualizationView: UIViewRepresentable {
 
             let proxy = Entity()
             proxy.name = "system:hand-selection-proxy"
-            proxy.components.set(CollisionComponent(shapes: shapes))
+            proxy.components.set(CollisionComponent(
+                shapes: shapes,
+                filter: anatomySelectionCollisionFilter
+            ))
             handDetailSelectionProxyRoot.addChild(proxy)
         }
 
@@ -1677,7 +1746,10 @@ struct BodyVisualizationView: UIViewRepresentable {
             guard !shapes.isEmpty else { return }
             let entity = Entity()
             entity.name = name
-            entity.components.set(CollisionComponent(shapes: shapes))
+            entity.components.set(CollisionComponent(
+                shapes: shapes,
+                filter: anatomySelectionCollisionFilter
+            ))
             selectionZonesByEntity[ObjectIdentifier(entity)] = zone
             selectionProxyRoot.addChild(entity)
         }
@@ -1748,9 +1820,10 @@ struct BodyVisualizationView: UIViewRepresentable {
             let proxy = Entity()
             proxy.name = "anatomy:\(structureID)"
             proxy.position = bounds.center
-            proxy.components.set(CollisionComponent(shapes: [
-                .generateBox(size: size)
-            ]))
+            proxy.components.set(CollisionComponent(
+                shapes: [.generateBox(size: size)],
+                filter: anatomySelectionCollisionFilter
+            ))
             organSelectionProxyRoot.addChild(proxy)
         }
 
@@ -2155,6 +2228,53 @@ struct BodyVisualizationView: UIViewRepresentable {
             return entity
         }
 
+        private func loadEntityAsync(
+            _ fileName: String,
+            completion: @escaping (Entity?) -> Void
+        ) {
+            guard let url = Bundle.main.url(
+                forResource: fileName,
+                withExtension: "usdc",
+                subdirectory: "BodyAnatomy"
+            ) else {
+                completion(nil)
+                return
+            }
+
+            let request = ModelEntity.loadModelAsync(contentsOf: url)
+                .map { $0 as Entity }
+                .catch { _ in
+                    Entity.loadAsync(contentsOf: url)
+                }
+                .receive(on: DispatchQueue.main)
+                .sink { result in
+                    if case .failure = result {
+                        completion(nil)
+                    }
+                } receiveValue: { entity in
+                    entity.scale = SIMD3(repeating: anatomySceneScale)
+                    completion(entity)
+                }
+            assetLoadRequests.insert(request)
+        }
+
+        private func prepareSelectionResources() {
+            // Mesh generation and haptic-engine startup are both surprisingly
+            // visible when paid on the first body tap. Pay those one-time costs
+            // while the loading indicator is still present instead.
+            _ = sphereMesh(radius: 0.022)
+            _ = sphereMesh(radius: 0.044)
+            selectionFeedbackGenerator.prepare()
+        }
+
+        private func reportInitialLoad(succeeded: Bool) {
+            guard !didReportInitialLoad else { return }
+            didReportInitialLoad = true
+            DispatchQueue.main.async { [weak self] in
+                self?.parent.onInitialLoad(succeeded)
+            }
+        }
+
         private func setMaterial(_ material: any RealityKit.Material, on entity: Entity) {
             if var component = entity.components[ModelComponent.self] {
                 component.materials = Array(
@@ -2285,8 +2405,10 @@ struct BodyVisualizationView: UIViewRepresentable {
             }
         }
 
-        private func updateMaterials() {
-            for (structureID, entities) in entitiesByStructureID {
+        private func updateMaterials(for structureIDs: Set<String>? = nil) {
+            let identifiers = structureIDs ?? Set(entitiesByStructureID.keys)
+            for structureID in identifiers {
+                guard let entities = entitiesByStructureID[structureID] else { continue }
                 guard let specification = specificationsByStructureID[structureID] else { continue }
                 let selected = parent.selectedStructureIDs.contains(structureID)
                 let material = AnatomyMaterial.material(for: specification, selected: selected)
