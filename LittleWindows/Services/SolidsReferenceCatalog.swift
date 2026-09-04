@@ -3003,8 +3003,11 @@ enum SolidsSourceLibrary {
     static let espghanSugarPosition = URL(string: "https://doi.org/10.1097/MPG.0000000000001733")!
     static let aapStartingSolids = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/Starting-Solid-Foods.aspx")!
     static let aapInfantConstipation = URL(string: "https://www.healthychildren.org/english/ages-stages/baby/diapers-clothing/pages/infant-constipation.aspx")!
+    static let aapInfantAbdominalPain = URL(string: "https://www.healthychildren.org/English/health-issues/conditions/abdominal/Pages/Abdominal-Pains-in-Infants.aspx")!
+    static let aapConstipationSymptomChecker = URL(string: "https://www.healthychildren.org/English/tips-tools/symptom-checker/Pages/symptomviewer.aspx?symptom=Constipation")!
     static let aapInfantBowelMovements = URL(string: "https://www.healthychildren.org/English/ages-stages/baby/Pages/babys-first-days-bowel-movements-and-urination.aspx")!
     static let aapInfantDrinks = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/Recommended-Drinks-for-Young-Children-Ages-0-5.aspx")!
+    static let cdcFoodsToAvoid = URL(string: "https://www.cdc.gov/infant-toddler-nutrition/foods-and-drinks/foods-and-drinks-to-avoid-or-limit.html")!
     static let niddkChildConstipationEating = URL(string: "https://www.niddk.nih.gov/health-information/digestive-diseases/constipation-children/eating-diet-nutrition")!
     static let niddkChildConstipationSymptoms = URL(string: "https://www.niddk.nih.gov/health-information/digestive-diseases/constipation-children/symptoms-causes")!
     static let aapAllergenIntroduction = URL(string: "https://www.healthychildren.org/English/healthy-living/nutrition/Pages/when-to-introduce-egg-peanut-butter-and-other-common-food-allergens-to-your-baby-food-allergy-prevention-tips.aspx")!
@@ -3020,8 +3023,11 @@ enum SolidsSourceLibrary {
         if url == aapFruitJuice { return "AAP — Fruit juice guidance" }
         if url == aapStartingSolids { return "AAP — Starting solids and portions" }
         if url == aapInfantConstipation { return "AAP — Infant constipation" }
+        if url == aapInfantAbdominalPain { return "AAP — Infant abdominal pain and constipation" }
+        if url == aapConstipationSymptomChecker { return "AAP — Constipation care guidance" }
         if url == aapInfantBowelMovements { return "AAP — Infant bowel movements" }
         if url == aapInfantDrinks { return "AAP — Drinks for babies and young children" }
+        if url == cdcFoodsToAvoid { return "CDC — Foods and drinks to avoid or limit" }
         if url == niddkChildConstipationEating { return "NIDDK — Eating and constipation" }
         if url == niddkChildConstipationSymptoms { return "NIDDK — Constipation signs and care" }
         if url == aapAllergenIntroduction { return "AAP — Allergen introduction guidance" }

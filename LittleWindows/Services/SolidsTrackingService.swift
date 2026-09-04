@@ -2639,56 +2639,251 @@ enum SolidsDigestiveSupportService {
         for food: SolidsReferenceFood,
         ageMonths: Int
     ) -> SolidsDigestiveFoodGuidance {
-        let stage: String
-        switch ageMonths {
-        case ..<6: stage = "At \(ageMonths) months"
-        case 6..<9: stage = "At 6–8 months"
-        case 9...12: stage = "At 9–12 months"
-        default: stage = "At \(ageMonths) months"
+        guard let reference = SolidsNutritionCatalog.reference(foodID: food.id),
+              let fiber = reference.nutrients.fiberGrams else {
+            return SolidsDigestiveFoodGuidance(
+                note: "No food-specific fiber match is available for \(food.name). Use the overall feeding pattern rather than assigning a digestive effect to this food.",
+                caution: nil,
+                sourceURLs: [
+                    SolidsSourceLibrary.cdcFoodsToEncourage,
+                    SolidsSourceLibrary.niddkChildConstipationEating
+                ]
+            )
         }
-        let base: String
-        switch food.category {
-        case .fruit, .vegetable, .beanAndPlantProtein:
-            base = "\(stage), this can contribute variety and naturally occurring fiber. Offer an age-safe texture and keep breast milk or formula as the main drink."
-        case .grain:
-            base = "\(stage), grains can be part of a varied pattern. Rotate grain types and pair them with fruit, vegetables, beans, or another iron-rich food when practical."
-        case .meat, .seafood, .egg:
-            base = "\(stage), this can add protein and important nutrients. Balance it across the week with age-safe fruits, vegetables, beans, and grains."
-        case .dairy:
-            base = "\(stage), this food can add energy and nutrients, but it should complement—not replace—breast milk or formula and a varied set of solid foods."
-        case .nutAndSeed:
-            base = "\(stage), serve this only in the age-safe form shown here. Pair it with other food groups over time rather than relying on one repeated combination."
-        case .herbAndFlavor:
-            base = "\(stage), use this to build flavor variety in an age-safe preparation; it does not replace the fruits, vegetables, grains, proteins, and iron-rich foods in a balanced pattern."
-        case .preparedFood:
-            base = "\(stage), review the ingredients and use this within a varied pattern. Individual stool responses differ, so look at the overall pattern instead of blaming one food automatically."
-        }
-        let generalWarning = generalFoodWarning(ageMonths: ageMonths)
 
-        let caution: String?
-        switch food.id {
-        case "banana":
-            caution = "Possible digestive effect: underripe banana may contribute to hard stools for some babies. Choose fully ripe, soft banana and consider pausing it while hard stools are present if the pattern seems connected."
-        case "infant-rice-cereal", "rice-cereal":
-            caution = "Possible digestive effect: rice cereal may contribute to constipation for some babies. If hard stools appear, ask the child's clinician whether rotating to oatmeal or barley cereal makes sense."
-        default:
-            caution = nil
+        let isProxy = reference.sourceDescription.hasPrefix("Representative USDA estimate")
+        let matchedDescription = conciseUSDADescription(
+            reference.sourceDescription,
+            isProxy: isProxy
+        )
+        let formattedFiber = formatFiber(fiber)
+        let matchStatement = isProxy
+            ? "For \(food.name), the catalog uses “\(matchedDescription)” as a USDA proxy (FDC \(reference.sourceID)); the nutrient value is an estimate for this food."
+            : "\(food.name) is matched to the USDA entry “\(matchedDescription)” (FDC \(reference.sourceID))."
+        let fiberStatement = "That matched form contains \(formattedFiber) g dietary fiber per 100 g. A baby portion is usually much smaller."
+        let context = evidenceContext(
+            for: food,
+            fiberGramsPer100: fiber,
+            ageMonths: ageMonths
+        )
+        let stoolEffect = possibleStoolEffect(
+            for: food,
+            fiberGramsPer100: fiber
+        )
+        let caution = constipationCaution(
+            for: food,
+            fiberGramsPer100: fiber,
+            ageMonths: ageMonths
+        )
+
+        var sources = [
+            SolidsSourceLibrary.foodDataCentral,
+            SolidsSourceLibrary.niddkChildConstipationEating
+        ]
+        sources.append(contentsOf: evidenceSourceURLs(for: food))
+        if food.id == "honey" {
+            sources.append(SolidsSourceLibrary.cdcFoodsToAvoid)
+        }
+        if caution != nil {
+            sources.append(SolidsSourceLibrary.aapConstipationSymptomChecker)
         }
 
         return SolidsDigestiveFoodGuidance(
-            note: "\(base) \(generalWarning)",
+            note: [
+                "\(matchStatement) \(fiberStatement)",
+                "\(ageContext(ageMonths: ageMonths)) \(context)",
+                stoolEffect
+            ].joined(separator: "\n\n"),
             caution: caution,
-            sourceURLs: caution == nil
-                ? [SolidsSourceLibrary.cdcFoodsToEncourage, SolidsSourceLibrary.niddkChildConstipationEating]
-                : [SolidsSourceLibrary.aapInfantBowelMovements, SolidsSourceLibrary.aapInfantConstipation]
+            sourceURLs: orderedUniqueURLs(sources)
         )
     }
 
-    static func generalFoodWarning(ageMonths: Int) -> String {
-        if ageMonths < 6 {
-            return "Before 6 months, if solids have already started based on readiness and clinician guidance, possible digestive effects can include stool changes, including constipation. A change after one food does not prove that food caused it."
+    /// Foods explicitly named in AAP infant constipation guidance. Other foods
+    /// stay evidence-neutral even when their USDA match contains substantial fiber.
+    private static let aapNamedInfantFiberFoods: Set<String> = [
+        "apricot", "avocado", "chia-seed", "flaxseed", "kiwi", "peach", "pear",
+        "pineapple", "plum", "prune"
+    ]
+
+    /// Exact foods or age-safe forms of groups named in NIDDK's fiber examples.
+    private static let niddkNamedFiberFoods: Set<String> = [
+        "almond", "almond-butter", "broccoli", "carrot", "collard-greens", "oat-bran",
+        "oatmeal", "orange", "peanut", "peanut-butter", "pecan", "pecan-butter",
+        "whole-grain-pasta", "whole-wheat-bread", "whole-wheat-toast"
+    ]
+
+    private static let milkAndCheeseFoods: Set<String> = [
+        "buttermilk-in-food", "cheddar-cheese", "colby-cheese", "cottage-cheese",
+        "cream-cheese", "feta-cheese", "fontina-cheese", "goat-cheese", "gouda-cheese",
+        "gruyere-cheese", "havarti-cheese", "mascarpone", "monterey-jack-cheese",
+        "mozzarella-cheese", "paneer", "parmesan-cheese", "pasteurized-milk-in-food",
+        "provolone-cheese", "queso-fresco", "ricotta", "romano-cheese", "swiss-cheese"
+    ]
+
+    private static func evidenceContext(
+        for food: SolidsReferenceFood,
+        fiberGramsPer100 fiber: Double,
+        ageMonths: Int
+    ) -> String {
+        switch food.id {
+        case "apple":
+            return "NIDDK names apples with skin as a fiber source; for this age, cook or grate apple into the safe form shown rather than offering a hard raw piece."
+        case "applesauce":
+            let appleFiber = SolidsNutritionCatalog.reference(foodID: "apple")?.nutrients.fiberGrams ?? 2.4
+            return "This unsweetened applesauce match has \(formatFiber(fiber)) g fiber per 100 g, compared with \(formatFiber(appleFiber)) g in the catalog’s raw apple-with-skin match. These are different USDA food forms, so the raw-apple value should not be assigned to applesauce."
+        case "banana":
+            return "The sources used here do not support treating banana as an automatic constipation trigger. Its measured fiber belongs in the whole-diet picture, while preparation, portion, and individual response can differ."
+        case "infant-rice-cereal":
+            let oatmealFiber = SolidsNutritionCatalog.reference(foodID: "infant-oatmeal")?.nutrients.fiberGrams ?? 7.3
+            let barleyFiber = SolidsNutritionCatalog.reference(foodID: "infant-barley-cereal")?.nutrients.fiberGrams ?? 6.6
+            return "The dry rice-cereal match has \(formatFiber(fiber)) g fiber per 100 g, versus \(formatFiber(oatmealFiber)) g for dry infant oatmeal and \(formatFiber(barleyFiber)) g for dry infant barley cereal. CDC recommends rotating infant cereals rather than serving only rice cereal; that recommendation is primarily about arsenic exposure, not proof that rice cereal causes constipation."
+        case "honey" where ageMonths < 12:
+            return "Honey is not an age-appropriate constipation option before 12 months because CDC advises avoiding it due to infant botulism risk."
+        default:
+            break
         }
-        return "At \(ageMonths) months, possible digestive effects while introducing solids can include stool changes, including constipation. A change after one food does not prove that food caused it."
+
+        if isBeanLentilOrPea(food) {
+            return "\(food.name) is a bean, lentil, or pea food. AAP and NIDDK include these groups among fiber-containing options when hard stools are present, prepared in an age-safe texture."
+        }
+        if aapNamedInfantFiberFoods.contains(food.id) {
+            return "AAP specifically includes \(food.name.lowercased()) among fiber-containing foods to consider once a baby is eating solids and has hard stools. It is still one option within a varied pattern, not a stand-alone treatment."
+        }
+        if isBerry(food) {
+            return "NIDDK lists berries among fiber sources. For \(food.name), the exact value above applies to its named USDA form; crush, cook, or cut it as the preparation guidance requires."
+        }
+        if niddkNamedFiberFoods.contains(food.id) {
+            return "NIDDK names this food or its food group among useful fiber sources. For an infant, the preparation and serving size still need to match current eating skills."
+        }
+
+        switch food.category {
+        case .meat, .seafood, .egg:
+            return "The matched \(food.name.lowercased()) form provides no dietary fiber. It can contribute other nutrients, but it does not replace fiber-containing fruits, vegetables, beans, or grains in the logged pattern."
+        case .dairy:
+            return fiber == 0
+                ? "The matched \(food.name.lowercased()) form provides no dietary fiber. Use it alongside—not instead of—a varied set of age-safe solid foods and usual milk feeds."
+                : "The matched \(food.name.lowercased()) form contains some fiber, but recipes and brands may differ; use the exact match and label rather than assuming all dairy foods are alike."
+        case .herbAndFlavor:
+            return "A seasoning amount of \(food.name.lowercased()) is far below 100 g, so its practical fiber contribution will be small even when the per-100-g number looks high. Use it for flavor variety, not as constipation support."
+        case .preparedFood:
+            return "\(food.name) is a composite food. Its actual fiber changes with the recipe, brand, and proportions, so the value above applies only to the named USDA match—not every version of this dish."
+        case .nutAndSeed:
+            return "Nuts and seeds can contain fiber, but a baby-safe thin, finely ground, or mixed-in portion is far smaller than 100 g. Follow the preparation and allergen guidance rather than using the reference value as a serving target."
+        case .fruit, .vegetable, .beanAndPlantProtein, .grain:
+            if fiber == 0 {
+                return "This matched form adds no dietary fiber. Pairing it over time with age-safe fiber-containing foods gives a more varied pattern."
+            }
+            return "This matched form contributes dietary fiber, but the pediatric sources reviewed do not identify this exact food as a proven constipation treatment or trigger in infants."
+        }
+    }
+
+    private static func possibleStoolEffect(
+        for food: SolidsReferenceFood,
+        fiberGramsPer100 fiber: Double
+    ) -> String {
+        let opening = "Possible stool effect for \(food.name):"
+        if aapNamedInfantFiberFoods.contains(food.id) || isBeanLentilOrPea(food) {
+            return "\(opening) its fiber may help broaden a low-fiber pattern when hard stools are present, but response varies and a single serving does not diagnose or treat constipation."
+        }
+        if fiber == 0 {
+            return "\(opening) it adds no fiber in this matched form. If it repeatedly crowds out fiber-containing foods, the overall pattern may be less supportive of soft stools when constipation is present; one serving does not prove a cause."
+        }
+        return "\(opening) firmer or looser stools—including constipation—can coincide with introducing any solid. Track repeated timing and the full diet rather than assuming this food caused one change."
+    }
+
+    private static func constipationCaution(
+        for food: SolidsReferenceFood,
+        fiberGramsPer100 fiber: Double,
+        ageMonths: Int
+    ) -> String? {
+        guard milkAndCheeseFoods.contains(food.id) else { return nil }
+        let feedingContext = ageMonths < 12
+            ? "Before 12 months, dairy foods should complement—not replace—breast milk or formula."
+            : "Keep portions within a varied diet."
+        return "AAP notes that high amounts of milk and cheese can contribute to constipation. \(food.name)’s USDA match contains \(formatFiber(fiber)) g fiber per 100 g. \(feedingContext)"
+    }
+
+    private static func evidenceSourceURLs(for food: SolidsReferenceFood) -> [URL] {
+        if aapNamedInfantFiberFoods.contains(food.id) || isBeanLentilOrPea(food) {
+            return [
+                SolidsSourceLibrary.aapInfantAbdominalPain,
+                SolidsSourceLibrary.aapConstipationSymptomChecker
+            ]
+        }
+        if food.id == "apple" || isBerry(food) || niddkNamedFiberFoods.contains(food.id) {
+            return []
+        }
+        if food.id == "infant-rice-cereal" {
+            return [SolidsSourceLibrary.cdcIntroduction]
+        }
+        return []
+    }
+
+    private static func isBeanLentilOrPea(_ food: SolidsReferenceFood) -> Bool {
+        if food.category == .vegetable {
+            return food.id == "pea"
+        }
+        guard food.category == .beanAndPlantProtein, !food.id.contains("sprout") else { return false }
+        let id = food.id
+        if id == "pea" || id == "green-pea" || id == "split-pea"
+            || id == "yellow-split-pea" || id == "black-eyed-pea" || id == "pigeon-pea" {
+            return true
+        }
+        return id.contains("bean") || id.contains("lentil") || id == "chickpea"
+            || id == "garbanzo-bean"
+    }
+
+    private static func isBerry(_ food: SolidsReferenceFood) -> Bool {
+        food.name.localizedCaseInsensitiveContains("berry")
+            || food.id == "cranberry"
+            || food.id == "currant"
+            || food.id == "redcurrant"
+            || food.id == "white-currant"
+            || food.id == "blackcurrant"
+    }
+
+    private static func ageContext(ageMonths: Int) -> String {
+        switch ageMonths {
+        case ..<6:
+            return "Before 6 months, solids should generally wait for developmental readiness and clinician guidance."
+        case 6..<9:
+            return "At 6–8 months, use an age-safe texture and keep breast milk or formula as the main drink. No numeric fiber target is established for infants under 1."
+        case 9...12:
+            return "At 9–12 months, use an age-safe texture and keep breast milk or formula central through 12 months. No numeric fiber target is established for infants under 1."
+        default:
+            return "At \(ageMonths) months, match the preparation to current eating skills and use this food within a varied pattern."
+        }
+    }
+
+    private static func conciseUSDADescription(
+        _ description: String,
+        isProxy: Bool
+    ) -> String {
+        var result = description
+        if isProxy, let separator = result.range(of: ": ") {
+            result = String(result[separator.upperBound...])
+        }
+        if let parenthetical = result.range(of: " (Includes foods for USDA's Food Distribution Program)") {
+            result.removeSubrange(parenthetical)
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func formatFiber(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...2)))
+    }
+
+    private static func orderedUniqueURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<URL>()
+        return urls.filter { seen.insert($0).inserted }
+    }
+
+    static func customFoodWarning(foodName: String, ageMonths: Int) -> String {
+        let timing = ageMonths < 6
+            ? "Before 6 months, solids should generally wait for developmental readiness and clinician guidance."
+            : "At \(ageMonths) months, match the preparation to current eating skills."
+        return "\(foodName) is a custom food, so it has no built-in USDA match or food-specific digestive claim. \(timing) Stool changes—including constipation—can coincide with introducing any solid; use the saved ingredient or nutrition label and look for a repeated pattern rather than assuming this food caused one change."
     }
 
     static func isSupportAvailable(

@@ -3146,7 +3146,10 @@ struct CustomSolidFoodDetailView: View {
                 }
             }
             Section("Digestive notes") {
-                Text(SolidsDigestiveSupportService.generalFoodWarning(ageMonths: ageMonths))
+                Text(SolidsDigestiveSupportService.customFoodWarning(
+                    foodName: food.name,
+                    ageMonths: ageMonths
+                ))
                 Text("Consider the whole feeding pattern and contact the child’s clinician for persistent or concerning symptoms.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

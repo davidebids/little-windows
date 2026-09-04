@@ -32,49 +32,101 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertNil(TodayFeedQuickActionDetail.solidFoodSummary(for: event))
     }
 
-    func testCatalogContainsMoreThanFourHundredUniqueFoods() {
+    func testCatalogContainsAtLeastFiveHundredUniqueFoods() {
         let foods = SolidsReferenceCatalog.foods
-        XCTAssertGreaterThanOrEqual(foods.count, 400)
+        XCTAssertGreaterThanOrEqual(foods.count, 500)
         XCTAssertEqual(Set(foods.map(\.id)).count, foods.count)
         XCTAssertTrue(foods.allSatisfy { !$0.name.isEmpty })
     }
 
-    func testEveryBuiltInFoodHasAgeAwareDigestiveNotes() throws {
-        for summary in SolidsReferenceCatalog.foodSummaries {
-            let food = try XCTUnwrap(SolidsReferenceCatalog.food(id: summary.id))
+    func testEveryBuiltInFoodHasExactFoodSpecificDigestiveNotes() throws {
+        let foods = SolidsReferenceCatalog.foods
+        var notes = Set<String>()
+
+        for food in foods {
+            let reference = try XCTUnwrap(
+                SolidsNutritionCatalog.reference(foodID: food.id),
+                "Missing nutrition match for \(food.name)"
+            )
+            let fiber = try XCTUnwrap(
+                reference.nutrients.fiberGrams,
+                "Missing fiber value for \(food.name)"
+            )
             let guidance = SolidsDigestiveSupportService.foodGuidance(for: food, ageMonths: 8)
             XCTAssertFalse(guidance.note.isEmpty, food.name)
             XCTAssertTrue(
                 guidance.note.localizedCaseInsensitiveContains("constipation"),
-                "Every food detail should carry the age-aware general digestive warning: \(food.name)"
+                "Every food detail should explain possible stool changes: \(food.name)"
+            )
+            XCTAssertTrue(guidance.note.contains(food.name), "Food name missing: \(food.name)")
+            XCTAssertTrue(guidance.note.contains("FDC \(reference.sourceID)"), "FDC ID missing: \(food.name)")
+            XCTAssertTrue(
+                guidance.note.contains(
+                    "\(fiber.formatted(.number.precision(.fractionLength(0...2)))) g dietary fiber per 100 g"
+                ),
+                "Exact fiber value missing: \(food.name)"
+            )
+            XCTAssertTrue(
+                guidance.sourceURLs.contains(SolidsSourceLibrary.foodDataCentral),
+                "USDA source missing: \(food.name)"
             )
             XCTAssertFalse(guidance.sourceURLs.isEmpty, food.name)
+            XCTAssertTrue(notes.insert(guidance.note).inserted, "Duplicate note: \(food.name)")
         }
+        XCTAssertEqual(notes.count, foods.count)
 
         let banana = try XCTUnwrap(SolidsReferenceCatalog.food(id: "banana"))
         let bananaGuidance = SolidsDigestiveSupportService.foodGuidance(for: banana, ageMonths: 7)
-        XCTAssertTrue(bananaGuidance.caution?.localizedCaseInsensitiveContains("underripe") == true)
-        XCTAssertTrue(bananaGuidance.caution?.localizedCaseInsensitiveContains("hard stools") == true)
+        XCTAssertNil(bananaGuidance.caution)
+        XCTAssertTrue(bananaGuidance.note.contains("2.6 g dietary fiber per 100 g"))
+        XCTAssertTrue(bananaGuidance.note.contains("automatic constipation trigger"))
 
         let applesauce = try XCTUnwrap(SolidsReferenceCatalog.food(id: "applesauce"))
         XCTAssertNil(
             SolidsDigestiveSupportService.foodGuidance(for: applesauce, ageMonths: 7).caution,
             "Applesauce should not receive a food-specific constipation claim without direct support."
         )
+        let applesauceGuidance = SolidsDigestiveSupportService.foodGuidance(
+            for: applesauce,
+            ageMonths: 7
+        )
+        XCTAssertTrue(applesauceGuidance.note.contains("1.1 g dietary fiber per 100 g"))
+        XCTAssertTrue(applesauceGuidance.note.contains("2.4 g in the catalog’s raw apple-with-skin match"))
+
         let riceCereal = try XCTUnwrap(
             SolidsReferenceCatalog.food(id: "infant-rice-cereal")
         )
-        XCTAssertTrue(
-            SolidsDigestiveSupportService.foodGuidance(for: riceCereal, ageMonths: 7)
-                .caution?.localizedCaseInsensitiveContains("constipation") == true
+        let riceGuidance = SolidsDigestiveSupportService.foodGuidance(
+            for: riceCereal,
+            ageMonths: 7
         )
+        XCTAssertNil(riceGuidance.caution)
+        XCTAssertTrue(riceGuidance.note.contains("1.3 g fiber per 100 g"))
+        XCTAssertTrue(riceGuidance.note.contains("7.3 g for dry infant oatmeal"))
+        XCTAssertTrue(riceGuidance.note.contains("not proof that rice cereal causes constipation"))
+
+        let cheddar = try XCTUnwrap(SolidsReferenceCatalog.food(id: "cheddar-cheese"))
+        let cheddarGuidance = SolidsDigestiveSupportService.foodGuidance(
+            for: cheddar,
+            ageMonths: 8
+        )
+        XCTAssertTrue(cheddarGuidance.caution?.contains("high amounts of milk and cheese") == true)
+
+        let huckleberry = try XCTUnwrap(SolidsReferenceCatalog.food(id: "huckleberry"))
+        XCTAssertTrue(
+            SolidsDigestiveSupportService.foodGuidance(for: huckleberry, ageMonths: 8)
+                .note.contains("as a USDA proxy")
+        )
+
+        let cinnamon = try XCTUnwrap(SolidsReferenceCatalog.food(id: "cinnamon"))
+        XCTAssertTrue(
+            SolidsDigestiveSupportService.foodGuidance(for: cinnamon, ageMonths: 8)
+                .note.contains("seasoning amount")
+        )
+
         XCTAssertTrue(
             SolidsDigestiveSupportService.foodGuidance(for: applesauce, ageMonths: 18)
                 .note.contains("At 18 months")
-        )
-        XCTAssertTrue(
-            SolidsDigestiveSupportService.generalFoodWarning(ageMonths: 7)
-                .contains("At 7 months")
         )
         XCTAssertTrue(
             SolidsDigestiveSupportService.foodGuidance(for: banana, ageMonths: 5)
@@ -153,8 +205,11 @@ final class SolidsFeatureTests: XCTestCase {
             now: now,
             calendar: calendar
         )
+        XCTAssertFalse(activeConcern.opportunities.contains {
+            $0.id == "digestive-caution-banana"
+        })
         XCTAssertTrue(activeConcern.opportunities.contains {
-            $0.id == "digestive-caution-banana" && $0.detail.contains("underripe")
+            $0.id == "digestive-support-options"
         })
 
         let olderAssessment = SolidsDigestiveSupportService.assessment(
