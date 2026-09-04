@@ -2225,42 +2225,121 @@ struct SolidsDigestiveSupportView: View {
     @ViewBuilder
     private func suggestionsSection(_ assessment: SolidsBalanceAssessment) -> some View {
         if !assessment.suggestedFoodIDs.isEmpty || !assessment.suggestedRecipeIDs.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Ideas for the next meals")
                     .font(.headline)
-                Text("Open a food to see age-safe preparation, recipes, and the existing shopping-list actions.")
+                Text("Foods and recipes are listed separately. Open a food for preparation and shopping, or a recipe for full instructions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ForEach(assessment.suggestedFoodIDs, id: \.self) { foodID in
-                    if let food = SolidsReferenceCatalog.food(id: foodID) {
-                        Button { openFood(food.id) } label: {
-                            HStack {
-                                Text(food.visualEmoji)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(food.name).foregroundStyle(.primary)
-                                    Text(food.category.displayName).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                            }
-                            .padding(12)
-                            .appSurface(cornerRadius: 15)
+
+                if !assessment.suggestedFoodIDs.isEmpty {
+                    suggestionGroupHeader(
+                        "Individual foods",
+                        detail: "Preparation guidance and shopping-list actions",
+                        systemImage: "carrot.fill",
+                        tint: .green
+                    )
+                    ForEach(assessment.suggestedFoodIDs, id: \.self) { foodID in
+                        if let food = SolidsReferenceCatalog.food(id: foodID) {
+                            foodSuggestionRow(food)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                ForEach(assessment.suggestedRecipeIDs, id: \.self) { recipeID in
-                    if let recipe = SolidsReferenceCatalog.recipe(id: recipeID) {
-                        Button { openRecipe(recipe.id) } label: {
-                            Label(recipe.title, systemImage: "fork.knife")
-                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !assessment.suggestedRecipeIDs.isEmpty {
+                    suggestionGroupHeader(
+                        "Recipe ideas",
+                        detail: "Complete meal ideas using suggested foods",
+                        systemImage: "fork.knife",
+                        tint: .orange
+                    )
+                    .padding(.top, 4)
+                    ForEach(assessment.suggestedRecipeIDs, id: \.self) { recipeID in
+                        if let recipe = SolidsReferenceCatalog.recipe(id: recipeID) {
+                            recipeSuggestionRow(recipe)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.orange)
                     }
                 }
             }
         }
+    }
+
+    private func suggestionGroupHeader(
+        _ title: String,
+        detail: String,
+        systemImage: String,
+        tint: Color
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func foodSuggestionRow(_ food: SolidsReferenceFood) -> some View {
+        Button { openFood(food.id) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: food.category.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .frame(width: 36, height: 36)
+                    .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(food.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("Food • \(food.category.displayName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .appSurface(cornerRadius: 15)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func recipeSuggestionRow(_ recipe: SolidsReferenceRecipe) -> some View {
+        Button { openRecipe(recipe.id) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "fork.knife")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 36, height: 36)
+                    .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recipe.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    Text("Recipe • \(recipe.minimumAgeMonths)+ months")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .appSurface(cornerRadius: 15)
+        }
+        .buttonStyle(.plain)
     }
 
     private var practicalGuidance: some View {
