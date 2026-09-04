@@ -180,6 +180,37 @@ struct SolidsHomeView: View {
         let digestiveNeedsAttention = digestiveAssessment.activeConcern != nil
             || digestiveAssessment.shouldSurfaceProactively
         return VStack(alignment: .leading, spacing: 16) {
+            if digestiveNeedsAttention {
+                Button { open(.solidsDigestive) } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: digestiveAssessment.activeConcern == nil
+                            ? "leaf.circle.fill"
+                            : "cross.case.fill")
+                            .font(.title3)
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(digestiveAssessment.activeConcern == nil
+                                ? "A feeding pattern to review"
+                                : "Digestive concern is active")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(digestiveAssessment.activeConcern == nil
+                                ? "See gentle ideas for broadening the foods logged this week."
+                                : "Review comfort, safety signs, and follow-up suggestions.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(14)
+                    .appSurface(cornerRadius: 17)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("solids.digestive.proactive")
+            }
+
             HStack(spacing: 10) {
                 metric(
                     value: "\(visibleProgress.lazy.filter { $0.status == .tried }.count)",
@@ -214,18 +245,6 @@ struct SolidsHomeView: View {
             Text("Explore")
                 .font(.headline)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                if showsDigestiveSupport && digestiveNeedsAttention {
-                    destinationCard(
-                        "Feeding balance",
-                        digestiveAssessment.activeConcern == nil
-                            ? "Pattern ready to review"
-                            : "Concern active · Review now",
-                        digestiveAssessment.activeConcern == nil
-                            ? "leaf.circle.fill"
-                            : "cross.case.fill",
-                        .solidsDigestive
-                    )
-                }
                 destinationCard("Guided solids", "A practical next step", "point.forward.to.point.capsulepath", .solidsGuided)
                 destinationCard("Food database", "400+ foods", "books.vertical.fill", .solidsDatabase)
                 destinationCard("Plan meals", visiblePlans.isEmpty ? "Build the next plate" : "\(visiblePlans.count) upcoming", "calendar.badge.plus", .solidsPlan)
