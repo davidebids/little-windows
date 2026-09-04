@@ -1326,20 +1326,14 @@ struct MilestonesView: View {
 
                 if solidsAccessLevel != .hidden {
                     NavigationLink(value: CareNavigationRoute.food(.solidsHome)) {
-                        HStack(spacing: 8) {
-                            compactCareRow(
-                                title: solidsAccessLevel == .readinessPreview
-                                    ? "Starting solids soon"
-                                    : "Solids",
-                                subtitle: solidsSubtitle,
-                                systemImage: "carrot.fill",
-                                tint: .orange
-                            )
-                            Spacer(minLength: 4)
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
+                        compactCareRow(
+                            title: solidsAccessLevel == .readinessPreview
+                                ? "Starting solids soon"
+                                : "Solids",
+                            subtitle: solidsSubtitle,
+                            systemImage: "carrot.fill",
+                            tint: .orange
+                        )
                     }
                     .accessibilityIdentifier("care.solids")
                 }
