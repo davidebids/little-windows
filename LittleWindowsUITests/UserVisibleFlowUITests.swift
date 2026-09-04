@@ -1937,6 +1937,46 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Age-aware balance"].exists)
     }
 
+    func testDigestiveDashboardShowsStatusBannerAndPersistentEntryAndConcernCanBeResolvedAndRecordedAgain() {
+        continueAfterFailure = false
+
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-digestive")
+        app.open(URL(string: "littlewindows://food/solids")!)
+        XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 4))
+
+        let statusBanner = app.buttons.matching(identifier: "solids.digestive.proactive")
+        XCTAssertTrue(statusBanner.firstMatch.waitForExistence(timeout: 4))
+        XCTAssertEqual(statusBanner.count, 1)
+        XCTAssertFalse(app.buttons["Constipation concern today"].exists)
+
+        let feedingBalance = app.buttons.matching(
+            identifier: "solids.dashboard.feeding-balance"
+        )
+        let entry = feedingBalance.firstMatch
+        for _ in 0..<6 where !entry.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(entry.waitForExistence(timeout: 4))
+        XCTAssertEqual(feedingBalance.count, 1)
+        entry.tap()
+        XCTAssertTrue(app.navigationBars["Feeding balance"].waitForExistence(timeout: 4))
+
+        let resolve = app.buttons["solids.digestive.resolve"]
+        XCTAssertTrue(resolve.waitForExistence(timeout: 4))
+        resolve.tap()
+        XCTAssertTrue(app.staticTexts["Concern recorded"].waitForNonExistence(timeout: 4))
+
+        let addCheckIn = app.buttons["solids.digestive.add-check-in"]
+        XCTAssertTrue(addCheckIn.waitForExistence(timeout: 4))
+        addCheckIn.tap()
+        XCTAssertTrue(app.navigationBars["Digestive check-in"].waitForExistence(timeout: 4))
+        app.buttons["Save"].tap()
+
+        XCTAssertTrue(app.navigationBars["Feeding balance"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Concern recorded"].waitForExistence(timeout: 4))
+    }
+
     func testProductionScaleInputEditorsAcceptTypingPromptly() {
         continueAfterFailure = false
 

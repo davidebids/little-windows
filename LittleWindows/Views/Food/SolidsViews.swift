@@ -246,11 +246,21 @@ struct SolidsHomeView: View {
                 .font(.headline)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 destinationCard("Guided solids", "A practical next step", "point.forward.to.point.capsulepath", .solidsGuided)
-                destinationCard("Food database", "400+ foods", "books.vertical.fill", .solidsDatabase)
+                destinationCard(
+                    "Food database",
+                    "\(SolidsReferenceCatalog.foods.count) foods",
+                    "books.vertical.fill",
+                    .solidsDatabase
+                )
                 destinationCard("Plan meals", visiblePlans.isEmpty ? "Build the next plate" : "\(visiblePlans.count) upcoming", "calendar.badge.plus", .solidsPlan)
                 destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker(.all))
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
-                destinationCard("Recipes", "400+ simple ideas", "fork.knife", .solidsRecipes)
+                destinationCard(
+                    "Recipes",
+                    "\(SolidsReferenceCatalog.recipes.count) simple ideas",
+                    "fork.knife",
+                    .solidsRecipes
+                )
                 if showsDigestiveSupport {
                     destinationCard(
                         "Feeding balance",
@@ -258,6 +268,7 @@ struct SolidsHomeView: View {
                         "leaf.circle.fill",
                         .solidsDigestive
                     )
+                    .accessibilityIdentifier("solids.dashboard.feeding-balance")
                 }
             }
 

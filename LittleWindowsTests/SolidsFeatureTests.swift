@@ -13,11 +13,22 @@ final class SolidsFeatureTests: XCTestCase {
         let now = Date(timeIntervalSinceReferenceDate: 810_000_000)
 
         DebugSimulatorSmokeSeedService.seedDigestiveDemo(context: context, now: now)
+        DebugSimulatorSmokeSeedService.seedDigestiveDemo(
+            context: context,
+            now: now.addingTimeInterval(60)
+        )
 
         let events = try context.fetch(FetchDescriptor<CareEvent>())
+        let profileStates = try context.fetch(FetchDescriptor<SolidsProfileState>())
         let solidMeals = events.filter { $0.type == .feed && $0.feedKind == .solid }
         let routineChange = try XCTUnwrap(events.first { $0.title == "Routine changed" })
 
+        XCTAssertEqual(
+            profileStates.filter {
+                $0.profileID == DebugSimulatorSmokeSeedService.childProfileID
+            }.count,
+            1
+        )
         XCTAssertEqual(solidMeals.count, 6)
         XCTAssertTrue(solidMeals.allSatisfy { $0.endDate == $0.startDate })
         XCTAssertFalse(solidMeals.contains(where: \.isTimerDraft))
