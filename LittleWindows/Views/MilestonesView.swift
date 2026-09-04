@@ -119,10 +119,12 @@ struct CareView: View {
         )
         accessEventDescriptor.fetchLimit = 1
         _careEvents = Query(accessEventDescriptor)
-        _solidsProfileStates = Query(FetchDescriptor<SolidsProfileState>(
+        var profileStateDescriptor = FetchDescriptor<SolidsProfileState>(
             predicate: #Predicate { $0.profileID == selectedProfileID },
             sortBy: [SortDescriptor(\SolidsProfileState.updatedAt, order: .reverse)]
-        ))
+        )
+        profileStateDescriptor.fetchLimit = 1
+        _solidsProfileStates = Query(profileStateDescriptor)
     }
 
     private var profile: CareProfile? {
@@ -147,18 +149,7 @@ struct CareView: View {
     }
 
     var body: some View {
-        Group {
-            if path.isEmpty {
-                navigationContent(data: nil)
-            } else {
-                CareSolidsRouteDataLoader(
-                    profileID: profile?.id,
-                    activeRoute: path.last?.foodRoute
-                ) { data in
-                    navigationContent(data: data)
-                }
-            }
-        }
+        navigationContent
         .task {
             _ = profileService.ensureSelection(in: profiles)
             handlePendingProfileSwitch()
@@ -190,24 +181,20 @@ struct CareView: View {
         }
     }
 
-    private func navigationContent(data: CareSolidsRouteData?) -> some View {
+    private var navigationContent: some View {
         NavigationStack(path: $path) {
             MilestonesView(
                 profile: profile,
-                solidsAccessLevel: solidsAccessLevel,
-                openSolids: openSolids
+                solidsAccessLevel: solidsAccessLevel
             )
                 .navigationDestination(for: CareNavigationRoute.self) { route in
-                    careDestination(for: route, data: data)
+                    careDestination(for: route)
                 }
         }
     }
 
     @ViewBuilder
-    private func careDestination(
-        for route: CareNavigationRoute,
-        data: CareSolidsRouteData?
-    ) -> some View {
+    private func careDestination(for route: CareNavigationRoute) -> some View {
         switch route {
         case .medications:
             if let profile {
@@ -217,8 +204,13 @@ struct CareView: View {
             }
         case .food(let foodRoute):
             Group {
-                if let data {
-                    destinationContent(for: foodRoute, data: data)
+                if let profileID = profile?.id {
+                    DeferredCareSolidsRouteDataLoader(
+                        profileID: profileID,
+                        activeRoute: foodRoute
+                    ) { data in
+                        destinationContent(for: foodRoute, data: data)
+                    }
                 } else {
                     CareUnavailableView()
                 }
@@ -241,12 +233,6 @@ struct CareView: View {
                 }
             }
         }
-    }
-
-    private func openSolids(_ route: FoodRoute) {
-        guard profile?.profileType == .child, solidsAccessLevel != .hidden else { return }
-        returnOriginAfterSolids = nil
-        path = [.food(route)]
     }
 
     private func appendFoodRoute(_ route: FoodRoute) {
@@ -739,6 +725,51 @@ private struct CareSolidsDataScope {
 
 }
 
+/// Lets the navigation transition commit before SwiftData installs the
+/// route-specific solids queries. Without this boundary, a cold first visit can
+/// make the Care row appear to ignore a valid tap while the destination is built.
+private struct DeferredCareSolidsRouteDataLoader<Content: View>: View {
+    let profileID: UUID
+    let activeRoute: FoodRoute
+    let content: (CareSolidsRouteData) -> Content
+
+    @State private var isReadyToLoad = false
+
+    init(
+        profileID: UUID,
+        activeRoute: FoodRoute,
+        @ViewBuilder content: @escaping (CareSolidsRouteData) -> Content
+    ) {
+        self.profileID = profileID
+        self.activeRoute = activeRoute
+        self.content = content
+    }
+
+    var body: some View {
+        Group {
+            if isReadyToLoad {
+                CareSolidsRouteDataLoader(
+                    profileID: profileID,
+                    activeRoute: activeRoute,
+                    content: content
+                )
+            } else {
+                ProgressView("Loading solids…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppTheme.background)
+            }
+        }
+        .accessibilityIdentifier("care.solids.destination")
+        .task(id: activeRoute) {
+            guard !isReadyToLoad else { return }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            isReadyToLoad = true
+        }
+    }
+}
+
 private struct CareSolidsRouteDataLoader<Content: View>: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var careEvents: [CareEvent]
@@ -858,10 +889,19 @@ private struct CareSolidsRouteDataLoader<Content: View>: View {
             predicate: #Predicate { $0.profileID == allergenProfileID },
             sortBy: [SortDescriptor(\SolidAllergenProgress.updatedAt, order: .reverse)]
         ))
-        _plannedSolidMeals = Query(FetchDescriptor<PlannedSolidMeal>(
-            predicate: #Predicate { $0.profileID == planProfileID },
-            sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
-        ))
+        if case .solidsHome = activeRoute {
+            _plannedSolidMeals = Query(FetchDescriptor<PlannedSolidMeal>(
+                predicate: #Predicate {
+                    $0.profileID == planProfileID && $0.completedEventID == nil
+                },
+                sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
+            ))
+        } else {
+            _plannedSolidMeals = Query(FetchDescriptor<PlannedSolidMeal>(
+                predicate: #Predicate { $0.profileID == planProfileID },
+                sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
+            ))
+        }
         if scope.loadsCustomFoods {
             _customSolidFoods = Query(FetchDescriptor<SolidFoodCatalogItem>(
                 sortBy: [SortDescriptor(\SolidFoodCatalogItem.name)]
@@ -969,7 +1009,6 @@ struct MilestonesView: View {
     @Query(sort: \PuppyStageGuideReadState.updatedAt) private var puppyStageGuideReadStates: [PuppyStageGuideReadState]
     let profile: CareProfile?
     let solidsAccessLevel: SolidsAccessLevel
-    let openSolids: (FoodRoute) -> Void
     @State private var searchText = ""
     @State private var selectedCategory: MilestoneCategory?
     @State private var favoritesOnly = false
@@ -990,12 +1029,10 @@ struct MilestonesView: View {
 
     init(
         profile: CareProfile?,
-        solidsAccessLevel: SolidsAccessLevel,
-        openSolids: @escaping (FoodRoute) -> Void = { _ in }
+        solidsAccessLevel: SolidsAccessLevel
     ) {
         self.profile = profile
         self.solidsAccessLevel = solidsAccessLevel
-        self.openSolids = openSolids
         let selectedProfileID = profile?.id
             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
         _allMilestones = Query(FetchDescriptor<MilestoneEntry>(
@@ -1288,9 +1325,7 @@ struct MilestonesView: View {
                 .accessibilityIdentifier("care.export-report")
 
                 if solidsAccessLevel != .hidden {
-                    Button {
-                        openSolids(.solidsHome)
-                    } label: {
+                    NavigationLink(value: CareNavigationRoute.food(.solidsHome)) {
                         HStack(spacing: 8) {
                             compactCareRow(
                                 title: solidsAccessLevel == .readinessPreview
@@ -1306,7 +1341,6 @@ struct MilestonesView: View {
                                 .foregroundStyle(.tertiary)
                         }
                     }
-                    .buttonStyle(.plain)
                     .accessibilityIdentifier("care.solids")
                 }
             } header: {

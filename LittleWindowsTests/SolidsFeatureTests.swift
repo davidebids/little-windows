@@ -219,6 +219,20 @@ final class SolidsFeatureTests: XCTestCase {
         XCTAssertTrue(assessment.shouldSurfaceProactively)
         XCTAssertTrue(assessment.opportunities.contains { $0.id == "variety-opportunity" })
         XCTAssertTrue(assessment.opportunities.contains { $0.id == "iron-opportunity" })
+        XCTAssertFalse(assessment.suggestedRecipeIDs.isEmpty)
+
+        let landingAssessment = SolidsDigestiveSupportService.assessment(
+            profileID: profileID,
+            ageMonths: 8,
+            eventItems: items,
+            state: state,
+            now: now,
+            calendar: calendar,
+            includesRecipeSuggestions: false
+        )
+        XCTAssertEqual(landingAssessment.opportunities, assessment.opportunities)
+        XCTAssertEqual(landingAssessment.suggestedFoodIDs, assessment.suggestedFoodIDs)
+        XCTAssertTrue(landingAssessment.suggestedRecipeIDs.isEmpty)
 
         state.digestiveLoggingCoverage = .someMeals
         let partial = SolidsDigestiveSupportService.assessment(
@@ -2035,11 +2049,13 @@ final class SolidsFeatureTests: XCTestCase {
     }
 
     func testGuidedPathAndRecipeLibraryAreCompleteAndStable() {
+        XCTAssertEqual(SolidsReferenceCatalog.foodCount, SolidsReferenceCatalog.foodSummaries.count)
         XCTAssertEqual(SolidsReferenceCatalog.guidedFoods.count, 100)
         XCTAssertEqual(Set(SolidsReferenceCatalog.guidedFoods.map(\.id)).count, 100)
         XCTAssertTrue(SolidsReferenceCatalog.guidedFoods.allSatisfy(\.isEligibleForGuidedPath))
 
         let recipes = SolidsReferenceCatalog.recipes
+        XCTAssertEqual(SolidsReferenceCatalog.recipeCount, recipes.count)
         XCTAssertGreaterThanOrEqual(recipes.count, 400)
         XCTAssertEqual(Set(recipes.map(\.id)).count, recipes.count)
         XCTAssertGreaterThanOrEqual(Set(recipes.map(\.instructions)).count, 400)

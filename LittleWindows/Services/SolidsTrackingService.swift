@@ -737,7 +737,7 @@ actor SolidsBackfillWriter {
             if details.isEmpty {
                 details = SolidFoodSelection.names(from: event.foodDescription).map { name in
                     let normalizedName = SolidFoodSelection.normalizedName(name)
-                    let reference = SolidsReferenceCatalog.food(named: name)
+                    let reference = SolidsReferenceCatalog.foodSummary(named: name)
                     let custom = customByName[normalizedName]
                     let foodID = reference?.id
                         ?? custom.map { "custom-\($0.id.uuidString.lowercased())" }
@@ -2622,6 +2622,12 @@ enum SolidsDigestiveSupportService {
     static let defaultLookbackDays = 7
     static let timelineEntryLimit = 80
 
+    private struct DigestiveFoodDescriptor {
+        var id: String
+        var name: String
+        var category: SolidsFoodCategory
+    }
+
     static let sourceURLs = [
         SolidsSourceLibrary.aapInfantConstipation,
         SolidsSourceLibrary.aapInfantBowelMovements,
@@ -2637,6 +2643,34 @@ enum SolidsDigestiveSupportService {
 
     static func foodGuidance(
         for food: SolidsReferenceFood,
+        ageMonths: Int
+    ) -> SolidsDigestiveFoodGuidance {
+        foodGuidance(
+            for: DigestiveFoodDescriptor(
+                id: food.id,
+                name: food.name,
+                category: food.category
+            ),
+            ageMonths: ageMonths
+        )
+    }
+
+    private static func foodGuidance(
+        for food: SolidsReferenceFoodSummary,
+        ageMonths: Int
+    ) -> SolidsDigestiveFoodGuidance {
+        foodGuidance(
+            for: DigestiveFoodDescriptor(
+                id: food.id,
+                name: food.name,
+                category: food.category
+            ),
+            ageMonths: ageMonths
+        )
+    }
+
+    private static func foodGuidance(
+        for food: DigestiveFoodDescriptor,
         ageMonths: Int
     ) -> SolidsDigestiveFoodGuidance {
         guard let reference = SolidsNutritionCatalog.reference(foodID: food.id),
@@ -2722,7 +2756,7 @@ enum SolidsDigestiveSupportService {
     ]
 
     private static func evidenceContext(
-        for food: SolidsReferenceFood,
+        for food: DigestiveFoodDescriptor,
         fiberGramsPer100 fiber: Double,
         ageMonths: Int
     ) -> String {
@@ -2779,7 +2813,7 @@ enum SolidsDigestiveSupportService {
     }
 
     private static func possibleStoolEffect(
-        for food: SolidsReferenceFood,
+        for food: DigestiveFoodDescriptor,
         fiberGramsPer100 fiber: Double
     ) -> String {
         let opening = "Possible stool effect for \(food.name):"
@@ -2793,7 +2827,7 @@ enum SolidsDigestiveSupportService {
     }
 
     private static func constipationCaution(
-        for food: SolidsReferenceFood,
+        for food: DigestiveFoodDescriptor,
         fiberGramsPer100 fiber: Double,
         ageMonths: Int
     ) -> String? {
@@ -2804,7 +2838,7 @@ enum SolidsDigestiveSupportService {
         return "AAP notes that high amounts of milk and cheese can contribute to constipation. \(food.name)’s USDA match contains \(formatFiber(fiber)) g fiber per 100 g. \(feedingContext)"
     }
 
-    private static func evidenceSourceURLs(for food: SolidsReferenceFood) -> [URL] {
+    private static func evidenceSourceURLs(for food: DigestiveFoodDescriptor) -> [URL] {
         if aapNamedInfantFiberFoods.contains(food.id) || isBeanLentilOrPea(food) {
             return [
                 SolidsSourceLibrary.aapInfantAbdominalPain,
@@ -2820,7 +2854,7 @@ enum SolidsDigestiveSupportService {
         return []
     }
 
-    private static func isBeanLentilOrPea(_ food: SolidsReferenceFood) -> Bool {
+    private static func isBeanLentilOrPea(_ food: DigestiveFoodDescriptor) -> Bool {
         if food.category == .vegetable {
             return food.id == "pea"
         }
@@ -2834,7 +2868,7 @@ enum SolidsDigestiveSupportService {
             || id == "garbanzo-bean"
     }
 
-    private static func isBerry(_ food: SolidsReferenceFood) -> Bool {
+    private static func isBerry(_ food: DigestiveFoodDescriptor) -> Bool {
         food.name.localizedCaseInsensitiveContains("berry")
             || food.id == "cranberry"
             || food.id == "currant"
@@ -3083,7 +3117,8 @@ enum SolidsDigestiveSupportService {
         state: SolidsProfileState?,
         now: Date = Date(),
         calendar: Calendar = .current,
-        lookbackDays: Int = defaultLookbackDays
+        lookbackDays: Int = defaultLookbackDays,
+        includesRecipeSuggestions: Bool = true
     ) -> SolidsBalanceAssessment {
         let start = calendar.date(byAdding: .day, value: -lookbackDays, to: now) ?? now
         let resolvedFollowUp = SolidReactionFollowUp.resolved.rawValue
@@ -3120,7 +3155,7 @@ enum SolidsDigestiveSupportService {
         var eventIDs = Set<UUID>()
         var loggedDayStarts = Set<Date>()
         var uniqueFoodIDs = Set<String>()
-        var foods = [String: SolidsReferenceFood]()
+        var foods = [String: SolidsReferenceFoodSummary]()
         var foodMealIDs = [String: Set<UUID>]()
         var hasUnclassifiedFoods = false
         for item in items {
@@ -3128,7 +3163,7 @@ enum SolidsDigestiveSupportService {
             loggedDayStarts.insert(calendar.startOfDay(for: item.createdAt))
             foodMealIDs[item.foodID, default: []].insert(item.eventID)
             guard uniqueFoodIDs.insert(item.foodID).inserted else { continue }
-            if let food = SolidsReferenceCatalog.food(id: item.foodID) {
+            if let food = SolidsReferenceCatalog.foodSummary(id: item.foodID) {
                 foods[item.foodID] = food
             } else {
                 hasUnclassifiedFoods = true
@@ -3208,7 +3243,7 @@ enum SolidsDigestiveSupportService {
             ))
         }
         if let activeConcern, !activeConcern.needsPromptMedicalAdvice {
-            let cautiousFoods = foods.values.compactMap { food -> (SolidsReferenceFood, String)? in
+            let cautiousFoods = foods.values.compactMap { food -> (SolidsReferenceFoodSummary, String)? in
                 guard let caution = foodGuidance(for: food, ageMonths: ageMonths).caution else {
                     return nil
                 }
@@ -3261,21 +3296,23 @@ enum SolidsDigestiveSupportService {
         }
 
         let suggestedFoodIDs = Array(orderedUnique(opportunities.flatMap(\.suggestedFoodIDs)).prefix(8))
-        let recipeIDs = suggestedFoodIDs.flatMap {
-            SolidsReferenceCatalog.recipes(containingFoodID: $0)
-                .filter { recipe in
-                    guard recipe.minimumAgeMonths <= ageMonths,
-                          Set(recipe.allergenIDs).isDisjoint(with: excludedAllergenIDs) else {
-                        return false
+        let recipeIDs: [String] = includesRecipeSuggestions
+            ? suggestedFoodIDs.flatMap {
+                SolidsReferenceCatalog.recipes(containingFoodID: $0)
+                    .filter { recipe in
+                        guard recipe.minimumAgeMonths <= ageMonths,
+                              Set(recipe.allergenIDs).isDisjoint(with: excludedAllergenIDs) else {
+                            return false
+                        }
+                        let recipeFoodIDs = Set(recipe.ingredients.compactMap {
+                            SolidsReferenceCatalog.foodSummary(named: $0.foodName)?.id
+                        })
+                        return recipeFoodIDs.isDisjoint(with: excludedFoodIDs)
                     }
-                    let recipeFoodIDs = Set(recipe.ingredients.compactMap {
-                        SolidsReferenceCatalog.food(named: $0.foodName)?.id
-                    })
-                    return recipeFoodIDs.isDisjoint(with: excludedFoodIDs)
-                }
-                .prefix(2)
-                .map(\.id)
-        }
+                    .prefix(2)
+                    .map(\.id)
+            }
+            : []
         let summary: String
         if activeConcern?.needsPromptMedicalAdvice == true {
             summary = "A symptom needing prompt medical advice is recorded. Contact the child’s clinician; this feeding review cannot assess the cause or urgency."
@@ -3332,7 +3369,7 @@ enum SolidsDigestiveSupportService {
                 && Set(food.allergenIDs).isDisjoint(with: excludingAllergenIDs)
         }
         if !eligible.isEmpty { return Array(eligible.prefix(6).map(\.id)) }
-        return SolidsReferenceCatalog.foods.lazy.filter { food in
+        return SolidsReferenceCatalog.foodSummaries.lazy.filter { food in
             food.minimumAgeMonths <= ageMonths
                 && food.isEligibleForGuidedPath
                 && (categories == nil || categories?.contains(food.category) == true)

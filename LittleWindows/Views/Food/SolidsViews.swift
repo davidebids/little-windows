@@ -170,7 +170,8 @@ struct SolidsHomeView: View {
             profileID: profile.id,
             ageMonths: ageMonths,
             eventItems: eventItems,
-            state: profileState
+            state: profileState,
+            includesRecipeSuggestions: false
         )
         let showsDigestiveSupport = SolidsDigestiveSupportService.isSupportAvailable(
             ageMonths: ageMonths,
@@ -248,7 +249,7 @@ struct SolidsHomeView: View {
                 destinationCard("Guided solids", "A practical next step", "point.forward.to.point.capsulepath", .solidsGuided)
                 destinationCard(
                     "Food database",
-                    "\(SolidsReferenceCatalog.foods.count) foods",
+                    "\(SolidsReferenceCatalog.foodCount) foods",
                     "books.vertical.fill",
                     .solidsDatabase
                 )
@@ -257,7 +258,7 @@ struct SolidsHomeView: View {
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
                 destinationCard(
                     "Recipes",
-                    "\(SolidsReferenceCatalog.recipes.count) simple ideas",
+                    "\(SolidsReferenceCatalog.recipeCount) simple ideas",
                     "fork.knife",
                     .solidsRecipes
                 )

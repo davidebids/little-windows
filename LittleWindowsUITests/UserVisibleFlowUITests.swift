@@ -1864,6 +1864,16 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(solids.waitForExistence(timeout: 4))
         let solidsStartedAt = ContinuousClock.now
         solids.tap()
+        XCTAssertLessThan(
+            solidsStartedAt.duration(to: .now),
+            .seconds(1.5),
+            "The Solids row should acknowledge a single tap promptly."
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["care.solids.destination"]
+                .waitForExistence(timeout: 1.5),
+            "One tap should immediately leave Care, even while route data is still loading."
+        )
         XCTAssertTrue(app.buttons["Log solids"].waitForExistence(timeout: 4))
         XCTAssertLessThan(
             solidsStartedAt.duration(to: .now),

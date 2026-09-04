@@ -815,7 +815,7 @@ struct FoodHomeView: View {
         case .solids, .solidsDatabase, .solidsGuided, .solidsDigestive, .solidsPlan, .solidsTracker, .solidsAllergens, .solidsRecipes:
             return solidsAccessLevel == .hidden
         case .solidFood(let id):
-            return solidsAccessLevel == .hidden || SolidsReferenceCatalog.food(id: id) == nil
+            return solidsAccessLevel == .hidden || SolidsReferenceCatalog.foodSummary(id: id) == nil
         case .customSolidFood(let id):
             return solidsAccessLevel == .hidden || !customSolidFoods.contains { $0.id == id }
         case .plannedSolidMeal(let id):
@@ -829,7 +829,7 @@ struct FoodHomeView: View {
         case .solidAllergen(let id):
             return solidsAccessLevel == .hidden || SolidsAllergen(rawValue: id) == nil
         case .solidsRecipe(let id):
-            return solidsAccessLevel == .hidden || !SolidsReferenceCatalog.recipes.contains { $0.id == id }
+            return solidsAccessLevel == .hidden || SolidsReferenceCatalog.recipe(id: id) == nil
         case .todoList(let id):
             return !data.todoLists.contains { $0.id == id }
         case .shoppingList(let id), .shoppingMode(let id):
