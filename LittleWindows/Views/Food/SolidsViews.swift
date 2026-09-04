@@ -2177,6 +2177,7 @@ struct SolidsDigestiveSupportView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+                .fixedSize(horizontal: true, vertical: false)
             }
             .onChange(of: loggingCoverage) { _, coverage in
                 guard coverage != persistedLoggingCoverage else { return }
