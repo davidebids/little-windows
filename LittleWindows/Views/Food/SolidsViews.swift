@@ -251,8 +251,13 @@ struct SolidsHomeView: View {
                 destinationCard("Food tracker", "Foods and meal history", "checklist", .solidsTracker(.all))
                 destinationCard("Allergens", "9 major allergens", "allergens", .solidsAllergens)
                 destinationCard("Recipes", "400+ simple ideas", "fork.knife", .solidsRecipes)
-                if showsDigestiveSupport && !digestiveNeedsAttention {
-                    destinationCard("Feeding balance", "Comfort & variety", "leaf.circle.fill", .solidsDigestive)
+                if showsDigestiveSupport {
+                    destinationCard(
+                        "Feeding balance",
+                        "Digestive comfort & food variety",
+                        "leaf.circle.fill",
+                        .solidsDigestive
+                    )
                 }
             }
 
