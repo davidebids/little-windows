@@ -2084,31 +2084,74 @@ struct SolidsDigestiveSupportView: View {
     }
 
     private func checkInHistoryCard(_ checkIns: [SolidsDigestiveCheckIn]) -> some View {
-        DisclosureGroup(
-            "Recent check-ins (\(checkIns.count))",
-            isExpanded: $showingCheckInHistory
-        ) {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(checkIns) { concern in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(concern.recordedAt.formatted(date: .abbreviated, time: .omitted))
-                            .font(.subheadline.weight(.semibold))
-                        Text(concern.observationLabels.joined(separator: " • "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let resolvedAt = concern.resolvedAt {
-                            Text("Resolved \(resolvedAt.formatted(date: .abbreviated, time: .omitted))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+        DisclosureGroup(isExpanded: $showingCheckInHistory) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(checkIns.enumerated()), id: \.element.id) { index, concern in
+                    checkInHistoryRow(concern)
+                    if index < checkIns.count - 1 {
+                        Divider()
+                            .padding(.vertical, 12)
                     }
                 }
             }
-            .padding(.top, 10)
+            .padding(.top, 14)
+        } label: {
+            HStack(spacing: 8) {
+                Label("Recent check-ins", systemImage: "clock.arrow.circlepath")
+                    .font(.headline)
+                Text("\(checkIns.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.secondary.opacity(0.12), in: Capsule())
+            }
         }
-        .font(.headline)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .appSurface()
+    }
+
+    private func checkInHistoryRow(_ concern: SolidsDigestiveCheckIn) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.green)
+                .frame(width: 28, height: 28)
+                .background(.green.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(concern.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text("Resolved")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.green.opacity(0.12), in: Capsule())
+                }
+
+                let observations = concern.observationLabels.joined(separator: " • ")
+                Text(observations.isEmpty ? "Constipation concern" : observations)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if !concern.notes.isEmpty {
+                    Text(concern.notes)
+                        .font(.caption)
+                }
+
+                if let resolvedAt = concern.resolvedAt {
+                    Text("Marked resolved \(resolvedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
     }
 
     private func balanceCard(_ assessment: SolidsBalanceAssessment) -> some View {
