@@ -1877,6 +1877,13 @@ struct SolidsDigestiveSupportView: View {
         )
     }
 
+    private var activeReminderAt: Date? {
+        guard profileState?.digestiveReminderEnabled == true,
+              let reminderAt = profileState?.digestiveReminderAt,
+              reminderAt > Date() else { return nil }
+        return reminderAt
+    }
+
     var body: some View {
         let currentResolvedCheckIns = recentResolvedCheckIns
         let currentTimelineEntries = timelineEntries
@@ -2053,34 +2060,85 @@ struct SolidsDigestiveSupportView: View {
                 Text(concern.notes)
                     .font(.subheadline)
             }
-            if profileState?.digestiveReminderEnabled == true,
-               let reminderAt = profileState?.digestiveReminderAt,
-               reminderAt > Date() {
+            if let reminderAt = activeReminderAt {
                 Label(
                     "Follow-up reminder: \(reminderAt.formatted(date: .abbreviated, time: .shortened))",
                     systemImage: "bell.fill"
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Button("Cancel follow-up reminder") {
-                    Task { await updateReminder(for: concern, reminderAt: nil) }
-                }
-                .disabled(updatingReminder)
-            } else {
-                Button("Remind me tomorrow") {
-                    Task { await addTomorrowReminder(for: concern) }
-                }
-                .disabled(updatingReminder)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
             }
-            Button("Mark concern resolved") {
-                Task { await resolve(concern) }
-            }
-            .buttonStyle(.bordered)
-            .disabled(updatingReminder)
+            concernActions(concern, reminderScheduled: activeReminderAt != nil)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .appSurface()
+    }
+
+    private func concernActions(
+        _ concern: SolidsDigestiveCheckIn,
+        reminderScheduled: Bool
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                reminderAction(concern, reminderScheduled: reminderScheduled)
+                resolveAction(concern)
+            }
+            VStack(spacing: 10) {
+                reminderAction(concern, reminderScheduled: reminderScheduled)
+                resolveAction(concern)
+            }
+        }
+        .controlSize(.large)
+    }
+
+    private func reminderAction(
+        _ concern: SolidsDigestiveCheckIn,
+        reminderScheduled: Bool
+    ) -> some View {
+        Button {
+            Task {
+                if reminderScheduled {
+                    await updateReminder(for: concern, reminderAt: nil)
+                } else {
+                    await addTomorrowReminder(for: concern)
+                }
+            }
+        } label: {
+            Label(
+                reminderScheduled ? "Cancel reminder" : "Remind tomorrow",
+                systemImage: reminderScheduled ? "bell.slash.fill" : "bell.badge.fill"
+            )
+            .font(.subheadline.weight(.semibold))
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .tint(.orange)
+        .disabled(updatingReminder)
+        .accessibilityIdentifier("solids.digestive.reminder")
+    }
+
+    private func resolveAction(_ concern: SolidsDigestiveCheckIn) -> some View {
+        Button {
+            Task { await resolve(concern) }
+        } label: {
+            Label("Mark resolved", systemImage: "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.capsule)
+        .tint(.orange)
+        .disabled(updatingReminder)
+        .accessibilityLabel("Mark concern resolved")
+        .accessibilityIdentifier("solids.digestive.resolve")
     }
 
     private func checkInHistoryCard(_ checkIns: [SolidsDigestiveCheckIn]) -> some View {
