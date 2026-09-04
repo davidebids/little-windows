@@ -2028,7 +2028,7 @@ enum DebugSimulatorSmokeSeedService {
                 profile: profile,
                 type: .feed,
                 startDate: loggedAt,
-                endDate: nil,
+                endDate: loggedAt,
                 title: nil,
                 notes: mealIndex == 3 ? "A familiar, simple meal." : nil,
                 context: context
@@ -2137,12 +2137,13 @@ enum DebugSimulatorSmokeSeedService {
         state.updatedAt = now
 
         let contextEventID = UUID(uuidString: "00000000-0000-0000-0000-000000009981")!
+        let contextLoggedAt = calendar.date(byAdding: .day, value: -2, to: now) ?? now
         upsertEvent(
             id: contextEventID,
             profile: profile,
             type: .custom,
-            startDate: calendar.date(byAdding: .day, value: -2, to: now) ?? now,
-            endDate: nil,
+            startDate: contextLoggedAt,
+            endDate: contextLoggedAt,
             title: "Routine changed",
             notes: "Travel day; fewer meal details were recorded.",
             context: context
@@ -2603,6 +2604,12 @@ enum DebugSimulatorSmokeSeedService {
         event.endTimeZoneIdentifier = resolvedEndDate == nil
             ? nil
             : (event.endTimeZoneIdentifier ?? timeZoneIdentifier)
+        if resolvedEndDate != nil {
+            event.timerState = nil
+            event.timerAccumulatedSeconds = nil
+            event.activeTimerSegmentStartDate = nil
+            event.activeNursingSide = nil
+        }
         event.caregiverName = "Sample Caregiver"
         event.notes = notes
         event.updatedAt = Date()

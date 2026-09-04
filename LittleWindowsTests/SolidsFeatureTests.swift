@@ -3,6 +3,32 @@ import XCTest
 @testable import LittleWindows
 
 final class SolidsFeatureTests: XCTestCase {
+    @MainActor
+    func testDigestiveDemoSeedOnlyKeepsTheDeliberateNursingTimerActive() throws {
+        let container = try ModelContainer(
+            for: PersistenceService.schema,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let now = Date(timeIntervalSinceReferenceDate: 810_000_000)
+
+        DebugSimulatorSmokeSeedService.seedDigestiveDemo(context: context, now: now)
+
+        let events = try context.fetch(FetchDescriptor<CareEvent>())
+        let solidMeals = events.filter { $0.type == .feed && $0.feedKind == .solid }
+        let routineChange = try XCTUnwrap(events.first { $0.title == "Routine changed" })
+
+        XCTAssertEqual(solidMeals.count, 6)
+        XCTAssertTrue(solidMeals.allSatisfy { $0.endDate == $0.startDate })
+        XCTAssertFalse(solidMeals.contains(where: \.isTimerDraft))
+        XCTAssertEqual(routineChange.endDate, routineChange.startDate)
+        XCTAssertFalse(routineChange.isTimerDraft)
+        XCTAssertEqual(
+            Set(events.filter(\.isTimerDraft).map(\.id)),
+            Set([DebugSimulatorSmokeSeedService.activeNursingEventID])
+        )
+    }
+
     func testTodayFeedQuickActionShowsLatestSolidFoodNamesCompactly() {
         let event = CareEvent(type: .feed)
         event.feedKind = .solid
