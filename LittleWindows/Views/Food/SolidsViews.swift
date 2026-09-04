@@ -2152,11 +2152,11 @@ struct SolidsDigestiveSupportView: View {
                     checkInHistoryRow(concern)
                     if index < checkIns.count - 1 {
                         Divider()
-                            .padding(.vertical, 12)
+                            .padding(.vertical, 8)
                     }
                 }
             }
-            .padding(.top, 14)
+            .padding(.top, 10)
         } label: {
             HStack(spacing: 8) {
                 Label("Recent check-ins", systemImage: "clock.arrow.circlepath")
@@ -2170,19 +2170,19 @@ struct SolidsDigestiveSupportView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(14)
         .appSurface()
     }
 
     private func checkInHistoryRow(_ concern: SolidsDigestiveCheckIn) -> some View {
-        HStack(alignment: .top, spacing: 11) {
+        HStack(alignment: .top, spacing: 9) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.subheadline)
+                .font(.caption)
                 .foregroundStyle(.green)
-                .frame(width: 28, height: 28)
+                .frame(width: 22, height: 22)
                 .background(.green.opacity(0.12), in: Circle())
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(concern.recordedAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.subheadline.weight(.semibold))
@@ -2190,25 +2190,18 @@ struct SolidsDigestiveSupportView: View {
                     Text("Resolved")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(.green.opacity(0.12), in: Capsule())
                 }
 
                 let observations = concern.observationLabels.joined(separator: " • ")
                 Text(observations.isEmpty ? "Constipation concern" : observations)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
 
                 if !concern.notes.isEmpty {
                     Text(concern.notes)
                         .font(.caption)
-                }
-
-                if let resolvedAt = concern.resolvedAt {
-                    Text("Marked resolved \(resolvedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
             }
         }
