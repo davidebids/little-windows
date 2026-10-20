@@ -12,6 +12,12 @@ final class NightLightAudioService: ObservableObject {
     private var requestedVolume = 0.0
     private var preparationTask: Task<Void, Never>?
     private var generatedAudioCache: [NightLightSound: Data] = [:]
+    private let audioSession: NightLightAudioSession
+    private var playbackRequestID = UUID()
+
+    init(audioSession: NightLightAudioSession = .shared) {
+        self.audioSession = audioSession
+    }
 
     func play(_ sound: NightLightSound, volume: Double) {
         guard sound != .none else {
@@ -214,6 +220,7 @@ final class NightLightAudioService: ObservableObject {
     }
 
     private func stop(clearStatus: Bool) {
+        playbackRequestID = UUID()
         preparationTask?.cancel()
         preparationTask = nil
         player?.stop()
@@ -224,23 +231,26 @@ final class NightLightAudioService: ObservableObject {
         if clearStatus {
             statusMessage = nil
         }
-        try? AVAudioSession.sharedInstance().setActive(
-            false,
-            options: .notifyOthersOnDeactivation
-        )
+        audioSession.setActive(false) { _ in }
     }
 
     private func startPlayback(sound: NightLightSound, source: AudioSource) {
         guard currentSound == sound else { return }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(
-                .playback,
-                mode: .default,
-                options: [.mixWithOthers]
-            )
-            try session.setActive(true)
+        let requestID = playbackRequestID
+        isPreparing = true
+        audioSession.setActive(true) { [weak self] result in
+            guard let self, self.playbackRequestID == requestID else { return }
+            switch result {
+            case .success:
+                self.startPlayer(source: source)
+            case .failure:
+                self.handlePlaybackFailure()
+            }
+        }
+    }
 
+    private func startPlayer(source: AudioSource) {
+        do {
             let audioPlayer: AVAudioPlayer
             switch source {
             case .url(let url):
@@ -261,9 +271,13 @@ final class NightLightAudioService: ObservableObject {
             isPreparing = false
             statusMessage = nil
         } catch {
-            stop(clearStatus: false)
-            statusMessage = "Could not start ambient sound. Check the device volume and try again."
+            handlePlaybackFailure()
         }
+    }
+
+    private func handlePlaybackFailure() {
+        stop(clearStatus: false)
+        statusMessage = "Could not start ambient sound. Check the device volume and try again."
     }
 
     nonisolated static func masteredLoopURL(
@@ -344,6 +358,36 @@ final class NightLightAudioService: ObservableObject {
         var littleEndian = value.littleEndian
         withUnsafeBytes(of: &littleEndian) {
             data.append(contentsOf: $0)
+        }
+    }
+}
+
+/// Keeps blocking session changes off the UI thread and in request order on iOS 17+.
+final class NightLightAudioSession {
+    static let shared = NightLightAudioSession()
+
+    private let queue = DispatchQueue(label: "com.debidia.LittleWindows.night-light-audio")
+    private let operation: @Sendable (Bool) throws -> Void
+
+    init(operation: @escaping @Sendable (Bool) throws -> Void = { active in
+        let session = AVAudioSession.sharedInstance()
+        if active {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        }
+        try session.setActive(active, options: active ? [] : .notifyOthersOnDeactivation)
+    }) {
+        self.operation = operation
+    }
+
+    func setActive(
+        _ active: Bool,
+        completion: @escaping @MainActor @Sendable (Result<Void, Error>) -> Void
+    ) {
+        queue.async { [operation] in
+            let result = Result { try operation(active) }
+            DispatchQueue.main.async {
+                completion(result)
+            }
         }
     }
 }

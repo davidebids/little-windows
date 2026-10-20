@@ -242,6 +242,11 @@ struct HistoryView: View {
                     discard: { discardTimer(event) },
                     setStartTimeZone: { setStartTimeZone($0, for: event) },
                     setEndTimeZone: { setEndTimeZone($0, for: event) },
+                    setSleepConditions: { conditions in
+                        let draft = timerDraftForMutation(event)
+                        draft.sleepConditions = conditions
+                        persistTimerMutation(draft)
+                    },
                     switchNursingSide: event.type == .nursing
                         ? { switchNursingSide(event) }
                         : nil,

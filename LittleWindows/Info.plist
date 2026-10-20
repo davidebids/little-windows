@@ -35,6 +35,10 @@
 	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.healthcare-fitness</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Use your approximate location for Today weather and automatic outdoor temperatures on sleep logs.</string>
+	<key>NSLocationDefaultAccuracyReduced</key>
+	<true/>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>

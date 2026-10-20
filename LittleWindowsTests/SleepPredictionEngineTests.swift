@@ -1,4 +1,5 @@
 import CloudKit
+import Combine
 import CoreData
 import XCTest
 import SwiftData
@@ -2840,6 +2841,74 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertTrue(service.isPreparing)
         XCTAssertFalse(service.isPlaying)
         service.stop()
+    }
+
+    @MainActor
+    func testNightLightAudioSessionChangesRunOffMainThreadInOrder() async {
+        let activationStarted = expectation(description: "Activation started off main thread")
+        let activationFinished = expectation(description: "Activation completed")
+        let deactivationFinished = expectation(description: "Deactivation completed after activation")
+        let releaseActivation = DispatchSemaphore(value: 0)
+        let session = NightLightAudioSession { active in
+            XCTAssertFalse(Thread.isMainThread)
+            if active {
+                activationStarted.fulfill()
+                XCTAssertEqual(releaseActivation.wait(timeout: .now() + 5), .success)
+            }
+        }
+
+        session.setActive(true) { _ in activationFinished.fulfill() }
+        session.setActive(false) { _ in deactivationFinished.fulfill() }
+        await fulfillment(of: [activationStarted], timeout: 5)
+        // Reaching this line while activation is blocked proves the UI actor is free.
+        releaseActivation.signal()
+        await fulfillment(of: [activationFinished, deactivationFinished], timeout: 5, enforceOrder: true)
+    }
+
+    @MainActor
+    func testNightLightStopWhileActivatingDoesNotRestartPlayback() async {
+        let activationStarted = expectation(description: "Activation started")
+        let sessionDrained = expectation(description: "Stop completed")
+        let releaseActivation = DispatchSemaphore(value: 0)
+        let session = NightLightAudioSession { active in
+            if active {
+                activationStarted.fulfill()
+                XCTAssertEqual(releaseActivation.wait(timeout: .now() + 5), .success)
+            }
+        }
+        let service = NightLightAudioService(audioSession: session)
+        service.play(.whiteNoise, volume: 0.25)
+        XCTAssertTrue(service.isPreparing)
+        await fulfillment(of: [activationStarted], timeout: 5)
+
+        service.stop()
+        releaseActivation.signal()
+        session.setActive(false) { _ in sessionDrained.fulfill() }
+        await fulfillment(of: [sessionDrained], timeout: 5)
+
+        XCTAssertFalse(service.isPlaying)
+        XCTAssertFalse(service.isPreparing)
+        XCTAssertNil(service.statusMessage)
+    }
+
+    @MainActor
+    func testNightLightActivationFailureLeavesPlaybackStopped() async {
+        let failureShown = expectation(description: "Activation failure shown")
+        let session = NightLightAudioSession { active in
+            if active { throw CocoaError(.fileReadUnknown) }
+        }
+        let service = NightLightAudioService(audioSession: session)
+        let observation = service.$statusMessage.compactMap { $0 }.sink { _ in
+            failureShown.fulfill()
+        }
+
+        service.play(.whiteNoise, volume: 0.25)
+        await fulfillment(of: [failureShown], timeout: 5)
+
+        XCTAssertFalse(service.isPlaying)
+        XCTAssertFalse(service.isPreparing)
+        XCTAssertNotNil(service.statusMessage)
+        withExtendedLifetime(observation) {}
     }
 
     func testNightLightWhiteNoiseHasBundledMasteredLoop() throws {
@@ -8393,6 +8462,93 @@ final class SleepPredictionEngineTests: XCTestCase {
         XCTAssertEqual(todos.countLabel, "1 open")
         XCTAssertEqual(todos.items.map(\.title), ["Current title"])
         XCTAssertEqual(todos.items.first?.detail, "Current Tasks")
+    }
+
+    @MainActor
+    func testTodayHomeTripSummaryCoalescesDuplicateRecordsBeforeFiltering() throws {
+        let householdID = UUID()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let tripID = UUID()
+        let oldTrip = PackingTrip(
+            id: tripID, householdID: householdID, title: "Old Trip",
+            startDate: now, endDate: now.addingTimeInterval(86_400),
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let currentTrip = PackingTrip(
+            id: tripID, householdID: householdID, title: "Current Trip",
+            startDate: now, endDate: now.addingTimeInterval(86_400),
+            finalCheckDate: now.addingTimeInterval(-60), updatedAt: now
+        )
+        let packingID = UUID()
+        let oldPacking = PackingItem(
+            id: packingID, householdID: householdID, tripID: tripID,
+            title: "Tickets", priority: .essential, state: .needed,
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let currentPacking = PackingItem(
+            id: packingID, householdID: householdID, tripID: tripID,
+            title: "Tickets", priority: .essential, state: .packed, updatedAt: now
+        )
+        let itineraryID = UUID()
+        let oldItinerary = TripItineraryItem(
+            id: itineraryID, householdID: householdID, tripID: tripID,
+            title: "Old Activity", scheduledDay: now,
+            updatedAt: now.addingTimeInterval(-60)
+        )
+        let currentItinerary = TripItineraryItem(
+            id: itineraryID, householdID: householdID, tripID: tripID,
+            title: "Current Activity", scheduledDay: now, updatedAt: now
+        )
+        let otherHouseholdTrip = PackingTrip(
+            id: tripID, householdID: UUID(), title: "Other Household Trip",
+            startDate: now, endDate: now.addingTimeInterval(86_400),
+            updatedAt: now.addingTimeInterval(60)
+        )
+
+        func makeSummary(_ trips: [PackingTrip], _ itinerary: [TripItineraryItem]) -> TodayHomeSummary {
+            TodayHomeSummaryService.summary(
+                householdID: householdID, currentCaregiverName: "",
+                todoLists: [], todoItems: [], shoppingLists: [], shoppingItems: [],
+                inventoryItems: [], mealPrepItems: [], mealPrepUsages: [],
+                packingTrips: trips, packingItems: [currentPacking, oldPacking, currentPacking],
+                itineraryItems: itinerary, returnRequests: [], returnItems: [],
+                returnPackages: [], reminders: [], now: now
+            )
+        }
+
+        for trips in [[oldTrip, currentTrip, oldTrip, otherHouseholdTrip],
+                      [otherHouseholdTrip, currentTrip, oldTrip, currentTrip]] {
+            for itinerary in [[], [oldItinerary, currentItinerary, oldItinerary]] {
+                let summary = makeSummary(trips, itinerary)
+                let section = try XCTUnwrap(summary.sections.first { $0.category == .trips })
+                XCTAssertEqual(section.countLabel, "1 active trip")
+                XCTAssertEqual(Set(section.items.map(\.id)).count, section.items.count)
+                XCTAssertEqual(section.items.count, itinerary.isEmpty ? 1 : 2)
+                XCTAssertNil(section.remainderText)
+                let tripRow = try XCTUnwrap(section.items.first { $0.route == .food(.packingTrip(tripID)) })
+                XCTAssertEqual(tripRow.title, "Current Trip")
+                XCTAssertEqual(tripRow.detail, "Happening now · 1 of 1 packed")
+                if !itinerary.isEmpty {
+                    XCTAssertEqual(section.items.first?.title, "Current Activity")
+                    XCTAssertTrue(section.summary.contains("1 itinerary item today"))
+                }
+                XCTAssertEqual(summary.allAttentionItems.count, 1)
+                XCTAssertEqual(summary.allAttentionItems.first?.title, "Review Current Trip")
+                XCTAssertEqual(summary.allAttentionItems.first?.detail, "Trip check is due")
+            }
+        }
+
+        currentTrip.isArchived = true
+        let archivedSummary = makeSummary([oldTrip, currentTrip], [oldItinerary, currentItinerary])
+        XCTAssertTrue(try XCTUnwrap(archivedSummary.sections.first { $0.category == .trips }).items.isEmpty)
+        XCTAssertTrue(archivedSummary.allAttentionItems.isEmpty)
+
+        currentTrip.isArchived = false
+        currentItinerary.isCompleted = true
+        let completedSummary = makeSummary([oldTrip, currentTrip], [oldItinerary, currentItinerary])
+        let section = try XCTUnwrap(completedSummary.sections.first { $0.category == .trips })
+        XCTAssertEqual(section.items.map(\.title), ["Current Trip"])
+        XCTAssertTrue(section.summary.contains("0 itinerary items today"))
     }
 
     @MainActor

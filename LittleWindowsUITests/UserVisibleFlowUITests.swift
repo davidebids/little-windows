@@ -4072,6 +4072,48 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Test Errand List"].waitForExistence(timeout: 5))
     }
 
+    func testWeatherHeaderIsCompactAndOffersLocationOrCity() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        let weather = app.buttons["today.weather.header"]
+        XCTAssertTrue(weather.waitForExistence(timeout: 8))
+        XCTAssertLessThan(weather.frame.maxY, app.frame.minY + app.frame.height * 0.5)
+        let greeting = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Good ")).firstMatch
+        XCTAssertTrue(greeting.exists)
+        XCTAssertLessThan(weather.frame.minY - greeting.frame.maxY, 100)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Compact Today weather header"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        weather.tap()
+        XCTAssertTrue(app.buttons["weather.use-current-location"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["weather.city-search"].exists)
+    }
+
+    func testWeatherZIPSearchDisplaysAndSavesCityName() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        let weather = app.buttons["today.weather.header"]
+        XCTAssertTrue(weather.waitForExistence(timeout: 8))
+        weather.tap()
+        let search = app.textFields["weather.city-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("10001")
+        let city = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "New York")).firstMatch
+        XCTAssertTrue(city.waitForExistence(timeout: 20), "A ZIP search should resolve to its city instead of retaining a numeric label.")
+        city.tap()
+        XCTAssertTrue(weather.waitForExistence(timeout: 5))
+        XCTAssertTrue(weather.label.contains("New York"))
+        XCTAssertFalse(weather.label.contains("10001"))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Today weather with resolved city"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testStartingSleepOpensRunningTimerEditor() {
         continueAfterFailure = false
 
@@ -4104,6 +4146,47 @@ final class UserVisibleFlowUITests: XCTestCase {
         )
         XCTAssertTrue(app.staticTexts["Running"].exists)
         XCTAssertTrue(app.buttons["Stop"].exists)
+    }
+
+    func testSleepTimerSavesInlineSleepSackSelection() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://quick-log/sleep")
+        let nap = app.buttons["Nap"]
+        XCTAssertTrue(nap.waitForExistence(timeout: 5))
+        nap.tap()
+
+        let sack = app.buttons["sleep.sack-usage"]
+        for _ in 0..<5 where !sack.isHittable { app.swipeUp() }
+        XCTAssertTrue(sack.isHittable)
+        XCTAssertFalse(app.buttons["active-timer.sleep-conditions"].exists)
+        sack.tap()
+        let tog = app.buttons["2.5 TOG"]
+        XCTAssertTrue(tog.waitForExistence(timeout: 4))
+        for _ in 0..<3 where !tog.isHittable { app.swipeUp() }
+        XCTAssertTrue(tog.isHittable)
+        let trayScreenshot = XCTAttachment(screenshot: app.screenshot())
+        trayScreenshot.name = "Standard sleep sack TOG tray"
+        trayScreenshot.lifetime = .keepAlways
+        add(trayScreenshot)
+        tog.tap()
+        XCTAssertTrue(app.navigationBars["Timer"].exists)
+        let inlineScreenshot = XCTAttachment(screenshot: app.screenshot())
+        inlineScreenshot.name = "Inline sleep details before saving"
+        inlineScreenshot.lifetime = .keepAlways
+        add(inlineScreenshot)
+
+        let finish = app.buttons["active-timer.finish-and-save"]
+        for _ in 0..<3 where !finish.isHittable { app.swipeUp() }
+        XCTAssertTrue(finish.isHittable)
+        finish.tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 5))
+        let savedSleep = app.buttons.matching(NSPredicate(
+            format: "identifier == %@ AND label CONTAINS %@", "today-timeline.event.sleep", "2.5 TOG"
+        )).firstMatch
+        for _ in 0..<8 where !savedSleep.isHittable { app.swipeUp() }
+        XCTAssertTrue(savedSleep.exists, "Saving sleep should keep the inline TOG choice in history.")
     }
 
     func testPausedTimerEditorFinishAndSaveCommitsEvent() {

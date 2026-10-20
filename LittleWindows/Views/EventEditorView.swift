@@ -173,6 +173,8 @@ struct EventEditorView: View {
     @State private var caregiverName: String
     @State private var notes: String
     @State private var sleepKind: SleepKind
+    @State private var showingWeatherCityPicker = false
+    @State private var sleepConditionsDraft: SleepConditionsDraft
     @State private var feedKind: FeedKind
     @State private var amountOzText: String
     @State private var foodDescription: String
@@ -334,6 +336,7 @@ struct EventEditorView: View {
         _caregiverName = State(initialValue: event?.caregiverName ?? "")
         _notes = State(initialValue: event?.notes ?? "")
         _sleepKind = State(initialValue: event?.sleepKind ?? .nap)
+        _sleepConditionsDraft = State(initialValue: SleepConditionsDraft(event?.sleepConditions))
         _feedKind = State(initialValue: event?.feedKind ?? (solidPreset == nil ? .bottle : .solid))
         _amountOzText = State(initialValue: Self.amountText(for: event?.amountOz))
         let detailFoodNames = event?.solidFoodDetails.map(\.foodName) ?? []
@@ -794,6 +797,7 @@ struct EventEditorView: View {
 
     private var editableEventSheetsView: some View {
         editableEventLifecycleView
+            .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
             .sheet(item: $growthMeasurementEditor) { editor in
                 GrowthMeasurementInputSheet(
                     kind: editor,
@@ -981,6 +985,16 @@ struct EventEditorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+            if sleepKind != .nightWaking {
+                SleepConditionsFields(
+                    draft: $sleepConditionsDraft,
+                    date: startDate,
+                    timeZone: startTimeZone,
+                    allowsSleepSack: activeProfileType == .child,
+                    chooseWeatherCity: { showingWeatherCityPicker = true },
+                    allowsForecastReplacement: existingEvent == nil
+                )
             }
         case .feed:
             Section("Feed") {
@@ -1716,6 +1730,11 @@ struct EventEditorView: View {
             return
         }
 
+        if type == .sleep, sleepKind != .nightWaking,
+           let message = sleepConditionsDraft.validationMessage {
+            validationMessage = message
+            return
+        }
         let wasActiveTimer = existingEvent?.isTimerDraft == true
         // Build an unregistered draft so editing a large SwiftUI-owned context
         // never dirties it or triggers an autosave on the gesture thread. The
@@ -1738,6 +1757,12 @@ struct EventEditorView: View {
         event.caregiverName = caregiverName.nilIfBlank
         event.notes = notes.nilIfBlank
         event.sleepKind = type == .sleep ? sleepKind : nil
+        var sleepConditions = sleepConditionsDraft.details
+        if activeProfileType != .child {
+            sleepConditions.usedSleepSack = nil
+            sleepConditions.sleepSackTOG = nil
+        }
+        event.sleepConditions = type == .sleep && sleepKind != .nightWaking ? sleepConditions : nil
         event.feedKind = type == .feed ? feedKind : nil
         event.amountOz = type == .feed && feedKind == .bottle ? positiveAmountOz : nil
         if type == .pumping {

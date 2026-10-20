@@ -2,6 +2,7 @@ import SwiftUI
 
 struct EventRow: View {
     let event: CareEvent
+    @AppStorage(OutdoorTemperatureSettings.unitKey) private var outdoorTemperatureUnit = OutdoorTemperatureSettings.preferredUnit()
 
     var body: some View {
         HStack(spacing: 14) {
@@ -26,6 +27,11 @@ struct EventRow: View {
                 Text(detail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                if event.type == .sleep, let conditions = event.sleepConditions, !conditions.isEmpty {
+                    Text(conditions.formattedSummary(unit: outdoorTemperatureUnit))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let notes = event.notes, !notes.isEmpty {
                     Text(notes)
                         .font(.caption)

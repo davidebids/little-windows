@@ -2,7 +2,7 @@
 
 **Effective date: August 16, 2026**
 
-**Last updated: August 16, 2026**
+**Last updated: October 18, 2026**
 
 Little Windows is a local-first home organizer and optional care tracker for children, adults, and dogs. This policy explains how information is handled when you use the Little Windows app, its widgets, Live Activities, shortcuts, and Apple Watch companion (collectively, **Little Windows**).
 
@@ -62,9 +62,9 @@ Apple processes information used by iCloud and CloudKit under [Apple's Privacy P
 
 ## Apple Maps and WeatherKit
 
-When you search for a trip destination, your search text is sent to Apple Maps to return matching places. When you request trip weather, the selected destination coordinates and dates needed for the forecast are processed through Apple's WeatherKit service.
+When you search for a trip destination or weather city, your search text is sent to Apple Maps to return matching places. When you request trip weather, Today temperatures, or a sleep forecast, the selected place coordinates and dates needed for the forecast are processed through Apple's WeatherKit service. Your choice of current location or a manually selected weather city is stored on your device. Outdoor temperature values, forecast date and city label, and sleep sack details you save to a sleep log become part of that care record and follow its storage, sync, sharing, backup, and deletion choices.
 
-Little Windows does not request or use your device's current geographic location. Saved destinations and forecast results may be included in your local data, iCloud sync, Family Sync, and backups according to the choices you make.
+If you choose **Use current location**, Little Windows requests location access while the app is in use and uses an approximate, city-scale position for Apple Weather and city-name lookup. It does not track location continuously or in the background. Current-location coordinates stay in memory rather than being saved to app preferences or care logs. You can instead search for a city or ZIP code, change the choice, or turn weather off. Manually selected city coordinates are stored in device preferences. Saved trip destinations and forecast values attached to care records may be included in local data, iCloud sync, Family Sync, and backups according to the choices you make.
 
 ## Photos
 
