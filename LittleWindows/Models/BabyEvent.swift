@@ -215,6 +215,7 @@ final class CareEvent {
     var notes: String?
 
     var sleepKindRawValue: String?
+    var sleepConditionsData: Data?
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
@@ -406,6 +407,11 @@ final class CareEvent {
         set {
             healthObservationDetailsData = try? JSONEncoder().encode(newValue)
         }
+    }
+
+    var sleepConditions: SleepConditions? {
+        get { sleepConditionsData.flatMap { try? JSONDecoder().decode(SleepConditions.self, from: $0) } }
+        set { sleepConditionsData = newValue.flatMap { $0.isEmpty ? nil : try? JSONEncoder().encode($0) } }
     }
 
     var sleepKind: SleepKind? {

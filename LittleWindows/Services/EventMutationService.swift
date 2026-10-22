@@ -89,6 +89,7 @@ struct CareEventPersistenceSnapshot: Sendable {
     var caregiverName: String?
     var notes: String?
     var sleepKindRawValue: String?
+    var sleepConditionsData: Data?
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
@@ -158,6 +159,7 @@ struct CareEventPersistenceSnapshot: Sendable {
         caregiverName = event.caregiverName
         notes = event.notes
         sleepKindRawValue = event.sleepKindRawValue
+        sleepConditionsData = event.sleepConditionsData
         feedKindRawValue = event.feedKindRawValue
         amountOz = event.amountOz
         foodDescription = event.foodDescription
@@ -243,6 +245,7 @@ struct CareEventPersistenceSnapshot: Sendable {
         event.caregiverName = caregiverName
         event.notes = notes
         event.sleepKindRawValue = sleepKindRawValue
+        event.sleepConditionsData = sleepConditionsData
         event.feedKindRawValue = feedKindRawValue
         event.amountOz = amountOz
         event.foodDescription = foodDescription
@@ -362,11 +365,18 @@ private actor EventPersistenceWorker {
         let stored = try? modelContext.fetch(descriptor).first
         switch request.operation {
         case .upsert(let snapshot):
+            let capturedWeather = stored?.startDate == snapshot.startDate && stored?.profileID == snapshot.profileID
+                ? stored?.sleepConditions : nil
             let event = stored ?? snapshot.makeDetachedEvent()
             if event.modelContext == nil {
                 modelContext.insert(event)
             }
             snapshot.apply(to: event)
+            if event.isSleepBlock {
+                event.sleepConditions = SleepWeatherAutofill.preservingCapturedWeather(
+                    from: capturedWeather, in: event.sleepConditions, for: event.startDate
+                )
+            }
         case .delete:
             if let stored {
                 modelContext.delete(stored)
@@ -378,6 +388,29 @@ private actor EventPersistenceWorker {
                 try modelContext.save()
                 PersistenceService.recordLocalSave()
             }
+            return nil
+        } catch {
+            modelContext.rollback()
+            return error.localizedDescription
+        }
+    }
+
+    func fillSleepWeather(
+        eventID: UUID, profileID: UUID?, startDate: Date, conditions: SleepConditions
+    ) -> String? {
+        var descriptor = FetchDescriptor<CareEvent>(predicate: #Predicate { $0.id == eventID })
+        descriptor.fetchLimit = 1
+        guard let event = try? modelContext.fetch(descriptor).first,
+              EventVisibilityStore.isVisible(event), event.isSleepBlock,
+              event.profileID == profileID, event.startDate == startDate,
+              SleepWeatherAutofill.needsTemperatures(event.sleepConditions) else { return nil }
+        event.sleepConditions = SleepWeatherAutofill.preservingCapturedWeather(
+            from: conditions, in: event.sleepConditions, for: event.startDate
+        )
+        event.updatedAt = Date()
+        do {
+            try modelContext.save()
+            PersistenceService.recordLocalSave()
             return nil
         } catch {
             modelContext.rollback()
@@ -1004,6 +1037,7 @@ enum EventMutationService {
     private static var pendingSystemIntegrationTask: Task<Void, Never>?
     private static var systemIntegrationRevision = 0
     private static var timerPersistenceSequence: UInt64 = 0
+    private static var pendingSleepWeather = Set<String>()
 
     static func startTimer(
         type: EventType,
@@ -1043,6 +1077,11 @@ enum EventMutationService {
         for event: CareEvent,
         deleting: Bool = false
     ) -> TimerPersistenceRequest {
+        if !deleting, event.isSleepBlock {
+            event.sleepConditions = DailyWeatherStore.shared.cachedSleepConditions(
+                for: event.startDate, preserving: event.sleepConditions
+            )
+        }
         timerPersistenceSequence &+= 1
         return TimerPersistenceRequest(
             eventID: event.id,
@@ -1062,7 +1101,41 @@ enum EventMutationService {
             await PersistenceService.recordLocalSaveFailure(error)
             return false
         }
+        if case .upsert(let snapshot) = request.operation {
+            await scheduleSleepWeather(for: snapshot, container: container)
+        }
         return true
+    }
+
+    private static func scheduleSleepWeather(for snapshot: CareEventPersistenceSnapshot, container: ModelContainer) {
+        guard snapshot.typeRawValue == EventType.sleep.rawValue,
+              snapshot.sleepKindRawValue != SleepKind.nightWaking.rawValue,
+              DailyWeatherStore.shared.isConfigured else { return }
+        let existing = snapshot.sleepConditionsData.flatMap { try? JSONDecoder().decode(SleepConditions.self, from: $0) }
+        guard SleepWeatherAutofill.needsTemperatures(existing) else { return }
+        let key = "\(snapshot.id)|\(snapshot.startDate.timeIntervalSince1970)"
+        guard pendingSleepWeather.insert(key).inserted else { return }
+        Task { @MainActor in
+            defer { pendingSleepWeather.remove(key) }
+            guard let conditions = await DailyWeatherStore.shared.sleepConditions(for: snapshot.startDate, preserving: existing),
+                  conditions.outdoorHighCelsius != nil || conditions.outdoorLowCelsius != nil else { return }
+            await fillSleepWeather(
+                eventID: snapshot.id, profileID: snapshot.profileID, startDate: snapshot.startDate,
+                conditions: conditions, container: container
+            )
+        }
+    }
+
+    nonisolated static func fillSleepWeather(
+        eventID: UUID, profileID: UUID?, startDate: Date,
+        conditions: SleepConditions, container: ModelContainer
+    ) async {
+        let worker = await EventPersistenceWorkerPool.shared.worker(for: container)
+        if let error = await worker.fillSleepWeather(
+            eventID: eventID, profileID: profileID, startDate: startDate, conditions: conditions
+        ) {
+            await PersistenceService.recordLocalSaveFailure(error)
+        }
     }
 
     /// Persists a detached editor result without ever registering it in the

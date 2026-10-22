@@ -144,12 +144,15 @@ struct ActiveTimerEditorView: View {
     let discard: () -> Void
     let setStartTimeZone: (String) -> Void
     let setEndTimeZone: (String) -> Void
+    let setSleepConditions: (SleepConditions?) -> Void
     let switchNursingSide: (() -> Void)?
     let setNursingSide: ((NursingSide) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedStart: Date
     @State private var selectedEnd: Date
+    @State private var sleepConditionsDraft: SleepConditionsDraft
+    @State private var showingWeatherCityPicker = false
     @State private var startTimeZoneIdentifier: String
     @State private var endTimeZoneIdentifier: String
     @State private var showingResetConfirmation = false
@@ -167,6 +170,7 @@ struct ActiveTimerEditorView: View {
         discard: @escaping () -> Void,
         setStartTimeZone: @escaping (String) -> Void = { _ in },
         setEndTimeZone: @escaping (String) -> Void = { _ in },
+        setSleepConditions: @escaping (SleepConditions?) -> Void,
         switchNursingSide: (() -> Void)? = nil,
         setNursingSide: ((NursingSide) -> Void)? = nil
     ) {
@@ -179,9 +183,11 @@ struct ActiveTimerEditorView: View {
         self.discard = discard
         self.setStartTimeZone = setStartTimeZone
         self.setEndTimeZone = setEndTimeZone
+        self.setSleepConditions = setSleepConditions
         self.switchNursingSide = switchNursingSide
         self.setNursingSide = setNursingSide
         _selectedStart = State(initialValue: event.startDate)
+        _sleepConditionsDraft = State(initialValue: SleepConditionsDraft(event.sleepConditions))
         _selectedEnd = State(initialValue: Self.defaultEndDate(for: event))
         _startTimeZoneIdentifier = State(
             initialValue: event.startTimeZoneIdentifier
@@ -419,6 +425,16 @@ struct ActiveTimerEditorView: View {
                 .padding(18)
                 .appSurface()
 
+                if event.isSleepBlock {
+                    SleepTimerConditionsCard(
+                        draft: $sleepConditionsDraft,
+                        date: selectedStart,
+                        timeZone: startTimeZone,
+                        allowsSleepSack: event.profileTypeSnapshot == .child,
+                        chooseWeatherCity: { showingWeatherCityPicker = true }
+                    )
+                }
+
                 VStack(spacing: 12) {
                     Button {
                         apply(selectedStart)
@@ -435,7 +451,7 @@ struct ActiveTimerEditorView: View {
                         )
                     }
                     .buttonStyle(TimerFilledButtonStyle(height: 58))
-                    .disabled(displayedElapsed(at: Date()) < 1)
+                    .disabled(displayedElapsed(at: Date()) < 1 || sleepConditionsValidationMessage != nil)
                     .accessibilityIdentifier("active-timer.finish-and-save")
 
                     Button {
@@ -451,6 +467,7 @@ struct ActiveTimerEditorView: View {
             .padding(.bottom, 28)
         }
         .background(AppTheme.background)
+        .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
         .navigationTitle("Timer")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -460,6 +477,7 @@ struct ActiveTimerEditorView: View {
                     finalizedEditorAction = true
                     dismiss()
                 }
+                .disabled(sleepConditionsValidationMessage != nil)
             }
         }
         .alert("Timer wasn't saved", isPresented: $showingSaveFailure) {
@@ -584,8 +602,27 @@ struct ActiveTimerEditorView: View {
 
     private func apply(_ date: Date) {
         let clamped = min(date, Date())
-        guard abs(event.startDate.timeIntervalSince(clamped)) > 0.5 else { return }
-        adjustStart(clamped)
+        if abs(event.startDate.timeIntervalSince(clamped)) > 0.5 {
+            adjustStart(clamped)
+        }
+        if event.isSleepBlock, sleepConditionsDraft.validationMessage == nil {
+            sleepConditionsDraft.invalidateAutomaticWeather(for: clamped, locationName: nil)
+            var conditions = DailyWeatherStore.shared.cachedSleepConditions(
+                for: clamped, preserving: sleepConditionsDraft.details
+            )
+            if event.profileTypeSnapshot != .child {
+                conditions?.usedSleepSack = nil
+                conditions?.sleepSackTOG = nil
+            }
+            if conditions?.isEmpty == true { conditions = nil }
+            if event.sleepConditions != conditions {
+                setSleepConditions(conditions)
+            }
+        }
+    }
+
+    private var sleepConditionsValidationMessage: String? {
+        event.isSleepBlock ? sleepConditionsDraft.validationMessage : nil
     }
 
     private static func defaultEndDate(for event: CareEvent) -> Date {

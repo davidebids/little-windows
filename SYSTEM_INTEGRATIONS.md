@@ -19,9 +19,11 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - Apple Watch complications and Smart Stack widgets for the active timer, next sleep window, and today summary, with add-profile states when care tracking is not active.
 - Apple Watch App Intents for the most common profile-aware care actions.
 - Local notifications for sleep windows, medication schedules, routine reminders, appointment reminders, monthly guide reminders, itinerary items, trip packing and final-check reminders, and user-created Food & Home reminders. Medication reminders support snooze, optional 30-minute follow-up, and managed Taken/Skipped actions; the Apple Watch adult-profile card can perform the same dose actions and schedule a 10-minute snooze through the paired iPhone.
-- WeatherKit forecasts and Apple Weather attribution for trip packing suggestions.
+- WeatherKit forecasts and Apple Weather attribution for trip packing suggestions, Today temperatures, and dated outdoor high/low snapshots on sleep logs.
 
 The primary Live Activity priority is Sleep, Nursing, Pumping, Feed, Tummy Time, Reading, then Bath. When another timer is active, the surface displays a `+1 more active` count.
+
+Night Light configures, activates, and deactivates its playback audio session on a serial background queue to keep blocking audio-session calls off the UI thread on iOS 17 and later. Playback waits for activation, and stopping or changing sounds invalidates pending playback requests. Session deactivation still notifies other audio apps after the player stops.
 Running Active Timer widgets show the original session start in a compact footer, such as **Sleeping since 9:12 AM**, while keeping the live elapsed duration prominent. The Lock Screen Live Activity places that start time on the same row as the caregiver and other timer details, right-aligned to avoid increasing the activity's height. The expanded Dynamic Island repeats the start-time context in its footer. Nursing timer widgets and expanded Live Activity presentations show both the live total duration and the cumulative duration for the active Left or Right side.
 
 ## Xcode capability setup
@@ -164,6 +166,8 @@ This is intentional. The widget extension does not make unsafe concurrent edits 
 All routes use the `littlewindows://` scheme.
 
 Home, Food, Settings, Night Light, and the unscoped Today route work without an active care profile. Care-only navigation, action, timer, event, report, appointment, routine, guide, milestone, memory, prediction, solids, medication, health-log, and quick-log routes present **Add a care profile** with context for the requested feature. Creating the first profile from that prompt resumes the app in Today > Care; dismissing it leaves the household-only destination unchanged.
+
+Today’s **Starting solids soon** link opens its readiness preview within Today. Back returns to Today without switching tabs. Validate cold launch and this open/back flow without repeated navigation-update warnings in the app log; deeper solids links continue through Care with their existing return destination.
 
 Navigation routes:
 
@@ -397,3 +401,15 @@ Family Sync also needs two signed physical devices or simulator/device installs 
 - [Creating a widget extension](https://developer.apple.com/documentation/widgetkit/creating-a-widget-extension)
 - [Configuring App Groups](https://developer.apple.com/documentation/xcode/configuring-app-groups)
 - [App Intents](https://developer.apple.com/documentation/appintents)
+
+## Today Weather And Sleep Conditions
+
+Today integrates a compact city/current/high/low line with the greeting in Home and Care modes. Tap the line to choose **Use current location** or search Apple Maps for a city/ZIP code. Weather search prefers the result's locality over postal-code titles, and previously saved numeric ZIP labels are resolved on refresh. Source attribution and the Apple Weather mark appear in the location sheet alongside turn-off controls, rather than beneath the Today weather line. Updates are automatic, without a manual refresh control. The location sheet also offers a device-local Fahrenheit/Celsius preference for Today and outdoor sleep temperatures, including history summaries. Existing values remain stored in Celsius; selecting units does not fetch another forecast or change body-temperature units.
+
+Current location uses one foreground Core Location fix, kilometer accuracy, reduced accuracy by default, and When In Use permission requested only from the explicit action. `NSLocationWhenInUseUsageDescription` explains Today weather and automatic sleep temperatures. Permission denial, restricted access, or location failure leaves manual city search available. Current-location mode is saved as a device preference; coordinates are rounded to city scale, kept in memory, and refreshed when weather next needs updating. Manually selected city coordinates remain in device UserDefaults. No background location mode is added. Weather refreshes on foreground entry and at 30-minute intervals while active, with shared in-flight requests.
+
+Sleep events use the optional `CareEvent.sleepConditionsData` payload for outdoor highs/lows in Celsius, weather date/time zone and city label, forecast retrieval time, automatic/manual preference, and child-only sleep sack usage/TOG. Forecasts fill new or empty automatic sleep records without tapping a forecast button, including timer starts and saves through the centralized mutation service. Cached weather fills immediately; a later forecast merges into the existing record without delaying the timer. The isolated writer checks event ID, profile, unchanged start date, and manual overrides, never recreates a deleted record, and keeps the latest sleep sack choice. A later timer snapshot preserves captured weather for the same event/date. Recorded temperatures remain unchanged when reopening history or when forecasts refresh. Existing backups without these optional values remain supported.
+
+The sleep timer shows an inline weather summary and one sleep sack/TOG selector directly above **Finish & Save Event**, without a separate conditions screen. Keeping or saving the timer also commits those choices. **Temperature options → Enter temperatures manually** in the timer, or turning off **Automatic temperatures** in the log editor, enables Fahrenheit/Celsius manual fields, including negative values. Missing forecast coverage and service failures never block sleep logging. Daily lows cover the calendar day, not an overnight-only or room measurement. Quick repeat uses fresh weather rather than copying prior temperatures or sleep sack tags. The optional SwiftData payload field still requires CloudKit development schema verification and production schema promotion before distribution.
+
+Simulator checks: inspect the compact greeting in both Today modes; search a ZIP and confirm its city name; verify current-location Allow/Deny flows, manual city fallback, location refresh, and removal. With available weather, start and finish sleep without opening conditions and confirm highs/lows appear in history. Change sleep sack usage while weather is pending; verify it survives the merge. Check manual overrides, date changes, deleted logs, negative temperatures, unit conversion, saved history, and backup/import. Live forecasts still require a signed WeatherKit-enabled build. Physical-device tests must preserve existing data and must not use simulator reset/seed routes.

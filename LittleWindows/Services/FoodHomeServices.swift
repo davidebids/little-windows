@@ -2990,28 +2990,44 @@ enum TodayHomeSummaryService {
         dayEnd: Date,
         calendar: Calendar
     ) -> (section: TodayHomeSummarySection, attention: [TodayHomeSummaryItem]) {
-        let activeTrips = trips.filter {
-            $0.householdID == householdID && !$0.isArchived && $0.status == .upcoming && $0.completedAt == nil
+        let activeTrips = latestValuesByID(
+            trips.filter { $0.householdID == householdID },
+            id: \.id,
+            updatedAt: \.updatedAt
+        ).values.filter {
+            !$0.isArchived && $0.status == .upcoming && $0.completedAt == nil
         }.sorted { lhs, rhs in
             let lhsCurrent = lhs.startDate < dayEnd && lhs.endDate >= dayStart
             let rhsCurrent = rhs.startDate < dayEnd && rhs.endDate >= dayStart
             if lhsCurrent != rhsCurrent { return lhsCurrent }
+            if lhs.startDate == rhs.startDate { return lhs.id.uuidString < rhs.id.uuidString }
             return lhs.startDate < rhs.startDate
         }
         let activeTripIDs = Set(activeTrips.map(\.id))
+        let uniquePackingItems = latestValuesByID(
+            packingItems.filter { $0.householdID == householdID },
+            id: \.id,
+            updatedAt: \.updatedAt
+        ).values.filter { activeTripIDs.contains($0.tripID) }
         let packingByTrip = Dictionary(
-            grouping: packingItems.filter { $0.householdID == householdID && activeTripIDs.contains($0.tripID) },
+            grouping: uniquePackingItems,
             by: \.tripID
         )
-        let todayItinerary = itineraryItems.filter {
-            guard $0.householdID == householdID, activeTripIDs.contains($0.tripID), !$0.isCompleted else {
+        let todayItinerary = latestValuesByID(
+            itineraryItems.filter { $0.householdID == householdID },
+            id: \.id,
+            updatedAt: \.updatedAt
+        ).values.filter {
+            guard activeTripIDs.contains($0.tripID), !$0.isCompleted else {
                 return false
             }
             return isInDay($0.scheduledDay, start: dayStart, end: dayEnd)
                 || isInDay($0.startDate, start: dayStart, end: dayEnd)
-        }.sorted {
-            ($0.startDate ?? $0.scheduledDay ?? .distantFuture)
-                < ($1.startDate ?? $1.scheduledDay ?? .distantFuture)
+        }.sorted { lhs, rhs in
+            let lhsDate = lhs.startDate ?? lhs.scheduledDay ?? .distantFuture
+            let rhsDate = rhs.startDate ?? rhs.scheduledDay ?? .distantFuture
+            if lhsDate == rhsDate { return lhs.id.uuidString < rhs.id.uuidString }
+            return lhsDate < rhsDate
         }
         var representative = todayItinerary.prefix(2).map { item in
             TodayHomeSummaryItem(

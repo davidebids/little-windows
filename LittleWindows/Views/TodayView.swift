@@ -183,6 +183,7 @@ struct TodayView: View {
     @AppStorage("customWakeMinimum") private var customWakeMinimum = 0.0
     @AppStorage("customWakeMaximum") private var customWakeMaximum = 0.0
 
+    @State private var showingWeatherCityPicker = false
     @State private var editorRoute: EventEditorRoute?
     @State private var pendingActivityEditorRoute: EventEditorRoute?
     @State private var activeTimerToEdit: CareEvent?
@@ -794,12 +795,14 @@ struct TodayView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Good \(greeting), \(activeCaregiverName)")
                                 .font(.title2.bold())
+                                .fixedSize(horizontal: false, vertical: true)
                             if let profile {
                                 Text("\(profile.name) · \(profile.profileSubtitle)")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .layoutPriority(1)
                         Spacer()
                         if let profile {
                             Button {
@@ -820,16 +823,21 @@ struct TodayView: View {
                                 .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14))
                             }
                             .buttonStyle(.plain)
+                            .fixedSize(horizontal: true, vertical: false)
                             .accessibilityLabel("\(todayEvents.count) logs today for \(profile.name)")
                             .accessibilityHint("Jumps to today's timeline")
                         }
                     }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 2)
+                    .padding(.horizontal, 8)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 4, trailing: 0))
                     .listRowSeparator(.hidden)
+                    TodayWeatherHeader(chooseCity: { showingWeatherCityPicker = true })
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
+                        .listRowSeparator(.hidden)
                 }
+                .listSectionSpacing(0)
 
                 if profile == nil {
                     noProfileSection
@@ -978,9 +986,6 @@ struct TodayView: View {
                 .ignoresSafeArea()
         }
         .navigationTitle("Today")
-        .navigationDestination(for: FoodRoute.self) { route in
-            todaySolidsDestination(route, state: state)
-        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 ProfileToolbarSettingsButton(profile: profile) {
@@ -988,6 +993,7 @@ struct TodayView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
         .sheet(item: $editorRoute) { route in
             NavigationStack {
                 EventEditorView(
@@ -1486,7 +1492,11 @@ struct TodayView: View {
 
             if accessLevel == .readinessPreview {
                 Section {
-                    NavigationLink(value: FoodRoute.solidsHome) {
+                    // Keep this destination local so Today refreshes don't
+                    // repeatedly register a stack-wide FoodRoute handler.
+                    NavigationLink {
+                        todaySolidsDestination(.solidsHome, state: state)
+                    } label: {
                         Label {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Starting solids soon")
@@ -2303,6 +2313,11 @@ struct TodayView: View {
             discard: { discardTimer(event) },
             setStartTimeZone: { setStartTimeZone($0, for: event) },
             setEndTimeZone: { setEndTimeZone($0, for: event) },
+            setSleepConditions: { conditions in
+                let draft = timerDraftForMutation(event)
+                draft.sleepConditions = conditions
+                persistTimerMutation(draft)
+            },
             switchNursingSide: nursingSideSwitcher(for: event),
             setNursingSide: nursingSideSetter(for: event)
         )
@@ -4667,6 +4682,7 @@ private struct TodayHomeSummaryView: View {
     let open: (TodayHomeSummaryRoute) -> Void
     let openMedicationDose: (MedicationDoseRouteCommand) -> Void
 
+    @State private var showingWeatherCityPicker = false
     @State private var sessionSnoozes = [String: TodaySnoozedAttentionItem]()
     @State private var unsnoozedSourceKeys = Set<String>()
     @State private var attentionNow = Date()
@@ -4773,6 +4789,20 @@ private struct TodayHomeSummaryView: View {
 
     var body: some View {
         List {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(greetingTitle)
+                        .font(.title2.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                    TodayWeatherHeader(chooseCity: { showingWeatherCityPicker = true })
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 12, trailing: 0))
+                .listRowSeparator(.hidden)
+            }
+
             if summary.isQuiet {
                 Section {
                     ContentUnavailableView(
@@ -4907,6 +4937,7 @@ private struct TodayHomeSummaryView: View {
             _ = HouseholdAttentionSnoozeStore.activeSnoozes(now: now)
             attentionNow = now
         }
+        .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
         .sheet(isPresented: $showingAllAttention) {
             NavigationStack {
                 ScrollView {

@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct CareReportExportView: View {
     @Environment(\.modelContext) private var modelContext
@@ -20,7 +21,7 @@ struct CareReportExportView: View {
     @State private var endDate: Date = CareReportExportService.defaultRange(for: .last30Days).1
     @State private var showingExporter = false
     @State private var exportDocument = CareReportDocument()
-    @State private var exportContentType = CareReportFormat.pdf.contentType
+    @State private var exportFormat: CareReportFormat = .pdf
     @State private var defaultFilename = "Little-Windows-Care-Report.pdf"
     @State private var statusMessage: String?
 
@@ -158,7 +159,7 @@ struct CareReportExportView: View {
         .fileExporter(
             isPresented: $showingExporter,
             document: exportDocument,
-            contentType: exportContentType,
+            contentType: exportFormat.contentType,
             defaultFilename: defaultFilename
         ) { result in
             if case .failure(let error) = result {
@@ -197,7 +198,7 @@ struct CareReportExportView: View {
                     context: modelContext
                 )
             )
-            exportContentType = format.contentType
+            exportFormat = format
             defaultFilename = CareReportExportService.defaultFilename(
                 profile: selectedProfile,
                 format: format,

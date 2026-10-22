@@ -284,6 +284,7 @@ private struct EventDTO: Codable {
     var caregiverName: String?
     var notes: String?
     var sleepKindRawValue: String?
+    var sleepConditionsData: Data?
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
@@ -1286,7 +1287,8 @@ enum DataExportImportService {
                 endTimeZoneIdentifier: $0.endTimeZoneIdentifier,
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt, caregiverName: $0.caregiverName, notes: $0.notes,
-                sleepKindRawValue: $0.sleepKindRawValue, feedKindRawValue: $0.feedKindRawValue,
+                sleepKindRawValue: $0.sleepKindRawValue,
+                sleepConditionsData: $0.sleepConditionsData, feedKindRawValue: $0.feedKindRawValue,
                 amountOz: $0.amountOz, foodDescription: $0.foodDescription,
                 solidReactionRawValue: $0.solidReactionRawValue,
                 solidTextureRawValue: $0.solidTextureRawValue,
@@ -2564,6 +2566,7 @@ enum DataExportImportService {
             event.updatedAt = value.updatedAt
             event.profileTypeSnapshotRawValue = value.profileTypeSnapshotRawValue
             event.sleepKindRawValue = value.sleepKindRawValue
+            event.sleepConditionsData = value.sleepConditionsData
             event.feedKindRawValue = value.feedKindRawValue
             event.amountOz = value.amountOz
             event.foodDescription = value.foodDescription
@@ -4293,6 +4296,16 @@ enum DataExportImportService {
                     .map { (profile.id, $0) }
             }
         )
+        let sleepConditionsAreValid = envelope.events.allSatisfy { event in
+            guard let data = event.sleepConditionsData else { return true }
+            guard EventType.normalized(rawValue: event.typeRawValue) == .sleep,
+                  let details = try? JSONDecoder().decode(SleepConditions.self, from: data),
+                  details.isValid else { return false }
+            let profileType = event.profileID.flatMap { profileTypesByID[$0] }
+                ?? event.profileTypeSnapshotRawValue.flatMap(CareProfileType.init(rawValue:))
+            return profileType == .child || (details.usedSleepSack == nil && details.sleepSackTOG == nil)
+        }
+        guard sleepConditionsAreValid else { throw CocoaError(.fileReadCorruptFile) }
         let healthObservationDetailsAreValid = envelope.events.allSatisfy { event in
             let eventType = EventType.normalized(rawValue: event.typeRawValue)
             let profileType = event.profileID.flatMap { profileTypesByID[$0] }

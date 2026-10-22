@@ -58,6 +58,8 @@ Care events store concrete start and end time-zone identifiers. A timer can ther
 
 Quick repeat and backup/import preserve the production care details above, including pumping amounts, solid feeding style, diaper/potty details, medicine details, growth values, temperature readings, and activity metadata.
 
+Sleep logs can also record outdoor daily highs/lows and, for child profiles, whether a sleep sack was used and its optional TOG rating. Add these while logging or editing sleep, or review them directly above **Finish & Save Event** in an active sleep timer. A single sleep sack selector records no sack, an unknown TOG, a common rating, or another rating from the label. Choose **Use current location** or search for a city/ZIP code once. Temperatures then fill automatically for the sleep's start date, including timers saved without editing the sleep details. Use **Temperature options → Enter temperatures manually** in a timer, or turn off **Automatic temperatures** in the log editor, to enter an override or a past date without forecast coverage. Forecast lows cover the calendar day rather than just the sleeping hours. Values are stored with that event and included in JSON backups; weather and sleep sack context do not affect sleep predictions. Repeating a log does not copy prior weather or assume the same sleep sack.
+
 ## Today And Routines
 
 Today is the main operational screen for care. It includes:
@@ -66,6 +68,7 @@ Today is the main operational screen for care. It includes:
 - Smart quick actions ranked from recent history, active timers, prediction context, and user-pinned actions.
 - Per-profile Today action customization so caregivers can hide categories they do not use without affecting history, reports, backup/import, widgets, or other profiles.
 - Active timer cards and saved timer drafts for review before logging.
+- Compact current temperature and daily high/low beside the greeting in both Today modes, with automatic updates. Tap the weather line to use current location, choose a city/ZIP code, switch outdoor temperatures between °F and °C, or turn weather off. The unit choice is saved on the device and also applies to outdoor sleep temperatures. ZIP searches display city names. The location choice stays on the device; current-location coordinates are not persisted.
 - Household and profile-scoped routines, routine templates, custom routine steps, start/skip/complete flows, reminders, duplication, reordering, archiving, and an explicit Done button in the routines manager.
 - A child sleep day-ahead card below Log Something, generated from recent sleep history and confidence-aware planning windows.
 
