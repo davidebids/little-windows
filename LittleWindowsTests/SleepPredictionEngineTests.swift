@@ -8,6 +8,92 @@ import UIKit
 @testable import LittleWindows
 
 final class SleepPredictionEngineTests: XCTestCase {
+    func testExcludedBriefNapDoesNotResetPredictionsOrPlanning() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 15, hour: 14))!
+        let profile = CareProfile(name: "Test Child", birthDate: now.addingTimeInterval(-240 * 86_400))
+        let history = makeTwoNapHistory(today: now, calendar: calendar)
+        let briefNap = makeSleep(kind: .nap, start: now.addingTimeInterval(-30 * 60), end: now.addingTimeInterval(-20 * 60))
+        briefNap.excludeFromSleepPredictions = true
+        let events = history + [briefNap]
+        let baseline = try XCTUnwrap(SleepPredictionEngine.predict(profile: profile, events: history, now: now, calendar: calendar))
+        var actual = try XCTUnwrap(SleepPredictionEngine.predict(profile: profile, events: events, now: now, calendar: calendar))
+        // Factors receive new presentation IDs on every calculation.
+        XCTAssertEqual(actual.contributingFactors.count, baseline.contributingFactors.count)
+        actual.contributingFactors = zip(actual.contributingFactors, baseline.contributingFactors).map { factor, expected in
+            var factor = factor
+            factor.id = expected.id
+            return factor
+        }
+        XCTAssertEqual(actual, baseline)
+        let baselinePressure = try XCTUnwrap(SleepPredictionEngine.sleepPressure(profile: profile, events: history, now: now, calendar: calendar))
+        var pressure = try XCTUnwrap(SleepPredictionEngine.sleepPressure(profile: profile, events: events, now: now, calendar: calendar))
+        XCTAssertEqual(pressure.contributingFactors.count, baselinePressure.contributingFactors.count)
+        pressure.contributingFactors = zip(pressure.contributingFactors, baselinePressure.contributingFactors).map { factor, expected in
+            var factor = factor
+            factor.id = expected.id
+            return factor
+        }
+        XCTAssertEqual(pressure, baselinePressure)
+        XCTAssertEqual(SleepPredictionEngine.wakeWindowSamples(from: events, now: now, calendar: calendar),
+                       SleepPredictionEngine.wakeWindowSamples(from: history, now: now, calendar: calendar))
+        XCTAssertEqual(SleepPredictionEngine.nextNapIndex(events: events, date: now, calendar: calendar), 1)
+        let bedtime = now.addingTimeInterval(5 * 60 * 60)
+        XCTAssertEqual(SleepPredictionEngine.backwardsPlan(profile: profile, events: events, targetBedtime: bedtime, now: now, calendar: calendar),
+                       SleepPredictionEngine.backwardsPlan(profile: profile, events: history, targetBedtime: bedtime, now: now, calendar: calendar))
+        XCTAssertTrue(briefNap.isSleepBlock)
+        XCTAssertEqual(briefNap.duration, 10 * 60)
+        briefNap.excludeFromSleepPredictions = false
+        XCTAssertNotEqual(SleepPredictionEngine.predict(profile: profile, events: events, now: now, calendar: calendar)?.predictedStart, baseline.predictedStart)
+    }
+
+    func testHistoricalExclusionInvalidatesCacheEvenWhenLatestSleepIsUnchanged() throws {
+        let now = Date()
+        let profile = CareProfile(name: "Test Child", birthDate: now.addingTimeInterval(-240 * 86_400))
+        let older = makeSleep(kind: .nap, start: now.addingTimeInterval(-6 * 3600), end: now.addingTimeInterval(-5 * 3600))
+        let latest = makeSleep(kind: .nap, start: now.addingTimeInterval(-3 * 3600), end: now.addingTimeInterval(-2 * 3600))
+        let prediction = try XCTUnwrap(SleepPredictionEngine.predict(profile: profile, events: [older, latest], now: now))
+        let record = SleepPredictionRecord(prediction: prediction, basedOnLastSleepEventID: latest.id, profileID: profile.id)
+        XCTAssertNotNil(PredictionTuningService.cachedCurrentPrediction(profile: profile, events: [older, latest], records: [record]))
+        older.excludeFromSleepPredictions = true
+        older.updatedAt = record.generatedAt.addingTimeInterval(1)
+        XCTAssertNil(PredictionTuningService.cachedCurrentPrediction(profile: profile, events: [older, latest], records: [record]))
+        XCTAssertTrue(SleepPredictionEngine.wakeWindowSamples(from: [older, latest], now: now).isEmpty)
+    }
+
+    func testExcludedNightSleepDoesNotTeachBedtimeAndRunningSleepStillSuppressesPrediction() {
+        let now = Calendar.current.date(bySettingHour: 21, minute: 0, second: 0, of: Date())!
+        let sleep = makeSleep(kind: .nightSleep, start: now.addingTimeInterval(-3600), end: now)
+        XCTAssertEqual(SleepMiniPlanService.nightlyBedtimeStarts(events: [sleep], now: now, calendar: .current).count, 1)
+        sleep.excludeFromSleepPredictions = true
+        XCTAssertTrue(SleepMiniPlanService.nightlyBedtimeStarts(events: [sleep], now: now, calendar: .current).isEmpty)
+        sleep.endDate = nil
+        sleep.timerState = .running
+        sleep.activeTimerSegmentStartDate = sleep.startDate
+        let profile = CareProfile(name: "Test Child", birthDate: now.addingTimeInterval(-240 * 86_400))
+        XCTAssertNil(SleepPredictionEngine.predict(profile: profile, events: [sleep], now: now))
+        XCTAssertNil(SleepPredictionEngine.sleepPressure(profile: profile, events: [sleep], now: now))
+    }
+
+    func testExcludingResolvedSleepRemovesItsLearningOutcome() throws {
+        let now = Date()
+        let profile = CareProfile(name: "Test Child", birthDate: now.addingTimeInterval(-240 * 86_400))
+        let prior = makeSleep(kind: .nap, start: now.addingTimeInterval(-4 * 3600), end: now.addingTimeInterval(-3 * 3600))
+        let prediction = try XCTUnwrap(SleepPredictionEngine.predict(profile: profile, events: [prior], now: now))
+        let record = SleepPredictionRecord(prediction: prediction, basedOnLastSleepEventID: prior.id, profileID: profile.id)
+        let sleep = makeSleep(kind: .nap, start: record.generatedAt.addingTimeInterval(60), end: record.generatedAt.addingTimeInterval(660))
+        PredictionTuningService.resolveLatestPrediction(with: sleep, records: [record])
+        XCTAssertEqual(record.actualSleepEventID, sleep.id)
+        sleep.excludeFromSleepPredictions = true
+        PredictionTuningService.resolveLatestPrediction(with: sleep, records: [record])
+        XCTAssertNil(record.actualSleepEventID)
+        XCTAssertNil(record.actualSleepStart)
+        XCTAssertNil(record.errorMinutes)
+        XCTAssertNil(record.wasInsidePredictedWindow)
+        XCTAssertEqual(PredictionTuningService.accuracy(records: [record]).sampleCount, 0)
+    }
+
     func testManualCloudKitDevelopmentSchemaInitialization() throws {
         let environment = ProcessInfo.processInfo.environment
         guard Self.smokeConfigurationValue(

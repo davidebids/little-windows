@@ -27,6 +27,11 @@ struct EventRow: View {
                 Text(detail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                if event.isSleepBlock, event.excludeFromSleepPredictions {
+                    Text("Excluded from sleep predictions")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if event.type == .sleep, let conditions = event.sleepConditions, !conditions.isEmpty {
                     Text(conditions.formattedSummary(unit: outdoorTemperatureUnit))
                         .font(.caption)

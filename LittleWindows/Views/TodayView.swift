@@ -2318,6 +2318,12 @@ struct TodayView: View {
                 draft.sleepConditions = conditions
                 persistTimerMutation(draft)
             },
+            setSleepPredictionExclusion: { excluded in
+                let draft = timerDraftForMutation(event)
+                draft.excludeFromSleepPredictions = excluded
+                draft.updatedAt = Date()
+                persistTimerMutation(draft)
+            },
             switchNursingSide: nursingSideSwitcher(for: event),
             setNursingSide: nursingSideSetter(for: event)
         )

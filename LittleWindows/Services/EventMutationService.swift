@@ -90,6 +90,7 @@ struct CareEventPersistenceSnapshot: Sendable {
     var notes: String?
     var sleepKindRawValue: String?
     var sleepConditionsData: Data?
+    var excludeFromSleepPredictions: Bool
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
@@ -160,6 +161,7 @@ struct CareEventPersistenceSnapshot: Sendable {
         notes = event.notes
         sleepKindRawValue = event.sleepKindRawValue
         sleepConditionsData = event.sleepConditionsData
+        excludeFromSleepPredictions = event.excludeFromSleepPredictions
         feedKindRawValue = event.feedKindRawValue
         amountOz = event.amountOz
         foodDescription = event.foodDescription
@@ -246,6 +248,7 @@ struct CareEventPersistenceSnapshot: Sendable {
         event.notes = notes
         event.sleepKindRawValue = sleepKindRawValue
         event.sleepConditionsData = sleepConditionsData
+        event.excludeFromSleepPredictions = excludeFromSleepPredictions
         event.feedKindRawValue = feedKindRawValue
         event.amountOz = amountOz
         event.foodDescription = foodDescription
@@ -495,7 +498,7 @@ private actor EventPersistenceWorker {
             )
             : currentPrediction(in: records)
         let basedOnLastSleepEventID = events
-            .filter { !$0.isTimerDraft && $0.isSleepBlock && $0.endDate != nil }
+            .filter { !$0.isTimerDraft && $0.isPredictionSleepBlock && $0.endDate != nil }
             .max { $0.startDate < $1.startDate }?
             .id
         let pressure = SleepPredictionEngine.sleepPressure(
@@ -967,7 +970,7 @@ private actor EventPersistenceWorker {
         }
         if let prediction {
             let lastSleepID = committedEvents
-                .filter { $0.isSleepBlock && $0.endDate != nil }
+                .filter { $0.isPredictionSleepBlock && $0.endDate != nil }
                 .max { $0.startDate < $1.startDate }?
                 .id
             modelContext.insert(SleepPredictionRecord(
@@ -1001,23 +1004,7 @@ private actor EventPersistenceWorker {
         with sleepEvent: CareEvent,
         records: [SleepPredictionRecord]
     ) {
-        guard sleepEvent.isSleepBlock else { return }
-        let linkedRecord = records.first { $0.actualSleepEventID == sleepEvent.id }
-        let candidate = linkedRecord ?? records
-            .filter {
-                $0.actualSleepEventID == nil
-                    && $0.generatedAt <= sleepEvent.startDate
-                    && sleepEvent.startDate.timeIntervalSince($0.generatedAt) <= 18 * 60 * 60
-            }
-            .max { $0.generatedAt < $1.generatedAt }
-        guard let candidate else { return }
-        candidate.actualSleepEventID = sleepEvent.id
-        candidate.actualSleepStart = sleepEvent.startDate
-        candidate.errorMinutes = sleepEvent.startDate.timeIntervalSince(candidate.predictedStart) / 60
-        candidate.wasInsidePredictedWindow = (
-            candidate.predictedWindowStart...candidate.predictedWindowEnd
-        ).contains(sleepEvent.startDate)
-        candidate.updatedAt = Date()
+        PredictionTuningService.resolveLatestPrediction(with: sleepEvent, records: records)
     }
 
     private func currentPrediction(in records: [SleepPredictionRecord]) -> SleepPrediction? {

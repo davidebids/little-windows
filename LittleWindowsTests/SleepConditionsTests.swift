@@ -3,6 +3,35 @@ import XCTest
 @testable import LittleWindows
 
 final class SleepConditionsTests: XCTestCase {
+    @MainActor
+    func testFiveMinuteSleepCanBeExcludedAfterStoppingAndBeforeSaving() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let start = Date().addingTimeInterval(-300)
+        let stoppedAt = start.addingTimeInterval(300)
+        let event = CareEvent(type: .sleep, startDate: start)
+        event.profileTypeSnapshot = .child
+        event.sleepKind = .nap
+        event.timerState = .running
+        event.timerAccumulatedSeconds = 0
+        event.activeTimerSegmentStartDate = start
+        EventMutationService.stopTimer(event, context: context, at: stoppedAt)
+        XCTAssertTrue(event.isTimerDraft)
+        XCTAssertFalse(event.isTimerRunning)
+        XCTAssertNil(event.endDate)
+        event.excludeFromSleepPredictions = true
+        XCTAssertTrue(EventMutationService.saveTimer(event, context: context, at: stoppedAt))
+        let persisted = await EventMutationService.persistStandaloneEvent(event, container: container)
+        XCTAssertTrue(persisted)
+        let verification = ModelContext(container)
+        let saved = try XCTUnwrap(verification.fetch(FetchDescriptor<CareEvent>()).first)
+        XCTAssertFalse(saved.isTimerDraft)
+        XCTAssertTrue(saved.excludeFromSleepPredictions)
+        XCTAssertTrue(saved.isSleepBlock)
+        XCTAssertFalse(saved.isPredictionSleepBlock)
+        XCTAssertEqual(saved.duration, 300)
+    }
+
     func testOptionalFieldsAndExplicitNoSleepSackAreDistinct() {
         XCTAssertTrue(SleepConditions().isEmpty)
         XCTAssertFalse(SleepConditions(usedSleepSack: false).isEmpty)
@@ -120,10 +149,12 @@ final class SleepConditionsTests: XCTestCase {
         let event = CareEvent(profileID: profile.id, type: .sleep)
         event.profileTypeSnapshot = .child
         event.sleepKind = .nightSleep
+        event.excludeFromSleepPredictions = true
         event.sleepConditions = sampleConditions
         context.insert(event)
         try context.save()
         let draft = EventMutationService.detachedTimerCopy(event)
+        XCTAssertTrue(draft.excludeFromSleepPredictions)
         XCTAssertEqual(draft.sleepConditions, sampleConditions)
         var changedConditions = sampleConditions
         changedConditions.usedSleepSack = false
@@ -135,6 +166,7 @@ final class SleepConditionsTests: XCTestCase {
         let verification = ModelContext(container)
         let saved = try XCTUnwrap(verification.fetch(FetchDescriptor<CareEvent>()).first)
         XCTAssertEqual(saved.profileID, profile.id)
+        XCTAssertTrue(saved.excludeFromSleepPredictions)
         XCTAssertEqual(saved.sleepConditions, changedConditions)
     }
 
@@ -147,6 +179,7 @@ final class SleepConditionsTests: XCTestCase {
         let event = CareEvent(profileID: profile.id, type: .sleep)
         event.profileTypeSnapshot = .child
         event.sleepKind = .nightSleep
+        event.excludeFromSleepPredictions = true
         event.sleepConditions = sampleConditions
         context.insert(event)
         let bodyTemperature = CareEvent(profileID: profile.id, type: .temperature)
@@ -156,6 +189,7 @@ final class SleepConditionsTests: XCTestCase {
         let backup = try DataExportImportService.exportData(context: context)
         try DataExportImportService.importData(backup, context: context)
         let imported = try context.fetch(FetchDescriptor<CareEvent>())
+        XCTAssertEqual(imported.first { $0.type == .sleep }?.excludeFromSleepPredictions, true)
         XCTAssertEqual(imported.first { $0.type == .sleep }?.sleepConditions, sampleConditions)
         XCTAssertEqual(imported.first { $0.type == .sleep }?.profileID, profile.id)
         XCTAssertEqual(imported.first { $0.type == .temperature }?.temperatureCelsius, 37)
@@ -170,10 +204,14 @@ final class SleepConditionsTests: XCTestCase {
         let backup = try DataExportImportService.exportData(context: container.mainContext)
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: backup) as? [String: Any])
         var events = try XCTUnwrap(json["events"] as? [[String: Any]])
-        for i in events.indices { events[i].removeValue(forKey: "sleepConditionsData") }
+        for i in events.indices {
+            events[i].removeValue(forKey: "sleepConditionsData")
+            events[i].removeValue(forKey: "excludeFromSleepPredictions")
+        }
         json["events"] = events
         let legacy = try JSONSerialization.data(withJSONObject: json)
         try DataExportImportService.importData(legacy, context: container.mainContext)
+        XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<CareEvent>()).first?.excludeFromSleepPredictions, false)
         XCTAssertNil(try container.mainContext.fetch(FetchDescriptor<CareEvent>()).first?.sleepConditions)
     }
 

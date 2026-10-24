@@ -42,6 +42,10 @@ enum SleepMiniPlanService {
         now: Date,
         calendar: Calendar
     ) -> SleepMiniPlan? {
+        let excludedSleepIDs = Set(events.filter { $0.isSleepBlock && $0.excludeFromSleepPredictions }.map(\.id))
+        let records = records.filter { record in
+            record.actualSleepEventID.map { !excludedSleepIDs.contains($0) } ?? true
+        }
         guard profile.profileType == .child else { return nil }
         let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
         let runningSleep = events
@@ -49,7 +53,7 @@ enum SleepMiniPlanService {
             .max { $0.startDate < $1.startDate }
         var hasCompletedSleep = false
         var recentSleeps: [CareEvent] = []
-        for event in events where event.isSleepBlock && !event.isTimerDraft && event.endDate != nil && event.startDate <= now {
+        for event in events where event.isPredictionSleepBlock && !event.isTimerDraft && event.endDate != nil && event.startDate <= now {
             hasCompletedSleep = true
             if event.startDate >= recentCutoff {
                 recentSleeps.append(event)
@@ -256,7 +260,7 @@ enum SleepMiniPlanService {
                 isCurrent: true
             ))
         } else if let lastSleep = recentSleeps
-            .filter(\.isSleepBlock)
+            .filter(\.isPredictionSleepBlock)
             .compactMap({ event -> CareEvent? in
                 guard let endDate = event.endDate, endDate <= now else { return nil }
                 return event
@@ -326,6 +330,7 @@ enum SleepMiniPlanService {
         var startsByNight: [Date: (event: CareEvent, unfoldedMinute: Double)] = [:]
 
         for event in events where
+            event.isPredictionSleepBlock &&
             event.sleepKind == .nightSleep &&
             !event.isTimerDraft &&
             event.endDate != nil &&
@@ -830,7 +835,7 @@ enum SleepPredictionEngine {
         } ?? .distantPast
         let completedSleeps = events
             .filter {
-                $0.isSleepBlock &&
+                $0.isPredictionSleepBlock &&
                     !$0.isTimerDraft &&
                     $0.endDate != nil &&
                     $0.startDate >= historyStart &&
@@ -875,7 +880,7 @@ enum SleepPredictionEngine {
         } ?? .distantPast
 
         let completedSleeps = events
-            .filter { $0.isSleepBlock && !$0.isTimerDraft && $0.endDate != nil }
+            .filter { $0.isPredictionSleepBlock && !$0.isTimerDraft && $0.endDate != nil }
             .sorted { $0.startDate < $1.startDate }
         let historySleeps = completedSleeps.filter {
             $0.startDate >= historyStart && $0.startDate < todayStart
@@ -1097,6 +1102,10 @@ enum SleepPredictionEngine {
         calendar: Calendar = .current,
         settings: PredictionSettings = .default
     ) -> SleepPrediction? {
+        let excludedSleepIDs = Set(events.filter { $0.isSleepBlock && $0.excludeFromSleepPredictions }.map(\.id))
+        let records = records.filter { record in
+            record.actualSleepEventID.map { !excludedSleepIDs.contains($0) } ?? true
+        }
         guard profile.profileType.capabilities.supportsSleepPrediction,
               let birthDate = profile.birthDate else { return nil }
         if events.contains(where: { $0.isSleepBlock && $0.isTimerRunning }) {
@@ -1104,7 +1113,7 @@ enum SleepPredictionEngine {
         }
         let events = events.filter { !$0.isTimerDraft }
         let completedSleeps = events
-            .filter { $0.isSleepBlock && $0.endDate != nil && $0.startDate <= now }
+            .filter { $0.isPredictionSleepBlock && $0.endDate != nil && $0.startDate <= now }
             .sorted { $0.startDate < $1.startDate }
         guard let lastSleep = completedSleeps.last, let lastSleepEnd = lastSleep.endDate else {
             return nil
@@ -1112,7 +1121,7 @@ enum SleepPredictionEngine {
 
         let nextSleepIndex = nextNapIndex(events: events, date: now, calendar: calendar)
         let napsToday = events.filter {
-            $0.isSleepBlock &&
+            $0.isPredictionSleepBlock &&
             $0.sleepKind == .nap &&
             $0.occursOnLocalDay(now, calendar: calendar)
         }.count
@@ -1334,6 +1343,10 @@ enum SleepPredictionEngine {
         calendar: Calendar = .current,
         settings: PredictionSettings = .default
     ) -> SleepPressure? {
+        let excludedSleepIDs = Set(events.filter { $0.isSleepBlock && $0.excludeFromSleepPredictions }.map(\.id))
+        let records = records.filter { record in
+            record.actualSleepEventID.map { !excludedSleepIDs.contains($0) } ?? true
+        }
         guard let profile,
               profile.profileType.capabilities.supportsSleepPrediction,
               let birthDate = profile.birthDate else { return nil }
@@ -1364,7 +1377,7 @@ enum SleepPredictionEngine {
 
         let committedEvents = events.filter { !$0.isTimerDraft }
         let completedSleeps = committedEvents
-            .filter { $0.isSleepBlock && $0.endDate != nil && $0.startDate <= now }
+            .filter { $0.isPredictionSleepBlock && $0.endDate != nil && $0.startDate <= now }
             .sorted { $0.startDate < $1.startDate }
         guard let lastSleep = completedSleeps.last,
               let lastSleepEnd = lastSleep.endDate,
@@ -1389,7 +1402,7 @@ enum SleepPredictionEngine {
 
         let awakeMinutes = max(0, now.timeIntervalSince(lastSleepEnd) / 60)
         let napsToday = committedEvents.filter {
-            $0.isSleepBlock &&
+            $0.isPredictionSleepBlock &&
                 $0.sleepKind == .nap &&
                 $0.occursOnLocalDay(now, calendar: calendar)
         }.count
@@ -1589,7 +1602,7 @@ enum SleepPredictionEngine {
         calendar: Calendar = .current
     ) -> [WakeWindowSample] {
         let sorted = sleeps
-            .filter { $0.isSleepBlock && $0.endDate != nil }
+            .filter { $0.isPredictionSleepBlock && $0.endDate != nil }
             .sorted { $0.startDate < $1.startDate }
         guard sorted.count >= 2 else { return [] }
 
@@ -1626,6 +1639,7 @@ enum SleepPredictionEngine {
     static func napIndex(for sleep: CareEvent, among sleeps: [CareEvent], calendar: Calendar = .current) -> Int {
         guard sleep.sleepKind != .nightSleep else { return 5 }
         let earlierNaps = sleeps.filter {
+            $0.isPredictionSleepBlock &&
             $0.id != sleep.id &&
             $0.sleepKind == .nap &&
             $0.startDate < sleep.startDate &&
@@ -1636,7 +1650,7 @@ enum SleepPredictionEngine {
 
     static func nextNapIndex(events: [CareEvent], date: Date, calendar: Calendar = .current) -> Int {
         min(4, events.filter {
-            $0.isSleepBlock &&
+            $0.isPredictionSleepBlock &&
             $0.sleepKind == .nap &&
             $0.startDate < date &&
             $0.occursOnLocalDay(date, calendar: calendar)
@@ -1947,7 +1961,7 @@ enum SleepPredictionEngine {
         end: Date
     ) -> Double {
         events.reduce(0) { total, event in
-            guard event.isSleepBlock, let eventEnd = event.endDate else { return total }
+            guard event.isPredictionSleepBlock, let eventEnd = event.endDate else { return total }
             let overlapStart = max(event.startDate, start)
             let overlapEnd = min(eventEnd, end)
             guard overlapEnd > overlapStart else { return total }

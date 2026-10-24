@@ -4114,6 +4114,79 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testStoppedSleepTimerCanBeExcludedBeforeSaving() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://quick-log/sleep")
+        let nap = app.buttons["Nap"]
+        XCTAssertTrue(nap.waitForExistence(timeout: 5))
+        nap.tap()
+        XCTAssertTrue(app.staticTexts["Running"].waitForExistence(timeout: 5))
+        app.scrollViews.buttons["Stop"].firstMatch.tap()
+        let toggle = app.switches["active-timer.exclude-from-sleep-predictions"]
+        for _ in 0..<8 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertTrue(toggle.isHittable)
+        if toggle.frame.maxY > app.frame.maxY - 120 { app.swipeUp() }
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Stopped sleep timer excluded before saving"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let finish = app.buttons["active-timer.finish-and-save"]
+        for _ in 0..<6 where !finish.isHittable { app.swipeUp() }
+        XCTAssertTrue(finish.isHittable)
+        finish.tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+        let savedSleep = app.buttons.matching(NSPredicate(
+            format: "identifier == %@ AND label CONTAINS %@", "today-timeline.event.sleep", "Excluded from sleep predictions"
+        )).firstMatch
+        for _ in 0..<8 where !savedSleep.isHittable { app.swipeUp() }
+        XCTAssertTrue(savedSleep.isHittable)
+        savedSleep.tap()
+        let savedToggle = app.switches["event.exclude-from-sleep-predictions"]
+        for _ in 0..<8 where !savedToggle.isHittable { app.swipeUp() }
+        XCTAssertEqual(savedToggle.value as? String, "1")
+    }
+
+    func testSleepPredictionExclusionPersistsAndCanBeReversed() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        let eventURL = "littlewindows://event/00000000-0000-0000-0000-000000000201"
+        launch(startURL: eventURL)
+        let toggle = app.switches["event.exclude-from-sleep-predictions"]
+        for _ in 0..<8 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertTrue(toggle.isHittable)
+        if toggle.frame.maxY > app.frame.maxY - 120 { app.swipeUp() }
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Sleep prediction exclusion enabled"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.navigationBars["Edit Event"].buttons["Save"].tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+
+        launch(startURL: eventURL)
+        for _ in 0..<8 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertTrue(toggle.isHittable)
+        if toggle.frame.maxY > app.frame.maxY - 120 { app.swipeUp() }
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.navigationBars["Edit Event"].buttons["Save"].tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 8))
+
+        launch(startURL: eventURL)
+        for _ in 0..<8 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertTrue(toggle.isHittable)
+        if toggle.frame.maxY > app.frame.maxY - 120 { app.swipeUp() }
+        XCTAssertEqual(toggle.value as? String, "0")
+    }
+
     func testStartingSleepOpensRunningTimerEditor() {
         continueAfterFailure = false
 

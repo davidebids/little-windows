@@ -247,6 +247,12 @@ struct HistoryView: View {
                         draft.sleepConditions = conditions
                         persistTimerMutation(draft)
                     },
+                    setSleepPredictionExclusion: { excluded in
+                        let draft = timerDraftForMutation(event)
+                        draft.excludeFromSleepPredictions = excluded
+                        draft.updatedAt = Date()
+                        persistTimerMutation(draft)
+                    },
                     switchNursingSide: event.type == .nursing
                         ? { switchNursingSide(event) }
                         : nil,
