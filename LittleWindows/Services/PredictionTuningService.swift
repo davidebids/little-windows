@@ -31,7 +31,10 @@ enum PredictionTuningService {
         let cacheVersion = SleepPredictionEngine.cacheVersion(settings: settings)
         guard let currentRecord,
               currentRecord.basedOnLastSleepEventID == lastSleepID,
-              currentRecord.algorithmVersion == cacheVersion else {
+              currentRecord.algorithmVersion == cacheVersion,
+              !committedEvents.contains(where: {
+                  $0.isSleepBlock && $0.updatedAt > currentRecord.generatedAt
+              }) else {
             return nil
         }
         return currentRecord.prediction
@@ -84,7 +87,10 @@ enum PredictionTuningService {
         let cacheVersion = SleepPredictionEngine.cacheVersion(settings: settings)
         if let currentRecord,
            currentRecord.basedOnLastSleepEventID == lastSleepID,
-           currentRecord.algorithmVersion == cacheVersion {
+           currentRecord.algorithmVersion == cacheVersion,
+           !committedEvents.contains(where: {
+               $0.isSleepBlock && $0.updatedAt > currentRecord.generatedAt
+           }) {
             return currentRecord.prediction
         }
 
@@ -120,6 +126,16 @@ enum PredictionTuningService {
         records: [SleepPredictionRecord]
     ) {
         guard sleepEvent.isSleepBlock else { return }
+        if sleepEvent.excludeFromSleepPredictions {
+            for record in records where record.actualSleepEventID == sleepEvent.id {
+                record.actualSleepEventID = nil
+                record.actualSleepStart = nil
+                record.errorMinutes = nil
+                record.wasInsidePredictedWindow = nil
+                record.updatedAt = Date()
+            }
+            return
+        }
         let linkedRecord = records.first { $0.actualSleepEventID == sleepEvent.id }
         let candidate = linkedRecord ?? records
             .filter {
@@ -204,7 +220,7 @@ enum PredictionTuningService {
 
     private static func latestCompletedSleepID(in events: [CareEvent]) -> UUID? {
         events
-            .filter { $0.isSleepBlock && $0.endDate != nil }
+            .filter { $0.isPredictionSleepBlock && $0.endDate != nil }
             .max { $0.startDate < $1.startDate }?
             .id
     }

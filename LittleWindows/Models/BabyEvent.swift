@@ -216,6 +216,7 @@ final class CareEvent {
 
     var sleepKindRawValue: String?
     var sleepConditionsData: Data?
+    var excludeFromSleepPredictions: Bool = false
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
@@ -607,6 +608,11 @@ final class CareEvent {
 
     var isSleepBlock: Bool {
         type == .sleep && sleepKind != .nightWaking
+    }
+
+    /// Prediction eligibility is separate from recorded sleep and analytics totals.
+    var isPredictionSleepBlock: Bool {
+        isSleepBlock && !excludeFromSleepPredictions
     }
 
     var isNightWaking: Bool {

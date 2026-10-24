@@ -172,6 +172,7 @@ struct EventEditorView: View {
     @State private var endTimeZoneIdentifier: String
     @State private var caregiverName: String
     @State private var notes: String
+    @State private var excludeFromSleepPredictions: Bool
     @State private var sleepKind: SleepKind
     @State private var showingWeatherCityPicker = false
     @State private var sleepConditionsDraft: SleepConditionsDraft
@@ -335,6 +336,7 @@ struct EventEditorView: View {
         )
         _caregiverName = State(initialValue: event?.caregiverName ?? "")
         _notes = State(initialValue: event?.notes ?? "")
+        _excludeFromSleepPredictions = State(initialValue: event?.excludeFromSleepPredictions ?? false)
         _sleepKind = State(initialValue: event?.sleepKind ?? .nap)
         _sleepConditionsDraft = State(initialValue: SleepConditionsDraft(event?.sleepConditions))
         _feedKind = State(initialValue: event?.feedKind ?? (solidPreset == nil ? .bottle : .solid))
@@ -984,6 +986,14 @@ struct EventEditorView: View {
                     Text("Night waking tracks awake time during the overnight period and is used in sleep insights, not as sleep duration.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+            if sleepKind != .nightWaking, activeProfileType == .child {
+                Section {
+                    Toggle("Exclude from sleep predictions", isOn: $excludeFromSleepPredictions)
+                        .accessibilityIdentifier("event.exclude-from-sleep-predictions")
+                } footer: {
+                    Text("Keep this sleep in history and sleep totals without using it to estimate wake windows, bedtime, or sleep pressure. Useful for a brief or unusual nap. You can include it again anytime.")
                 }
             }
             if sleepKind != .nightWaking {
@@ -1757,6 +1767,8 @@ struct EventEditorView: View {
         event.caregiverName = caregiverName.nilIfBlank
         event.notes = notes.nilIfBlank
         event.sleepKind = type == .sleep ? sleepKind : nil
+        event.excludeFromSleepPredictions = type == .sleep && sleepKind != .nightWaking
+            && activeProfileType == .child && excludeFromSleepPredictions
         var sleepConditions = sleepConditionsDraft.details
         if activeProfileType != .child {
             sleepConditions.usedSleepSack = nil

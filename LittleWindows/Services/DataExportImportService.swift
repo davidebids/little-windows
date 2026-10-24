@@ -285,6 +285,7 @@ private struct EventDTO: Codable {
     var notes: String?
     var sleepKindRawValue: String?
     var sleepConditionsData: Data?
+    var excludeFromSleepPredictions: Bool?
     var feedKindRawValue: String?
     var amountOz: Double?
     var foodDescription: String?
@@ -1288,7 +1289,8 @@ enum DataExportImportService {
                 createdAt: $0.createdAt,
                 updatedAt: $0.updatedAt, caregiverName: $0.caregiverName, notes: $0.notes,
                 sleepKindRawValue: $0.sleepKindRawValue,
-                sleepConditionsData: $0.sleepConditionsData, feedKindRawValue: $0.feedKindRawValue,
+                sleepConditionsData: $0.sleepConditionsData,
+                excludeFromSleepPredictions: $0.excludeFromSleepPredictions, feedKindRawValue: $0.feedKindRawValue,
                 amountOz: $0.amountOz, foodDescription: $0.foodDescription,
                 solidReactionRawValue: $0.solidReactionRawValue,
                 solidTextureRawValue: $0.solidTextureRawValue,
@@ -2567,6 +2569,7 @@ enum DataExportImportService {
             event.profileTypeSnapshotRawValue = value.profileTypeSnapshotRawValue
             event.sleepKindRawValue = value.sleepKindRawValue
             event.sleepConditionsData = value.sleepConditionsData
+            event.excludeFromSleepPredictions = value.excludeFromSleepPredictions ?? false
             event.feedKindRawValue = value.feedKindRawValue
             event.amountOz = value.amountOz
             event.foodDescription = value.foodDescription

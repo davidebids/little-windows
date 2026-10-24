@@ -145,12 +145,14 @@ struct ActiveTimerEditorView: View {
     let setStartTimeZone: (String) -> Void
     let setEndTimeZone: (String) -> Void
     let setSleepConditions: (SleepConditions?) -> Void
+    let setSleepPredictionExclusion: (Bool) -> Void
     let switchNursingSide: (() -> Void)?
     let setNursingSide: ((NursingSide) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedStart: Date
     @State private var selectedEnd: Date
+    @State private var excludeFromSleepPredictions: Bool
     @State private var sleepConditionsDraft: SleepConditionsDraft
     @State private var showingWeatherCityPicker = false
     @State private var startTimeZoneIdentifier: String
@@ -171,6 +173,7 @@ struct ActiveTimerEditorView: View {
         setStartTimeZone: @escaping (String) -> Void = { _ in },
         setEndTimeZone: @escaping (String) -> Void = { _ in },
         setSleepConditions: @escaping (SleepConditions?) -> Void,
+        setSleepPredictionExclusion: @escaping (Bool) -> Void,
         switchNursingSide: (() -> Void)? = nil,
         setNursingSide: ((NursingSide) -> Void)? = nil
     ) {
@@ -184,9 +187,11 @@ struct ActiveTimerEditorView: View {
         self.setStartTimeZone = setStartTimeZone
         self.setEndTimeZone = setEndTimeZone
         self.setSleepConditions = setSleepConditions
+        self.setSleepPredictionExclusion = setSleepPredictionExclusion
         self.switchNursingSide = switchNursingSide
         self.setNursingSide = setNursingSide
         _selectedStart = State(initialValue: event.startDate)
+        _excludeFromSleepPredictions = State(initialValue: event.excludeFromSleepPredictions)
         _sleepConditionsDraft = State(initialValue: SleepConditionsDraft(event.sleepConditions))
         _selectedEnd = State(initialValue: Self.defaultEndDate(for: event))
         _startTimeZoneIdentifier = State(
@@ -425,6 +430,18 @@ struct ActiveTimerEditorView: View {
                 .padding(18)
                 .appSurface()
 
+                if event.isSleepBlock, event.profileTypeSnapshot == .child {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Exclude from sleep predictions", isOn: $excludeFromSleepPredictions)
+                            .accessibilityIdentifier("active-timer.exclude-from-sleep-predictions")
+                        Text("Keep this sleep in history and sleep totals without using it for wake windows, bedtime, or sleep pressure. You can change this before saving, even after stopping the timer.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(18)
+                    .appSurface()
+                }
+
                 if event.isSleepBlock {
                     SleepTimerConditionsCard(
                         draft: $sleepConditionsDraft,
@@ -604,6 +621,10 @@ struct ActiveTimerEditorView: View {
         let clamped = min(date, Date())
         if abs(event.startDate.timeIntervalSince(clamped)) > 0.5 {
             adjustStart(clamped)
+        }
+        if event.isSleepBlock, event.profileTypeSnapshot == .child,
+           event.excludeFromSleepPredictions != excludeFromSleepPredictions {
+            setSleepPredictionExclusion(excludeFromSleepPredictions)
         }
         if event.isSleepBlock, sleepConditionsDraft.validationMessage == nil {
             sleepConditionsDraft.invalidateAutomaticWeather(for: clamped, locationName: nil)
