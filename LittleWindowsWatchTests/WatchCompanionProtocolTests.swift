@@ -2,6 +2,18 @@ import XCTest
 @testable import LittleWindowsWatch
 
 final class WatchCompanionProtocolTests: XCTestCase {
+    func testNightLightRouteOpensOnlyTheLocalWatchLight() throws {
+        XCTAssertTrue(WatchAppRoute.isNightLight(WatchAppRoute.nightLightURL))
+        for value in [
+            "https://watch/night-light",
+            "littlewindows://night-light/diaper-change",
+            "littlewindows://watch/night-light/stop",
+            "littlewindows://watch/today"
+        ] {
+            XCTAssertFalse(WatchAppRoute.isNightLight(try XCTUnwrap(URL(string: value))))
+        }
+    }
+
     func testChildCatalogKeepsSixCoreActionsFirst() {
         let actions = WatchActionCatalog.actions(profileTypeRawValue: "child")
 

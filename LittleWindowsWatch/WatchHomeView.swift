@@ -31,6 +31,7 @@ private extension View {
 
 struct WatchHomeView: View {
     @EnvironmentObject private var connectivity: WatchConnectivityClient
+    var openNightLight: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -40,9 +41,12 @@ struct WatchHomeView: View {
 
                 Group {
                     if connectivity.state.profiles.isEmpty {
-                        VStack(spacing: 8) {
-                            brandHeader
-                            unavailableView
+                        ScrollView {
+                            VStack(spacing: 12) {
+                                brandHeader
+                                nightLightButton
+                                unavailableView
+                            }
                         }
                     } else {
                         homeContent
@@ -65,6 +69,7 @@ struct WatchHomeView: View {
         ScrollView {
             VStack(spacing: 12) {
                 brandHeader
+                nightLightButton
                 profilePicker
 
                 if !connectivity.state.activeTimers.isEmpty {
@@ -130,6 +135,26 @@ struct WatchHomeView: View {
             .padding(.bottom, 8)
         }
         .refreshable { connectivity.requestRefresh() }
+    }
+
+    private var nightLightButton: some View {
+        Button(action: openNightLight) {
+            HStack(spacing: 8) {
+                Image(systemName: "flashlight.on.fill")
+                    .foregroundStyle(.red)
+                Text("Night Light")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .watchSurface(cornerRadius: 15)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens a red light on this watch. Works without your iPhone.")
+        .accessibilityIdentifier("watch.night-light.open")
     }
 
     private var brandHeader: some View {

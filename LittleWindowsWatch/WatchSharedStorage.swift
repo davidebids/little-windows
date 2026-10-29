@@ -1,6 +1,16 @@
 import Foundation
 import WidgetKit
 
+enum WatchAppRoute {
+    static let nightLightURL = URL(string: "littlewindows://watch/night-light")!
+
+    static func isNightLight(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "littlewindows"
+            && url.host?.lowercased() == "watch"
+            && url.path == "/night-light"
+    }
+}
+
 enum WatchSharedStorage {
     private static let lock = NSLock()
 

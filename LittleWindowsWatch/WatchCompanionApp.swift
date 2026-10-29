@@ -14,15 +14,27 @@ struct LittleWindowsWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchCompanionAppDelegate.self)
     private var appDelegate
     @StateObject private var connectivity = WatchConnectivityClient.shared
+    @State private var showsNightLight = false
 
     var body: some Scene {
         WindowGroup {
-            WatchHomeView()
-                .environmentObject(connectivity)
-                .task {
-                    connectivity.start()
-                    connectivity.requestRefresh()
+            Group {
+                if showsNightLight {
+                    WatchNightLightView { showsNightLight = false }
+                } else {
+                    WatchHomeView { showsNightLight = true }
                 }
+            }
+            .environmentObject(connectivity)
+            .onOpenURL { url in
+                if WatchAppRoute.isNightLight(url) {
+                    showsNightLight = true
+                }
+            }
+            .task {
+                connectivity.start()
+                connectivity.requestRefresh()
+            }
         }
     }
 }

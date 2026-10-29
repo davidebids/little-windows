@@ -1882,7 +1882,7 @@ private struct AppleWatchSettingsView: View {
 
             Section {
                 Label("Configured on Apple Watch", systemImage: "applewatch.watchface")
-                Text("Add Little Windows complications while editing a Watch face, or add its widgets to the Smart Stack. The phone sends their data, but watchOS controls where they appear.")
+                Text("Add Little Windows complications while editing a Watch face, or add its widgets to the Smart Stack. Choose Night Light for a red light that opens directly on your watch, even without an iPhone connection. Care widgets use data sent by your phone; watchOS controls where widgets appear.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {

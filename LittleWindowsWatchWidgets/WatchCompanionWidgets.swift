@@ -268,11 +268,75 @@ private struct WatchMissingProfileWidgetView: View {
     }
 }
 
+private struct WatchNightLightEntry: TimelineEntry {
+    var date: Date
+}
+
+private struct WatchNightLightProvider: TimelineProvider {
+    func placeholder(in context: Context) -> WatchNightLightEntry {
+        WatchNightLightEntry(date: .now)
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (WatchNightLightEntry) -> Void) {
+        completion(WatchNightLightEntry(date: .now))
+    }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<WatchNightLightEntry>) -> Void) {
+        completion(Timeline(entries: [WatchNightLightEntry(date: .now)], policy: .never))
+    }
+}
+
+struct WatchNightLightWidget: Widget {
+    let kind = "LittleWindows.Watch.NightLight"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: WatchNightLightProvider()) { _ in
+            WatchNightLightWidgetView()
+                .widgetURL(WatchAppRoute.nightLightURL)
+                .containerBackground(for: .widget) { Color.red.opacity(0.18) }
+        }
+        .configurationDisplayName("Night Light")
+        .description("Tap to open a red light on your watch. No iPhone connection needed.")
+        .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline])
+    }
+}
+
+private struct WatchNightLightWidgetView: View {
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        switch family {
+        case .accessoryCircular:
+            Image(systemName: "flashlight.on.fill")
+                .font(.title2)
+                .widgetAccentable()
+                .accessibilityLabel("Night Light, open red light")
+        case .accessoryInline:
+            Label("Night Light", systemImage: "flashlight.on.fill")
+        default:
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Night Light")
+                        .font(.headline)
+                    Text("Tap for red light")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "flashlight.on.fill")
+                    .font(.title2)
+                    .widgetAccentable()
+            }
+        }
+    }
+}
+
 @main
 struct LittleWindowsWatchWidgetsBundle: WidgetBundle {
     var body: some Widget {
         WatchActiveTimerWidget()
         WatchSleepWindowWidget()
         WatchTodayWidget()
+        WatchNightLightWidget()
     }
 }

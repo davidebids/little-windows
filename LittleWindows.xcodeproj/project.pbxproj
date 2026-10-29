@@ -27,6 +27,7 @@
 		A40000000000000000000012 /* WatchSharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5000000000000000000000B /* WatchSharedStorage.swift */; };
 		A40000000000000000000013 /* WatchCompanionProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000012 /* WatchCompanionProtocolTests.swift */; };
 		A40000000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001F /* Assets.xcassets */; };
+		A40000000000000000000015 /* WatchNightLightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000015 /* WatchNightLightView.swift */; };
 		B00000000000000000000001 /* LittleWindowsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000001 /* LittleWindowsApp.swift */; };
 		B00000000000000000000002 /* Models/BabyProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000002 /* Models/BabyProfile.swift */; };
 		B00000000000000000000003 /* Models/BabyEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000003 /* Models/BabyEvent.swift */; };
@@ -289,6 +290,8 @@
 		A50000000000000000000007 /* WatchCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCompanionApp.swift; sourceTree = "<group>"; };
 		A50000000000000000000008 /* WatchConnectivityClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConnectivityClient.swift; sourceTree = "<group>"; };
 		A50000000000000000000009 /* WatchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHomeView.swift; sourceTree = "<group>"; };
+		A50000000000000000000015 /* WatchNightLightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchNightLightView.swift; sourceTree = "<group>"; };
+		A50000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A5000000000000000000000A /* WatchAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAppIntents.swift; sourceTree = "<group>"; };
 		A5000000000000000000000B /* WatchSharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSharedStorage.swift; sourceTree = "<group>"; };
 		A5000000000000000000000C /* LittleWindowsWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LittleWindowsWatch.entitlements; sourceTree = "<group>"; };
@@ -534,6 +537,8 @@
 				A50000000000000000000007 /* WatchCompanionApp.swift */,
 				A50000000000000000000008 /* WatchConnectivityClient.swift */,
 				A50000000000000000000009 /* WatchHomeView.swift */,
+				A50000000000000000000015 /* WatchNightLightView.swift */,
+				A50000000000000000000014 /* Info.plist */,
 				A5000000000000000000000A /* WatchAppIntents.swift */,
 				A5000000000000000000000B /* WatchSharedStorage.swift */,
 				A5000000000000000000000C /* LittleWindowsWatch.entitlements */,
@@ -1063,6 +1068,7 @@
 				A4000000000000000000000A /* WatchConnectivityClient.swift in Sources */,
 				A4000000000000000000000B /* WatchCompanionApp.swift in Sources */,
 				A4000000000000000000000C /* WatchHomeView.swift in Sources */,
+				A40000000000000000000015 /* WatchNightLightView.swift in Sources */,
 				A4000000000000000000000D /* WatchAppIntents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1322,6 +1328,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Little Windows";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.debidia.LittleWindows;
+				INFOPLIST_FILE = LittleWindowsWatch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1351,6 +1358,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Little Windows";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.debidia.LittleWindows;
+				INFOPLIST_FILE = LittleWindowsWatch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

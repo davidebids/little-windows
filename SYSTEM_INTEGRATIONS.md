@@ -17,6 +17,7 @@ Little Windows integrates with WidgetKit, ActivityKit, App Intents, App Shortcut
 - iOS 18 Control Center controls for sleep, Left nursing, Right nursing, tummy time, stop timer, diaper-change light, and soothing light.
 - A dependent watchOS 10+ companion app with profile switching, six profile-aware smart or customized favorites, a watch-safe All Actions list, timer controls, today metrics, and sleep-window predictions.
 - Apple Watch complications and Smart Stack widgets for the active timer, next sleep window, and today summary, with add-profile states when care tracking is not active.
+- Apple Watch Night Light complication and Smart Stack widget: one tap opens a full-screen red light locally on the watch, without an iPhone connection or care profile. Night Light is also available near the top of the Watch app.
 - Apple Watch App Intents for the most common profile-aware care actions.
 - Local notifications for sleep windows, medication schedules, routine reminders, appointment reminders, monthly guide reminders, itinerary items, trip packing and final-check reminders, and user-created Food & Home reminders. Medication reminders support snooze, optional 30-minute follow-up, and managed Taken/Skipped actions; the Apple Watch adult-profile card can perform the same dose actions and schedule a 10-minute snooze through the paired iPhone.
 - WeatherKit forecasts and Apple Weather attribution for trip packing suggestions, Today temperatures, and dated outdoor high/low snapshots on sleep logs.
@@ -109,6 +110,14 @@ Commands retain their Watch tap order across both interactive and background del
 Watch complications are read-only cached surfaces. They never open or write the SwiftData store. Their timelines refresh when the companion receives authoritative state and otherwise age naturally until the next WatchConnectivity delivery.
 
 Watch validation requires both an iPhone and paired Apple Watch signed with profiles that contain the shared App Group. Verify immediate reachable actions, simultaneous timers with isolated controls, several offline queued actions followed by reconnection, duplicate delivery, profile switching, Stop versus Stop & Save, nursing-side switching, stale timer rejection after an iPhone edit, complication refresh, and app relaunch with a non-empty outbox. Simulator builds require an installed watchOS simulator runtime in addition to the watchOS SDK.
+
+### Watch Night Light
+
+Add **Night Light** while editing a compatible watch face complication or adding a Smart Stack widget. Circular, rectangular, and inline accessory families use `littlewindows://watch/night-light` to open the red light directly on the watch, including on cold launch. The Watch app registers this URL separately from iPhone night-light presets. This utility does not send care commands, change the phone's night light, or require a selected profile.
+
+The light starts at 60% rendered red intensity each time it opens. Turn the Digital Crown to adjust from 10% to 100%, with no haptic feedback. Tap the light to reveal or hide its controls; controls hide after four seconds, and **Close** returns to the Watch home screen. VoiceOver offers intensity adjustment and a named close action. watchOS still manages hardware brightness, wrist-down dimming, screen wake time, and return to the clock; this feature does not force the display to stay awake.
+
+Validate on both small and large Watch simulators: cold/warm URL launch, repeated widget taps, no-profile and disconnected operation, Crown dimming, control auto-hide, Close, and reopening at the default intensity. On a signed Apple Watch, also verify adding the widget/complication, wrist-down/Always On behavior, wake duration, and usable light output in a dark room.
 
 ## Action behavior
 
