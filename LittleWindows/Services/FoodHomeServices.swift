@@ -1917,11 +1917,23 @@ enum TodayHomeSummaryService {
             dayEnd: dayEnd,
             calendar: calendar
         )
+        let filteredCareAttention = careAttention.filter { item in
+            guard let profileID = item.profileID else { return true }
+            switch item.category {
+            case .medications: return CareTrackingPreferenceStore.allows(.medicine, profileID: profileID)
+            case .solids: return CareTrackingPreferenceStore.allows(.feed, profileID: profileID)
+            case .appointments: return CareTrackingPreferenceStore.allowsPrompts(.appointments, profileID: profileID)
+            case .routines:
+                guard case .routines = item.route else { return true }
+                return CareTrackingPreferenceStore.allowsPrompts(.routines, profileID: profileID)
+            default: return true
+            }
+        }
         let allAttention = reminderAttention
             + kitchenResult.attention
             + tripResult.attention
             + returnResult.attention
-            + careAttention
+            + filteredCareAttention
         let coordinatedAttention = applyCollaboration(
             to: allAttention,
             profiles: profiles,
@@ -2325,6 +2337,7 @@ enum TodayHomeSummaryService {
     ) -> [TodayHomeSummaryItem] {
         routines.compactMap { routine in
             guard !routine.isArchived,
+                  CareTrackingPreferenceStore.allowsRoutine(routine),
                   (routine.householdID == householdID || routine.profileID.map({ profilesByID[$0] != nil }) == true) else {
                 return nil
             }

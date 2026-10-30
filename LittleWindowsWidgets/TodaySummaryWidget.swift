@@ -75,7 +75,7 @@ private struct TodaySummaryWidgetView: View {
     }
 
     private var widgetMetrics: [CareSummaryMetricSnapshot] {
-        if let metrics = snapshot.todaySummary.summaryMetrics, !metrics.isEmpty {
+        if let metrics = snapshot.todaySummary.summaryMetrics {
             let preferredIDs = snapshot.todaySummary.isDog
                 ? ["food", "water", "potty", "walks"]
                 : ["sleep-total", "sleep-naps", "feed-total", "diapers"]

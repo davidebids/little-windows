@@ -39,7 +39,14 @@ enum CareCategoryPreferenceStore {
     nonisolated private static let prefix = "careCategory.hiddenTypeRawValues"
 
     nonisolated static func hiddenTypes(profileID: UUID?) -> Set<EventType> {
-        Set((UserDefaults.standard.stringArray(forKey: key(profileID: profileID)) ?? []).compactMap(EventType.init(rawValue:)))
+        var hidden = Set((UserDefaults.standard.stringArray(forKey: key(profileID: profileID)) ?? []).compactMap(EventType.init(rawValue:)))
+        let preferences = CareTrackingPreferenceStore.preferences(profileID: profileID)
+        for type in EventType.allCases {
+            if let value = preferences.fields["hidden.\(type.rawValue)"]?.value.first {
+                if value == "true" { hidden.insert(type) } else { hidden.remove(type) }
+            }
+        }
+        return hidden
     }
 
     static func isHidden(_ type: EventType, profileID: UUID?) -> Bool {
@@ -57,16 +64,31 @@ enum CareCategoryPreferenceStore {
     }
 
     static func setHiddenTypes(_ hidden: Set<EventType>, profileID: UUID?) {
+        let prior = hiddenTypes(profileID: profileID)
+        let preferences = CareTrackingPreferenceStore.preferences(profileID: profileID)
+        let changed = prior.symmetricDifference(hidden).union(hidden.filter {
+            preferences.fields["hidden.\($0.rawValue)"] == nil
+        })
         UserDefaults.standard.set(hidden.map(\.rawValue).sorted(), forKey: key(profileID: profileID))
+        if let profileID, !changed.isEmpty {
+            CareTrackingPreferenceStore.update(profileID: profileID) { preferences in
+                for type in changed {
+                    preferences.set("hidden.\(type.rawValue)", value: [String(hidden.contains(type))])
+                }
+            }
+        }
     }
 
     static func reset(profileID: UUID?) {
+        setHiddenTypes([], profileID: profileID)
         UserDefaults.standard.removeObject(forKey: key(profileID: profileID))
     }
 
     static func visibleTypes(for profileType: CareProfileType, profileID: UUID?) -> [EventType] {
         let hidden = hiddenTypes(profileID: profileID)
-        return EventType.cases(for: profileType).filter { !hidden.contains($0) }
+        return EventType.cases(for: profileType).filter {
+            !hidden.contains($0) && CareTrackingPreferenceStore.allows($0, profileID: profileID)
+        }
     }
 
     nonisolated private static func key(profileID: UUID?) -> String {
@@ -210,7 +232,7 @@ enum WidgetSnapshotService {
         let allowsSolids = profileID != nil
             && profileType == .child
             && (solidsWorkspaceActivated || hasSolidHistory || ageMonths >= 6)
-        let visiblePrediction = visibleEvents.contains {
+        let visiblePrediction = !CareTrackingPreferenceStore.allows(.sleep, profileID: profileID) || visibleEvents.contains {
             $0.isSleepBlock && $0.isTimerRunning
         } ? nil : prediction
 
@@ -253,7 +275,11 @@ enum WidgetSnapshotService {
                 dogWaterCount: daily.waterCount,
                 dogPottyCount: daily.pottyCount,
                 dogWalkSeconds: daily.walkTime,
-                summaryMetrics: summaryMetrics(for: profileType, daily: daily)
+                summaryMetrics: summaryMetrics(for: profileType, daily: daily).filter {
+                    $0.eventTypeRawValue.flatMap(EventType.init(rawValue:)).map {
+                        CareTrackingPreferenceStore.allows($0, profileID: profileID)
+                    } ?? true
+                }
             ),
             food: food,
             quickActions: makeQuickActions(
@@ -350,6 +376,7 @@ enum WidgetSnapshotService {
     ) -> [QuickLogActionSnapshot] {
         let recentCutoff = calendar.date(byAdding: .day, value: -14, to: now) ?? now
         let hiddenTypes = CareCategoryPreferenceStore.hiddenTypes(profileID: profileID)
+            .union(CareTrackingPreferenceStore.preferences(profileID: profileID).pausedTypes)
         let candidates = quickActionCandidates(for: profileType).filter {
             !hiddenTypes.contains($0.eventType)
         }

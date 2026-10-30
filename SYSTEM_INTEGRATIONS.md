@@ -29,6 +29,18 @@ Running Active Timer widgets show the original session start in a compact footer
 
 Sleep logs can be excluded from prediction inputs in the iPhone sleep editor or active sleep timer editor, including after stopping and before saving. Excluded logs remain in history and recorded sleep totals, while next-sleep windows, sleep pressure, and bedtime planning ignore them. Saving the change refreshes prediction snapshots used by widgets, the paired watch, and sleep-window notifications. A running sleep timer still suppresses next-sleep predictions until it ends, including when excluded. The choice is stored with the event and preserved in JSON backups; older backups default to included. Validate toggling an existing brief nap, including it again, and refreshing system snapshots on a signed device. CloudKit development schema was updated and read back on 2026-10-22: `CD_CareEvent.CD_excludeFromSleepPredictions` is `INT64 QUERYABLE SORTABLE`, matching existing Boolean storage. Production schema deployment and signed-device sync validation remain required.
 
+## Essentials layout and tracking pauses
+
+Settings → Today & Tracking and Today → profile menu → Customize Today open the same per-profile configuration. Full and Essentials have separate section visibility; Essentials uses large full-width buttons with recent-record and active-timer context. The menu retains access to History and active timers even when all sections are hidden. A direct log, shortcut, or deep link remains an explicit manual action and does not resume a paused category.
+
+`CareTrackingPreferenceStore` stores versioned per-profile preferences in the existing iCloud key-value entitlement, under `careTracking.v1.<profile UUID>`. Each field has its own timestamp and deterministic revision tie-breaker; pause and resume values are retained so stale offline pauses do not overwrite newer resumes. Different settings merge independently. The newest edit wins for the same setting, including activity order. Sync runs on launch, foreground entry, sync-mode changes, and iCloud key-value change notifications while sync is enabled. It is same-Apple-Account preference sync; it does not require a SwiftData/CloudKit schema change and is separate from Family Sync caregiver records. Delivery is eventual: a device can continue showing old preferences or firing local reminders until it receives the change.
+
+Pausing Sleep suppresses sleep prediction/pressure/planning prompts and notifications. Pausing Feed suppresses solids meal/allergen prompts and reminders; digestive check-ins also respect Diaper pauses. Routines with paused event categories stop producing suggestions and reminders. Guides, routine prompts, and appointment prompts/reminders have separate switches. Hiding their Today section alone never changes reminders. Medication pause explicitly cancels scheduled, follow-up, and snoozed reminders without editing a medication plan or dose history. Resume schedules future reminders rather than issuing overdue catch-up requests. Notification publication rechecks the policy to avoid an in-flight scheduler restoring a paused reminder.
+
+Quick Log suggestions, Today Summary metrics, Watch favorites/actions, Watch sleep predictions, and the Watch medication card respect paused categories after snapshot reconciliation. Active timer widgets, Live Activities, and Watch timer controls stay available until the timer is finished or discarded. Existing records remain available in History and reports; a pause does not write zero activity or missed-dose outcomes.
+
+Automated validation covers preference merge/profile isolation, notification policy, preserved plans/history, production-button sizing with accessibility text, simulator builds, and related Watch/medication regressions. Simulator UI flows were added for customization, large touch areas, pause/resume, and hidden-section timer access; the attempted runs stopped at initial onboarding before reaching the feature. Interactive visual review remains outstanding. Before release, validate on two signed iOS devices on the same Apple Account: pause with reminders pending, confirm cancellation after receipt, edit different categories offline and reconnect, resolve a pause/resume conflict, and check resumed future reminders and paired Watch snapshots. Simulator validation does not establish iCloud delivery or signed notification/Watch behavior.
+
 ## Xcode capability setup
 
 The source and entitlements currently use this App Group:
@@ -55,7 +67,7 @@ For the `LittleWindows` app target only:
 
 1. Add the **iCloud** capability.
 2. Enable **CloudKit**.
-3. Enable **Key-value storage** so the caregiver identity for new entries follows the same Apple Account.
+3. Enable **Key-value storage** so caregiver identity and per-profile Today/tracking preferences follow the same Apple Account.
 4. Select or create `iCloud.com.debidia.LittleWindows`.
 5. Add the **Push Notifications** capability to the main app target. The widget extension does not need it.
 6. Enable the **Remote notifications** background mode on the main app target.

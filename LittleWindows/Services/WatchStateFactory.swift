@@ -114,7 +114,8 @@ enum WatchStateFactory {
         let hiddenCategoriesByProfile = Dictionary(uniqueKeysWithValues: profiles.map {
             (
                 $0.id,
-                Set(CareCategoryPreferenceStore.hiddenTypes(profileID: $0.id).map(\.rawValue))
+                Set(CareCategoryPreferenceStore.hiddenTypes(profileID: $0.id)
+                    .union(CareTrackingPreferenceStore.preferences(profileID: $0.id).pausedTypes).map(\.rawValue))
             )
         })
         let priorSnapshot = WidgetSnapshotService.read()
@@ -197,7 +198,7 @@ enum WatchStateFactory {
         let hasRunningSleep = events.contains {
             $0.isSleepBlock && $0.isTimerRunning
         }
-        let currentPrediction = hasRunningSleep ? nil : prediction.flatMap {
+        let currentPrediction = hasRunningSleep || !CareTrackingPreferenceStore.allows(.sleep, profileID: profileID) ? nil : prediction.flatMap {
             $0.windowEnd >= now ? $0 : nil
         }
         let metrics = orderedMetrics(
@@ -212,6 +213,7 @@ enum WatchStateFactory {
             )
         }
         let upcomingMedication = selectedProfile.profileType == .adult
+            && CareTrackingPreferenceStore.allows(.medicine, profileID: profileID)
             ? upcomingMedication(
                 profileID: profileID,
                 context: context,
