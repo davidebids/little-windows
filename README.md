@@ -147,6 +147,8 @@ Active timers synchronize to a Live Activity with Lock Screen and Dynamic Island
 
 Without an active care profile, care-specific widgets use an intentional **Add a care profile** state instead of showing fictional or stale care data. Care-only shortcuts and deep links open the app with the same profile prompt; Home, Food, Settings, and Night Light links continue to work normally.
 
+Settings -> Siri & Shortcuts introduces profile-aware voice logging for child and adult care, last-entry questions, and managed medication-dose logging. Baby sleep, nursing, pumping, feed, activity, and custom timers support voice start, pause, resume, finish/save, reset, discard, start-time correction, and open-timer status; nursing supports live side switching. Non-timer entries include sized pee/poo and mixed diapers with structured details, child potty records, solid meals, growth measurements, and completed activities. Siri asks for missing required details and confirms saved entries; a named shortcut can prefill a profile, category, and preferred units. These authenticated actions open the main app.
+
 System surfaces pass commands back to the app and read lightweight App Group snapshots. They do not directly mutate the full SwiftData store. See [SYSTEM_INTEGRATIONS.md](SYSTEM_INTEGRATIONS.md) for signing, entitlements, routes, widgets, Live Activities, notification, and real-device testing details.
 
 ## Backup, Report Export, Import, And Fixtures

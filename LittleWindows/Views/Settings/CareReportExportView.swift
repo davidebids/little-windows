@@ -1,6 +1,5 @@
 import SwiftData
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct CareReportExportView: View {
     @Environment(\.modelContext) private var modelContext
@@ -20,7 +19,7 @@ struct CareReportExportView: View {
     @State private var startDate: Date = CareReportExportService.defaultRange(for: .last30Days).0
     @State private var endDate: Date = CareReportExportService.defaultRange(for: .last30Days).1
     @State private var showingExporter = false
-    @State private var exportDocument = CareReportDocument()
+    @State private var exportDocument: CareReportDocument = CareReportDocument()
     @State private var exportFormat: CareReportFormat = .pdf
     @State private var defaultFilename = "Little-Windows-Care-Report.pdf"
     @State private var statusMessage: String?
@@ -48,103 +47,11 @@ struct CareReportExportView: View {
 
     var body: some View {
         Form {
-            Section {
-                if activeProfiles.isEmpty && uniqueProfiles.isEmpty {
-                    ContentUnavailableView(
-                        "No Profiles",
-                        systemImage: "person.crop.circle.badge.exclamationmark",
-                        description: Text("Create a profile before exporting a visit report.")
-                    )
-                } else {
-                    Picker("Profile", selection: Binding(
-                        get: { selectedProfile?.id },
-                        set: { selectedProfileID = $0 }
-                    )) {
-                        ForEach(activeProfiles.isEmpty ? uniqueProfiles : activeProfiles) { profile in
-                            Text(profile.name).tag(Optional(profile.id))
-                        }
-                    }
-                }
-
-                Picker("Format", selection: $format) {
-                    ForEach(CareReportFormat.allCases) { format in
-                        Text(format.displayName).tag(format)
-                    }
-                }
-                .pickerStyle(.segmented)
-            } header: {
-                Label("Report", systemImage: "doc.text.magnifyingglass")
-            } footer: {
-                Text("CSV and PDF reports include logged facts and the current medication plan for sharing at visits. JSON backup remains the restore/import format.")
-            }
-
-            Section {
-                Picker("Date Range", selection: $rangePreset) {
-                    ForEach(CareReportDateRangePreset.allCases) { preset in
-                        Text(preset.displayName).tag(preset)
-                    }
-                }
-
-                if rangePreset == .custom {
-                    CareReportDatePickerRow(title: "Start", date: $startDate)
-                    CareReportDatePickerRow(title: "End", date: $endDate)
-                } else {
-                    LabeledContent("Start", value: startDate.formatted(date: .abbreviated, time: .omitted))
-                    LabeledContent("End", value: endDate.formatted(date: .abbreviated, time: .omitted))
-                }
-            } header: {
-                Label("Dates", systemImage: "calendar")
-            }
-            .onChange(of: rangePreset) { _, newValue in
-                storedRangePreset = newValue.rawValue
-                if newValue == .custom {
-                    startDate = Date(timeIntervalSinceReferenceDate: storedCustomStart)
-                    endDate = Date(timeIntervalSinceReferenceDate: storedCustomEnd)
-                    return
-                }
-                let range = CareReportExportService.defaultRange(for: newValue)
-                startDate = range.0
-                endDate = range.1
-            }
-            .onChange(of: startDate) { _, newValue in
-                guard rangePreset == .custom else { return }
-                storedCustomStart = newValue.timeIntervalSinceReferenceDate
-            }
-            .onChange(of: endDate) { _, newValue in
-                guard rangePreset == .custom else { return }
-                storedCustomEnd = newValue.timeIntervalSinceReferenceDate
-            }
-
-            Section {
-                Toggle("Include notes", isOn: $includeNotes)
-                Toggle("Include caregiver names", isOn: $includeCaregiverNames)
-                Toggle("Include appointments", isOn: $includeAppointments)
-                Toggle("Include milestones", isOn: $includeMilestones)
-            } header: {
-                Label("Included Details", systemImage: "checklist")
-            } footer: {
-                Text("Notes and caregiver names are included by default so doctor visit exports are complete. Turn them off for a smaller, more private report.")
-            }
-
-            Section {
-                Button {
-                    export()
-                } label: {
-                    Label("Export \(format.displayName) Report", systemImage: "square.and.arrow.up")
-                }
-                .disabled(selectedProfile == nil)
-            }
-
-            if let selectedProfile, selectedProfile.profileType == .child {
-                Section("Focused reports") {
-                    NavigationLink {
-                        FoodReactionReportView(profile: selectedProfile)
-                    } label: {
-                        Label("Food reaction report", systemImage: "doc.text.magnifyingglass")
-                    }
-                    .accessibilityIdentifier("care-report.food-reactions")
-                }
-            }
+            reportSection
+            datesSection
+            detailsSection
+            exportSection
+            focusedReportsSection
         }
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)
@@ -184,6 +91,119 @@ struct CareReportExportView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(statusMessage ?? "")
+        }
+    }
+
+    private var reportSection: some View {
+        Section {
+            if activeProfiles.isEmpty && uniqueProfiles.isEmpty {
+                ContentUnavailableView(
+                    "No Profiles",
+                    systemImage: "person.crop.circle.badge.exclamationmark",
+                    description: Text("Create a profile before exporting a visit report.")
+                )
+            } else {
+                Picker("Profile", selection: Binding<UUID?>(
+                    get: { selectedProfile?.id },
+                    set: { selectedProfileID = $0 }
+                )) {
+                    ForEach(activeProfiles.isEmpty ? uniqueProfiles : activeProfiles) { profile in
+                        Text(profile.name).tag(Optional(profile.id))
+                    }
+                }
+            }
+
+            Picker("Format", selection: $format) {
+                ForEach(CareReportFormat.allCases) { format in
+                    Text(format.displayName).tag(format)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Label("Report", systemImage: "doc.text.magnifyingglass")
+        } footer: {
+            Text("CSV and PDF reports include logged facts and the current medication plan for sharing at visits. JSON backup remains the restore/import format.")
+        }
+    }
+
+    private var datesSection: some View {
+        Section {
+            Picker("Date Range", selection: $rangePreset) {
+                ForEach(CareReportDateRangePreset.allCases) { preset in
+                    Text(preset.displayName).tag(preset)
+                }
+            }
+
+            if rangePreset == .custom {
+                CareReportDatePickerRow(title: "Start", date: $startDate)
+                CareReportDatePickerRow(title: "End", date: $endDate)
+            } else {
+                LabeledContent("Start", value: startDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("End", value: endDate.formatted(date: .abbreviated, time: .omitted))
+            }
+        } header: {
+            Label("Dates", systemImage: "calendar")
+        }
+        .onChange(of: rangePreset) { _, newValue in
+            updateDateRange(newValue)
+        }
+        .onChange(of: startDate) { _, newValue in
+            guard rangePreset == .custom else { return }
+            storedCustomStart = newValue.timeIntervalSinceReferenceDate
+        }
+        .onChange(of: endDate) { _, newValue in
+            guard rangePreset == .custom else { return }
+            storedCustomEnd = newValue.timeIntervalSinceReferenceDate
+        }
+    }
+
+    private var detailsSection: some View {
+        Section {
+            Toggle("Include notes", isOn: $includeNotes)
+            Toggle("Include caregiver names", isOn: $includeCaregiverNames)
+            Toggle("Include appointments", isOn: $includeAppointments)
+            Toggle("Include milestones", isOn: $includeMilestones)
+        } header: {
+            Label("Included Details", systemImage: "checklist")
+        } footer: {
+            Text("Notes and caregiver names are included by default so doctor visit exports are complete. Turn them off for a smaller, more private report.")
+        }
+    }
+
+    private var exportSection: some View {
+        Section {
+            Button {
+                export()
+            } label: {
+                Label("Export \(format.displayName) Report", systemImage: "square.and.arrow.up")
+            }
+            .disabled(selectedProfile == nil)
+        }
+    }
+
+    @ViewBuilder
+    private var focusedReportsSection: some View {
+        if let selectedProfile, selectedProfile.profileType == .child {
+            Section("Focused reports") {
+                NavigationLink {
+                    FoodReactionReportView(profile: selectedProfile)
+                } label: {
+                    Label("Food reaction report", systemImage: "doc.text.magnifyingglass")
+                }
+                .accessibilityIdentifier("care-report.food-reactions")
+            }
+        }
+    }
+
+    private func updateDateRange(_ preset: CareReportDateRangePreset) {
+        storedRangePreset = preset.rawValue
+        if preset == .custom {
+            startDate = Date(timeIntervalSinceReferenceDate: storedCustomStart)
+            endDate = Date(timeIntervalSinceReferenceDate: storedCustomEnd)
+        } else {
+            let range = CareReportExportService.defaultRange(for: preset)
+            startDate = range.0
+            endDate = range.1
         }
     }
 

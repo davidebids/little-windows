@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftData
 import SwiftUI
 import UIKit
@@ -232,6 +233,14 @@ struct SettingsView: View {
 
             SyncSettingsSection(hasActiveCareProfile: selectedProfile != nil)
 
+            Section {
+                NavigationLink {
+                    VoiceLoggingHelpView()
+                } label: {
+                    Label("Siri & Shortcuts", systemImage: "mic.fill")
+                }
+            }
+
             if selectedProfile != nil {
                 WatchSettingsSection(profile: selectedProfile)
             }
@@ -440,6 +449,71 @@ struct SettingsView: View {
         } catch {
             statusMessage = "Delete failed: \(error.localizedDescription)"
         }
+    }
+}
+
+private struct VoiceLoggingHelpView: View {
+    var body: some View {
+        List {
+            Section("Try with Siri") {
+                Text("Log care in Little Windows")
+                Text("Log sleep in Little Windows")
+                Text("Start nursing left in Little Windows")
+                Text("Start nursing right in Little Windows")
+                Text("Switch nursing sides in Little Windows")
+                Text("Log blood pressure in Little Windows")
+                Text("Log a bottle in Little Windows")
+                Text("Manage a care timer in Little Windows")
+                Text("Get last care entry in Little Windows")
+            }
+            Section("Baby timer types") {
+                Text("Sleep, naps, night sleep and night waking; nursing on either side; pumping; bottle, solid-meal and other feeds; tummy time, story time, tooth brushing, indoor and outdoor play, screen time, bath, and named custom activities or timers.")
+                Text("Solid-meal timers follow the existing Solids readiness settings. Food and allergen details are managed in the Solids workspace.")
+            }
+            Section("Baby entries without a timer") {
+                Text("Log big pee in Little Windows")
+                Text("Log medium poop in Little Windows")
+                Text("Log mixed diaper in Little Windows")
+                Text("Log potty pee in Little Windows")
+                Text("Log solids in Little Windows")
+                Text("Log height in Little Windows")
+                Text("Log head circumference in Little Windows")
+                Text("Log reading in Little Windows")
+            }
+            Section("Diaper and potty details") {
+                Text("Pee, poo or poop, and mixed diapers are supported. Amounts are little or small, medium, and big or large. Try Log big pee or Log a medium dirty diaper. Log diaper also accepts an answer such as medium poop when Siri asks for details.")
+                Text("Pee amount and poo amount are separate fields, including for a mixed diaper. Poo color and consistency, diaper rash, time, and notes are optional. Potty entries also support location and accident status.")
+                Text("In a custom Log Care by Voice shortcut, set details such as Pee amount, Poo amount, or Poo consistency to Ask Each Time to collect them in the same conversation. Missing optional details stay unknown.")
+                Text("Completed activities do not need a running timer or a duration. Solid meals ask what was eaten and follow the existing readiness settings. Growth readings ask for an explicit unit.")
+            }
+            Section("Timer phrases") {
+                Text("Start tummy time in Little Windows")
+                Text("Start pumping in Little Windows")
+                Text("Pause tummy time in Little Windows")
+                Text("Resume tummy time in Little Windows")
+                Text("Finish tummy time in Little Windows")
+                Text("Reset timer in Little Windows")
+                Text("Discard timer in Little Windows")
+                Text("Correct tummy time start time in Little Windows")
+                Text("Show active timers in Little Windows")
+                Text("Stop pauses a timer; finish or save completes it in history. Siri asks which session when several match, and offers to add a milk amount when finishing a bottle or pumping timer. An unknown amount can stay blank. Reset, discard, and start-time changes require confirmation.")
+            }
+            Section("How it works") {
+                Text("Siri asks who the entry is for when more than one eligible profile is available, then asks for any missing details. It confirms the person, saved details, and time after saving.")
+                Text("An omitted time means now. For completed sleep, nursing, pumping, or activity entries, the time is when the session ended; the duration determines when it started.")
+                Text("The app opens to handle these actions. Your device may need to be unlocked.")
+            }
+            Section("Make your own phrase") {
+                Text("In Shortcuts, add Log Care by Voice, choose an entry and profile, and fill in any usual details. Leave changing values set to Ask Each Time, then name the shortcut with the phrase you want to say.")
+                ShortcutsLink()
+            }
+            Section("Medications and corrections") {
+                Text("Log Medication Dose by Voice records a taken or skipped dose from an existing plan. Siri confirms the medication, person, amount, scheduled dose, and recorded time before saving. Review different amounts or plan changes in Medications.")
+                Text("Undo Last Voice Care Entry is available in Shortcuts. It can remove an unchanged entry created by voice within ten minutes. Timer and medication changes are reviewed in the app.")
+            }
+        }
+        .navigationTitle("Siri & Shortcuts")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

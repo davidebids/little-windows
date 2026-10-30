@@ -1,3 +1,4 @@
+import AppIntents
 import CloudKit
 import SwiftData
 import SwiftUI
@@ -144,6 +145,9 @@ final class PersistenceStartupController: ObservableObject {
         failure = nil
         operationErrorMessage = nil
         modelContainer = container
+        // Refresh parameterized phrase registration after installing a new
+        // build. This does not read or modify care history.
+        LittleWindowsShortcuts.updateAppShortcutParameters()
     }
 
     private func refreshRecoveryBackups() {

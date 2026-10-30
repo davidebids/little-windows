@@ -1325,7 +1325,8 @@ enum EventMutationService {
         context: ModelContext,
         settings: PredictionSettings,
         notificationsEnabled: Bool,
-        notificationLeadMinutes: Int
+        notificationLeadMinutes: Int,
+        refreshSystemSurfaces: Bool = true
     ) async -> EventMutationOutcome {
         EventVisibilityStore.markPendingDeletion(event.id)
         let request = EventDeletionRequest(
@@ -1370,6 +1371,9 @@ enum EventMutationService {
                 PersistenceService.recordLocalSaveFailure(error)
             }
         }
+        guard refreshSystemSurfaces else {
+            return EventMutationOutcome(didPersist: true, analysis: integrationAnalysis(from: result))
+        }
         let container = context.container
         let revision = beginSystemIntegrationUpdate()
         pendingSystemIntegrationTask = Task { @MainActor [container] in
@@ -1407,7 +1411,8 @@ enum EventMutationService {
         refreshPrediction: Bool = true,
         waitForSystemIntegrations: Bool = false,
         solidPreset: SolidFeedEditorPreset? = nil,
-        eventAlreadyPersisted: Bool = false
+        eventAlreadyPersisted: Bool = false,
+        refreshSystemSurfaces: Bool = true
     ) async -> EventMutationOutcome {
         if !eventAlreadyPersisted {
             event.updatedAt = Date()
@@ -1476,6 +1481,9 @@ enum EventMutationService {
                 PersistenceService.recordLocalSaveFailure(errorDescription)
             }
             return EventMutationOutcome(didPersist: true, analysis: nil)
+        }
+        guard refreshSystemSurfaces else {
+            return EventMutationOutcome(didPersist: true, analysis: integrationAnalysis(from: result))
         }
         let prediction = result.prediction
         if waitForSystemIntegrations {

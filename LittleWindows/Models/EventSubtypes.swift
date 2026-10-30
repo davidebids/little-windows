@@ -1,6 +1,6 @@
 import Foundation
 
-enum SleepKind: String, Codable, CaseIterable, Identifiable {
+enum SleepKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case nap
     case nightSleep
     case nightWaking
@@ -90,14 +90,14 @@ enum SolidFeedingStyle: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum NursingSide: String, Codable, CaseIterable, Identifiable {
+enum NursingSide: String, Codable, CaseIterable, Identifiable, Sendable {
     case left
     case right
     var id: String { rawValue }
     var displayName: String { rawValue.capitalized }
 }
 
-enum DiaperKind: String, Codable, CaseIterable, Identifiable {
+enum DiaperKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case wet
     case dirty
     case both
@@ -113,7 +113,7 @@ enum DiaperKind: String, Codable, CaseIterable, Identifiable {
     var hasPoo: Bool { self == .dirty || self == .both }
 }
 
-enum ChildPottyKind: String, Codable, CaseIterable, Identifiable {
+enum ChildPottyKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case pee
     case poo
     case both
@@ -132,7 +132,7 @@ enum ChildPottyKind: String, Codable, CaseIterable, Identifiable {
     var hasPoo: Bool { self == .poo || self == .both }
 }
 
-enum ChildPottyLocation: String, Codable, CaseIterable, Identifiable {
+enum ChildPottyLocation: String, Codable, CaseIterable, Identifiable, Sendable {
     case toilet
     case pottyChair
     case trainingPants
@@ -151,7 +151,7 @@ enum ChildPottyLocation: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum DiaperAmount: String, Codable, CaseIterable, Identifiable {
+enum DiaperAmount: String, Codable, CaseIterable, Identifiable, Sendable {
     case little
     case medium
     case big
@@ -160,7 +160,7 @@ enum DiaperAmount: String, Codable, CaseIterable, Identifiable {
     var displayName: String { rawValue.capitalized }
 }
 
-enum PooColor: String, Codable, CaseIterable, Identifiable {
+enum PooColor: String, Codable, CaseIterable, Identifiable, Sendable {
     case yellow
     case green
     case brown
@@ -172,7 +172,7 @@ enum PooColor: String, Codable, CaseIterable, Identifiable {
     var displayName: String { rawValue.capitalized }
 }
 
-enum PooTexture: String, Codable, CaseIterable, Identifiable {
+enum PooTexture: String, Codable, CaseIterable, Identifiable, Sendable {
     case seedy
     case runny
     case soft

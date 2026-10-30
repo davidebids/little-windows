@@ -199,6 +199,10 @@
 		B8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift */; };
 		B8A000000000000000000005 /* SleepConditionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000005 /* SleepConditionsTests.swift */; };
 		B8A000000000000000000006 /* Services/WeatherLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000006 /* Services/WeatherLocationService.swift */; };
+		B8C000000000000000000001 /* Models/VoiceLoggingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000001 /* Models/VoiceLoggingModels.swift */; };
+		B8C000000000000000000002 /* Services/VoiceLoggingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000002 /* Services/VoiceLoggingService.swift */; };
+		B8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */; };
+		B8C000000000000000000004 /* VoiceLoggingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000004 /* VoiceLoggingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -474,6 +478,10 @@
 		F8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/TodayWeatherSection.swift; sourceTree = "<group>"; };
 		F8A000000000000000000005 /* SleepConditionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepConditionsTests.swift; sourceTree = "<group>"; };
 		F8A000000000000000000006 /* Services/WeatherLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WeatherLocationService.swift; sourceTree = "<group>"; };
+		F8C000000000000000000001 /* Models/VoiceLoggingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/VoiceLoggingModels.swift; sourceTree = "<group>"; };
+		F8C000000000000000000002 /* Services/VoiceLoggingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/VoiceLoggingService.swift; sourceTree = "<group>"; };
+		F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents/VoiceLoggingIntents.swift; sourceTree = "<group>"; };
+		F8C000000000000000000004 /* VoiceLoggingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceLoggingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -588,6 +596,9 @@
 		D00000000000000000000006 /* LittleWindows */ = {
 			isa = PBXGroup;
 			children = (
+				F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */,
+				F8C000000000000000000002 /* Services/VoiceLoggingService.swift */,
+				F8C000000000000000000001 /* Models/VoiceLoggingModels.swift */,
 				F00000000000000000000001 /* LittleWindowsApp.swift */,
 				A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */,
 				A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */,
@@ -739,6 +750,7 @@
 		D00000000000000000000007 /* LittleWindowsTests */ = {
 			isa = PBXGroup;
 			children = (
+				F8C000000000000000000004 /* VoiceLoggingTests.swift */,
 				A50000000000000000000006 /* WatchCompanionTests.swift */,
 				F0000000000000000000001B /* SleepPredictionEngineTests.swift */,
 				F8A000000000000000000005 /* SleepConditionsTests.swift */,
@@ -1101,6 +1113,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift in Sources */,
+				B8C000000000000000000002 /* Services/VoiceLoggingService.swift in Sources */,
+				B8C000000000000000000001 /* Models/VoiceLoggingModels.swift in Sources */,
 				A40000000000000000000001 /* Models/WatchCompanionProtocol.swift in Sources */,
 				A40000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift in Sources */,
 				A40000000000000000000004 /* Services/WatchStateFactory.swift in Sources */,
@@ -1246,6 +1261,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B8C000000000000000000004 /* VoiceLoggingTests.swift in Sources */,
 				A40000000000000000000007 /* WatchCompanionTests.swift in Sources */,
 				C10000000000000000000005 /* SolidsFeatureTests.swift in Sources */,
 				B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */,
