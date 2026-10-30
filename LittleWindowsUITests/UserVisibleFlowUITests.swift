@@ -3,6 +3,98 @@ import XCTest
 final class UserVisibleFlowUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "com.debidia.LittleWindows")
 
+    func testTodayEssentialsUsesLargeButtonsAndKeepsConfigurationInMenu() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+
+        let menu = app.buttons["today.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 8))
+        menu.tap()
+        app.buttons["Customize Today"].tap()
+        XCTAssertTrue(app.navigationBars["Today & Tracking"].waitForExistence(timeout: 5))
+        app.segmentedControls.buttons["Essentials"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Layout preview")).firstMatch.waitForExistence(timeout: 3))
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+
+        for type in ["sleep", "feed", "diaper"] {
+            let button = app.buttons["today.essential.\(type)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(button.frame.height, 120)
+            XCTAssertGreaterThan(button.frame.width, app.frame.width * 0.8)
+        }
+        XCTAssertFalse(app.staticTexts["Today's timeline"].exists)
+        XCTAssertFalse(app.buttons["Customize"].exists)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Today Essentials large logging buttons"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        app.buttons["today.essential.diaper"].tap()
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].firstMatch.tap()
+        menu.tap()
+        app.buttons["History"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Reports"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["Reports"].isSelected)
+
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        XCTAssertTrue(app.buttons["today.essential.feed"].waitForExistence(timeout: 8))
+    }
+
+    func testTodayPauseAndResumeCategoryPreservesEssentialChoiceAndActiveTimerAccess() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        XCTAssertTrue(app.navigationBars["Today & Tracking"].waitForExistence(timeout: 5))
+        app.segmentedControls.buttons["Essentials"].tap()
+        let tracking = app.buttons["Tracking & Reminders"]
+        for _ in 0..<3 where !tracking.isHittable { app.swipeUp() }
+        tracking.tap()
+        XCTAssertTrue(app.navigationBars["Tracking & Reminders"].waitForExistence(timeout: 5))
+        app.switches["Feed"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["today.essential.feed"].exists)
+        app.buttons["today.menu"].tap()
+        XCTAssertTrue(app.buttons["Nursing"].waitForExistence(timeout: 3))
+        app.buttons["Nursing"].tap()
+        XCTAssertTrue(app.navigationBars["Timer"].waitForExistence(timeout: 5))
+        app.buttons["Keep Timer"].tap()
+
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        for _ in 0..<3 where !tracking.isHittable { app.swipeUp() }
+        tracking.tap()
+        let feed = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Feed")).firstMatch
+        XCTAssertTrue(feed.waitForExistence(timeout: 5))
+        feed.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.essential.feed"].waitForExistence(timeout: 5))
+    }
+
+    private func launchTodayEssentialsTest(startURL: String) {
+        app.terminate()
+        app.launchEnvironment = [
+            "LITTLE_WINDOWS_UI_TESTING": "1",
+            "LITTLE_WINDOWS_START_URL": startURL
+        ]
+        app.launchArguments = ["--little-windows-ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+        if startURL.hasSuffix("reset-empty") {
+            XCTAssertTrue(app.navigationBars["Welcome"].waitForExistence(timeout: 12))
+        } else {
+            XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 15))
+        }
+    }
+
     func testBodyLocationVisualizationSelectsThroughLightweightHitTargets() {
         continueAfterFailure = false
 
@@ -1234,6 +1326,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(attachment)
 
         profileSettings.tap()
+        app.buttons["Settings & Profiles"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
 

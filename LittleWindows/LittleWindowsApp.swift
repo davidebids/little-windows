@@ -178,6 +178,7 @@ struct LittleWindowsApp: App {
                 .task {
                     if !startupController.isDataReady {
                         CaregiverIdentityService.startICloudSync()
+                        CareTrackingPreferenceStore.startICloudSync()
                         await SampleData.seedIfNeeded(in: modelContainer.mainContext)
                         if PersistenceService.isICloudSyncEnabled() {
                             CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)

@@ -86,6 +86,7 @@ private struct TodayRenderState {
     var nextPlannedSolidMeal: PlannedSolidMeal?
     var dueSolidAllergenProgress: SolidAllergenProgress?
     var hasSolidHistory: Bool
+    var upcomingMedication: WatchMedicationSnapshot? = nil
 
     func shows(_ type: EventType) -> Bool {
         visibleCareTypes.contains(type)
@@ -510,12 +511,16 @@ struct TodayView: View {
         let scopedAgeGuideReadStates = ageGuideReadStates
         let scopedPuppyGuideReadStates = puppyStageGuideReadStates
         let currentHouseholdID = households.first?.id
+        let trackingPreferences = CareTrackingPreferenceStore.preferences(profileID: profileID)
         let visibleCareRoutines = CareRoutineService.visibleRoutines(
             routines: careRoutines,
             profileID: profileID,
             profileType: profile?.profileType,
             householdID: currentHouseholdID
-        )
+        ).filter { routine in
+            CareRoutineService.activeRun(for: routine, runs: careRoutineRuns) != nil
+                || CareTrackingPreferenceStore.allowsRoutine(routine, steps: careRoutineSteps)
+        }
         let careRoutineTodayItems = visibleCareRoutines.prefix(3).map { routine in
             CareRoutineTodayItem(
                 routine: routine,
@@ -527,6 +532,8 @@ struct TodayView: View {
         let existingRoutineKinds = Set(visibleCareRoutines.compactMap(\.templateKind))
         let suggestedRoutineTemplates = CareRoutineService.templates(for: profile?.profileType).filter {
             !existingRoutineKinds.contains($0.kind)
+                && trackingPreferences.allowsPrompts(.routines)
+                && $0.steps.allSatisfy { $0.eventType.map(trackingPreferences.allows) ?? true }
         }
         let currentAgeGuide = profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
         let shouldShowAgeGuideCard: Bool
@@ -765,7 +772,12 @@ struct TodayView: View {
             solidsAccessLevel: solidsAccessLevel,
             nextPlannedSolidMeal: nextPlannedSolidMeal,
             dueSolidAllergenProgress: dueSolidAllergenProgress,
-            hasSolidHistory: hasSolidHistory
+            hasSolidHistory: hasSolidHistory,
+            upcomingMedication: profileID.flatMap {
+                trackingPreferences.layout == .essentials && trackingPreferences.allows(.medicine)
+                    ? WatchStateFactory.upcomingMedication(profileID: $0, context: modelContext, now: now)
+                    : nil
+            }
         )
     }
 
@@ -787,6 +799,7 @@ struct TodayView: View {
         let activeEvents = state.activeEvents
         let prediction = state.prediction
         let profile = state.profile
+        let trackingPreferences = CareTrackingPreferenceStore.preferences(profileID: state.profileID)
 
         let listContent = ScrollViewReader { scrollProxy in
             List {
@@ -804,7 +817,7 @@ struct TodayView: View {
                         }
                         .layoutPriority(1)
                         Spacer()
-                        if let profile {
+                        if let profile, trackingPreferences.shows(.timeline) {
                             Button {
                                 withAnimation(.snappy) {
                                     scrollProxy.scrollTo(TodayScrollAnchor.timeline, anchor: .top)
@@ -832,26 +845,30 @@ struct TodayView: View {
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 4, trailing: 0))
                     .listRowSeparator(.hidden)
-                    TodayWeatherHeader(chooseCity: { showingWeatherCityPicker = true })
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
-                        .listRowSeparator(.hidden)
+                    if trackingPreferences.shows(.weather) {
+                        TodayWeatherHeader(chooseCity: { showingWeatherCityPicker = true })
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
+                            .listRowSeparator(.hidden)
+                    }
                 }
                 .listSectionSpacing(0)
 
                 if profile == nil {
                     noProfileSection
                 } else {
-                    activeTimersSection(activeEvents)
-
-                    solidsTodaySection(state)
+                    if trackingPreferences.layout == .essentials, trackingPreferences.shows(.actions) {
+                        essentialsActionsSection(state, preferences: trackingPreferences)
+                    }
+                    if trackingPreferences.shows(.activeTimers) { activeTimersSection(activeEvents) }
+                    if trackingPreferences.shows(.solids) { solidsTodaySection(state) }
 
                     if state.isDogProfile {
-                        dogTodaySummarySection(state)
-                        puppyStageGuideSection(state)
+                        if trackingPreferences.shows(.summary) { dogTodaySummarySection(state) }
+                        if trackingPreferences.shows(.guides) { puppyStageGuideSection(state) }
                     }
 
-                    if profile?.profileType == .child,
+                    if trackingPreferences.shows(.prediction), profile?.profileType == .child,
                        !state.activeEvents.contains(where: { $0.isSleepBlock }) {
                         Section {
                             PredictionCard(
@@ -861,6 +878,7 @@ struct TodayView: View {
                                 sleepPressure: state.sleepPressure,
                                 alertStatusText: notificationManager.statusText(
                                     prediction: prediction,
+                                    profileID: state.profileID,
                                     settings: .current,
                                     isSleeping: state.isSleeping
                                 ),
@@ -875,63 +893,66 @@ struct TodayView: View {
                         }
                     }
 
-                    if state.isDogProfile {
-                        dogQuickActionsSection(state)
-                    } else if profile?.profileType == .adult {
-                        adultQuickActionsSection(state)
-                    } else {
-                        childQuickActionsSection(state)
+                    if trackingPreferences.layout == .full, trackingPreferences.shows(.actions) {
+                        if state.isDogProfile {
+                            dogQuickActionsSection(state)
+                        } else if profile?.profileType == .adult {
+                            adultQuickActionsSection(state)
+                        } else {
+                            childQuickActionsSection(state)
+                        }
                     }
 
-                    sleepMiniPlanSection(state)
+                    if trackingPreferences.shows(.sleepPlan) { sleepMiniPlanSection(state) }
+                    if trackingPreferences.shows(.routines) { careRoutinesSection(state) }
 
-                    careRoutinesSection(state)
-
-                    Section {
-                        if todayEvents.isEmpty {
-                            ContentUnavailableView(
-                                "No events yet",
-                                systemImage: "clock",
-                                description: Text("Use a quick action to start \(profile?.name ?? "the profile")'s day.")
-                            )
-                        } else {
-                            ForEach(todayEvents) { event in
-                                Button {
-                                    if event.isTimerDraft {
-                                        activeTimerToEdit = editableTimer(event)
-                                    } else {
-                                        editorRoute = EventEditorRoute(type: event.type, event: event)
-                                    }
-                                } label: {
-                                    EventRow(event: event)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier(
-                                    "today-timeline.event.\(event.type.rawValue)"
+                    if trackingPreferences.shows(.timeline) {
+                        Section {
+                            if todayEvents.isEmpty {
+                                ContentUnavailableView(
+                                    "No events yet",
+                                    systemImage: "clock",
+                                    description: Text("Use a quick action to start \(profile?.name ?? "the profile")'s day.")
                                 )
-                                .accessibilityValue(event.id.uuidString)
-                                .swipeActions {
-                                    Button(role: .destructive) {
-                                        eventPendingDelete = event
+                            } else {
+                                ForEach(todayEvents) { event in
+                                    Button {
+                                        if event.isTimerDraft {
+                                            activeTimerToEdit = editableTimer(event)
+                                        } else {
+                                            editorRoute = EventEditorRoute(type: event.type, event: event)
+                                        }
                                     } label: {
-                                        Label("Delete", systemImage: "trash")
+                                        EventRow(event: event)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier(
+                                        "today-timeline.event.\(event.type.rawValue)"
+                                    )
+                                    .accessibilityValue(event.id.uuidString)
+                                    .swipeActions {
+                                        Button(role: .destructive) {
+                                            eventPendingDelete = event
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
                                     }
                                 }
                             }
+                        } header: {
+                            AppSectionHeader(
+                                title: "Today's timeline",
+                                subtitle: todayEvents.isEmpty ? nil : "\(todayEvents.count) events"
+                            )
                         }
-                    } header: {
-                        AppSectionHeader(
-                            title: "Today's timeline",
-                            subtitle: todayEvents.isEmpty ? nil : "\(todayEvents.count) events"
-                        )
+                        .id(TodayScrollAnchor.timeline)
                     }
-                    .id(TodayScrollAnchor.timeline)
 
-                    if !state.isDogProfile {
+                    if !state.isDogProfile, trackingPreferences.shows(.guides) {
                         monthlyAgeGuideSection(state)
                     }
 
-                    appointmentsSection(state)
+                    if trackingPreferences.shows(.appointments) { appointmentsSection(state) }
                 }
             }
                 .listStyle(.insetGrouped)
@@ -988,9 +1009,41 @@ struct TodayView: View {
         .navigationTitle("Today")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                ProfileToolbarSettingsButton(profile: profile) {
-                    deepLinkRouter.presentSettings()
+                Menu {
+                    if profile != nil {
+                        Button("Customize Today", systemImage: "slider.horizontal.3") {
+                            showingCareCustomization = true
+                        }
+                        Button("History", systemImage: "clock.arrow.circlepath") {
+                            deepLinkRouter.route(URL(string: "littlewindows://history")!)
+                        }
+                        if !activeEvents.isEmpty {
+                            Section("Active timers") {
+                                ForEach(activeEvents) { event in
+                                    Button(event.type.displayName, systemImage: "timer") {
+                                        activeTimerToEdit = editableTimer(event)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Button("Settings & Profiles", systemImage: "gearshape") {
+                        deepLinkRouter.presentSettings()
+                    }
+                } label: {
+                    Group {
+                        if let profile {
+                            ProfileAvatarView(profile: profile, size: 34)
+                        } else {
+                            Image(systemName: "ellipsis.circle").font(.title3)
+                        }
+                    }
+                    .frame(width: 36, height: 44)
                 }
+                .buttonBorderShape(.circle)
+                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Today menu")
+                .accessibilityHint("Opens Today customization, history, active timers, and settings")
+                .accessibilityIdentifier("today.menu")
             }
         }
         .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
@@ -1091,12 +1144,13 @@ struct TodayView: View {
         }
         .sheet(isPresented: $showingCareCustomization) {
             NavigationStack {
-                CareCategoryCustomizationView(
-                    profileID: state.profileID,
-                    profileType: profile?.profileType ?? .child
-                ) {
-                    categoryPreferenceRevision += 1
-                    refreshWidgetSnapshot()
+                if let profile {
+                    TodayTrackingSettingsView(profile: profile)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showingCareCustomization = false }
+                            }
+                        }
                 }
             }
         }
@@ -1242,6 +1296,13 @@ struct TodayView: View {
         content
         .onChange(of: deepLinkRouter.pendingAction) { _, _ in
             handlePendingDeepLink()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in
+            categoryPreferenceRevision += 1
+            scheduleRenderStateRefresh()
+        }
+        .onChange(of: showingCareCustomization) { _, showing in
+            if !showing { categoryPreferenceRevision += 1; scheduleRenderStateRefresh() }
         }
         .onChange(of: preferenceRevision) { _, _ in
             scheduleRenderStateRefresh()
@@ -1697,6 +1758,82 @@ struct TodayView: View {
         }
     }
 
+    private func essentialsActionsSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
+        let types = preferences.essentialTypes(
+            for: state.profile?.profileType ?? .child,
+            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)
+        )
+        return Section {
+            ForEach(types) { type in
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    EssentialsActionButton(
+                        type: type,
+                        profileType: state.profile?.profileType ?? .child,
+                        detail: essentialDetail(type, state: state, now: context.date),
+                        timerStart: state.activeTimer(of: type).flatMap {
+                            $0.isTimerRunning ? $0.timerDisplayStartDate(at: context.date) : nil
+                        },
+                        count: types.count
+                    ) {
+                        performEssentialAction(type, state: state)
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        }
+        .listSectionSpacing(12)
+    }
+
+    private func essentialDetail(_ type: EventType, state: TodayRenderState, now: Date) -> String {
+        if let timer = state.activeTimer(of: type) {
+            return timer.isTimerRunning ? "Timer running · tap to manage" : "Timer stopped · tap to finish"
+        }
+        if type == .medicine, let dose = state.upcomingMedication {
+            let time = dose.scheduledAt.formatted(date: .abbreviated, time: .shortened)
+            return "\(dose.medicationName) · \(dose.scheduledAt <= now ? "Due" : "Next") \(time)"
+        }
+        if type == .sleep || type == .rest,
+           let endedAt = state.scopedEvents.filter({ $0.type == type && !$0.isTimerDraft })
+            .compactMap(\.endDate).filter({ $0 <= now }).max() {
+            return "Last \(type.displayName.lowercased()) ended \(DurationFormatting.string(seconds: now.timeIntervalSince(endedAt))) ago"
+        }
+        guard let date = state.lastLoggedDates[type], date <= now else {
+            return type == .medicine ? "Record a dose or review medications" : "No recent record · tap to log"
+        }
+        return "Last \(DurationFormatting.string(seconds: now.timeIntervalSince(date))) ago"
+    }
+
+    private func performEssentialAction(_ type: EventType, state: TodayRenderState) {
+        // A timer remains editable even if preferences change while its tile is visible.
+        if let timer = state.activeTimer(of: type) {
+            activeTimerToEdit = editableTimer(timer)
+            return
+        }
+        switch type {
+        case .sleep: showingSleepChooser = true
+        case .nursing: showingNursingChooser = true
+        case .pumping: startTimer(.pumping)
+        case .activity: showingActivityChooser = true
+        case .walk, .rest, .training, .grooming: startTimer(type)
+        case .medicine:
+            if let dose = state.upcomingMedication {
+                deepLinkRouter.openMedicationDose(MedicationDoseRouteCommand(
+                    profileID: dose.profileID, medicationID: dose.medicationID,
+                    regimenID: dose.regimenID, phaseID: dose.phaseID,
+                    occurrenceKey: dose.occurrenceKey, scheduledAt: dose.scheduledAt,
+                    doseAmount: dose.doseAmount, doseUnit: dose.doseUnit
+                ))
+            } else if state.profile?.profileType == .adult {
+                showingMedications = true
+            } else {
+                editorRoute = EventEditorRoute(type: .medicine)
+            }
+        default: editorRoute = EventEditorRoute(type: type)
+        }
+    }
+
     private func childQuickActionsSection(_ state: TodayRenderState) -> some View {
         Section {
             VStack(spacing: 14) {
@@ -1858,8 +1995,10 @@ struct TodayView: View {
                             editorRoute = EventEditorRoute(type: .growth)
                         }
                     }
+                    if CareTrackingPreferenceStore.allowsPrompts(.appointments, profileID: state.profileID) {
                     QuickActionButton(title: "Visits", icon: "stethoscope", color: .indigo) {
                         showingAppointments = true
+                    }
                     }
                     if state.shows(.custom) {
                         QuickActionButton(
@@ -1872,14 +2011,6 @@ struct TodayView: View {
                         }
                     }
                 }
-                Button {
-                    showingCareCustomization = true
-                } label: {
-                    Label("Customize", systemImage: "slider.horizontal.3")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
             }
             .padding(14)
             .appSurface()
@@ -1902,8 +2033,10 @@ struct TodayView: View {
                     columns: quickActionGridColumns,
                     spacing: quickActionGridSpacing
                 ) {
-                    QuickActionButton(title: "Medications", icon: "pills.fill", color: .red) {
-                        showingMedications = true
+                    if state.shows(.medicine) {
+                        QuickActionButton(title: "Medications", icon: "pills.fill", color: .red) {
+                            showingMedications = true
+                        }
                     }
                     adultHealthQuickAction(.symptom, title: "Symptom", color: .orange, state: state)
                     adultHealthQuickAction(.bloodPressure, title: "Blood pressure", color: .red, state: state)
@@ -1943,21 +2076,15 @@ struct TodayView: View {
                             showingActivityChooser = true
                         }
                     }
+                    if CareTrackingPreferenceStore.allowsPrompts(.appointments, profileID: state.profileID) {
                     QuickActionButton(title: "Visits", icon: "stethoscope", color: .indigo) {
                         showingAppointments = true
+                    }
                     }
                     if state.shows(.custom) {
                         adultHealthQuickAction(.custom, title: "Custom", color: .gray, state: state)
                     }
                 }
-                Button {
-                    showingCareCustomization = true
-                } label: {
-                    Label("Customize", systemImage: "slider.horizontal.3")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
             }
             .padding(14)
             .appSurface()
@@ -2004,14 +2131,6 @@ struct TodayView: View {
                         dogQuickAction(type, state: state)
                     }
                 }
-                Button {
-                    showingCareCustomization = true
-                } label: {
-                    Label("Customize", systemImage: "slider.horizontal.3")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
             }
             .padding(14)
             .appSurface()
@@ -2188,12 +2307,24 @@ struct TodayView: View {
     private func dogTodaySummarySection(_ state: TodayRenderState) -> some View {
         Section {
             LazyVGrid(columns: summaryGridColumns, spacing: 10) {
-                DogSummaryCard(title: "Last food", value: dogLastEventTitle(.food, state: state), icon: "fork.knife", color: .orange)
-                DogSummaryCard(title: "Last water", value: dogLastEventTitle(.water, state: state), icon: "drop.fill", color: .cyan)
-                DogSummaryCard(title: "Last pee", value: dogPottyTitle(.pee, state: state), icon: "pawprint.fill", color: .teal)
-                DogSummaryCard(title: "Last poop", value: dogPottyTitle(.poop, state: state), icon: "pawprint.circle.fill", color: .teal)
-                DogSummaryCard(title: "Last walk", value: dogLastEventTitle(.walk, state: state), icon: "figure.walk", color: .green)
-                DogSummaryCard(title: "Medicine", value: dogLastEventTitle(.medicine, state: state), icon: "cross.case.fill", color: .red)
+                if state.shows(.food) {
+                    DogSummaryCard(title: "Last food", value: dogLastEventTitle(.food, state: state), icon: "fork.knife", color: .orange)
+                }
+                if state.shows(.water) {
+                    DogSummaryCard(title: "Last water", value: dogLastEventTitle(.water, state: state), icon: "drop.fill", color: .cyan)
+                }
+                if state.shows(.potty) {
+                    DogSummaryCard(title: "Last pee", value: dogPottyTitle(.pee, state: state), icon: "pawprint.fill", color: .teal)
+                }
+                if state.shows(.potty) {
+                    DogSummaryCard(title: "Last poop", value: dogPottyTitle(.poop, state: state), icon: "pawprint.circle.fill", color: .teal)
+                }
+                if state.shows(.walk) {
+                    DogSummaryCard(title: "Last walk", value: dogLastEventTitle(.walk, state: state), icon: "figure.walk", color: .green)
+                }
+                if state.shows(.medicine) {
+                    DogSummaryCard(title: "Medicine", value: dogLastEventTitle(.medicine, state: state), icon: "cross.case.fill", color: .red)
+                }
             }
             .padding(14)
             .appSurface()
@@ -2863,7 +2994,11 @@ struct TodayView: View {
         Household.self,
         PlannedSolidMeal.self,
         SolidsProfileState.self,
-        SolidAllergenProgress.self
+        SolidAllergenProgress.self,
+        Medication.self,
+        MedicationRegimen.self,
+        MedicationSchedulePhase.self,
+        MedicationDoseRecord.self
     ].map { String(describing: $0) }.reduce(into: Set<String>()) {
         $0.insert($1)
     }
@@ -4103,7 +4238,7 @@ private struct QuickActionButtonLabel: View {
     }
 }
 
-private struct CareCategoryCustomizationView: View {
+struct CareCategoryCustomizationView: View {
     @Environment(\.dismiss) private var dismiss
     let profileID: UUID?
     let profileType: CareProfileType
@@ -4147,8 +4282,11 @@ private struct CareCategoryCustomizationView: View {
                 }
             }
         }
-        .navigationTitle("Customize")
+        .navigationTitle("Full Quick Actions")
         .navigationBarTitleDisplayMode(.inline)
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in
+            hiddenTypes = CareCategoryPreferenceStore.hiddenTypes(profileID: profileID)
+        }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
@@ -4667,6 +4805,9 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
                 }
                 summaryTimeRevision &+= 1
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in
+            summaryTimeRevision &+= 1
         }
         .task(id: familySyncEnabled) {
             guard familySyncEnabled else { return }

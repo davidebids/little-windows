@@ -2229,6 +2229,21 @@ enum MedicationNotificationScheduler {
     static let systemPendingRequestLimit = 64
     static let totalRollingRequestLimit = 48
 
+    private static func addTrackingAwareRequest(_ request: UNNotificationRequest) async throws -> Bool {
+        guard CareTrackingPreferenceStore.allowsNotification(
+            identifier: request.identifier, userInfo: request.content.userInfo
+        ) else { return false }
+        let center = UNUserNotificationCenter.current()
+        try await center.add(request)
+        guard CareTrackingPreferenceStore.allowsNotification(
+            identifier: request.identifier, userInfo: request.content.userInfo
+        ) else {
+            center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
+            return false
+        }
+        return true
+    }
+
     static func availableMedicationRequestCount(
         nonMedicationPendingRequestCount: Int
     ) -> Int {
@@ -2246,6 +2261,10 @@ enum MedicationNotificationScheduler {
         maximumRequestCount: Int = 24,
         now: Date = Date()
     ) async -> Int {
+        guard CareTrackingPreferenceStore.allows(.medicine, profileID: regimen.profileID) else {
+            await cancel(regimenID: regimen.id)
+            return 0
+        }
         let end = Calendar.current.date(byAdding: .day, value: 30, to: now) ?? now
         let snoozeSearchStart = Calendar.current.date(byAdding: .hour, value: -12, to: now)
             ?? now.addingTimeInterval(-12 * 60 * 60)
@@ -2277,7 +2296,9 @@ enum MedicationNotificationScheduler {
         }
         var scheduledRequestCount = 0
         for occurrence in occurrences {
-            guard scheduledRequestCount < maximumRequestCount else { break }
+            guard scheduledRequestCount < maximumRequestCount,
+                  CareTrackingPreferenceStore.allows(.medicine, profileID: regimen.profileID),
+                  !Task.isCancelled else { break }
             let content = UNMutableNotificationContent()
             content.title = "Time for \(medication.name)"
             content.body = "\(occurrence.doseAmount.formatted(.number.precision(.fractionLength(0...2)))) \(occurrence.doseUnit)"
@@ -2307,12 +2328,13 @@ enum MedicationNotificationScheduler {
                 )
             )
             do {
-                try await UNUserNotificationCenter.current().add(request)
+                guard try await addTrackingAwareRequest(request) else { break }
                 scheduledRequestCount += 1
             } catch {
                 continue
             }
             if regimen.followUpRemindersEnabled,
+               CareTrackingPreferenceStore.allows(.medicine, profileID: regimen.profileID),
                scheduledRequestCount < maximumRequestCount {
                 let followUpDate = occurrence.scheduledAt.addingTimeInterval(30 * 60)
                 guard followUpDate > now,
@@ -2333,7 +2355,7 @@ enum MedicationNotificationScheduler {
                     )
                 )
                 do {
-                    try await UNUserNotificationCenter.current().add(followUpRequest)
+                    guard try await addTrackingAwareRequest(followUpRequest) else { break }
                     scheduledRequestCount += 1
                 } catch {
                     continue
@@ -2389,7 +2411,8 @@ enum MedicationNotificationScheduler {
     static func snooze(_ response: UNNotificationResponse) async -> Bool {
         guard let content = response.notification.request.content.mutableCopy()
                 as? UNMutableNotificationContent,
-              let command = doseCommand(from: content.userInfo, status: .taken) else { return false }
+              let command = doseCommand(from: content.userInfo, status: .taken),
+              CareTrackingPreferenceStore.allows(.medicine, profileID: command.profileID) else { return false }
         let fireDate = Date().addingTimeInterval(10 * 60)
         let request = UNNotificationRequest(
             identifier: response.notification.request.identifier + ".snooze",
@@ -2397,7 +2420,7 @@ enum MedicationNotificationScheduler {
             trigger: oneShotTrigger(at: fireDate)
         )
         do {
-            try await UNUserNotificationCenter.current().add(request)
+            guard try await addTrackingAwareRequest(request) else { return false }
             MedicationSnoozeStateStore.markSnoozed(
                 occurrenceKey: command.occurrenceKey,
                 until: fireDate
@@ -2412,7 +2435,8 @@ enum MedicationNotificationScheduler {
         medication: WatchMedicationSnapshot,
         fireDate: Date
     ) async -> Bool {
-        guard fireDate > Date().addingTimeInterval(1) else { return false }
+        guard fireDate > Date().addingTimeInterval(1),
+              CareTrackingPreferenceStore.allows(.medicine, profileID: medication.profileID) else { return false }
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
@@ -2424,10 +2448,10 @@ enum MedicationNotificationScheduler {
             return false
         }
         do {
-            try await center.add(watchSnoozeRequest(
+            guard try await addTrackingAwareRequest(watchSnoozeRequest(
                 medication: medication,
                 fireDate: fireDate
-            ))
+            )) else { return false }
             MedicationSnoozeStateStore.markSnoozed(
                 occurrenceKey: medication.occurrenceKey,
                 until: fireDate

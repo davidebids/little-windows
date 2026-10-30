@@ -224,6 +224,14 @@ struct SettingsView: View {
             }
 
             if let selectedProfile {
+                Section {
+                    NavigationLink {
+                        TodayTrackingSettingsView(profile: selectedProfile)
+                    } label: {
+                        Label("Today & Tracking", systemImage: "slider.horizontal.3")
+                    }
+                }
+
                 CareTimeZoneSettingsNavigationSection()
 
                 if selectedProfile.profileType == .child {
@@ -1072,6 +1080,7 @@ private struct ChildSleepSettingsSections: View {
         let sleepPressureStatus = NotificationManager.sleepPressureStatusText(
             pressure: currentPressure,
             enabled: sleepPressureAlertsEnabled,
+            profileID: profileID,
             isSleeping: selectedProfileIsSleeping,
             authorizationStatus: notificationManager.authorizationStatus
         )

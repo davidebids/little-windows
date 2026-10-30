@@ -643,6 +643,7 @@ struct RootView: View {
         .onChange(of: scenePhase) {
             let phase = scenePhase
             if phase == .active {
+                CareTrackingPreferenceStore.startICloudSync()
                 consumePendingSystemAction()
             } else {
                 // Flush any main-context timer field changes before iOS
@@ -664,6 +665,7 @@ struct RootView: View {
         }
         .task(id: "\(scenePhase)-\(familySyncModeRawValue)") {
             guard scenePhase == .active else { return }
+            CareTrackingPreferenceStore.startICloudSync()
             await pollFamilyTimerChangesWhileActive()
         }
         .task(id: "system-integrations-\(scenePhase)") {
@@ -1730,6 +1732,9 @@ enum DebugSimulatorSmokeSeedService {
     @MainActor
     static func resetEmpty(context: ModelContext) {
         try? DataExportImportService.deleteAll(context: context)
+        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix(CareTrackingPreferenceStore.prefix) {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         UserDefaults.standard.removeObject(forKey: FirstRunOnboarding.completedKey)
         UserDefaults.standard.removeObject(forKey: "caregiverOne")
         UserDefaults.standard.removeObject(forKey: CaregiverIdentityService.currentCaregiverNameKey)
