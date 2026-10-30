@@ -8,11 +8,12 @@ enum CareTodayLayout: String, Codable, CaseIterable, Identifiable {
 }
 
 enum CareTodaySection: String, Codable, CaseIterable, Identifiable {
-    case actions, activeTimers, weather, prediction, sleepPlan, solids, routines, timeline, guides, appointments, summary
+    case actions, medicationDue, activeTimers, weather, prediction, sleepPlan, solids, routines, timeline, guides, appointments, summary
     var id: String { rawValue }
     var title: String {
         switch self {
         case .actions: "Logging buttons"
+        case .medicationDue: "Medication due"
         case .activeTimers: "Active timers"
         case .weather: "Weather"
         case .prediction: "Sleep prediction"
@@ -32,6 +33,16 @@ enum CareTodaySection: String, Codable, CaseIterable, Identifiable {
         case .guides: type != .adult
         case .summary: type == .dog
         default: true
+        }
+    }
+}
+
+extension CareRoutineStepAction {
+    var trackingPromptSection: CareTodaySection? {
+        switch self {
+        case .openAgeGuide, .openPuppyGuide: .guides
+        case .openAppointments: .appointments
+        default: nil
         }
     }
 }
@@ -62,11 +73,16 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
 
     func allows(_ type: EventType) -> Bool { !pausedTypes.contains(type) }
 
+    func allowsRoutineStep(eventType: EventType?, action: CareRoutineStepAction) -> Bool {
+        (eventType.map(allows) ?? true) && (action.trackingPromptSection.map(allowsPrompts) ?? true)
+    }
+
     func allowsPrompts(_ section: CareTodaySection) -> Bool {
         guard fields["prompts.\(section.rawValue)"]?.value != ["false"] else { return false }
         switch section {
         case .prediction, .sleepPlan: return allows(.sleep)
         case .solids: return allows(.feed)
+        case .medicationDue: return allows(.medicine)
         default: return true
         }
     }
@@ -76,7 +92,33 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
         if let choice = fields["section.\(layout.rawValue).\(section.rawValue)"]?.value.first {
             return choice == "true"
         }
-        return layout == .full || section == .actions
+        return Self.defaultVisibility(of: section, in: layout)
+    }
+
+    static func defaultVisibility(of section: CareTodaySection, in layout: CareTodayLayout) -> Bool {
+        layout == .full ? section != .medicationDue : section == .actions || section == .medicationDue
+    }
+
+    mutating func resetCurrentLayout(for type: CareProfileType) {
+        for section in CareTodaySection.allCases {
+            set("section.\(layout.rawValue).\(section.rawValue)", value: [String(Self.defaultVisibility(of: section, in: layout))])
+        }
+        if layout == .essentials {
+            set("essentials", value: Self.defaultEssentials(for: type).map(\.rawValue))
+        } else {
+            for type in EventType.cases(for: type) { set("hidden.\(type.rawValue)", value: ["false"]) }
+        }
+    }
+
+    func showsMedicationDueCard(
+        scheduledAt: Date?, profileType: CareProfileType, hidden: Set<EventType> = [],
+        now: Date = Date(), calendar: Calendar = .current
+    ) -> Bool {
+        guard shows(.medicationDue), let scheduledAt,
+              scheduledAt >= now.addingTimeInterval(-24 * 60 * 60),
+              let dayEnd = calendar.dateInterval(of: .day, for: now)?.end,
+              scheduledAt < dayEnd else { return false }
+        return layout != .essentials || !shows(.actions) || !essentialTypes(for: profileType, hidden: hidden).contains(.medicine)
     }
 
     func essentialTypes(for type: CareProfileType, hidden: Set<EventType> = []) -> [EventType] {
@@ -96,14 +138,17 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
 
     static func defaultEssentials(for type: CareProfileType) -> [EventType] {
         switch type {
-        case .child: [.sleep, .feed, .diaper, .medicine]
+        case .child: [.sleep, .feed, .diaper]
         case .adult: [.medicine, .symptom, .bloodPressure, .sleep]
         case .dog: [.food, .potty, .walk, .rest]
         }
     }
 
     mutating func set(_ key: String, value: [String], now: Date = Date(), revision: String = UUID().uuidString) {
-        fields[key] = CareTrackingPreferenceValue(value: value, updatedAt: now, revision: revision)
+        // A deliberate edit must follow a value already observed from another
+        // device, even if that device's wall clock is ahead of this one.
+        let observed = fields[key]?.updatedAt.addingTimeInterval(0.001) ?? now
+        fields[key] = CareTrackingPreferenceValue(value: value, updatedAt: max(now, observed), revision: revision)
     }
 
     func merging(_ other: Self) -> Self {
@@ -117,6 +162,15 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
         return result
     }
 }
+
+protocol CareTrackingCloudStore {
+    var dictionaryRepresentation: [String: Any] { get }
+    func data(forKey key: String) -> Data?
+    func set(_ value: Any?, forKey key: String)
+    @discardableResult func synchronize() -> Bool
+}
+
+extension NSUbiquitousKeyValueStore: CareTrackingCloudStore {}
 
 @MainActor
 enum CareTrackingPreferenceStore {
@@ -140,14 +194,21 @@ enum CareTrackingPreferenceStore {
         preferences(profileID: profileID).allowsPrompts(section)
     }
 
-    static func update(profileID: UUID, _ change: (inout CareTrackingPreferences) -> Void) {
-        var value = preferences(profileID: profileID)
-        change(&value)
-        save(value, profileID: profileID)
-        if PersistenceService.isICloudSyncEnabled() {
-            reconcile(profileID: profileID, store: .default)
+    static func update(
+        profileID: UUID, defaults: UserDefaults = .standard,
+        store: CareTrackingCloudStore = NSUbiquitousKeyValueStore.default,
+        _ change: (inout CareTrackingPreferences) -> Void
+    ) {
+        if PersistenceService.isICloudSyncEnabled(defaults: defaults) {
+            reconcile(profileID: profileID, defaults: defaults, store: store)
         }
-        notify(profileID)
+        var value = preferences(profileID: profileID, defaults: defaults)
+        change(&value)
+        save(value, profileID: profileID, defaults: defaults)
+        if PersistenceService.isICloudSyncEnabled(defaults: defaults) {
+            reconcile(profileID: profileID, defaults: defaults, store: store)
+        }
+        if defaults === UserDefaults.standard { notify(profileID) }
     }
 
     static func startICloudSync() {
@@ -165,19 +226,21 @@ enum CareTrackingPreferenceStore {
         synchronize()
     }
 
-    private static func synchronize() {
-        guard PersistenceService.isICloudSyncEnabled() else { return }
-        let store = NSUbiquitousKeyValueStore.default
-        let keys = Set(UserDefaults.standard.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) })
+    static func synchronize(
+        defaults: UserDefaults = .standard,
+        store: CareTrackingCloudStore = NSUbiquitousKeyValueStore.default
+    ) {
+        guard PersistenceService.isICloudSyncEnabled(defaults: defaults) else { return }
+        let keys = Set(defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix) })
             .union(store.dictionaryRepresentation.keys.filter { $0.hasPrefix(prefix) })
         for key in keys {
             guard let profileID = UUID(uuidString: String(key.dropFirst(prefix.count))) else { continue }
-            reconcile(profileID: profileID, store: store)
+            reconcile(profileID: profileID, defaults: defaults, store: store)
         }
     }
 
-    private static func reconcile(profileID: UUID, store: NSUbiquitousKeyValueStore) {
-        let local = preferences(profileID: profileID)
+    private static func reconcile(profileID: UUID, defaults: UserDefaults, store: CareTrackingCloudStore) {
+        let local = preferences(profileID: profileID, defaults: defaults)
         let remote = store.data(forKey: key(profileID)).flatMap {
             try? JSONDecoder().decode(CareTrackingPreferences.self, from: $0)
         } ?? CareTrackingPreferences()
@@ -185,8 +248,8 @@ enum CareTrackingPreferenceStore {
         guard remote.version == 1 else { return }
         let merged = local.merging(remote)
         if merged != local {
-            save(merged, profileID: profileID)
-            notify(profileID)
+            save(merged, profileID: profileID, defaults: defaults)
+            if defaults === UserDefaults.standard { notify(profileID) }
         }
         if merged != remote, let data = try? JSONEncoder().encode(merged) {
             store.set(data, forKey: key(profileID))
@@ -194,9 +257,9 @@ enum CareTrackingPreferenceStore {
         }
     }
 
-    private static func save(_ preferences: CareTrackingPreferences, profileID: UUID) {
+    private static func save(_ preferences: CareTrackingPreferences, profileID: UUID, defaults: UserDefaults) {
         guard let data = try? JSONEncoder().encode(preferences) else { return }
-        UserDefaults.standard.set(data, forKey: key(profileID))
+        defaults.set(data, forKey: key(profileID))
     }
 
     private static func notify(_ profileID: UUID) {
@@ -210,9 +273,11 @@ enum CareTrackingPreferenceStore {
     static func allowsRoutine(_ routine: CareRoutine, steps: [CareRoutineStep]? = nil) -> Bool {
         guard let profileID = routine.profileID else { return true }
         let preferences = preferences(profileID: profileID)
-        let resolvedSteps = steps ?? ((try? routine.modelContext?.fetch(FetchDescriptor<CareRoutineStep>())) ?? [])
+        let routineID = routine.id
+        let descriptor = FetchDescriptor<CareRoutineStep>(predicate: #Predicate { $0.routineID == routineID })
+        let resolvedSteps = steps ?? ((try? routine.modelContext?.fetch(descriptor)) ?? [])
         return preferences.allowsPrompts(.routines) && resolvedSteps.filter { $0.routineID == routine.id }.allSatisfy {
-            $0.eventType.map(preferences.allows) ?? true
+            preferences.allowsRoutineStep(eventType: $0.eventType, action: $0.action)
         }
     }
 
@@ -240,7 +305,9 @@ enum CareTrackingPreferenceStore {
         if identifier.hasPrefix("appointment.") { return preferences.allowsPrompts(.appointments) }
         if identifier.hasPrefix("routine.") {
             let types = (userInfo["trackingCategoryRawValues"] as? [String] ?? []).compactMap(EventType.init(rawValue:))
+            let sections = (userInfo["trackingPromptSectionRawValues"] as? [String] ?? []).compactMap(CareTodaySection.init(rawValue:))
             return preferences.allowsPrompts(.routines) && types.allSatisfy(preferences.allows)
+                && sections.allSatisfy(preferences.allowsPrompts)
         }
         return true
     }

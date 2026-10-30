@@ -232,6 +232,11 @@ struct TodayView: View {
         usesWideIPadLayout ? 46 : 0
     }
 
+    private var todayMenuLabelWidth: CGFloat {
+        if #available(iOS 26.0, *) { return 24 }
+        return 36
+    }
+
     private var todayListContentHorizontalMargin: CGFloat? {
         usesWideIPadLayout ? todayContentHorizontalMargin : nil
     }
@@ -533,7 +538,7 @@ struct TodayView: View {
         let suggestedRoutineTemplates = CareRoutineService.templates(for: profile?.profileType).filter {
             !existingRoutineKinds.contains($0.kind)
                 && trackingPreferences.allowsPrompts(.routines)
-                && $0.steps.allSatisfy { $0.eventType.map(trackingPreferences.allows) ?? true }
+                && $0.steps.allSatisfy { trackingPreferences.allowsRoutineStep(eventType: $0.eventType, action: $0.action) }
         }
         let currentAgeGuide = profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
         let shouldShowAgeGuideCard: Bool
@@ -774,8 +779,8 @@ struct TodayView: View {
             dueSolidAllergenProgress: dueSolidAllergenProgress,
             hasSolidHistory: hasSolidHistory,
             upcomingMedication: profileID.flatMap {
-                trackingPreferences.layout == .essentials && trackingPreferences.allows(.medicine)
-                    ? WatchStateFactory.upcomingMedication(profileID: $0, context: modelContext, now: now)
+                (trackingPreferences.layout == .essentials || trackingPreferences.shows(.medicationDue)) && trackingPreferences.allows(.medicine)
+                    ? WatchStateFactory.upcomingMedication(profileID: $0, context: modelContext, now: now, lookbackHours: 24)
                     : nil
             }
         )
@@ -860,6 +865,7 @@ struct TodayView: View {
                     if trackingPreferences.layout == .essentials, trackingPreferences.shows(.actions) {
                         essentialsActionsSection(state, preferences: trackingPreferences)
                     }
+                    medicationDueSection(state, preferences: trackingPreferences)
                     if trackingPreferences.shows(.activeTimers) { activeTimersSection(activeEvents) }
                     if trackingPreferences.shows(.solids) { solidsTodaySection(state) }
 
@@ -1009,13 +1015,20 @@ struct TodayView: View {
         .navigationTitle("Today")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if profile != nil {
+                if let profile {
+                    Menu {
                         Button("Customize Today", systemImage: "slider.horizontal.3") {
                             showingCareCustomization = true
                         }
                         Button("History", systemImage: "clock.arrow.circlepath") {
                             deepLinkRouter.route(URL(string: "littlewindows://history")!)
+                        }
+                        Menu("Log Another Activity", systemImage: "plus.circle") {
+                            ForEach(EventType.cases(for: profile.profileType)) { type in
+                                Button(type.displayName, systemImage: type.systemImage(for: profile.profileType)) {
+                                    performEssentialAction(type, state: state)
+                                }
+                            }
                         }
                         if !activeEvents.isEmpty {
                             Section("Active timers") {
@@ -1026,24 +1039,26 @@ struct TodayView: View {
                                 }
                             }
                         }
+                        Button("Settings & Profiles", systemImage: "gearshape") {
+                            deepLinkRouter.presentSettings()
+                        }
+                    } label: {
+                        ProfileAvatarView(profile: profile, size: 34)
+                            // Menu adds 12pt of horizontal toolbar chrome.
+                            // The avatar can overflow this label into that
+                            // padding while the resulting target stays round.
+                            .frame(width: todayMenuLabelWidth, height: 44)
                     }
-                    Button("Settings & Profiles", systemImage: "gearshape") {
+                    .buttonStyle(.plain)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("\(profile.name) settings")
+                    .accessibilityHint("Opens Today customization, history, active timers, and settings")
+                    .accessibilityIdentifier("today.menu")
+                } else {
+                    ProfileToolbarSettingsButton(profile: nil) {
                         deepLinkRouter.presentSettings()
                     }
-                } label: {
-                    Group {
-                        if let profile {
-                            ProfileAvatarView(profile: profile, size: 34)
-                        } else {
-                            Image(systemName: "ellipsis.circle").font(.title3)
-                        }
-                    }
-                    .frame(width: 36, height: 44)
                 }
-                .buttonBorderShape(.circle)
-                .accessibilityLabel(profile.map { "\($0.name) settings" } ?? "Today menu")
-                .accessibilityHint("Opens Today customization, history, active timers, and settings")
-                .accessibilityIdentifier("today.menu")
             }
         }
         .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
@@ -1356,10 +1371,11 @@ struct TodayView: View {
                 handlePendingRoutineDeepLink()
             }
         }
-        .task {
-            guard !hasCompletedInitialSetup else { return }
+        .task(id: deepLinkRouter.isDataReady) {
+            guard deepLinkRouter.isDataReady, !hasCompletedInitialSetup else { return }
             hasCompletedInitialSetup = true
-            _ = HouseholdService.ensureDefaultHousehold(context: modelContext)
+            // RootView creates the household after onboarding. Creating one
+            // here races the empty-store onboarding check and can suppress it.
             _ = profileService.ensureSelection(in: profiles)
             refreshCachedRenderState()
             refreshActiveSleepPlan()
@@ -1758,6 +1774,29 @@ struct TodayView: View {
         }
     }
 
+    @ViewBuilder
+    private func medicationDueSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
+        if preferences.showsMedicationDueCard(
+            scheduledAt: state.upcomingMedication?.scheduledAt,
+            profileType: state.profile?.profileType ?? .child,
+            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)
+        ) {
+            Section {
+                EssentialsActionButton(
+                    type: .medicine, profileType: state.profile?.profileType ?? .child,
+                    detail: essentialDetail(.medicine, state: state, now: Date()), count: 4
+                ) {
+                    performEssentialAction(.medicine, state: state)
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } header: {
+                AppSectionHeader(title: "Medication due")
+            }
+        }
+    }
+
     private func essentialsActionsSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
         let types = preferences.essentialTypes(
             for: state.profile?.profileType ?? .child,
@@ -1806,6 +1845,11 @@ struct TodayView: View {
     }
 
     private func performEssentialAction(_ type: EventType, state: TodayRenderState) {
+        guard let profileID = state.profileID,
+              profileService.selectedProfile(in: profiles)?.id == profileID else {
+            scheduleRenderStateRefresh()
+            return
+        }
         // A timer remains editable even if preferences change while its tile is visible.
         if let timer = state.activeTimer(of: type) {
             activeTimerToEdit = editableTimer(timer)
@@ -2304,35 +2348,39 @@ struct TodayView: View {
         .accessibilityElement(children: .contain)
     }
 
+    @ViewBuilder
     private func dogTodaySummarySection(_ state: TodayRenderState) -> some View {
-        Section {
-            LazyVGrid(columns: summaryGridColumns, spacing: 10) {
-                if state.shows(.food) {
-                    DogSummaryCard(title: "Last food", value: dogLastEventTitle(.food, state: state), icon: "fork.knife", color: .orange)
+        let preferences = CareTrackingPreferenceStore.preferences(profileID: state.profileID)
+        if [EventType.food, .water, .potty, .walk, .medicine].contains(where: preferences.allows) {
+            Section {
+                LazyVGrid(columns: summaryGridColumns, spacing: 10) {
+                    if preferences.allows(.food) {
+                        DogSummaryCard(title: "Last food", value: dogLastEventTitle(.food, state: state), icon: "fork.knife", color: .orange)
+                    }
+                    if preferences.allows(.water) {
+                        DogSummaryCard(title: "Last water", value: dogLastEventTitle(.water, state: state), icon: "drop.fill", color: .cyan)
+                    }
+                    if preferences.allows(.potty) {
+                        DogSummaryCard(title: "Last pee", value: dogPottyTitle(.pee, state: state), icon: "pawprint.fill", color: .teal)
+                    }
+                    if preferences.allows(.potty) {
+                        DogSummaryCard(title: "Last poop", value: dogPottyTitle(.poop, state: state), icon: "pawprint.circle.fill", color: .teal)
+                    }
+                    if preferences.allows(.walk) {
+                        DogSummaryCard(title: "Last walk", value: dogLastEventTitle(.walk, state: state), icon: "figure.walk", color: .green)
+                    }
+                    if preferences.allows(.medicine) {
+                        DogSummaryCard(title: "Medicine", value: dogLastEventTitle(.medicine, state: state), icon: "cross.case.fill", color: .red)
+                    }
                 }
-                if state.shows(.water) {
-                    DogSummaryCard(title: "Last water", value: dogLastEventTitle(.water, state: state), icon: "drop.fill", color: .cyan)
-                }
-                if state.shows(.potty) {
-                    DogSummaryCard(title: "Last pee", value: dogPottyTitle(.pee, state: state), icon: "pawprint.fill", color: .teal)
-                }
-                if state.shows(.potty) {
-                    DogSummaryCard(title: "Last poop", value: dogPottyTitle(.poop, state: state), icon: "pawprint.circle.fill", color: .teal)
-                }
-                if state.shows(.walk) {
-                    DogSummaryCard(title: "Last walk", value: dogLastEventTitle(.walk, state: state), icon: "figure.walk", color: .green)
-                }
-                if state.shows(.medicine) {
-                    DogSummaryCard(title: "Medicine", value: dogLastEventTitle(.medicine, state: state), icon: "cross.case.fill", color: .red)
-                }
+                .padding(14)
+                .appSurface()
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } header: {
+                AppSectionHeader(title: "\(state.profile?.name ?? "Dog") today", subtitle: "Quick snapshot")
             }
-            .padding(14)
-            .appSurface()
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-        } header: {
-            AppSectionHeader(title: "\(state.profile?.name ?? "Dog") today", subtitle: "Quick snapshot")
         }
     }
 

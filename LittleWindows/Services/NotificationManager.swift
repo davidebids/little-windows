@@ -350,10 +350,15 @@ final class NotificationManager: NSObject, ObservableObject {
     func cancelPausedTrackingReminders() async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
-        center.removePendingNotificationRequests(withIdentifiers: pending.compactMap {
-            CareTrackingPreferenceStore.allowsNotification(identifier: $0.identifier, userInfo: $0.content.userInfo)
-                ? nil : $0.identifier
-        })
+        let paused = pending.filter {
+            !CareTrackingPreferenceStore.allowsNotification(identifier: $0.identifier, userInfo: $0.content.userInfo)
+        }
+        for request in paused where request.identifier.hasPrefix("medication.") {
+            if let occurrenceKey = request.content.userInfo["occurrenceKey"] as? String {
+                MedicationSnoozeStateStore.clear(occurrenceKey: occurrenceKey)
+            }
+        }
+        center.removePendingNotificationRequests(withIdentifiers: paused.map(\.identifier))
     }
 
     func configure() async {
@@ -1519,8 +1524,12 @@ final class NotificationManager: NSObject, ObservableObject {
         if let profileID = routine.profileID {
             userInfo["profileID"] = profileID.uuidString
         }
-        let steps = (try? routine.modelContext?.fetch(FetchDescriptor<CareRoutineStep>())) ?? []
-        userInfo["trackingCategoryRawValues"] = steps.filter { $0.routineID == routine.id }.compactMap(\.eventTypeRawValue)
+        let routineID = routine.id
+        let descriptor = FetchDescriptor<CareRoutineStep>(predicate: #Predicate { $0.routineID == routineID })
+        let steps = (try? routine.modelContext?.fetch(descriptor)) ?? []
+        userInfo["trackingCategoryRawValues"] = steps.compactMap(\.eventTypeRawValue)
+        userInfo["trackingPromptSectionRawValues"] = steps
+            .compactMap { $0.action.trackingPromptSection?.rawValue }
         content.userInfo = userInfo
         return content
     }

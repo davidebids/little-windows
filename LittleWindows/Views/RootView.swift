@@ -697,7 +697,8 @@ struct RootView: View {
                 }
             }
             .animation(.snappy, value: familySyncAcceptanceIsInProgress)
-            .task {
+            .task(id: router.isDataReady) {
+                guard router.isDataReady, !hasCheckedInitialOnboardingState else { return }
                 performInitialSetup()
             }
     }
