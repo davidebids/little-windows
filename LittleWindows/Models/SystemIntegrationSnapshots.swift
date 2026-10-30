@@ -265,6 +265,18 @@ struct TodaySummarySnapshot: Codable, Hashable, Sendable {
         profileTypeRawValue == "dog"
     }
 
+    var widgetMetrics: [CareSummaryMetricSnapshot]? {
+        guard let metrics = summaryMetrics else { return nil }
+        let preferredIDs: [String]
+        switch profileTypeRawValue {
+        case "adult": preferredIDs = ["medicine", "symptoms", "blood-pressure", "heart-rate"]
+        case "dog": preferredIDs = ["food", "water", "potty", "walks"]
+        default: preferredIDs = ["sleep-total", "sleep-naps", "feed-total", "diapers"]
+        }
+        let preferred = preferredIDs.compactMap { id in metrics.first { $0.id == id } }
+        return Array((preferred + metrics.filter { !preferredIDs.contains($0.id) }).prefix(4))
+    }
+
     var resolvedAllowsSolids: Bool {
         allowsSolids ?? allowsSolids(at: Date())
     }

@@ -7,18 +7,193 @@ import XCTest
 final class CareTrackingPreferenceTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    private final class CloudStore: CareTrackingCloudStore {
+        var dictionaryRepresentation: [String: Any] = [:]
+        var writes = 0
+        func data(forKey key: String) -> Data? { dictionaryRepresentation[key] as? Data }
+        func set(_ value: Any?, forKey key: String) {
+            dictionaryRepresentation[key] = value
+            writes += 1
+        }
+        func synchronize() -> Bool { true }
+    }
+
+    private func device() throws -> UserDefaults {
+        let suite = "CareTrackingDevice-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return defaults
+    }
+
+    func testRealStoreRoundTripMergesOfflineDevicesAndDoesNotRepublishUnchangedValues() throws {
+        let cloud = CloudStore()
+        let first = try device(), second = try device()
+        let profileID = UUID(), otherID = UUID()
+        for defaults in [first, second] { PersistenceService.setICloudSyncEnabled(false, defaults: defaults) }
+        CareTrackingPreferenceStore.update(profileID: profileID, defaults: first, store: cloud) {
+            $0.set("layout", value: ["essentials"])
+            $0.set("paused.sleep", value: ["true"])
+        }
+        CareTrackingPreferenceStore.update(profileID: profileID, defaults: second, store: cloud) {
+            $0.set("paused.feed", value: ["true"])
+            $0.set("essentials", value: ["diaper", "sleep"])
+        }
+        XCTAssertEqual(cloud.writes, 0)
+        for defaults in [first, second] { PersistenceService.setICloudSyncEnabled(true, defaults: defaults) }
+        for defaults in [first, second, first] { CareTrackingPreferenceStore.synchronize(defaults: defaults, store: cloud) }
+        let merged = CareTrackingPreferenceStore.preferences(profileID: profileID, defaults: first)
+        XCTAssertEqual(merged, CareTrackingPreferenceStore.preferences(profileID: profileID, defaults: second))
+        XCTAssertEqual(merged.pausedTypes, [.sleep, .feed])
+        XCTAssertEqual(merged.layout, .essentials)
+        XCTAssertEqual(merged.essentialTypes(for: .child), [.diaper])
+        XCTAssertTrue(CareTrackingPreferenceStore.preferences(profileID: otherID, defaults: first).pausedTypes.isEmpty)
+        let writes = cloud.writes
+        CareTrackingPreferenceStore.synchronize(defaults: first, store: cloud)
+        XCTAssertEqual(cloud.writes, writes)
+    }
+
+    func testStoreHonorsDeliberateResumeAfterReceivingFutureDatedPause() throws {
+        let cloud = CloudStore(), defaults = try device()
+        let profileID = UUID()
+        var remote = CareTrackingPreferences()
+        remote.set("paused.medicine", value: ["true"], now: Date().addingTimeInterval(86_400))
+        cloud.set(try JSONEncoder().encode(remote), forKey: CareTrackingPreferenceStore.key(profileID))
+        CareTrackingPreferenceStore.update(profileID: profileID, defaults: defaults, store: cloud) {
+            $0.set("paused.medicine", value: ["false"])
+        }
+        let saved = CareTrackingPreferenceStore.preferences(profileID: profileID, defaults: defaults)
+        XCTAssertTrue(saved.allows(.medicine))
+        let uploaded = try JSONDecoder().decode(CareTrackingPreferences.self, from: XCTUnwrap(cloud.data(forKey: CareTrackingPreferenceStore.key(profileID))))
+        XCTAssertEqual(saved, uploaded)
+    }
+
+    func testStoreDoesNotOverwriteNewerCloudSchema() throws {
+        let cloud = CloudStore(), defaults = try device()
+        let id = UUID()
+        var remote = CareTrackingPreferences()
+        remote.version = 2
+        let data = try JSONEncoder().encode(remote)
+        cloud.set(data, forKey: CareTrackingPreferenceStore.key(id))
+        let writes = cloud.writes
+        CareTrackingPreferenceStore.update(profileID: id, defaults: defaults, store: cloud) { $0.set("layout", value: ["essentials"]) }
+        XCTAssertEqual(cloud.writes, writes)
+        XCTAssertEqual(cloud.data(forKey: CareTrackingPreferenceStore.key(id)), data)
+    }
+
+    func testResetOnlyChangesCurrentLayoutAndKeepsTrackingPauses() {
+        var preferences = CareTrackingPreferences()
+        preferences.set("essentials", value: ["diaper", "feed"])
+        preferences.set("section.essentials.timeline", value: ["true"])
+        preferences.set("hidden.sleep", value: ["true"])
+        preferences.set("paused.feed", value: ["true"])
+        preferences.resetCurrentLayout(for: .child)
+        XCTAssertEqual(preferences.configuredEssentials(for: .child), [.diaper, .feed])
+        XCTAssertEqual(preferences.fields["section.essentials.timeline"]?.value, ["true"])
+        XCTAssertEqual(preferences.fields["hidden.sleep"]?.value, ["false"])
+        XCTAssertFalse(preferences.allows(.feed))
+        preferences.set("layout", value: ["essentials"])
+        preferences.set("section.full.weather", value: ["false"])
+        preferences.resetCurrentLayout(for: .child)
+        XCTAssertEqual(preferences.configuredEssentials(for: .child), [.sleep, .feed, .diaper])
+        XCTAssertFalse(preferences.shows(.timeline))
+        XCTAssertEqual(preferences.fields["section.full.weather"]?.value, ["false"])
+        XCTAssertFalse(preferences.allows(.feed))
+    }
+
+    func testMedicationDueIsConditionalHideableAndDoesNotDuplicateChosenMedicationTile() {
+        var preferences = CareTrackingPreferences()
+        preferences.set("layout", value: ["essentials"])
+        XCTAssertFalse(preferences.showsMedicationDueCard(scheduledAt: nil, profileType: .child))
+        XCTAssertTrue(preferences.showsMedicationDueCard(scheduledAt: Date(), profileType: .child))
+        preferences.set("essentials", value: ["sleep", "medicine"])
+        XCTAssertFalse(preferences.showsMedicationDueCard(scheduledAt: Date(), profileType: .child))
+        preferences.set("section.essentials.actions", value: ["false"])
+        XCTAssertTrue(preferences.showsMedicationDueCard(scheduledAt: Date(), profileType: .child))
+        preferences.set("section.essentials.medicationDue", value: ["false"])
+        XCTAssertFalse(preferences.showsMedicationDueCard(scheduledAt: Date(), profileType: .child))
+        preferences.set("section.essentials.medicationDue", value: ["true"])
+        preferences.set("paused.medicine", value: ["true"])
+        XCTAssertFalse(preferences.showsMedicationDueCard(scheduledAt: Date(), profileType: .child))
+    }
+
+    func testMedicationDueUsesLocalDayBoundaryAcrossDaylightSavingChange() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let current = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 12)))
+        let tonight = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 23, minute: 30)))
+        let tomorrow = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 9, hour: 0, minute: 15)))
+        var preferences = CareTrackingPreferences()
+        preferences.set("layout", value: ["essentials"])
+        XCTAssertTrue(preferences.showsMedicationDueCard(scheduledAt: tonight, profileType: .child, now: current, calendar: calendar))
+        XCTAssertFalse(preferences.showsMedicationDueCard(scheduledAt: tomorrow, profileType: .child, now: current, calendar: calendar))
+        XCTAssertFalse(preferences.showsMedicationDueCard(scheduledAt: current.addingTimeInterval(-25 * 60 * 60), profileType: .child, now: current, calendar: calendar))
+    }
+
+    func testGuideAndAppointmentPausesAlsoQuietTheirRoutineStepsAndNotifications() throws {
+        let defaults = try device(), id = UUID()
+        var preferences = CareTrackingPreferences()
+        preferences.set("prompts.guides", value: ["false"])
+        preferences.set("prompts.appointments", value: ["false"])
+        defaults.set(try JSONEncoder().encode(preferences), forKey: CareTrackingPreferenceStore.key(id))
+        for action in [CareRoutineStepAction.openAgeGuide, .openPuppyGuide, .openAppointments] {
+            XCTAssertFalse(preferences.allowsRoutineStep(eventType: nil, action: action))
+        }
+        XCTAssertTrue(preferences.allowsRoutineStep(eventType: nil, action: .checklist))
+        XCTAssertFalse(CareTrackingPreferenceStore.allowsNotification(
+            identifier: "routine.reminder.test",
+            userInfo: ["profileID": id.uuidString, "trackingPromptSectionRawValues": ["guides"]], defaults: defaults
+        ))
+    }
+
+    func testOneOffRecordInPausedCategoryPersistsWithoutResumingOrReappearingInSuggestions() async throws {
+        let container = try ModelContainer(for: PersistenceService.schema, configurations: [
+            ModelConfiguration(schema: PersistenceService.schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        ])
+        let profile = CareProfile(name: "Test Child", birthDate: now.addingTimeInterval(-180 * 86_400))
+        container.mainContext.insert(profile)
+        try container.mainContext.save()
+        let key = CareTrackingPreferenceStore.key(profile.id)
+        var preferences = CareTrackingPreferences()
+        preferences.set("paused.feed", value: ["true"])
+        UserDefaults.standard.set(try JSONEncoder().encode(preferences), forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let event = CareEvent(profileID: profile.id, type: .feed, startDate: now, endDate: now)
+        event.feedKind = .bottle
+        let saved = await EventMutationService.persistStandaloneEvent(event, container: container)
+        XCTAssertTrue(saved)
+        let stored = try ModelContext(container).fetch(FetchDescriptor<CareEvent>())
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored.first?.profileID, profile.id)
+        XCTAssertFalse(CareTrackingPreferenceStore.allows(.feed, profileID: profile.id))
+        let snapshot = WidgetSnapshotService.makeSnapshot(profileID: profile.id, babyName: "Test Child", events: stored, prediction: nil, now: now)
+        XCTAssertFalse(snapshot.resolvedQuickActions.contains { $0.destinationPath == "quick-log/feed" })
+    }
+
+    func testWidgetUsesAdultMetricsAndRemainingEnabledCategoriesRatherThanBlankSummary() {
+        var snapshot = WidgetSnapshotService.makeSnapshot(profileID: UUID(), profileType: .adult, babyName: "Test Adult", events: [], prediction: nil)
+        XCTAssertEqual(snapshot.todaySummary.widgetMetrics?.map(\.id), ["medicine", "symptoms", "blood-pressure", "heart-rate"])
+        let metric = CareSummaryMetricSnapshot(id: "growth", title: "Growth", value: "1", systemImage: "ruler", tintName: "green", eventTypeRawValue: "growth")
+        snapshot.todaySummary.summaryMetrics = [metric]
+        XCTAssertEqual(snapshot.todaySummary.widgetMetrics, [metric])
+        snapshot.todaySummary.summaryMetrics = []
+        XCTAssertEqual(snapshot.todaySummary.widgetMetrics, [])
+        snapshot.todaySummary.summaryMetrics = nil
+        XCTAssertNil(snapshot.todaySummary.widgetMetrics)
+    }
+
     func testExistingInstallKeepsFullLayoutWithoutPausingCategories() {
         let preferences = CareTrackingPreferences()
         XCTAssertEqual(preferences.layout, .full)
         XCTAssertTrue(preferences.pausedTypes.isEmpty)
-        XCTAssertTrue(CareTodaySection.allCases.allSatisfy(preferences.shows))
+        XCTAssertTrue(CareTodaySection.allCases.filter { $0 != .medicationDue }.allSatisfy(preferences.shows))
+        XCTAssertFalse(preferences.shows(.medicationDue))
     }
 
     func testEssentialsHasItsOwnMinimalDefaultsAndProfileAppropriateActivities() {
         var preferences = CareTrackingPreferences()
         preferences.set("layout", value: ["essentials"])
-        XCTAssertEqual(CareTodaySection.allCases.filter(preferences.shows), [.actions])
-        XCTAssertEqual(preferences.essentialTypes(for: .child), [.sleep, .feed, .diaper, .medicine])
+        XCTAssertEqual(CareTodaySection.allCases.filter(preferences.shows), [.actions, .medicationDue])
+        XCTAssertEqual(preferences.essentialTypes(for: .child), [.sleep, .feed, .diaper])
         XCTAssertEqual(preferences.essentialTypes(for: .adult), [.medicine, .symptom, .bloodPressure, .sleep])
         XCTAssertEqual(preferences.essentialTypes(for: .dog), [.food, .potty, .walk, .rest])
     }
@@ -63,7 +238,7 @@ final class CareTrackingPreferenceTests: XCTestCase {
 
     func testLegacyHiddenActionsOnlyAffectInitialEssentialsAndNeverBecomePauses() {
         var preferences = CareTrackingPreferences()
-        XCTAssertEqual(preferences.essentialTypes(for: .child, hidden: [.diaper]), [.sleep, .feed, .medicine])
+        XCTAssertEqual(preferences.essentialTypes(for: .child, hidden: [.diaper]), [.sleep, .feed])
         XCTAssertTrue(preferences.allows(.diaper))
         preferences.set("essentials", value: ["diaper"])
         XCTAssertEqual(preferences.essentialTypes(for: .child, hidden: [.diaper]), [.diaper])
@@ -89,6 +264,7 @@ final class CareTrackingPreferenceTests: XCTestCase {
         resumed.set("paused.sleep", value: ["false"], now: now.addingTimeInterval(1), revision: "b")
         XCTAssertTrue(stale.merging(resumed).allows(.sleep))
         XCTAssertEqual(stale.merging(resumed), resumed.merging(stale))
+        resumed = CareTrackingPreferences()
         resumed.set("paused.sleep", value: ["false"], now: now, revision: "b")
         XCTAssertEqual(stale.merging(resumed), resumed.merging(stale))
         XCTAssertTrue(stale.merging(resumed).allows(.sleep))

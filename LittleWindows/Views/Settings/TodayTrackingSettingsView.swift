@@ -74,14 +74,7 @@ struct TodayTrackingSettingsView: View {
 
             Section {
                 Button("Reset This Layout") {
-                    update { value in
-                        for section in CareTodaySection.allCases {
-                            value.set("section.\(value.layout.rawValue).\(section.rawValue)", value: [
-                                value.layout == .full || section == .actions ? "true" : "false"
-                            ])
-                        }
-                        value.set("essentials", value: CareTrackingPreferences.defaultEssentials(for: profile.profileType).map(\.rawValue))
-                    }
+                    update { $0.resetCurrentLayout(for: profile.profileType) }
                 }
             } footer: {
                 Text("Resets buttons and section visibility. Paused tracking and reminder choices stay as you set them.")
@@ -116,6 +109,16 @@ private struct TodayEssentialsActivitiesView: View {
             Section {
                 ForEach(selected) { type in
                     HStack {
+                        Button {
+                            save(selected.filter { $0 != type })
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.red)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Remove \(type.displayName)")
+                        .accessibilityIdentifier("today-settings.remove.\(type.rawValue)")
                         Label(type.displayName, systemImage: type.systemImage(for: profile.profileType))
                         Spacer()
                         if !preferences.allows(type) { Text("Paused").foregroundStyle(.secondary) }
@@ -124,11 +127,6 @@ private struct TodayEssentialsActivitiesView: View {
                 .onMove { source, destination in
                     var types = selected
                     types.move(fromOffsets: source, toOffset: destination)
-                    save(types)
-                }
-                .onDelete { offsets in
-                    var types = selected
-                    types.remove(atOffsets: offsets)
                     save(types)
                 }
             } header: {
@@ -177,6 +175,7 @@ private struct TodaySectionSettingsView: View {
                             reload()
                         }
                     ))
+                    .accessibilityIdentifier("today-settings.section.\(section.rawValue)")
                     .disabled(!preferences.allowsPrompts(section))
                 }
             } header: {
@@ -216,6 +215,7 @@ private struct TodayTrackingCategoriesView: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier("today-tracking.category.\(type.rawValue)")
                 }
             } header: {
                 Text("Active tracking")

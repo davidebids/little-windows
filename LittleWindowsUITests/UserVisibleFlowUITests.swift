@@ -56,11 +56,21 @@ final class UserVisibleFlowUITests: XCTestCase {
         for _ in 0..<3 where !tracking.isHittable { app.swipeUp() }
         tracking.tap()
         XCTAssertTrue(app.navigationBars["Tracking & Reminders"].waitForExistence(timeout: 5))
-        app.switches["Feed"].tap()
+        let pauseFeed = app.switches["today-tracking.category.feed"]
+        XCTAssertEqual(pauseFeed.value as? String, "1")
+        pauseFeed.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertEqual(pauseFeed.value as? String, "0")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars["Today & Tracking"].buttons["Done"].tap()
         XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["today.essential.feed"].exists)
+        app.buttons["today.menu"].tap()
+        app.buttons["Log Another Activity"].tap()
+        app.buttons["Feed"].tap()
+        XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 5))
+        app.navigationBars["Add Event"].buttons["Save"].tap()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["today.essential.feed"].exists, "A one-off record must not resume tracking")
         app.buttons["today.menu"].tap()
         XCTAssertTrue(app.buttons["Nursing"].waitForExistence(timeout: 3))
         app.buttons["Nursing"].tap()
@@ -71,12 +81,53 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.buttons["Customize Today"].tap()
         for _ in 0..<3 where !tracking.isHittable { app.swipeUp() }
         tracking.tap()
-        let feed = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Feed")).firstMatch
+        let feed = app.switches["today-tracking.category.feed"]
         XCTAssertTrue(feed.waitForExistence(timeout: 5))
-        feed.tap()
+        feed.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars["Today & Tracking"].buttons["Done"].tap()
         XCTAssertTrue(app.buttons["today.essential.feed"].waitForExistence(timeout: 5))
+    }
+
+    func testEssentialsCanRemoveActivitiesAndHideAllSectionsWithoutLosingMenu() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.segmentedControls.buttons["Essentials"].tap()
+        let activities = app.buttons["Activities & Button Order"]
+        for _ in 0..<4 where !activities.isHittable { app.swipeUp() }
+        activities.tap()
+        XCTAssertTrue(app.navigationBars["Activities & Order"].waitForExistence(timeout: 5))
+        app.buttons["today-settings.remove.diaper"].tap()
+        XCTAssertFalse(app.buttons["today-settings.remove.diaper"].exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["today.essential.diaper"].exists)
+
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        let sections = app.buttons["Visible Sections"]
+        for _ in 0..<4 where !sections.isHittable { app.swipeUp() }
+        sections.tap()
+        XCTAssertTrue(app.navigationBars["Visible Sections"].waitForExistence(timeout: 5))
+        let actions = app.switches["today-settings.section.actions"]
+        XCTAssertEqual(actions.value as? String, "1")
+        actions.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertEqual(actions.value as? String, "0")
+        app.switches["today-settings.section.medicationDue"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["today.essential.sleep"].exists)
+        XCTAssertFalse(app.buttons["today.essential.feed"].exists)
+        app.buttons["today.menu"].tap()
+        XCTAssertTrue(app.buttons["Customize Today"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["History"].exists)
+        XCTAssertTrue(app.buttons["Nursing"].exists)
     }
 
     private func launchTodayEssentialsTest(startURL: String) {

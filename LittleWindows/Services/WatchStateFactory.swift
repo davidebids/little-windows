@@ -253,6 +253,7 @@ enum WatchStateFactory {
         profileID: UUID,
         context: ModelContext,
         now: Date = Date(),
+        lookbackHours: Int = 12,
         snoozeDefaults: UserDefaults = .standard
     ) -> WatchMedicationSnapshot? {
         let medications = ((try? context.fetch(FetchDescriptor<Medication>(
@@ -280,8 +281,8 @@ enum WatchStateFactory {
             predicate: #Predicate { $0.profileID == profileID }
         ))) ?? [])
         let calendar = MedicationScheduleDate.currentCalendar()
-        let searchStart = calendar.date(byAdding: .hour, value: -12, to: now)
-            ?? now.addingTimeInterval(-12 * 60 * 60)
+        let searchStart = calendar.date(byAdding: .hour, value: -lookbackHours, to: now)
+            ?? now.addingTimeInterval(Double(-lookbackHours) * 60 * 60)
         let searchEnd = calendar.date(byAdding: .day, value: 7, to: now)
             ?? now.addingTimeInterval(7 * 24 * 60 * 60)
         var candidates: [WatchMedicationSnapshot] = []
