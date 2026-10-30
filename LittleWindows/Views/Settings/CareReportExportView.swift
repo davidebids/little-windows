@@ -134,6 +134,17 @@ struct CareReportExportView: View {
                 }
                 .disabled(selectedProfile == nil)
             }
+
+            if let selectedProfile, selectedProfile.profileType == .child {
+                Section("Focused reports") {
+                    NavigationLink {
+                        FoodReactionReportView(profile: selectedProfile)
+                    } label: {
+                        Label("Food reaction report", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .accessibilityIdentifier("care-report.food-reactions")
+                }
+            }
         }
         .scrollContentBackground(.hidden)
         .background(AppTheme.background)

@@ -284,6 +284,17 @@ struct SolidsHomeView: View {
             .tint(.orange)
             .accessibilityIdentifier("solids.view-feeding-report")
 
+            NavigationLink {
+                FoodReactionReportView(profile: profile)
+            } label: {
+                Label("Food reaction report", systemImage: "doc.text.magnifyingglass")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.orange)
+            .accessibilityIdentifier("solids.food-reaction-report")
+
             if let next = visiblePlans.first {
                 Button {
                     open(.plannedSolidMeal(next.id))

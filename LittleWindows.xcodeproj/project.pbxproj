@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B8B000000000000000000001 /* Services/FoodReactionReportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000001 /* Services/FoodReactionReportService.swift */; };
+		B8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift */; };
 		A40000000000000000000001 /* Models/WatchCompanionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */; };
 		A40000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */; };
 		A40000000000000000000003 /* Models/LittleWindowsActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */; };
@@ -281,6 +283,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F8B000000000000000000001 /* Services/FoodReactionReportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/FoodReactionReportService.swift; sourceTree = "<group>"; };
+		F8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/FoodReactionReportView.swift; sourceTree = "<group>"; };
 		A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/WatchCompanionProtocol.swift; sourceTree = "<group>"; };
 		A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/LittleWindowsActivityAttributes.swift; sourceTree = "<group>"; };
 		A50000000000000000000003 /* Services/WatchStateFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WatchStateFactory.swift; sourceTree = "<group>"; };
@@ -650,6 +654,7 @@
 				F00000000000000000000089 /* Services/FoodHomeServices.swift */,
 				F00000000000000000000092 /* Services/CareRoutineService.swift */,
 				F00000000000000000000095 /* Services/CareReportExportService.swift */,
+				F8B000000000000000000001 /* Services/FoodReactionReportService.swift */,
 				F00000000000000000000098 /* Services/CareStoryService.swift */,
 				F20000000000000000000002 /* Services/TripPackingService.swift */,
 				F20000000000000000000003 /* Services/TripWeatherService.swift */,
@@ -679,6 +684,7 @@
 				F00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift */,
 				F00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift */,
 				F00000000000000000000096 /* Views/Settings/CareReportExportView.swift */,
+				F8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift */,
 				F0000000000000000000008B /* Views/Food/FoodHomeViews.swift */,
 				C20000000000000000000004 /* Views/Food/SolidsViews.swift */,
 				F20000000000000000000004 /* Views/Trips/TripPackingViews.swift */,
@@ -1161,6 +1167,7 @@
 				B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */,
 				B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */,
 				B00000000000000000000095 /* Services/CareReportExportService.swift in Sources */,
+				B8B000000000000000000001 /* Services/FoodReactionReportService.swift in Sources */,
 				B00000000000000000000098 /* Services/CareStoryService.swift in Sources */,
 				B20000000000000000000002 /* Services/TripPackingService.swift in Sources */,
 				B20000000000000000000003 /* Services/TripWeatherService.swift in Sources */,
@@ -1190,6 +1197,7 @@
 				B00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift in Sources */,
 				B00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift in Sources */,
 				B00000000000000000000096 /* Views/Settings/CareReportExportView.swift in Sources */,
+				B8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift in Sources */,
 				B0000000000000000000008B /* Views/Food/FoodHomeViews.swift in Sources */,
 				C10000000000000000000004 /* Views/Food/SolidsViews.swift in Sources */,
 				B20000000000000000000004 /* Views/Trips/TripPackingViews.swift in Sources */,

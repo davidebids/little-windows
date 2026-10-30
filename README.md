@@ -157,6 +157,8 @@ If the SwiftData store cannot open, Little Windows presents a recovery screen in
 
 Settings also supports profile-scoped CSV and PDF care report export for doctor visits and caregiver handoff. Report export includes selectable 7-day, 30-day, and custom date ranges, optional notes and caregiver names, the current medication plan, and care-profile events with appointments and milestones when enabled. CSV/PDF reports are human-readable only; JSON remains the restore/import format.
 
+Child profiles also have a focused **Food reaction report**, available from the Solids workspace or Care Report Export. Choose a 7-day, 30-day, or custom range, optionally include meals without reaction details, and preview the PDF before sharing or saving a PDF/CSV. Reports preserve food-level symptoms, recorded severity, onset, duration, response descriptions, follow-up, and other foods in the same meal. Notes and caregiver names can be excluded. Older meal-level sensitivity flags remain meal-level observations without attributing a cause to an ingredient. These are recorded observations, not confirmed allergies or evidence of tolerance.
+
 The repository includes a neutral legacy import fixture for development and test validation:
 
 - `LittleWindows/SeedData/Sample-Legacy-Tracker-Backup.json`

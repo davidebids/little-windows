@@ -3090,6 +3090,56 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertEqual(app.tabBars.buttons["Care"].isSelected, true)
     }
 
+    func testFoodReactionReportPreviewsAndOffersPDFAndCSVForSelectedChild() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://care")
+        let exportReport = app.buttons["care.export-report"]
+        XCTAssertTrue(exportReport.waitForExistence(timeout: 8))
+        exportReport.tap()
+        let reactions = app.buttons["care-report.food-reactions"]
+        for _ in 0..<4 where !reactions.isHittable { app.swipeUp() }
+        XCTAssertTrue(reactions.waitForExistence(timeout: 4))
+        reactions.tap()
+        XCTAssertTrue(app.navigationBars["Food Reaction Report"].waitForExistence(timeout: 5))
+        let profile = app.descendants(matching: .any)["food-reaction-report.profile"].firstMatch
+        XCTAssertTrue(profile.waitForExistence(timeout: 5), app.debugDescription)
+        let preview = app.buttons["food-reaction-report.preview"]
+        for _ in 0..<3 where !preview.isHittable { app.swipeUp() }
+        XCTAssertTrue(preview.waitForExistence(timeout: 4))
+        let optionsScreenshot = XCTAttachment(screenshot: app.screenshot())
+        optionsScreenshot.name = "Food reaction report options"
+        optionsScreenshot.lifetime = .keepAlways
+        add(optionsScreenshot)
+        preview.tap()
+        XCTAssertTrue(app.navigationBars["Report Preview"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.buttons["food-reaction-report.share-pdf"].exists)
+        let previewScreenshot = XCTAttachment(screenshot: app.screenshot())
+        previewScreenshot.name = "Food reaction report PDF preview"
+        previewScreenshot.lifetime = .keepAlways
+        add(previewScreenshot)
+        app.buttons["food-reaction-report.save"].tap()
+        XCTAssertTrue(app.buttons["Save PDF"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Save CSV"].exists)
+    }
+
+    func testFoodReactionReportOpensFromSolidsWorkspace() {
+        continueAfterFailure = false
+        launch(startURL: "littlewindows://debug/reset-empty")
+        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/food/solids")
+        let activate = app.buttons["Start solids workspace"]
+        if activate.waitForExistence(timeout: 4) { activate.tap() }
+        let reactions = app.buttons["solids.food-reaction-report"]
+        for _ in 0..<5 where !reactions.isHittable { app.swipeUp() }
+        XCTAssertTrue(reactions.waitForExistence(timeout: 4))
+        reactions.tap()
+        XCTAssertTrue(app.navigationBars["Food Reaction Report"].waitForExistence(timeout: 5))
+        let profile = app.descendants(matching: .any)["food-reaction-report.profile"].firstMatch
+        XCTAssertTrue(profile.waitForExistence(timeout: 5))
+    }
+
     func testCareExportEntryOpensPDFReportForSelectedProfile() {
         continueAfterFailure = false
 

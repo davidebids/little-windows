@@ -679,6 +679,274 @@ final class CareReportExportServiceTests: XCTestCase {
         XCTAssertEqual(filename, "Little-Windows-Sample-Child-2026-06-06-to-2026-07-05.pdf")
     }
 
+    @MainActor
+    func testFoodReactionReportPreservesFoodLevelDetailsAndMealContext() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let date = Date()
+        let reaction = SolidFoodLogDetail(
+            foodID: "yogurt", foodName: "Yogurt", allergenIDs: ["milk"],
+            notes: "First serving", suspectedReaction: true, symptoms: [.hivesOrRash],
+            severity: .mild, onsetMinutes: 0, durationMinutes: 25,
+            responseNotes: "Recorded caregiver response", followUp: .discussWithClinician
+        )
+        let event = reactionMeal(profile: profile, date: date, details: [
+            reaction, SolidFoodLogDetail(foodID: "banana", foodName: "Banana")
+        ])
+        event.notes = "Meal context"
+        event.caregiverName = "Sample Caregiver"
+        context.insert(profile)
+        context.insert(event)
+        // Derived index duplicates must never produce duplicate report rows.
+        context.insert(SolidFoodEventItem(
+            eventID: event.id, profileID: profile.id, foodID: "yogurt",
+            foodNameSnapshot: "Yogurt", suspectedReaction: true
+        ))
+        try context.save()
+        let report = try FoodReactionReportService.makeReport(
+            profile: profile, options: reactionOptions(date), context: context
+        )
+        let entry = try XCTUnwrap(report.entries.first)
+        XCTAssertEqual(report.entries.count, 1)
+        XCTAssertEqual(report.mealCount, 1)
+        XCTAssertEqual(report.reactionMealCount, 1)
+        XCTAssertEqual(entry.food, "Yogurt")
+        XCTAssertEqual(entry.mealFoods, "Yogurt, Banana")
+        XCTAssertEqual(entry.allergens, "Milk")
+        XCTAssertEqual(entry.symptoms, "Hives or rash")
+        XCTAssertEqual(entry.severity, "Mild")
+        XCTAssertEqual(entry.onset, "0 min")
+        XCTAssertEqual(entry.duration, "25 min")
+        XCTAssertEqual(entry.response, "Recorded caregiver response")
+        XCTAssertEqual(entry.followUp, "Discuss with clinician")
+        XCTAssertEqual(entry.foodNotes, "First serving")
+        XCTAssertEqual(entry.mealNotes, "Meal context")
+        XCTAssertEqual(entry.caregiver, "Sample Caregiver")
+        let data = FoodReactionReportService.pdfData(for: report)
+        let document = try XCTUnwrap(PDFDocument(data: data))
+        XCTAssertEqual(document.pageCount, 1, "A typical observation with short notes should fit on one page.")
+        XCTAssertTrue(document.string?.contains("First serving") == true)
+        XCTAssertTrue(document.string?.contains("Meal context") == true)
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "com.adobe.pdf")
+        attachment.name = "Food reaction report sample"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testFoodReactionReportScopesByProfileSavedSolidsAndRecordedLocalDay() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let sibling = CareProfile(profileType: .child, name: "Sibling")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 20)))
+        let details = [SolidFoodLogDetail(foodID: "egg", foodName: "Egg", suspectedReaction: true)]
+        let included = reactionMeal(profile: profile, date: day.addingTimeInterval(-3600), details: details)
+        included.startTimeZoneIdentifier = "Pacific/Kiritimati"
+        let excludedLocalDay = reactionMeal(profile: profile, date: day.addingTimeInterval(3600), details: details)
+        excludedLocalDay.startTimeZoneIdentifier = "America/Los_Angeles"
+        let otherProfile = reactionMeal(profile: sibling, date: day, details: details)
+        let bottle = reactionMeal(profile: profile, date: day, details: details)
+        bottle.feedKind = .bottle
+        let draft = reactionMeal(profile: profile, date: day, details: details)
+        draft.endDate = nil
+        let outside = reactionMeal(profile: profile, date: day.addingTimeInterval(3 * 86_400), details: details)
+        [included, excludedLocalDay, otherProfile, bottle, draft, outside].forEach(context.insert)
+        try context.save()
+        let report = try FoodReactionReportService.makeReport(
+            profile: profile, options: reactionOptions(day), context: context, calendar: calendar
+        )
+        XCTAssertEqual(report.entries.map(\.eventID), [included.id])
+        XCTAssertEqual(report.entries.first?.timeZoneIdentifier, "Pacific/Kiritimati")
+        XCTAssertEqual(report.mealCount, 1)
+        let csv = String(decoding: FoodReactionReportService.csvData(for: report), as: UTF8.self)
+        XCTAssertTrue(csv.contains("Pacific/Kiritimati"))
+        XCTAssertTrue(csv.contains(DateFormatting.dayString(from: included.startDate, timeZone: included.startTimeZone)))
+        XCTAssertThrowsError(try FoodReactionReportService.makeReport(
+            profile: CareProfile(profileType: .dog, name: "Sample Dog"),
+            options: reactionOptions(day), context: context
+        ))
+    }
+
+    @MainActor
+    func testFoodReactionLegacyMealFlagDoesNotInventAnIngredientOrAllergen() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let date = Date()
+        let event = reactionMeal(profile: profile, date: date, details: [])
+        event.foodDescription = "Egg, banana"
+        event.solidSensitivityObserved = true
+        context.insert(event)
+        try context.save()
+        let report = try FoodReactionReportService.makeReport(
+            profile: profile, options: reactionOptions(date), context: context
+        )
+        let entry = try XCTUnwrap(report.entries.first)
+        XCTAssertEqual(report.entries.count, 1)
+        XCTAssertEqual(entry.food, "Meal-level observation")
+        XCTAssertEqual(entry.mealFoods, "Egg, banana")
+        XCTAssertEqual(entry.allergens, "Not recorded")
+        XCTAssertEqual(entry.symptoms, "Not recorded")
+        XCTAssertTrue(entry.observation.contains("individual food not identified"))
+    }
+
+    @MainActor
+    func testFoodReactionPrivacyControlsRemoveFreeTextFromPDFAndCSV() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let date = Date()
+        let event = reactionMeal(profile: profile, date: date, details: [
+            SolidFoodLogDetail(
+                foodID: "egg", foodName: "Egg", notes: "PRIVATE-FOOD-NOTE",
+                suspectedReaction: true, symptoms: [.vomiting], severity: .moderate,
+                onsetMinutes: 15, responseNotes: "PRIVATE-RESPONSE", followUp: .monitoring
+            )
+        ])
+        event.notes = "PRIVATE-MEAL-NOTE"
+        event.caregiverName = "PRIVATE-CAREGIVER"
+        context.insert(event)
+        try context.save()
+        var options = reactionOptions(date)
+        options.includeNotes = false
+        options.includeCaregiverNames = false
+        let report = try FoodReactionReportService.makeReport(profile: profile, options: options, context: context)
+        let csv = String(decoding: FoodReactionReportService.csvData(for: report), as: UTF8.self)
+        let pdf = try XCTUnwrap(PDFDocument(data: FoodReactionReportService.pdfData(for: report)))
+        let pdfText = try XCTUnwrap(pdf.string)
+        for text in [csv, pdfText] {
+            XCTAssertFalse(text.contains("PRIVATE-"))
+            XCTAssertTrue(text.contains("Vomiting"))
+            XCTAssertTrue(text.contains("Moderate"))
+            XCTAssertTrue(text.contains("15 min"))
+            XCTAssertTrue(text.contains("Monitoring"))
+        }
+        XCTAssertFalse(csv.components(separatedBy: "\n")[0].contains("Caregiver"))
+        XCTAssertFalse(csv.components(separatedBy: "\n")[0].contains("Response Taken"))
+    }
+
+    @MainActor
+    func testFoodReactionOptionalContextAndSymptomOnlyRecords() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let date = Date()
+        let event = reactionMeal(profile: profile, date: date, details: [
+            SolidFoodLogDetail(foodID: "egg", foodName: "Egg", symptoms: [.hivesOrRash]),
+            SolidFoodLogDetail(foodID: "milk", foodName: "Yogurt", suspectedReaction: true),
+            SolidFoodLogDetail(foodID: "banana", foodName: "Banana")
+        ])
+        event.solidSensitivityObserved = true
+        context.insert(event)
+        try context.save()
+        var options = reactionOptions(date)
+        let focused = try FoodReactionReportService.makeReport(profile: profile, options: options, context: context)
+        XCTAssertEqual(focused.entries.count, 2)
+        XCTAssertEqual(focused.reactionMealCount, 1)
+        options.includeMealsWithoutReactions = true
+        let contextual = try FoodReactionReportService.makeReport(profile: profile, options: options, context: context)
+        XCTAssertEqual(contextual.entries.count, 3)
+        XCTAssertEqual(contextual.reactionMealCount, 1)
+        XCTAssertEqual(contextual.entries.last?.observation, "No reaction details recorded")
+        XCTAssertFalse(contextual.entries.last?.hasReaction ?? true)
+    }
+
+    @MainActor
+    func testFoodReactionCSVQuotesAndDefusesUserEnteredValues() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let date = Date()
+        let event = reactionMeal(profile: profile, date: date, details: [
+            SolidFoodLogDetail(foodID: "custom", foodName: "=Food", suspectedReaction: true,
+                               responseNotes: "  +Response, with \"quotes\"\nand a new line")
+        ])
+        context.insert(event)
+        try context.save()
+        let report = try FoodReactionReportService.makeReport(
+            profile: profile, options: reactionOptions(date), context: context
+        )
+        let csv = String(decoding: FoodReactionReportService.csvData(for: report), as: UTF8.self)
+        XCTAssertTrue(csv.contains("\"'=Food\""))
+        XCTAssertTrue(csv.contains("\"'  +Response, with \"\"quotes\"\"\nand a new line\""))
+        XCTAssertTrue(csv.contains(FoodReactionReport.notice))
+    }
+
+    @MainActor
+    func testFoodReactionPDFPreservesLongNotesAcrossPages() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let date = Date()
+        let note = String(repeating: "Caregiver recorded context for this food. ", count: 350) + "FINAL-FOOD-NOTE"
+        let event = reactionMeal(profile: profile, date: date, details: [
+            SolidFoodLogDetail(foodID: "egg", foodName: "Egg", allergenIDs: ["egg"],
+                               notes: note, suspectedReaction: true, symptoms: [.hivesOrRash],
+                               severity: .mild, onsetMinutes: 10, durationMinutes: 30,
+                               responseNotes: "Recorded response", followUp: .resolved)
+        ])
+        event.notes = "FINAL-MEAL-NOTE"
+        context.insert(event)
+        try context.save()
+        let report = try FoodReactionReportService.makeReport(
+            profile: profile, options: reactionOptions(date), context: context
+        )
+        let data = FoodReactionReportService.pdfData(for: report)
+        let document = try XCTUnwrap(PDFDocument(data: data))
+        XCTAssertGreaterThan(document.pageCount, 2)
+        let text = try XCTUnwrap(document.string)
+        XCTAssertTrue(text.contains("FINAL-FOOD-NOTE"))
+        XCTAssertTrue(text.contains("FINAL-MEAL-NOTE"))
+        for index in 0..<document.pageCount {
+            let page = try XCTUnwrap(document.page(at: index))
+            XCTAssertTrue(page.string?.contains("Page \(index + 1)") == true)
+            for line in page.selection(for: page.bounds(for: .mediaBox))?.selectionsByLine() ?? [] {
+                let rect = line.bounds(for: page)
+                XCTAssertGreaterThanOrEqual(rect.minX, 40)
+                XCTAssertGreaterThanOrEqual(rect.minY, 32)
+                XCTAssertLessThanOrEqual(rect.maxX, 572)
+                XCTAssertLessThanOrEqual(rect.maxY, 755)
+            }
+        }
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "com.adobe.pdf")
+        attachment.name = "Food reaction report long notes"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testFoodReactionEmptyReportAndReversedRangeHaveHonestOutput() throws {
+        let container = try makeInMemoryContainer()
+        let context = ModelContext(container)
+        let profile = CareProfile(profileType: .child, name: "Sample Child")
+        let now = Date()
+        let options = FoodReactionReportOptions(startDate: now, endDate: now.addingTimeInterval(-7 * 86_400))
+        let report = try FoodReactionReportService.makeReport(profile: profile, options: options, context: context)
+        XCTAssertLessThan(report.options.startDate, report.options.endDate)
+        XCTAssertEqual(report.mealCount, 0)
+        let document = try XCTUnwrap(PDFDocument(data: FoodReactionReportService.pdfData(for: report)))
+        XCTAssertEqual(document.pageCount, 1)
+        XCTAssertTrue(document.string?.contains("No possible reaction observations were recorded") == true)
+        XCTAssertTrue(document.string?.contains("does not confirm an allergy") == true)
+        XCTAssertTrue(FoodReactionReportService.defaultFilename(for: report, format: .pdf).contains("Food-Reactions"))
+    }
+
+    @MainActor
+    private func reactionMeal(profile: CareProfile, date: Date, details: [SolidFoodLogDetail]) -> CareEvent {
+        let event = CareEvent(profileID: profile.id, type: .feed, startDate: date, endDate: date.addingTimeInterval(300))
+        event.feedKind = .solid
+        event.solidFoodDetails = details
+        return event
+    }
+
+    private func reactionOptions(_ date: Date) -> FoodReactionReportOptions {
+        FoodReactionReportOptions(startDate: date, endDate: date)
+    }
+
     private func csvColumnCount(_ row: Substring) -> Int {
         var count = 1
         var isInsideQuotedCell = false
