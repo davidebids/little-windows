@@ -116,6 +116,50 @@ final class CareTrackingPreferenceTests: XCTestCase {
         XCTAssertFalse(preferences.showsMedicationDueCard(scheduledAt: Date(), profileType: .child))
     }
 
+    func testFirstEssentialsSelectionStaysIndependentFromLaterFullEditsAndResets() {
+        for profileType in [CareProfileType.child, .adult, .dog] {
+            var preferences = CareTrackingPreferences()
+            let defaults = CareTrackingPreferences.defaultEssentials(for: profileType)
+            let initiallyHidden = Set(defaults.prefix(1))
+            preferences.selectLayout(.essentials, for: profileType, hidden: initiallyHidden)
+            let selected = preferences.configuredEssentials(for: profileType)
+            XCTAssertEqual(selected, Array(defaults.dropFirst()))
+            preferences.selectLayout(.full, for: profileType)
+            preferences.resetCurrentLayout(for: profileType)
+            preferences.selectLayout(.essentials, for: profileType, hidden: Set(defaults))
+            XCTAssertEqual(preferences.configuredEssentials(for: profileType), selected)
+            preferences.set("essentials", value: [])
+            preferences.selectLayout(.full, for: profileType)
+            preferences.selectLayout(.essentials, for: profileType)
+            XCTAssertTrue(preferences.configuredEssentials(for: profileType).isEmpty)
+        }
+    }
+
+    func testCompactTimersKeepStoppedAndConcurrentDraftsWithoutDuplicatingTheRepresentedTimer() {
+        let id = UUID()
+        let represented = CareEvent(profileID: id, type: .nursing, startDate: now)
+        let concurrent = CareEvent(profileID: id, type: .nursing, startDate: now)
+        let stopped = CareEvent(profileID: id, type: .sleep, startDate: now)
+        stopped.timerState = .stopped
+        stopped.timerAccumulatedSeconds = 120
+        let saved = CareEvent(profileID: id, type: .sleep, startDate: now, endDate: now.addingTimeInterval(60))
+        let events = [represented, concurrent, stopped, saved]
+        XCTAssertEqual(TodayEssentialsTimerPresentation.compactTimers(events: events, represented: [represented]).map(\.id),
+                       [concurrent.id, stopped.id])
+        XCTAssertEqual(TodayEssentialsTimerPresentation.compactTimers(events: events, represented: []).map(\.id),
+                       [represented.id, concurrent.id, stopped.id])
+        XCTAssertFalse(stopped.isTimerRunning)
+        XCTAssertEqual(stopped.timerElapsed(at: now.addingTimeInterval(600)), 120)
+    }
+
+    func testSwitchingAnExistingEssentialsLayoutToFullPreservesItsImplicitChoices() {
+        var preferences = CareTrackingPreferences()
+        preferences.set("layout", value: ["essentials"])
+        preferences.selectLayout(.full, for: .child, hidden: [.feed])
+        preferences.selectLayout(.essentials, for: .child)
+        XCTAssertEqual(preferences.configuredEssentials(for: .child), [.sleep, .diaper])
+    }
+
     func testMedicationDueUsesLocalDayBoundaryAcrossDaylightSavingChange() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))

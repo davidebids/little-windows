@@ -48,6 +48,13 @@ enum TodayDogQuickActionCatalog {
     }
 }
 
+enum TodayEssentialsTimerPresentation {
+    static func compactTimers(events: [CareEvent], represented: [CareEvent]) -> [CareEvent] {
+        let representedIDs = Set(represented.map(\.id))
+        return events.filter { $0.isTimerDraft && !representedIDs.contains($0.id) }
+    }
+}
+
 private struct TodayRenderState {
     var profile: CareProfile?
     var profileID: UUID?
@@ -98,6 +105,50 @@ private struct TodayRenderState {
 
     func activeTimer(of type: EventType) -> CareEvent? {
         activeEvents.first { $0.type == type && $0.isTimerDraft }
+    }
+
+    func compactEssentialTimers(preferences: CareTrackingPreferences, hidden: Set<EventType>) -> [CareEvent] {
+        let represented = preferences.shows(.actions)
+            ? preferences.essentialTypes(for: profile?.profileType ?? .child, hidden: hidden).compactMap(activeTimer)
+            : []
+        return TodayEssentialsTimerPresentation.compactTimers(events: activeEvents, represented: represented)
+    }
+
+    func visibleCareSections(preferences: CareTrackingPreferences, hidden: Set<EventType>) -> Set<CareTodaySection> {
+        guard let profile else { return [] }
+        return Set(CareTodaySection.allCases.filter { section in
+            guard section.applies(to: profile.profileType), preferences.shows(section) else { return false }
+            switch section {
+            case .actions:
+                return preferences.layout == .essentials
+                    ? !preferences.essentialTypes(for: profile.profileType, hidden: hidden).isEmpty
+                    : !visibleCareTypes.isEmpty || (profile.profileType == .adult && preferences.allowsPrompts(.appointments))
+            case .activeTimers:
+                return preferences.layout == .essentials
+                    ? !compactEssentialTimers(preferences: preferences, hidden: hidden).isEmpty
+                    : !activeEvents.isEmpty
+            case .medicationDue:
+                return preferences.showsMedicationDueCard(scheduledAt: upcomingMedication?.scheduledAt,
+                                                          profileType: profile.profileType, hidden: hidden)
+            case .prediction:
+                return !activeEvents.contains(where: { $0.isSleepBlock })
+            case .sleepPlan:
+                return sleepMiniPlan != nil && !activeEvents.contains(where: { $0.isSleepBlock })
+            case .solids:
+                return solidsAccessLevel == .readinessPreview || (solidsAccessLevel == .full &&
+                    (nextPlannedSolidMeal != nil || dueSolidAllergenProgress != nil || !hasSolidHistory))
+            case .guides:
+                return profile.profileType == .dog
+                    ? shouldShowPuppyGuideCard && currentPuppyGuide != nil
+                    : shouldShowAgeGuideCard && currentAgeGuide != nil
+            case .appointments:
+                return !relevantAppointments.isEmpty
+            case .summary:
+                return [EventType.food, .water, .potty, .walk, .medicine].contains(where: preferences.allows)
+            case .weather, .routines, .timeline:
+                return true
+            }
+        })
     }
 
     static let empty = TodayRenderState(
@@ -806,6 +857,10 @@ struct TodayView: View {
         let prediction = state.prediction
         let profile = state.profile
         let trackingPreferences = CareTrackingPreferenceStore.preferences(profileID: state.profileID)
+        let visibleSections = state.visibleCareSections(
+            preferences: trackingPreferences,
+            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)
+        )
 
         let listContent = ScrollViewReader { scrollProxy in
             List {
@@ -868,21 +923,9 @@ struct TodayView: View {
                 if profile == nil {
                     noProfileSection
                 } else {
-                    if !CareTodaySection.allCases.contains(where: {
-                        $0.applies(to: profile?.profileType ?? .child) && trackingPreferences.shows($0)
-                    }) {
+                    if visibleSections.isEmpty {
                         Section {
-                            ContentUnavailableView {
-                                Label("All sections are hidden", systemImage: "slider.horizontal.3")
-                            } description: {
-                                Text("Choose what to show in your \(trackingPreferences.layout.title) layout. Your records are still available in Reports.")
-                            } actions: {
-                                Button("Customize Today") {
-                                    showingCareCustomization = true
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .accessibilityIdentifier("today.empty.customize")
-                            }
+                            emptyCareView(state, preferences: trackingPreferences)
                             .padding(.top, verticalSizeClass == .compact ? 16 : 64)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -891,7 +934,7 @@ struct TodayView: View {
                     if trackingPreferences.layout == .essentials, trackingPreferences.shows(.activeTimers) {
                         essentialsTimersSection(state, preferences: trackingPreferences)
                     }
-                    if trackingPreferences.layout == .essentials, trackingPreferences.shows(.actions) {
+                    if trackingPreferences.layout == .essentials, visibleSections.contains(.actions) {
                         essentialsActionsSection(state, preferences: trackingPreferences)
                     }
                     medicationDueSection(state, preferences: trackingPreferences)
@@ -930,7 +973,7 @@ struct TodayView: View {
                         }
                     }
 
-                    if trackingPreferences.layout == .full, trackingPreferences.shows(.actions) {
+                    if trackingPreferences.layout == .full, visibleSections.contains(.actions) {
                         if state.isDogProfile {
                             dogQuickActionsSection(state)
                         } else if profile?.profileType == .adult {
@@ -1803,12 +1846,38 @@ struct TodayView: View {
     }
 
     @ViewBuilder
+    private func emptyCareView(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
+        let hidden = CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)
+        let allHidden = !CareTodaySection.allCases.contains {
+            $0.applies(to: state.profile?.profileType ?? .child) && preferences.shows($0)
+        }
+        let noEssentials = preferences.layout == .essentials && preferences.shows(.actions)
+        let noChoices = preferences.configuredEssentials(for: state.profile?.profileType ?? .child, hidden: hidden).isEmpty
+        ContentUnavailableView {
+            Label(allHidden ? "All sections are hidden" : noEssentials
+                  ? (noChoices ? "Choose your essentials" : "Your essentials are paused")
+                  : "Nothing to show right now", systemImage: "slider.horizontal.3")
+        } description: {
+            if allHidden {
+                Text("Choose what to show in your \(preferences.layout.title) layout. Your records are still available in Reports.")
+            } else if noEssentials && noChoices {
+                Text("Add the activities you want to keep on Today in Activities & Button Order. Your records are still available in Reports.")
+            } else if noEssentials {
+                Text("Resume an activity in Tracking & Reminders, or choose different essentials. Your records stay saved.")
+            } else {
+                Text("Your visible sections have no updates. Customize Today to show logging buttons or other sections. Your records are still available in Reports.")
+            }
+        } actions: {
+            Button("Customize Today") { showingCareCustomization = true }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("today.empty.customize")
+        }
+    }
+
+    @ViewBuilder
     private func essentialsTimersSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
-        let representedTypes = preferences.shows(.actions)
-            ? Set(preferences.essentialTypes(for: state.profile?.profileType ?? .child,
-                                            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)))
-            : []
-        let timers = state.activeEvents.filter { $0.isTimerRunning && !representedTypes.contains($0.type) }
+        let timers = state.compactEssentialTimers(preferences: preferences,
+            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID))
         if !timers.isEmpty {
             Section {
                 ForEach(timers) { event in
@@ -1821,15 +1890,21 @@ struct TodayView: View {
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(event.displayTitle).font(.headline)
-                                Text("Running timer · tap to manage")
+                                Text(event.isTimerRunning ? "Running timer · tap to manage" : "Stopped timer · tap to finish")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(event.timerDisplayStartDate(), style: .timer)
-                                .font(.body.monospacedDigit())
-                                .foregroundStyle(event.type.tint)
-                                .fixedSize()
+                            Group {
+                                if event.isTimerRunning {
+                                    Text(event.timerDisplayStartDate(), style: .timer)
+                                } else {
+                                    Text(DurationFormatting.liveString(seconds: event.timerElapsed()))
+                                }
+                            }
+                            .font(.body.monospacedDigit())
+                            .foregroundStyle(event.type.tint)
+                            .fixedSize()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
@@ -1890,6 +1965,9 @@ struct TodayView: View {
                         timerStart: state.activeTimer(of: type).flatMap {
                             $0.isTimerRunning ? $0.timerDisplayStartDate(at: context.date) : nil
                         },
+                        stoppedTimerElapsed: state.activeTimer(of: type).flatMap {
+                            $0.isTimerRunning ? nil : $0.timerElapsed(at: context.date)
+                        },
                         count: types.count
                     ) {
                         performEssentialAction(type, state: state)
@@ -1914,11 +1992,13 @@ struct TodayView: View {
         if type == .sleep || type == .rest,
            let endedAt = state.scopedEvents.filter({ $0.type == type && !$0.isTimerDraft })
             .compactMap(\.endDate).filter({ $0 <= now }).max() {
+            if now.timeIntervalSince(endedAt) < 60 { return "\(type.displayName) just ended" }
             return "Last \(type.displayName.lowercased()) ended \(DurationFormatting.string(seconds: now.timeIntervalSince(endedAt))) ago"
         }
         guard let date = state.lastLoggedDates[type], date <= now else {
             return type == .medicine ? "Record a dose or review medications" : "No recent record · tap to log"
         }
+        if now.timeIntervalSince(date) < 60 { return "Just logged" }
         return "Last \(DurationFormatting.string(seconds: now.timeIntervalSince(date))) ago"
     }
 
@@ -4371,6 +4451,7 @@ struct CareCategoryCustomizationView: View {
     let onChange: () -> Void
 
     @State private var hiddenTypes: Set<EventType>
+    @State private var pausedTypes: Set<EventType>
 
     init(
         profileID: UUID?,
@@ -4381,6 +4462,7 @@ struct CareCategoryCustomizationView: View {
         self.profileType = profileType
         self.onChange = onChange
         _hiddenTypes = State(initialValue: CareCategoryPreferenceStore.hiddenTypes(profileID: profileID))
+        _pausedTypes = State(initialValue: CareTrackingPreferenceStore.preferences(profileID: profileID).pausedTypes)
     }
 
     var body: some View {
@@ -4391,14 +4473,20 @@ struct CareCategoryCustomizationView: View {
             Section {
                 ForEach(eventTypes) { type in
                     Toggle(isOn: binding(for: type)) {
-                        Label(type.displayName, systemImage: type.systemImage(for: profileType))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label(type.displayName, systemImage: type.systemImage(for: profileType))
+                            if pausedTypes.contains(type) {
+                                Text("Paused in Tracking & Reminders")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     .disabled(!canChangeVisibility(for: type, visibleTypeCount: visibleTypeCount))
                 }
             } header: {
                 Text("Today Actions")
             } footer: {
-                Text("Hidden categories stay available in history and existing logs.")
+                Text("Hidden categories stay available in history and existing logs. Paused categories return to Today when resumed in Tracking & Reminders.")
             }
             Section {
                 Button("Reset to Defaults") {
@@ -4412,6 +4500,7 @@ struct CareCategoryCustomizationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in
             hiddenTypes = CareCategoryPreferenceStore.hiddenTypes(profileID: profileID)
+            pausedTypes = CareTrackingPreferenceStore.preferences(profileID: profileID).pausedTypes
         }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

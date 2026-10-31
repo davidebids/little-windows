@@ -99,6 +99,14 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
         layout == .full ? section != .medicationDue : [.actions, .activeTimers, .medicationDue].contains(section)
     }
 
+    mutating func selectLayout(_ layout: CareTodayLayout, for type: CareProfileType, hidden: Set<EventType> = []) {
+        // Import legacy action choices once; later Full edits must not change Essentials.
+        if (layout == .essentials || self.layout == .essentials), fields["essentials"] == nil {
+            set("essentials", value: configuredEssentials(for: type, hidden: hidden).map(\.rawValue))
+        }
+        set("layout", value: [layout.rawValue])
+    }
+
     mutating func resetCurrentLayout(for type: CareProfileType) {
         for section in CareTodaySection.allCases {
             set("section.\(layout.rawValue).\(section.rawValue)", value: [String(Self.defaultVisibility(of: section, in: layout))])
