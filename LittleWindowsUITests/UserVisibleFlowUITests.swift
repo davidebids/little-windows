@@ -44,8 +44,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.buttons["today.essential.diaper"].tap()
         XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].firstMatch.tap()
-        menu.tap()
-        app.buttons["History"].tap()
+        app.tabBars.buttons["Reports"].tap()
         XCTAssertTrue(app.tabBars.buttons["Reports"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Reports"].isSelected)
 
@@ -214,7 +213,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertFalse(app.buttons["today.running-timer.nursing"].exists)
         app.buttons["today.menu"].tap()
         XCTAssertTrue(app.buttons["Customize Today"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["History"].exists)
+        XCTAssertFalse(app.buttons["History"].exists)
         XCTAssertTrue(app.buttons["Nursing"].exists)
     }
 

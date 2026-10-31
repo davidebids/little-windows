@@ -1030,9 +1030,6 @@ struct TodayView: View {
                         Button("Customize Today", systemImage: "slider.horizontal.3") {
                             showingCareCustomization = true
                         }
-                        Button("History", systemImage: "clock.arrow.circlepath") {
-                            deepLinkRouter.route(URL(string: "littlewindows://history")!)
-                        }
                         Menu("Log Another Activity", systemImage: "plus.circle") {
                             ForEach(EventType.cases(for: profile.profileType)) { type in
                                 Button(type.displayName, systemImage: type.systemImage(for: profile.profileType)) {
@@ -1062,7 +1059,7 @@ struct TodayView: View {
                     .buttonStyle(.plain)
                     .buttonBorderShape(.circle)
                     .accessibilityLabel("\(profile.name) settings")
-                    .accessibilityHint("Opens Today customization, history, active timers, and settings")
+                    .accessibilityHint("Opens Today customization, active timers, and settings")
                     .accessibilityIdentifier("today.menu")
                 } else {
                     ProfileToolbarSettingsButton(profile: nil) {
