@@ -371,7 +371,7 @@ final class CareTrackingPreferenceTests: XCTestCase {
             type: .diaper, profileType: .child, detail: "Last 45 minutes ago", count: 3, action: {}
         ))
         let regularSize = regular.sizeThatFits(in: CGSize(width: 288, height: 2_000))
-        XCTAssertGreaterThanOrEqual(regularSize.height, 148)
+        XCTAssertGreaterThanOrEqual(regularSize.height, 120)
         XCTAssertEqual(regularSize.width, 288, accuracy: 1)
         let accessible = UIHostingController(rootView: EssentialsActionButton(
             type: .bloodPressure, profileType: .adult,

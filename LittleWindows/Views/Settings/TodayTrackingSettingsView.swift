@@ -296,8 +296,9 @@ struct EssentialsActionButton: View {
                     .foregroundStyle(type.tint)
                     .accessibilityHidden(true)
             }
-            .padding(22)
-            .frame(maxWidth: .infinity, minHeight: count <= 3 ? 148 : 120, alignment: .leading)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, minHeight: count <= 3 ? 120 : 108, alignment: .leading)
             .background(type.tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 24))
             .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(type.tint.opacity(0.18)))
             .contentShape(RoundedRectangle(cornerRadius: 24))
