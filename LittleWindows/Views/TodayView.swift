@@ -867,6 +867,25 @@ struct TodayView: View {
                 if profile == nil {
                     noProfileSection
                 } else {
+                    if !CareTodaySection.allCases.contains(where: {
+                        $0.applies(to: profile?.profileType ?? .child) && trackingPreferences.shows($0)
+                    }) {
+                        Section {
+                            ContentUnavailableView {
+                                Label("All sections are hidden", systemImage: "slider.horizontal.3")
+                            } description: {
+                                Text("Choose what to show in your \(trackingPreferences.layout.title) layout. Your records are still available in Reports.")
+                            } actions: {
+                                Button("Customize Today") {
+                                    showingCareCustomization = true
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .accessibilityIdentifier("today.empty.customize")
+                            }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+                    }
                     if trackingPreferences.layout == .essentials, trackingPreferences.shows(.activeTimers) {
                         essentialsTimersSection(state, preferences: trackingPreferences)
                     }
