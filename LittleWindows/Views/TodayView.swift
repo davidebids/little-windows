@@ -57,6 +57,10 @@ enum TodayEssentialsTimerPresentation {
 
 /// Keep button context short enough to share the existing secondary text line.
 enum TodayEssentialsEventDetail {
+    static func durationText(seconds: TimeInterval) -> String {
+        DurationFormatting.string(seconds: seconds).replacingOccurrences(of: " ", with: "\u{00A0}")
+    }
+
     static func context(for event: CareEvent) -> String? {
         switch event.type {
         case .nursing:
@@ -123,9 +127,9 @@ struct TodayEssentialsHistorySummary {
         guard let record = latestRecords[type], record.date <= now else { return "No recent record · tap to log" }
         let elapsed = now.timeIntervalSince(record.date)
         if let context = record.context {
-            return "\(context) · \(elapsed < 60 ? "Just logged" : "\(DurationFormatting.string(seconds: elapsed)) ago")"
+            return "\(context) · \(elapsed < 60 ? "Just logged" : "\(TodayEssentialsEventDetail.durationText(seconds: elapsed)) ago")"
         }
-        return elapsed < 60 ? "Just logged" : "Last \(DurationFormatting.string(seconds: elapsed)) ago"
+        return elapsed < 60 ? "Just logged" : "Last \(TodayEssentialsEventDetail.durationText(seconds: elapsed)) ago"
     }
 
     static func make(events: [CareEvent], now: Date) -> Self {
@@ -2126,7 +2130,7 @@ struct TodayView: View {
         if type == .sleep || type == .rest,
            let endedAt = state.essentialsHistory.lastEndedDates[type] {
             if now.timeIntervalSince(endedAt) < 60 { return "\(type.displayName) just ended" }
-            return "Last \(type.displayName.lowercased()) ended \(DurationFormatting.string(seconds: now.timeIntervalSince(endedAt))) ago"
+            return "Last \(type.displayName.lowercased()) ended \(TodayEssentialsEventDetail.durationText(seconds: now.timeIntervalSince(endedAt))) ago"
         }
         guard let record = state.essentialsHistory.latestRecords[type], record.date <= now else {
             return type == .medicine ? "Record a dose or review medications" : "No recent record · tap to log"
