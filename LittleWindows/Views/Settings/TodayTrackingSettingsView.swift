@@ -54,8 +54,10 @@ struct TodayTrackingSettingsView: View {
             }
 
             Section {
-                NavigationLink("Activities & Button Order") {
-                    TodayEssentialsActivitiesView(profile: profile)
+                if preferences.layout == .essentials {
+                    NavigationLink("Activities & Button Order") {
+                        TodayEssentialsActivitiesView(profile: profile)
+                    }
                 }
                 NavigationLink("Visible Sections") {
                     TodaySectionSettingsView(profile: profile)
@@ -63,9 +65,11 @@ struct TodayTrackingSettingsView: View {
                 NavigationLink("Tracking & Reminders") {
                     TodayTrackingCategoriesView(profile: profile)
                 }
-                NavigationLink("Full Layout Quick Actions") {
-                    CareCategoryCustomizationView(profileID: profile.id, profileType: profile.profileType) {
-                        SystemIntegrationReconciler.requestReconciliation()
+                if preferences.layout == .full {
+                    NavigationLink("Full Layout Quick Actions") {
+                        CareCategoryCustomizationView(profileID: profile.id, profileType: profile.profileType) {
+                            SystemIntegrationReconciler.requestReconciliation()
+                        }
                     }
                 }
             } footer: {
