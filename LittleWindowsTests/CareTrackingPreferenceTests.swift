@@ -180,6 +180,78 @@ final class CareTrackingPreferenceTests: XCTestCase {
         XCTAssertNil(later.nextTransition)
     }
 
+    func testEssentialsNursingContextFollowsActiveSideThroughStopAndFinish() {
+        let event = CareEvent(type: .nursing, startDate: now.addingTimeInterval(-600))
+        event.nursingSide = .left
+        event.activeNursingSide = .right
+        XCTAssertEqual(TodayEssentialsEventDetail.timerDetail(for: event), "Right · Running")
+        event.timerState = .stopped
+        XCTAssertEqual(TodayEssentialsEventDetail.timerDetail(for: event), "Right · Stopped")
+        event.nursingSide = .right
+        event.endDate = now
+        event.activeNursingSide = nil
+        var summary = TodayEssentialsHistorySummary.make(events: [event], now: now)
+        XCTAssertEqual(summary.recentDetail(for: .nursing, now: now), "Right · Just logged")
+        event.nursingSideRawValue = nil
+        event.leftDurationSeconds = 120
+        event.rightDurationSeconds = 240
+        summary.include(event, now: now)
+        XCTAssertEqual(summary.recentDetail(for: .nursing, now: now), "Both sides · Just logged")
+        event.leftDurationSeconds = nil
+        event.rightDurationSeconds = nil
+        summary.include(event, now: now)
+        XCTAssertEqual(summary.recentDetail(for: .nursing, now: now), "Just logged",
+                       "Missing historical side data must not invent a left-side record")
+    }
+
+    func testEssentialsContextUsesLatestCompletedRecordAndClearsMissingOrDeletedDetails() {
+        let older = CareEvent(type: .diaper, startDate: now.addingTimeInterval(-1_800))
+        older.diaperKind = .wet
+        let latest = CareEvent(type: .diaper, startDate: now.addingTimeInterval(-1_200))
+        latest.diaperKind = .both
+        let future = CareEvent(type: .diaper, startDate: now.addingTimeInterval(60))
+        future.diaperKind = .dirty
+        let active = CareEvent(type: .nursing, startDate: now.addingTimeInterval(-300))
+        var summary = TodayEssentialsHistorySummary.make(events: [future, latest, older, active], now: now)
+        XCTAssertEqual(summary.recentDetail(for: .diaper, now: now), "Pee & poo · 20m ago")
+        XCTAssertNil(summary.latestRecords[.nursing], "Drafts must not replace completed history")
+        XCTAssertEqual(summary.nextTransition, future.startDate)
+        latest.diaperKind = nil
+        summary.include(latest, now: now)
+        XCTAssertEqual(summary.recentDetail(for: .diaper, now: now), "Last 20m ago",
+                       "An edited record with missing details must clear the previous subtype")
+        summary = .make(events: [older], now: now)
+        XCTAssertEqual(summary.recentDetail(for: .diaper, now: now), "Pee · 30m ago")
+        summary = .make(events: [older, latest, future], now: now.addingTimeInterval(61))
+        XCTAssertEqual(summary.recentDetail(for: .diaper, now: now.addingTimeInterval(61)), "Poo · Just logged")
+        XCTAssertEqual(TodayEssentialsHistorySummary().recentDetail(for: .diaper, now: now),
+                       "No recent record · tap to log")
+    }
+
+    func testEssentialsShortSubtypesRespectChildAndDogFields() {
+        let potty = CareEvent(type: .potty, startDate: now)
+        potty.profileTypeSnapshot = .child
+        potty.childPottyKind = .poo
+        var dog = DogEventDetails()
+        dog.pottyType = .pee
+        potty.dogDetails = dog
+        XCTAssertEqual(TodayEssentialsEventDetail.context(for: potty), "Poo")
+        potty.profileTypeSnapshot = .dog
+        XCTAssertEqual(TodayEssentialsEventDetail.context(for: potty), "Pee")
+        dog.pottyType = .both
+        potty.dogDetails = dog
+        XCTAssertEqual(TodayEssentialsEventDetail.context(for: potty), "Pee & poo")
+        let feed = CareEvent(type: .feed, startDate: now)
+        feed.feedKind = .bottle
+        XCTAssertEqual(TodayEssentialsEventDetail.context(for: feed), "Bottle")
+        feed.feedKind = .solid
+        feed.foodDescription = "A long list of food details belongs in the event editor"
+        XCTAssertEqual(TodayEssentialsEventDetail.context(for: feed), "Solid")
+        let sleep = CareEvent(type: .sleep, startDate: now)
+        sleep.sleepKind = .nap
+        XCTAssertEqual(TodayEssentialsEventDetail.timerDetail(for: sleep), "Nap · Running")
+    }
+
     func testRepeatedTrackingPolicyLookupsPerformance() {
         var preferences = CareTrackingPreferences()
         for type in EventType.allCases {

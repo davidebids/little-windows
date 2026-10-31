@@ -372,6 +372,7 @@ struct EssentialsActionButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("today.essential.\(type.rawValue)")
+        .accessibilityHint(timerStart != nil ? "Manage running timer" : stoppedTimerElapsed != nil ? "Finish stopped timer" : "Log a new record")
     }
 
     @ViewBuilder

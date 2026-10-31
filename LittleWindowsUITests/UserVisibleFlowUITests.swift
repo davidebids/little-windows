@@ -52,6 +52,61 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["today.essential.feed"].waitForExistence(timeout: 8))
     }
 
+    func testEssentialsButtonsShowEventContextAndFollowNursingSideChanges() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.segmentedControls.buttons["Essentials"].tap()
+        app.buttons["Activities & Button Order"].tap()
+        app.buttons["today-settings.remove.feed"].tap()
+        app.buttons["Nursing"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+
+        let nursing = app.buttons["today.essential.nursing"]
+        let diaper = app.buttons["today.essential.diaper"]
+        XCTAssertTrue(nursing.waitForExistence(timeout: 5))
+        XCTAssertTrue(nursing.label.contains("Left · Running"))
+        XCTAssertTrue(diaper.label.contains("Pee & poo"))
+        for type in ["sleep", "diaper", "nursing"] {
+            XCTAssertLessThanOrEqual(app.buttons["today.essential.\(type)"].frame.maxY,
+                                     app.tabBars.firstMatch.frame.minY - 8)
+        }
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Essentials subtle nursing and diaper context"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        nursing.tap()
+        let right = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Right")).firstMatch
+        XCTAssertTrue(right.waitForExistence(timeout: 5))
+        right.tap()
+        app.buttons["Keep Timer"].tap()
+        XCTAssertTrue(nursing.label.contains("Right · Running"))
+        nursing.tap()
+        app.buttons["Stop"].tap()
+        app.buttons["Keep Timer"].tap()
+        XCTAssertTrue(nursing.label.contains("Right · Stopped"))
+        nursing.tap()
+        let finish = app.buttons["active-timer.finish-and-save"]
+        for _ in 0..<4 where !finish.isHittable { app.swipeUp() }
+        finish.tap()
+        XCTAssertTrue(nursing.waitForExistence(timeout: 5))
+        XCTAssertTrue(nursing.label.contains("Right ·"))
+        XCTAssertFalse(nursing.label.contains("Running"))
+        XCTAssertFalse(nursing.label.contains("Stopped"))
+
+        diaper.tap()
+        app.segmentedControls["diaper-kind-picker"].buttons["Poo"].tap()
+        app.navigationBars["Add Event"].buttons["Save"].tap()
+        XCTAssertTrue(diaper.waitForExistence(timeout: 5))
+        XCTAssertTrue(diaper.label.contains("Poo · Just logged"))
+        XCTAssertFalse(diaper.label.contains("Pee & poo"))
+    }
+
     func testTodayCustomizationOnlyShowsControlsForSelectedLayout() {
         continueAfterFailure = false
         launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
@@ -371,7 +426,7 @@ final class UserVisibleFlowUITests: XCTestCase {
         for type in ["sleep", "nursing", "pumping"] {
             let button = app.buttons["today.essential.\(type)"]
             XCTAssertTrue(button.waitForExistence(timeout: 5))
-            XCTAssertTrue(button.label.contains("Running · tap to manage"))
+            XCTAssertTrue(button.label.contains("Running"))
             XCTAssertLessThanOrEqual(button.frame.maxY, app.tabBars.firstMatch.frame.minY - 8,
                                      "Three running timers should fit without scrolling")
         }

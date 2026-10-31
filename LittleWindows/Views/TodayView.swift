@@ -55,8 +55,54 @@ enum TodayEssentialsTimerPresentation {
     }
 }
 
+/// Keep button context short enough to share the existing secondary text line.
+enum TodayEssentialsEventDetail {
+    static func context(for event: CareEvent) -> String? {
+        switch event.type {
+        case .nursing:
+            if event.isTimerDraft { return event.activeNursingSide?.displayName }
+            if let side = event.nursingSideRawValue.flatMap(NursingSide.init(rawValue:)) {
+                return side.displayName
+            }
+            let left = (event.leftDurationSeconds ?? 0) > 0
+            let right = (event.rightDurationSeconds ?? 0) > 0
+            if left && right { return "Both sides" }
+            return left ? "Left" : right ? "Right" : nil
+        case .diaper:
+            guard let kind = event.diaperKind else { return nil }
+            return kind == .both ? "Pee & poo" : kind.displayName
+        case .potty:
+            if event.profileTypeSnapshot == .dog {
+                guard let kind = event.dogDetails.pottyType else { return nil }
+                return kind == .both ? "Pee & poo" : kind.displayName
+            }
+            guard let kind = event.childPottyKind else { return nil }
+            return kind == .both ? "Pee & poo" : kind.displayName
+        case .feed:
+            return event.feedKind?.displayName
+        case .sleep:
+            return event.sleepKind?.displayName
+        default:
+            return nil
+        }
+    }
+
+    static func timerDetail(for event: CareEvent) -> String {
+        if let context = context(for: event) {
+            return "\(context) · \(event.isTimerRunning ? "Running" : "Stopped")"
+        }
+        return event.isTimerRunning ? "Running · tap to manage" : "Stopped · tap to finish"
+    }
+}
+
 /// Time labels read this tiny value instead of scanning history on every tick.
 struct TodayEssentialsHistorySummary {
+    struct Record {
+        var date: Date
+        var context: String?
+    }
+
+    var latestRecords: [EventType: Record] = [:]
     var lastEndedDates: [EventType: Date] = [:]
     var nextTransition: Date?
 
@@ -65,10 +111,21 @@ struct TodayEssentialsHistorySummary {
         let logDate = event.endDate ?? event.startDate
         if logDate > now {
             nextTransition = min(nextTransition ?? logDate, logDate)
+        } else if latestRecords[event.type].map({ logDate >= $0.date }) ?? true {
+            latestRecords[event.type] = Record(date: logDate, context: TodayEssentialsEventDetail.context(for: event))
         }
         if (event.type == .sleep || event.type == .rest), let end = event.endDate, end <= now {
             lastEndedDates[event.type] = max(lastEndedDates[event.type] ?? end, end)
         }
+    }
+
+    func recentDetail(for type: EventType, now: Date) -> String {
+        guard let record = latestRecords[type], record.date <= now else { return "No recent record · tap to log" }
+        let elapsed = now.timeIntervalSince(record.date)
+        if let context = record.context {
+            return "\(context) · \(elapsed < 60 ? "Just logged" : "\(DurationFormatting.string(seconds: elapsed)) ago")"
+        }
+        return elapsed < 60 ? "Just logged" : "Last \(DurationFormatting.string(seconds: elapsed)) ago"
     }
 
     static func make(events: [CareEvent], now: Date) -> Self {
@@ -2060,7 +2117,7 @@ struct TodayView: View {
 
     private func essentialDetail(_ type: EventType, state: TodayRenderState, now: Date) -> String {
         if let timer = state.activeTimer(of: type) {
-            return timer.isTimerRunning ? "Running · tap to manage" : "Stopped · tap to finish"
+            return TodayEssentialsEventDetail.timerDetail(for: timer)
         }
         if type == .medicine, let dose = state.upcomingMedication {
             let time = dose.scheduledAt.formatted(date: .abbreviated, time: .shortened)
@@ -2071,11 +2128,10 @@ struct TodayView: View {
             if now.timeIntervalSince(endedAt) < 60 { return "\(type.displayName) just ended" }
             return "Last \(type.displayName.lowercased()) ended \(DurationFormatting.string(seconds: now.timeIntervalSince(endedAt))) ago"
         }
-        guard let date = state.lastLoggedDates[type], date <= now else {
+        guard let record = state.essentialsHistory.latestRecords[type], record.date <= now else {
             return type == .medicine ? "Record a dose or review medications" : "No recent record · tap to log"
         }
-        if now.timeIntervalSince(date) < 60 { return "Just logged" }
-        return "Last \(DurationFormatting.string(seconds: now.timeIntervalSince(date))) ago"
+        return state.essentialsHistory.recentDetail(for: type, now: now)
     }
 
     private func performEssentialAction(_ type: EventType, state: TodayRenderState) {
