@@ -13,6 +13,10 @@ from pathlib import Path
 
 
 def validate(path):
+    assert not (path.parent / "nlu").exists(), (
+        "Flexible-matching assets are present; clean and rebuild with "
+        "APP_SHORTCUTS_ENABLE_FLEXIBLE_MATCHING=NO"
+    )
     data = json.loads(path.read_text())
     enums = {item["identifier"]: item for item in data["enums"]}
     shortcuts = data["autoShortcuts"]
@@ -29,6 +33,7 @@ def validate(path):
 
     owners = defaultdict(set)
     bindings = set()
+    expanded_phrase_count = 0
     for shortcut in shortcuts:
         action_id = shortcut["actionIdentifier"]
         parameters = {p["name"]: p for p in data["actions"][action_id]["parameters"]}
@@ -38,6 +43,7 @@ def validate(path):
             assert len(names) <= 1, f"Phrase has multiple parameters: {template}"
             if not names:
                 owners[template.casefold()].add(action_id)
+                expanded_phrase_count += 1
                 continue
             parameter_name = names[0]
             parameter = parameters[parameter_name]
@@ -49,7 +55,10 @@ def validate(path):
                 for word in words:
                     expanded = template.replace("${" + parameter_name + "}", word).casefold()
                     owners[expanded].add(action_id)
+                    expanded_phrase_count += 1
                 bindings.add((action_id, parameter_name, case["identifier"]))
+
+    assert expanded_phrase_count <= 1_000, f"Expanded phrase budget exceeded: {expanded_phrase_count}"
 
     collisions = {phrase: actions for phrase, actions in owners.items() if len(actions) > 1}
     assert not collisions, f"Competing phrase owners: {collisions}"
@@ -125,6 +134,10 @@ def validate(path):
         critical[f"log {entry}"] = log
         critical[f"record {entry}"] = log
         critical[f"get last {entry}"] = "LastCareEntryByVoiceIntent"
+    for entry in ["little p", "small p", "medium p", "big p", "large p"]:
+        critical[f"log {entry}"] = log
+        critical[f"record {entry}"] = log
+        critical[f"get last {entry}"] = "LastCareEntryByVoiceIntent"
     for entry in ["wet diaper", "dirty diaper", "mixed diaper", "pee diaper", "poo diaper", "poop diaper", "poopy diaper"]:
         critical[f"log a {entry}"] = log
     for amount in ["little", "small", "medium", "big", "large"]:
@@ -136,7 +149,7 @@ def validate(path):
     for prefix, expected_action in critical.items():
         phrase = f"{prefix} in little windows"
         assert owners.get(phrase) == {expected_action}, f"Incorrect phrase registration: {phrase}: {owners.get(phrase)}"
-    print(f"PASS: {len(kind_ids)} timer kinds, seven lifecycle bindings each, {len(care_ids)} care log kinds, {len(critical)} critical phrases, {len(shortcuts)} promoted shortcuts; no competing phrase owners.")
+    print(f"PASS: {len(kind_ids)} timer kinds, seven lifecycle bindings each, {len(care_ids)} care log kinds, {len(critical)} critical phrases, {len(shortcuts)} promoted shortcuts, {expanded_phrase_count}/1000 expanded phrases; no competing phrase owners or flexible-matching assets.")
 
 
 if __name__ == "__main__":
