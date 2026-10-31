@@ -96,7 +96,7 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
     }
 
     static func defaultVisibility(of section: CareTodaySection, in layout: CareTodayLayout) -> Bool {
-        layout == .full ? section != .medicationDue : section == .actions || section == .medicationDue
+        layout == .full ? section != .medicationDue : [.actions, .activeTimers, .medicationDue].contains(section)
     }
 
     mutating func resetCurrentLayout(for type: CareProfileType) {

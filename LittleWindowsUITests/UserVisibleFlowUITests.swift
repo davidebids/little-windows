@@ -14,9 +14,17 @@ final class UserVisibleFlowUITests: XCTestCase {
         menu.tap()
         app.buttons["Customize Today"].tap()
         XCTAssertTrue(app.navigationBars["Today & Tracking"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Full Layout Quick Actions"].exists)
+        XCTAssertFalse(app.buttons["Activities & Button Order"].exists)
         app.segmentedControls.buttons["Essentials"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Layout preview")).firstMatch.waitForExistence(timeout: 3))
         app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+
+        let nursingTimer = app.buttons["today.running-timer.nursing"]
+        XCTAssertTrue(nursingTimer.waitForExistence(timeout: 5))
+        nursingTimer.tap()
+        XCTAssertTrue(app.navigationBars["Timer"].waitForExistence(timeout: 5))
+        app.buttons["Keep Timer"].tap()
 
         for type in ["sleep", "feed", "diaper"] {
             let button = app.buttons["today.essential.\(type)"]
@@ -43,6 +51,48 @@ final class UserVisibleFlowUITests: XCTestCase {
 
         launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
         XCTAssertTrue(app.buttons["today.essential.feed"].waitForExistence(timeout: 8))
+    }
+
+    func testThreeEssentialsStayVisibleWithAllTimersRunning() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.segmentedControls.buttons["Essentials"].tap()
+        let activities = app.buttons["Activities & Button Order"]
+        for _ in 0..<4 where !activities.isHittable { app.swipeUp() }
+        XCTAssertFalse(app.buttons["Full Layout Quick Actions"].exists)
+        activities.tap()
+        app.buttons["today-settings.remove.feed"].tap()
+        app.buttons["today-settings.remove.diaper"].tap()
+        app.buttons["Nursing"].tap()
+        app.buttons["Pumping"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+
+        app.buttons["today.essential.sleep"].tap()
+        app.buttons["Nap"].tap()
+        XCTAssertTrue(app.navigationBars["Timer"].waitForExistence(timeout: 5))
+        app.buttons["Keep Timer"].tap()
+        app.buttons["today.essential.pumping"].tap()
+        XCTAssertTrue(app.navigationBars["Timer"].waitForExistence(timeout: 5))
+        app.buttons["Keep Timer"].tap()
+
+        for type in ["sleep", "nursing", "pumping"] {
+            let button = app.buttons["today.essential.\(type)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            XCTAssertTrue(button.label.contains("Running · tap to manage"))
+            XCTAssertLessThanOrEqual(button.frame.maxY, app.tabBars.firstMatch.frame.minY - 8,
+                                     "Three running timers should fit without scrolling")
+        }
+        XCTAssertFalse(app.buttons["today.running-timer.nursing"].exists,
+                       "A timer already visible on a large button should not be duplicated")
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Three Essentials with running timers"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     func testTodayPauseAndResumeCategoryPreservesEssentialChoiceAndActiveTimerAccess() {
@@ -121,11 +171,16 @@ final class UserVisibleFlowUITests: XCTestCase {
         actions.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         XCTAssertEqual(actions.value as? String, "0")
         app.switches["today-settings.section.medicationDue"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.switches["today-settings.section.activeTimers"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
+        let hiddenPreview = app.staticTexts["Logging buttons are hidden. Turn them on in Visible Sections."]
+        for _ in 0..<4 where !hiddenPreview.isHittable { app.swipeDown() }
+        XCTAssertTrue(hiddenPreview.waitForExistence(timeout: 5))
         app.navigationBars["Today & Tracking"].buttons["Done"].tap()
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["today.essential.sleep"].exists)
         XCTAssertFalse(app.buttons["today.essential.feed"].exists)
+        XCTAssertFalse(app.buttons["today.running-timer.nursing"].exists)
         app.buttons["today.menu"].tap()
         XCTAssertTrue(app.buttons["Customize Today"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["History"].exists)

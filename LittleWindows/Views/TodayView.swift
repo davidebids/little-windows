@@ -812,7 +812,7 @@ struct TodayView: View {
                     HStack(alignment: .center, spacing: 14) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Good \(greeting), \(activeCaregiverName)")
-                                .font(.title2.bold())
+                                .font(trackingPreferences.layout == .essentials ? .headline : .title2.bold())
                                 .fixedSize(horizontal: false, vertical: true)
                             if let profile {
                                 Text("\(profile.name) · \(profile.profileSubtitle)")
@@ -848,7 +848,12 @@ struct TodayView: View {
                     }
                     .padding(.horizontal, 8)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 4, trailing: 0))
+                    .listRowInsets(EdgeInsets(
+                        top: trackingPreferences.layout == .essentials ? 4 : 8,
+                        leading: 0,
+                        bottom: trackingPreferences.layout == .essentials ? 0 : 4,
+                        trailing: 0
+                    ))
                     .listRowSeparator(.hidden)
                     if trackingPreferences.shows(.weather) {
                         TodayWeatherHeader(chooseCity: { showingWeatherCityPicker = true })
@@ -862,11 +867,16 @@ struct TodayView: View {
                 if profile == nil {
                     noProfileSection
                 } else {
+                    if trackingPreferences.layout == .essentials, trackingPreferences.shows(.activeTimers) {
+                        essentialsTimersSection(state, preferences: trackingPreferences)
+                    }
                     if trackingPreferences.layout == .essentials, trackingPreferences.shows(.actions) {
                         essentialsActionsSection(state, preferences: trackingPreferences)
                     }
                     medicationDueSection(state, preferences: trackingPreferences)
-                    if trackingPreferences.shows(.activeTimers) { activeTimersSection(activeEvents) }
+                    if trackingPreferences.layout == .full, trackingPreferences.shows(.activeTimers) {
+                        activeTimersSection(activeEvents)
+                    }
                     if trackingPreferences.shows(.solids) { solidsTodaySection(state) }
 
                     if state.isDogProfile {
@@ -1775,6 +1785,56 @@ struct TodayView: View {
     }
 
     @ViewBuilder
+    private func essentialsTimersSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
+        let representedTypes = preferences.shows(.actions)
+            ? Set(preferences.essentialTypes(for: state.profile?.profileType ?? .child,
+                                            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)))
+            : []
+        let timers = state.activeEvents.filter { $0.isTimerRunning && !representedTypes.contains($0.type) }
+        if !timers.isEmpty {
+            Section {
+                ForEach(timers) { event in
+                    Button {
+                        activeTimerToEdit = editableTimer(event)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: event.type.systemImage(for: event.profileTypeSnapshot))
+                                .foregroundStyle(event.type.tint)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(event.displayTitle).font(.headline)
+                                Text("Running timer · tap to manage")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(event.timerDisplayStartDate(), style: .timer)
+                                .font(.body.monospacedDigit())
+                                .foregroundStyle(event.type.tint)
+                                .fixedSize()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                        .contentShape(RoundedRectangle(cornerRadius: 16))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("today.running-timer.\(event.type.rawValue)")
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+            }
+            .listSectionSpacing(0)
+        }
+    }
+
+    @ViewBuilder
     private func medicationDueSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
         if preferences.showsMedicationDueCard(
             scheduledAt: state.upcomingMedication?.scheduledAt,
@@ -1827,7 +1887,7 @@ struct TodayView: View {
 
     private func essentialDetail(_ type: EventType, state: TodayRenderState, now: Date) -> String {
         if let timer = state.activeTimer(of: type) {
-            return timer.isTimerRunning ? "Timer running · tap to manage" : "Timer stopped · tap to finish"
+            return timer.isTimerRunning ? "Running · tap to manage" : "Stopped · tap to finish"
         }
         if type == .medicine, let dose = state.upcomingMedication {
             let time = dose.scheduledAt.formatted(date: .abbreviated, time: .shortened)
