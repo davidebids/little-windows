@@ -209,7 +209,7 @@ private struct TodaySectionSettingsView: View {
             } header: {
                 Text("Sections in \(preferences.layout.title)")
             } footer: {
-                Text("Hidden sections leave no headers or placeholders. Hiding a section does not change its reminders. Running timers remain reachable from Today's menu. History is available in Reports.")
+                Text("Hidden sections leave no headers. If every section is hidden, Today shows a message with a shortcut to customization. Hiding a section does not change its reminders. Running timers remain reachable from Today's menu. History is available in Reports.")
             }
         }
         .navigationTitle("Visible Sections")

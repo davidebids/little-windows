@@ -208,6 +208,12 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(hiddenPreview.waitForExistence(timeout: 5))
         app.navigationBars["Today & Tracking"].buttons["Done"].tap()
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["All sections are hidden"].waitForExistence(timeout: 5))
+        let emptyState = XCTAttachment(screenshot: app.screenshot())
+        emptyState.name = "Today with every section hidden"
+        emptyState.lifetime = .keepAlways
+        add(emptyState)
+        XCTAssertTrue(app.buttons["today.empty.customize"].isHittable)
         XCTAssertFalse(app.buttons["today.essential.sleep"].exists)
         XCTAssertFalse(app.buttons["today.essential.feed"].exists)
         XCTAssertFalse(app.buttons["today.running-timer.nursing"].exists)
@@ -215,6 +221,16 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Customize Today"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["History"].exists)
         XCTAssertTrue(app.buttons["Nursing"].exists)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.3)).tap()
+        app.buttons["today.empty.customize"].tap()
+        XCTAssertTrue(app.navigationBars["Today & Tracking"].waitForExistence(timeout: 5))
+        for _ in 0..<4 where !sections.isHittable { app.swipeUp() }
+        sections.tap()
+        app.switches["today-settings.section.actions"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["All sections are hidden"].exists)
     }
 
     private func launchTodayEssentialsTest(startURL: String) {
