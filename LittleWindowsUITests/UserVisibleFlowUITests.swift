@@ -23,6 +23,8 @@ final class UserVisibleFlowUITests: XCTestCase {
             XCTAssertTrue(button.waitForExistence(timeout: 5))
             XCTAssertGreaterThanOrEqual(button.frame.height, 120)
             XCTAssertGreaterThan(button.frame.width, app.frame.width * 0.8)
+            XCTAssertLessThanOrEqual(button.frame.maxY, app.tabBars.firstMatch.frame.minY - 8,
+                                     "All three essentials should fit above the tab bar without scrolling")
         }
         XCTAssertFalse(app.staticTexts["Today's timeline"].exists)
         XCTAssertFalse(app.buttons["Customize"].exists)
