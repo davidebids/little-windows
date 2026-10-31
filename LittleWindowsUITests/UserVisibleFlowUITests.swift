@@ -52,6 +52,48 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["today.essential.feed"].waitForExistence(timeout: 8))
     }
 
+    func testTodayCustomizationOnlyShowsControlsForSelectedLayout() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        XCTAssertTrue(app.buttons["Full Layout Quick Actions"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Activities & Button Order"].exists)
+
+        for _ in 0..<2 {
+            app.segmentedControls.buttons["Essentials"].tap()
+            let activities = app.buttons["Activities & Button Order"]
+            for _ in 0..<4 where !activities.isHittable { app.swipeUp() }
+            XCTAssertTrue(activities.isHittable)
+            XCTAssertFalse(app.buttons["Full Layout Quick Actions"].exists)
+            activities.tap()
+            XCTAssertTrue(app.navigationBars["Activities & Order"].waitForExistence(timeout: 5))
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            let full = app.segmentedControls.buttons["Full"]
+            for _ in 0..<4 where !full.isHittable { app.swipeDown() }
+            full.tap()
+            XCTAssertTrue(app.buttons["Full Layout Quick Actions"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["Activities & Button Order"].exists)
+        }
+
+        app.segmentedControls.buttons["Essentials"].tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        XCTAssertTrue(app.segmentedControls.buttons["Essentials"].isSelected)
+        let activities = app.buttons["Activities & Button Order"]
+        for _ in 0..<4 where !activities.isHittable { app.swipeUp() }
+        XCTAssertTrue(activities.isHittable)
+        XCTAssertFalse(app.buttons["Full Layout Quick Actions"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Essentials customization shows only Essentials controls"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testNewEssentialActivityCanBeReorderedImmediatelyAndKeepsItsOrder() {
         continueAfterFailure = false
         launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
