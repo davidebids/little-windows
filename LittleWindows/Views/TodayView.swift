@@ -158,6 +158,7 @@ struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query private var allEvents: [CareEvent]
@@ -882,6 +883,7 @@ struct TodayView: View {
                                 .buttonStyle(.borderedProminent)
                                 .accessibilityIdentifier("today.empty.customize")
                             }
+                            .padding(.top, verticalSizeClass == .compact ? 16 : 64)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }
