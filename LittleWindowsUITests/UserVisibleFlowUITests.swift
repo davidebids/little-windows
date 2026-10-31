@@ -125,6 +125,129 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertLessThan(app.buttons["today.essential.nursing"].frame.minY, app.buttons["today.essential.sleep"].frame.minY)
     }
 
+    func testEmptyAndPausedEssentialsRecoverAndStoppedTimerStaysVisible() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.segmentedControls.buttons["Essentials"].tap()
+        XCTAssertTrue(app.buttons["Activities & Button Order"].isHittable)
+        XCTAssertTrue(app.buttons["Visible Sections"].isHittable)
+        app.buttons["Activities & Button Order"].tap()
+        for type in ["sleep", "feed", "diaper"] { app.buttons["today-settings.remove.\(type)"].tap() }
+        XCTAssertTrue(app.staticTexts["No essentials selected. Add an activity below."].exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+
+        let nursing = app.buttons["today.running-timer.nursing"]
+        XCTAssertTrue(nursing.waitForExistence(timeout: 5))
+        nursing.tap()
+        app.buttons["Stop"].tap()
+        app.buttons["Keep Timer"].tap()
+        XCTAssertTrue(nursing.waitForExistence(timeout: 5))
+        XCTAssertTrue(nursing.label.contains("Stopped timer · tap to finish"))
+        XCTAssertTrue(nursing.label.contains(":"), "Stopped timers retain their seconds rather than rounding to minutes")
+        nursing.tap()
+        XCTAssertTrue(app.staticTexts["Stopped"].waitForExistence(timeout: 5))
+        app.buttons["Keep Timer"].tap()
+
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.buttons["Visible Sections"].tap()
+        app.switches["today-settings.section.activeTimers"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Choose your essentials"].waitForExistence(timeout: 5))
+        app.buttons["today.empty.customize"].tap()
+        app.buttons["Activities & Button Order"].tap()
+        app.buttons["Sleep"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Tracking & Reminders"].tap()
+        app.switches["today-tracking.category.sleep"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Your essentials are paused"].waitForExistence(timeout: 5))
+        app.buttons["today.empty.customize"].tap()
+        app.buttons["Tracking & Reminders"].tap()
+        app.switches["today-tracking.category.sleep"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Your essentials are paused"].exists)
+
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.buttons["Visible Sections"].tap()
+        app.switches["today-settings.section.actions"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Nothing to show right now"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Today with only an empty conditional section enabled"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testEssentialsUseProfileAppropriateChoicesAndLoggingRoutes() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-performance")
+        for (id, expected, logType) in [
+            ("103", ["medicine", "symptom", "bloodPressure", "sleep"], "symptom"),
+            ("102", ["food", "potty", "walk", "rest"], "potty"),
+            ("101", ["sleep", "feed", "diaper"], "diaper")
+        ] {
+            launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000\(id)/today")
+            let name = id == "103" ? "Sample Adult" : id == "102" ? "Sample Dog" : "Sample Child"
+            let selectedProfile = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label CONTAINS %@", name), object: app.buttons["today.menu"])
+            XCTAssertEqual(XCTWaiter.wait(for: [selectedProfile], timeout: 8), .completed)
+            app.buttons["today.menu"].tap()
+            app.buttons["Customize Today"].tap()
+            app.segmentedControls.buttons["Essentials"].tap()
+            app.buttons["Activities & Button Order"].tap()
+            for type in expected {
+                XCTAssertTrue(app.buttons["today-settings.remove.\(type)"].waitForExistence(timeout: 5))
+            }
+            XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "today-settings.remove.")).count,
+                           expected.count)
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            app.buttons["Visible Sections"].tap()
+            if id != "101" {
+                XCTAssertFalse(app.switches["today-settings.section.prediction"].exists)
+                XCTAssertFalse(app.switches["today-settings.section.solids"].exists)
+            }
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            if id == "103" {
+                app.buttons["Tracking & Reminders"].tap()
+                let medicine = app.switches["today-tracking.category.medicine"]
+                medicine.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+                XCTAssertTrue(app.alerts["Pause medication tracking and reminders?"].waitForExistence(timeout: 3))
+                app.alerts.buttons["Cancel"].tap()
+                XCTAssertEqual(medicine.value as? String, "1")
+                medicine.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+                app.alerts.buttons["Pause Medication Reminders"].tap()
+                XCTAssertEqual(medicine.value as? String, "0")
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+                app.buttons["Visible Sections"].tap()
+                XCTAssertFalse(app.switches["today-settings.section.medicationDue"].isEnabled)
+                XCTAssertTrue(app.staticTexts["Paused in Tracking & Reminders"].exists)
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+            }
+            app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+            XCTAssertTrue(app.buttons["today.essential.\(logType)"].waitForExistence(timeout: 5))
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Profile \(id) Essentials"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            app.buttons["today.essential.\(logType)"].tap()
+            XCTAssertTrue(app.navigationBars["Add Event"].waitForExistence(timeout: 5))
+            app.buttons["Cancel"].firstMatch.tap()
+        }
+    }
+
     func testThreeEssentialsStayVisibleWithAllTimersRunning() {
         continueAfterFailure = false
         launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")

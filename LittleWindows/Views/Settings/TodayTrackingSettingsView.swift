@@ -4,12 +4,22 @@ struct TodayTrackingSettingsView: View {
     let profile: CareProfile
     @State private var preferences = CareTrackingPreferences()
 
+    init(profile: CareProfile) {
+        self.profile = profile
+        _preferences = State(initialValue: CareTrackingPreferenceStore.preferences(profileID: profile.id))
+    }
+
     var body: some View {
         Form {
             Section {
                 Picker("Layout", selection: Binding(
                     get: { preferences.layout },
-                    set: { layout in update { $0.set("layout", value: [layout.rawValue]) } }
+                    set: { layout in
+                        update {
+                            $0.selectLayout(layout, for: profile.profileType,
+                                            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id))
+                        }
+                    }
                 )) {
                     ForEach(CareTodayLayout.allCases) { Text($0.title).tag($0) }
                 }
@@ -20,45 +30,6 @@ struct TodayTrackingSettingsView: View {
             } footer: {
                 Text("Essentials puts a few large logging buttons at the center of Today. Full keeps the detailed care view. Switching layouts does not pause tracking or reminders.")
             }
-
-            if preferences.layout == .essentials {
-                Section("Layout preview") {
-                    let types = preferences.essentialTypes(
-                        for: profile.profileType,
-                        hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)
-                    )
-                    if !preferences.shows(.actions) {
-                        Text("Logging buttons are hidden. Turn them on in Visible Sections.")
-                            .foregroundStyle(.secondary)
-                    } else if types.isEmpty {
-                        Text(preferences.configuredEssentials(for: profile.profileType,
-                             hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)).isEmpty
-                             ? "Choose activities below to add your essentials."
-                             : "Your chosen activities are paused. Resume them in Tracking & Reminders.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        VStack(spacing: 12) {
-                            ForEach(types.prefix(3)) { type in
-                                EssentialsActionButton(
-                                    type: type, profileType: profile.profileType,
-                                    detail: "Recent record or running timer", count: types.count,
-                                    action: {}
-                                )
-                                .disabled(true)
-                            }
-                            if types.count > 3 {
-                                Text("Plus \(types.count - 3) more below these buttons")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 6)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Preview: large buttons for \(types.map(\.displayName).joined(separator: ", "))")
-                    }
-                }
-            }
-
             Section {
                 if preferences.layout == .essentials {
                     NavigationLink("Activities & Button Order") {
@@ -87,6 +58,43 @@ struct TodayTrackingSettingsView: View {
                 Text("These choices follow this profile on devices signed into the same Apple Account when iCloud Sync is on. Offline changes apply here immediately and merge when iCloud becomes available.")
             }
 
+            if preferences.layout == .essentials {
+                Section("Layout preview") {
+                    let types = preferences.essentialTypes(
+                        for: profile.profileType,
+                        hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)
+                    )
+                    if !preferences.shows(.actions) {
+                        Text("Logging buttons are hidden. Turn them on in Visible Sections.")
+                            .foregroundStyle(.secondary)
+                    } else if types.isEmpty {
+                        Text(preferences.configuredEssentials(for: profile.profileType,
+                             hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)).isEmpty
+                             ? "Choose activities in Activities & Button Order to add your essentials."
+                             : "Your chosen activities are paused. Resume them in Tracking & Reminders.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 12) {
+                            ForEach(types.prefix(3)) { type in
+                                EssentialsActionButton(
+                                    type: type, profileType: profile.profileType,
+                                    detail: "Recent record or running timer", count: types.count,
+                                    action: {}
+                                )
+                                .allowsHitTesting(false)
+                            }
+                            if types.count > 3 {
+                                Text("Plus \(types.count - 3) more below these buttons")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Preview: large buttons for \(types.map(\.displayName).joined(separator: ", "))")
+                    }
+                }
+            }
             Section {
                 Button("Reset This Layout") {
                     update { $0.resetCurrentLayout(for: profile.profileType) }
@@ -130,6 +138,10 @@ private struct TodayEssentialsActivitiesView: View {
     var body: some View {
         List {
             Section {
+                if selected.isEmpty {
+                    Text("No essentials selected. Add an activity below.")
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(selected.map { ActivityOption(type: $0, isSelected: true) }) { option in
                     let type = option.type
                     HStack {
@@ -199,7 +211,7 @@ private struct TodaySectionSettingsView: View {
         Form {
             Section {
                 ForEach(CareTodaySection.allCases.filter { $0.applies(to: profile.profileType) }) { section in
-                    Toggle(section.title, isOn: Binding(
+                    Toggle(isOn: Binding(
                         get: { preferences.shows(section) },
                         set: { shown in
                             CareTrackingPreferenceStore.update(profileID: profile.id) {
@@ -207,7 +219,15 @@ private struct TodaySectionSettingsView: View {
                             }
                             reload()
                         }
-                    ))
+                    )) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(section.title)
+                            if !preferences.allowsPrompts(section) {
+                                Text("Paused in Tracking & Reminders")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     .accessibilityIdentifier("today-settings.section.\(section.rawValue)")
                     .disabled(!preferences.allowsPrompts(section))
                 }
@@ -298,6 +318,7 @@ struct EssentialsActionButton: View {
     let profileType: CareProfileType
     let detail: String
     var timerStart: Date? = nil
+    var stoppedTimerElapsed: TimeInterval? = nil
     let count: Int
     let action: () -> Void
 
@@ -333,6 +354,10 @@ struct EssentialsActionButton: View {
                     Text(timerStart, style: .timer)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
+                } else if let stoppedTimerElapsed {
+                    Text(DurationFormatting.liveString(seconds: stoppedTimerElapsed))
+                        .font(.title3.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(type.tint)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -359,10 +384,14 @@ struct EssentialsActionButton: View {
                     Text(timerStart, style: .timer)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
+                } else if let stoppedTimerElapsed {
+                    Text(DurationFormatting.liveString(seconds: stoppedTimerElapsed))
+                        .font(.title3.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(type.tint)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: timerStart == nil ? "plus" : "timer")
+            Image(systemName: timerStart != nil || stoppedTimerElapsed != nil ? "timer" : "plus")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(type.tint)
                 .accessibilityHidden(true)
