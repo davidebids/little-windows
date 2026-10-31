@@ -192,7 +192,7 @@ final class CareTrackingPreferenceTests: XCTestCase {
     func testEssentialsHasItsOwnMinimalDefaultsAndProfileAppropriateActivities() {
         var preferences = CareTrackingPreferences()
         preferences.set("layout", value: ["essentials"])
-        XCTAssertEqual(CareTodaySection.allCases.filter(preferences.shows), [.actions, .medicationDue])
+        XCTAssertEqual(CareTodaySection.allCases.filter(preferences.shows), [.actions, .medicationDue, .activeTimers])
         XCTAssertEqual(preferences.essentialTypes(for: .child), [.sleep, .feed, .diaper])
         XCTAssertEqual(preferences.essentialTypes(for: .adult), [.medicine, .symptom, .bloodPressure, .sleep])
         XCTAssertEqual(preferences.essentialTypes(for: .dog), [.food, .potty, .walk, .rest])
@@ -207,9 +207,12 @@ final class CareTrackingPreferenceTests: XCTestCase {
         XCTAssertTrue(preferences.allows(.sleep))
         XCTAssertTrue(preferences.allowsPrompts(.prediction))
         preferences.set("layout", value: ["essentials"])
+        preferences.set("section.essentials.activeTimers", value: ["false"])
+        XCTAssertFalse(preferences.shows(.activeTimers))
         preferences.set("section.essentials.timeline", value: ["true"])
         XCTAssertTrue(preferences.shows(.timeline))
         preferences.set("layout", value: ["full"])
+        XCTAssertTrue(preferences.shows(.activeTimers))
         XCTAssertFalse(preferences.shows(.timeline))
     }
 
@@ -379,6 +382,15 @@ final class CareTrackingPreferenceTests: XCTestCase {
         ).dynamicTypeSize(.accessibility3))
         let accessibleSize = accessible.sizeThatFits(in: CGSize(width: 288, height: 2_000))
         XCTAssertGreaterThan(accessibleSize.height, regularSize.height)
+        XCTAssertEqual(accessibleSize.width, 288, accuracy: 1)
+        let accessibleRenderer = ImageRenderer(content: EssentialsActionButton(
+            type: .bloodPressure, profileType: .adult,
+            detail: "No recent record · tap to log", count: 3, action: {}
+        ).dynamicTypeSize(.accessibility3).frame(width: 288).background(Color(uiColor: .systemBackground)))
+        let accessibleAttachment = XCTAttachment(image: try XCTUnwrap(accessibleRenderer.uiImage))
+        accessibleAttachment.name = "Essentials full-width accessibility text"
+        accessibleAttachment.lifetime = .keepAlways
+        add(accessibleAttachment)
         let renderer = ImageRenderer(content: VStack(spacing: 12) {
             ForEach([EventType.sleep, .feed, .diaper]) { type in
                 EssentialsActionButton(type: type, profileType: .child, detail: "No recent record · tap to log", count: 3, action: {})

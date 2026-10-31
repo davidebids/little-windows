@@ -27,8 +27,14 @@ struct TodayTrackingSettingsView: View {
                         for: profile.profileType,
                         hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)
                     )
-                    if types.isEmpty {
-                        Text("Choose activities below to add your essentials.")
+                    if !preferences.shows(.actions) {
+                        Text("Logging buttons are hidden. Turn them on in Visible Sections.")
+                            .foregroundStyle(.secondary)
+                    } else if types.isEmpty {
+                        Text(preferences.configuredEssentials(for: profile.profileType,
+                             hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)).isEmpty
+                             ? "Choose activities below to add your essentials."
+                             : "Your chosen activities are paused. Resume them in Tracking & Reminders.")
                             .foregroundStyle(.secondary)
                     } else {
                         VStack(spacing: 12) {
@@ -143,7 +149,13 @@ private struct TodayEssentialsActivitiesView: View {
                     Button {
                         save(selected + [type])
                     } label: {
-                        Label(type.displayName, systemImage: "plus.circle")
+                        HStack {
+                            Label(type.displayName, systemImage: "plus.circle")
+                            Spacer()
+                            if !preferences.allows(type) {
+                                Text("Paused").foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
             }
@@ -263,6 +275,8 @@ private struct TodayTrackingCategoriesView: View {
 }
 
 struct EssentialsActionButton: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let type: EventType
     let profileType: CareProfileType
     let detail: String
@@ -272,38 +286,69 @@ struct EssentialsActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 20) {
-                Image(systemName: type.systemImage(for: profileType))
-                    .font(.system(size: count <= 3 ? 36 : 30, weight: .semibold))
-                    .frame(width: 58, height: 64)
-                    .foregroundStyle(type.tint)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(type == .medicine ? "Medication" : type.displayName)
-                        .font(.title2.bold())
-                    Text(detail)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let timerStart {
-                        Text(timerStart, style: .timer)
-                            .font(.title3.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(type.tint)
-                    }
-                }
-                Spacer(minLength: 0)
-                Image(systemName: timerStart == nil ? "plus" : "timer")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(type.tint)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity, minHeight: count <= 3 ? 120 : 108, alignment: .leading)
-            .background(type.tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(type.tint.opacity(0.18)))
-            .contentShape(RoundedRectangle(cornerRadius: 24))
+            labelContent
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, minHeight: count <= 3 ? 120 : 108, alignment: .leading)
+                .background(type.tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 24))
+                .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(type.tint.opacity(0.18)))
+                .contentShape(RoundedRectangle(cornerRadius: 24))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("today.essential.\(type.rawValue)")
+    }
+
+    @ViewBuilder
+    private var labelContent: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Image(systemName: type.systemImage(for: profileType))
+                        .foregroundStyle(type.tint)
+                        .accessibilityHidden(true)
+                    Text(type == .medicine ? "Medication" : type.displayName)
+                        .font(.title2.bold())
+                }
+                Text(detail)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                if let timerStart {
+                    Text(timerStart, style: .timer)
+                        .font(.title3.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(type.tint)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            compactContent
+        }
+    }
+
+    private var compactContent: some View {
+        HStack(spacing: 20) {
+            Image(systemName: type.systemImage(for: profileType))
+                .font(.system(size: count <= 3 ? 36 : 30, weight: .semibold))
+                .frame(width: 58, height: 64)
+                .foregroundStyle(type.tint)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(type == .medicine ? "Medication" : type.displayName)
+                    .font(.title2.bold())
+                Text(detail)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let timerStart {
+                    Text(timerStart, style: .timer)
+                        .font(.title3.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(type.tint)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: timerStart == nil ? "plus" : "timer")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(type.tint)
+                .accessibilityHidden(true)
+        }
     }
 }
