@@ -117,6 +117,7 @@ struct TodayTrackingSettingsView: View {
 }
 
 private struct TodayEssentialsActivitiesView: View {
+    @Environment(\.scenePhase) private var scenePhase
     private struct ActivityOption: Identifiable {
         let type: EventType
         let isSelected: Bool
@@ -127,12 +128,16 @@ private struct TodayEssentialsActivitiesView: View {
 
     let profile: CareProfile
     @State private var preferences = CareTrackingPreferences()
+    @State private var selected: [EventType]
+    @State private var pendingSelection: [EventType]?
+    @State private var saveTask: Task<Void, Never>?
 
-    private var selected: [EventType] {
-        preferences.configuredEssentials(
-            for: profile.profileType,
-            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)
-        )
+    init(profile: CareProfile) {
+        self.profile = profile
+        let preferences = CareTrackingPreferenceStore.preferences(profileID: profile.id)
+        _preferences = State(initialValue: preferences)
+        _selected = State(initialValue: preferences.configuredEssentials(
+            for: profile.profileType, hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id)))
     }
 
     var body: some View {
@@ -193,12 +198,45 @@ private struct TodayEssentialsActivitiesView: View {
         .navigationTitle("Activities & Order")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: reload)
-        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in reload() }
+        .onDisappear(perform: flushPendingSelection)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { flushPendingSelection() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { notification in
+            guard notification.object as? UUID == profile.id else { return }
+            reload()
+        }
     }
 
-    private func reload() { preferences = CareTrackingPreferenceStore.preferences(profileID: profile.id) }
+    private func reload() {
+        let latest = CareTrackingPreferenceStore.preferences(profileID: profile.id)
+        if preferences != latest { preferences = latest }
+        // A cloud update or our own save must not replace an in-progress move.
+        guard pendingSelection == nil else { return }
+        let types = latest.configuredEssentials(for: profile.profileType,
+            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: profile.id))
+        if selected != types { selected = types }
+    }
+
     private func save(_ types: [EventType]) {
+        guard types != selected else { return }
+        // List needs its new order immediately. Persistence and notifications
+        // must not re-enter its drag/drop transaction.
+        selected = types
+        pendingSelection = types
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            flushPendingSelection()
+        }
+    }
+
+    private func flushPendingSelection() {
+        saveTask?.cancel()
+        saveTask = nil
+        guard let types = pendingSelection else { return }
         CareTrackingPreferenceStore.update(profileID: profile.id) { $0.set("essentials", value: types.map(\.rawValue)) }
+        pendingSelection = nil
         reload()
     }
 }

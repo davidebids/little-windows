@@ -169,6 +169,16 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
         }
         return result
     }
+
+    func needsSystemReconciliation(comparedTo previous: Self) -> Bool {
+        guard version == previous.version else { return true }
+        return Set(fields.keys).union(previous.fields.keys).contains { key in
+            // Today layout, section visibility, and ordering do not change
+            // reminder policy or the widgets' independent action choices.
+            guard key != "layout", key != "essentials", !key.hasPrefix("section.") else { return false }
+            return fields[key]?.value != previous.fields[key]?.value
+        }
+    }
 }
 
 protocol CareTrackingCloudStore {
@@ -211,12 +221,15 @@ enum CareTrackingPreferenceStore {
             reconcile(profileID: profileID, defaults: defaults, store: store)
         }
         var value = preferences(profileID: profileID, defaults: defaults)
+        let previous = value
         change(&value)
         save(value, profileID: profileID, defaults: defaults)
         if PersistenceService.isICloudSyncEnabled(defaults: defaults) {
             reconcile(profileID: profileID, defaults: defaults, store: store)
         }
-        if defaults === UserDefaults.standard { notify(profileID) }
+        if defaults === UserDefaults.standard {
+            notify(profileID, needsSystemReconciliation: value.needsSystemReconciliation(comparedTo: previous))
+        }
     }
 
     static func startICloudSync() {
@@ -257,11 +270,14 @@ enum CareTrackingPreferenceStore {
         let merged = local.merging(remote)
         if merged != local {
             save(merged, profileID: profileID, defaults: defaults)
-            if defaults === UserDefaults.standard { notify(profileID) }
+            if defaults === UserDefaults.standard {
+                notify(profileID, needsSystemReconciliation: merged.needsSystemReconciliation(comparedTo: local))
+            }
         }
         if merged != remote, let data = try? JSONEncoder().encode(merged) {
+            // Writes synchronize automatically. Avoid forcing disk/cloud work
+            // from interactive edit handlers; launch/foreground still refresh.
             store.set(data, forKey: key(profileID))
-            _ = store.synchronize()
         }
     }
 
@@ -270,8 +286,9 @@ enum CareTrackingPreferenceStore {
         defaults.set(data, forKey: key(profileID))
     }
 
-    private static func notify(_ profileID: UUID) {
+    private static func notify(_ profileID: UUID, needsSystemReconciliation: Bool) {
         NotificationCenter.default.post(name: changedNotification, object: profileID)
+        guard needsSystemReconciliation else { return }
         Task { await NotificationManager.shared.cancelPausedTrackingReminders() }
         SystemIntegrationReconciler.requestReconciliation()
     }

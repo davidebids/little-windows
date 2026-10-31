@@ -190,6 +190,42 @@ final class UserVisibleFlowUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testProductionScaleEssentialsRepeatedReorderingKeepsListResponsive() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-performance")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.segmentedControls.buttons["Essentials"].tap()
+        app.buttons["Activities & Button Order"].tap()
+        app.buttons["today-settings.remove.feed"].tap()
+        app.buttons["Nursing"].tap()
+
+        for (moving, target) in [("Nursing", "Sleep"), ("Diaper", "Nursing"), ("Sleep", "Diaper")] {
+            let started = ContinuousClock.now
+            app.buttons["Reorder Remove \(moving)"].press(forDuration: 0.5,
+                thenDragTo: app.buttons["Reorder Remove \(target)"])
+            XCTAssertLessThan(started.duration(to: .now), .seconds(4),
+                              "Dropping a reordered row must not wait for history or system integration work")
+            XCTAssertLessThan(app.buttons["today-settings.remove.\(moving.lowercased())"].frame.minY,
+                              app.buttons["today-settings.remove.\(target.lowercased())"].frame.minY,
+                              "The list must reflect each drop without another drag")
+            let scrollStarted = ContinuousClock.now
+            app.swipeUp(velocity: .fast)
+            app.swipeDown(velocity: .fast)
+            XCTAssertLessThan(scrollStarted.duration(to: .now), .seconds(4),
+                              "The ordering list must accept scrolling immediately after a drop")
+        }
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertLessThan(app.buttons["today.essential.diaper"].frame.minY, app.buttons["today.essential.nursing"].frame.minY)
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 5))
+        XCTAssertLessThan(app.buttons["today.essential.sleep"].frame.minY, app.buttons["today.essential.diaper"].frame.minY)
+        XCTAssertLessThan(app.buttons["today.essential.diaper"].frame.minY, app.buttons["today.essential.nursing"].frame.minY)
+    }
+
     func testEssentialsUseProfileAppropriateChoicesAndLoggingRoutes() {
         continueAfterFailure = false
         launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")

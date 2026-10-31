@@ -10,12 +10,13 @@ final class CareTrackingPreferenceTests: XCTestCase {
     private final class CloudStore: CareTrackingCloudStore {
         var dictionaryRepresentation: [String: Any] = [:]
         var writes = 0
+        var synchronizations = 0
         func data(forKey key: String) -> Data? { dictionaryRepresentation[key] as? Data }
         func set(_ value: Any?, forKey key: String) {
             dictionaryRepresentation[key] = value
             writes += 1
         }
-        func synchronize() -> Bool { true }
+        func synchronize() -> Bool { synchronizations += 1; return true }
     }
 
     private func device() throws -> UserDefaults {
@@ -78,6 +79,42 @@ final class CareTrackingPreferenceTests: XCTestCase {
         CareTrackingPreferenceStore.update(profileID: id, defaults: defaults, store: cloud) { $0.set("layout", value: ["essentials"]) }
         XCTAssertEqual(cloud.writes, writes)
         XCTAssertEqual(cloud.data(forKey: CareTrackingPreferenceStore.key(id)), data)
+    }
+
+    func testDisplayOnlyChangesDoNotRequireSystemReconciliationButTrackingAndWidgetChoicesDo() {
+        let original = CareTrackingPreferences()
+        var display = original
+        display.selectLayout(.essentials, for: .child)
+        display.set("essentials", value: ["diaper", "sleep", "feed"])
+        display.set("section.essentials.timeline", value: ["true"])
+        XCTAssertFalse(display.needsSystemReconciliation(comparedTo: original))
+        XCTAssertFalse(original.needsSystemReconciliation(comparedTo: display))
+        for key in ["paused.feed", "paused.medicine", "prompts.guides", "hidden.sleep"] {
+            var changed = display
+            changed.set(key, value: [key.hasPrefix("prompts.") ? "false" : "true"])
+            XCTAssertTrue(changed.needsSystemReconciliation(comparedTo: display), key)
+            XCTAssertTrue(display.needsSystemReconciliation(comparedTo: changed), key)
+            var sameValues = changed
+            sameValues.set(key, value: changed.fields[key]!.value)
+            XCTAssertFalse(sameValues.needsSystemReconciliation(comparedTo: changed), key)
+        }
+    }
+
+    func testOrderChangesPublishLatestValuesWithoutForcingCloudSynchronizationPerEdit() throws {
+        let cloud = CloudStore(), defaults = try device()
+        let profileID = UUID()
+        PersistenceService.setICloudSyncEnabled(true, defaults: defaults)
+        for order in [["sleep", "feed", "diaper"], ["diaper", "sleep", "feed"], ["feed", "diaper", "sleep"]] {
+            CareTrackingPreferenceStore.update(profileID: profileID, defaults: defaults, store: cloud) {
+                $0.set("essentials", value: order)
+            }
+        }
+        let remote = try JSONDecoder().decode(CareTrackingPreferences.self,
+            from: XCTUnwrap(cloud.data(forKey: CareTrackingPreferenceStore.key(profileID))))
+        XCTAssertEqual(remote.configuredEssentials(for: .child), [.feed, .diaper, .sleep])
+        XCTAssertEqual(remote, CareTrackingPreferenceStore.preferences(profileID: profileID, defaults: defaults))
+        XCTAssertEqual(cloud.writes, 3)
+        XCTAssertEqual(cloud.synchronizations, 0)
     }
 
     func testResetOnlyChangesCurrentLayoutAndKeepsTrackingPauses() {

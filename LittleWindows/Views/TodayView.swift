@@ -467,7 +467,7 @@ struct TodayView: View {
     }
 
     private var renderStateRefreshIsDeferred: Bool {
-        deepLinkRouter.showingSettings || showingProfileEditor
+        deepLinkRouter.showingSettings || showingProfileEditor || showingCareCustomization
     }
 
     private func refreshCachedRenderState() {
