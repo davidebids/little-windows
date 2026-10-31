@@ -334,6 +334,33 @@ final class NotificationManager: NSObject, ObservableObject {
         UNUserNotificationCenter.current().delegate = self
     }
 
+    private func addTrackingAwareNotification(_ request: UNNotificationRequest) async throws {
+        guard CareTrackingPreferenceStore.allowsNotification(
+            identifier: request.identifier, userInfo: request.content.userInfo
+        ) else { return }
+        try await UNUserNotificationCenter.current().add(request)
+        // A pause may arrive while the notification center accepts the request.
+        if !CareTrackingPreferenceStore.allowsNotification(
+            identifier: request.identifier, userInfo: request.content.userInfo
+        ) {
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [request.identifier])
+        }
+    }
+
+    func cancelPausedTrackingReminders() async {
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        let paused = pending.filter {
+            !CareTrackingPreferenceStore.allowsNotification(identifier: $0.identifier, userInfo: $0.content.userInfo)
+        }
+        for request in paused where request.identifier.hasPrefix("medication.") {
+            if let occurrenceKey = request.content.userInfo["occurrenceKey"] as? String {
+                MedicationSnoozeStateStore.clear(occurrenceKey: occurrenceKey)
+            }
+        }
+        center.removePendingNotificationRequests(withIdentifiers: paused.map(\.identifier))
+    }
+
     func configure() async {
         registerNotificationCategories()
         UIApplication.shared.registerForRemoteNotifications()
@@ -570,6 +597,10 @@ final class NotificationManager: NSObject, ObservableObject {
         isSleeping: Bool = false,
         now: Date = Date()
     ) async {
+        guard CareTrackingPreferenceStore.allows(.sleep, profileID: profileID) else {
+            await cancelPendingLittleWindowAlerts(profileID: profileID)
+            return
+        }
         let decision = Self.schedulingDecision(
             prediction: prediction,
             settings: settings,
@@ -640,7 +671,7 @@ final class NotificationManager: NSObject, ObservableObject {
         )
 
         do {
-            try await UNUserNotificationCenter.current().add(request)
+            try await addTrackingAwareNotification(request)
             updateState(
                 LittleWindowNotificationState(
                     lastScheduledPredictionID: Self.predictionID(for: prediction),
@@ -706,6 +737,10 @@ final class NotificationManager: NSObject, ObservableObject {
         isSleeping: Bool = false,
         now: Date = Date()
     ) async {
+        guard CareTrackingPreferenceStore.allows(.sleep, profileID: profileID) else {
+            await cancelPendingSleepPressureAlerts(profileID: profileID)
+            return
+        }
         let decision = Self.sleepPressureAlertDecision(
             pressure: pressure,
             enabled: enabled,
@@ -736,7 +771,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: content,
             trigger: Self.oneShotTrigger(at: fireDate, now: now)
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelPendingSleepPressureAlerts(profileID: UUID? = nil) async {
@@ -774,6 +809,7 @@ final class NotificationManager: NSObject, ObservableObject {
         now: Date = Date()
     ) async {
         await cancelAppointmentReminders(appointmentID: appointment.id)
+        guard CareTrackingPreferenceStore.allowsPrompts(.appointments, profileID: appointment.profileID) else { return }
         guard UserDefaults.standard.object(forKey: "appointmentRemindersEnabled") == nil
                 || UserDefaults.standard.bool(forKey: "appointmentRemindersEnabled") else {
             return
@@ -786,7 +822,6 @@ final class NotificationManager: NSObject, ObservableObject {
             return
         }
 
-        let center = UNUserNotificationCenter.current()
         for leadTime in appointment.reminderLeadTimes {
             let fireDate = appointment.startDate.addingTimeInterval(
                 Double(-leadTime.rawValue) * 60
@@ -806,7 +841,7 @@ final class NotificationManager: NSObject, ObservableObject {
                 ),
                 trigger: Self.oneShotTrigger(at: fireDate, now: now)
             )
-            try? await center.add(request)
+            try? await addTrackingAwareNotification(request)
         }
     }
 
@@ -827,7 +862,9 @@ final class NotificationManager: NSObject, ObservableObject {
         now: Date = Date()
     ) async {
         await cancelActiveSleepPlanWakeAlert(profileID: alert?.profileID)
-        guard let alert else { return }
+        guard let alert,
+              CareTrackingPreferenceStore.allows(.sleep, profileID: alert.profileID),
+              alert.wakeByDate > now else { return }
 
         let status = await getAuthorizationStatus()
         authorizationStatus = status
@@ -850,7 +887,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: content,
             trigger: trigger
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelActiveSleepPlanWakeAlert(profileID: UUID? = nil) async {
@@ -958,6 +995,7 @@ final class NotificationManager: NSObject, ObservableObject {
         now: Date = Date()
     ) async {
         await cancelMonthlyAgeGuideNotifications(profileID: profile.id)
+        guard CareTrackingPreferenceStore.allowsPrompts(.guides, profileID: profile.id) else { return }
         guard UserDefaults.standard.object(forKey: "monthlyAgeGuideNotificationsEnabled") == nil
                 || UserDefaults.standard.bool(forKey: "monthlyAgeGuideNotificationsEnabled") else {
             return
@@ -1005,7 +1043,7 @@ final class NotificationManager: NSObject, ObservableObject {
             trigger: Self.oneShotTrigger(at: candidate.1, now: now)
         )
         do {
-            try await UNUserNotificationCenter.current().add(request)
+            try await addTrackingAwareNotification(request)
         } catch {
             return
         }
@@ -1037,7 +1075,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: buildFoodReminderNotificationContent(reminder: reminder),
             trigger: Self.oneShotTrigger(at: reminder.dateTime, now: now)
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelFoodReminder(reminderID: UUID) async {
@@ -1055,7 +1093,8 @@ final class NotificationManager: NSObject, ObservableObject {
         now: Date = Date()
     ) async {
         await cancelSolidMealReminder(planID: snapshot.id)
-        guard snapshot.reminderEnabled, !snapshot.isCompleted else { return }
+        guard snapshot.reminderEnabled, !snapshot.isCompleted,
+              CareTrackingPreferenceStore.allows(.feed, profileID: snapshot.profileID) else { return }
         let fireDate = snapshot.scheduledAt.addingTimeInterval(
             Double(-snapshot.reminderOffsetMinutes) * 60
         )
@@ -1081,7 +1120,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: content,
             trigger: Self.oneShotTrigger(at: fireDate, now: now)
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelSolidMealReminder(planID: UUID) async {
@@ -1109,6 +1148,7 @@ final class NotificationManager: NSObject, ObservableObject {
             allergenID: snapshot.allergenID
         )
         guard snapshot.reminderEnabled,
+              CareTrackingPreferenceStore.allows(.feed, profileID: snapshot.profileID),
               snapshot.statusRawValue != SolidAllergenStatus.suspectedReaction.rawValue,
               snapshot.statusRawValue != SolidAllergenStatus.avoidPendingAdvice.rawValue,
               let fireDate = snapshot.nextExposureDueAt,
@@ -1138,7 +1178,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: content,
             trigger: Self.oneShotTrigger(at: fireDate, now: now)
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelSolidAllergenReminder(profileID: UUID, allergenID: String) async {
@@ -1156,6 +1196,8 @@ final class NotificationManager: NSObject, ObservableObject {
     ) async {
         await cancelSolidsDigestiveReminder(profileID: snapshot.profileID)
         guard snapshot.isEnabled,
+              CareTrackingPreferenceStore.allows(.feed, profileID: snapshot.profileID),
+              CareTrackingPreferenceStore.allows(.diaper, profileID: snapshot.profileID),
               snapshot.hasActiveConcern,
               let fireDate = snapshot.reminderAt,
               fireDate > now else { return }
@@ -1179,7 +1221,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: content,
             trigger: Self.oneShotTrigger(at: fireDate, now: now)
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelSolidsDigestiveReminder(profileID: UUID) async {
@@ -1244,7 +1286,7 @@ final class NotificationManager: NSObject, ObservableObject {
                     ),
                     trigger: Self.oneShotTrigger(at: reminder.date, now: now)
                 )
-                try await UNUserNotificationCenter.current().add(request)
+                try await addTrackingAwareNotification(request)
             }
             return .scheduled(reminders.count)
         } catch {
@@ -1321,7 +1363,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: buildItineraryItemNotificationContent(item: item, trip: trip),
             trigger: Self.oneShotTrigger(at: fireDate, now: now)
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelItineraryItemReminder(itemID: UUID) async {
@@ -1416,6 +1458,7 @@ final class NotificationManager: NSObject, ObservableObject {
 
     func scheduleRoutineReminder(routine: CareRoutine) async {
         await cancelRoutineReminder(routineID: routine.id)
+        guard CareTrackingPreferenceStore.allowsRoutine(routine) else { return }
         guard routine.reminderEnabled,
               let minutes = routine.reminderTimeMinutesAfterMidnight else {
             return
@@ -1433,7 +1476,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: buildRoutineReminderNotificationContent(routine: routine),
             trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func cancelRoutineReminder(routineID: UUID) async {
@@ -1478,6 +1521,15 @@ final class NotificationManager: NSObject, ObservableObject {
         if let householdID = routine.householdID {
             userInfo["householdID"] = householdID.uuidString
         }
+        if let profileID = routine.profileID {
+            userInfo["profileID"] = profileID.uuidString
+        }
+        let routineID = routine.id
+        let descriptor = FetchDescriptor<CareRoutineStep>(predicate: #Predicate { $0.routineID == routineID })
+        let steps = (try? routine.modelContext?.fetch(descriptor)) ?? []
+        userInfo["trackingCategoryRawValues"] = steps.compactMap(\.eventTypeRawValue)
+        userInfo["trackingPromptSectionRawValues"] = steps
+            .compactMap { $0.action.trackingPromptSection?.rawValue }
         content.userInfo = userInfo
         return content
     }
@@ -1545,6 +1597,7 @@ final class NotificationManager: NSObject, ObservableObject {
         routines: [CareRoutine],
         ageGuideReadStates: [AgeGuideReadState]
     ) async {
+        await cancelPausedTrackingReminders()
         await refreshAuthorizationStatus()
         let allowed = authorizationStatus == .authorized
             || authorizationStatus == .provisional
@@ -1786,7 +1839,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: content,
             trigger: nil
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func showFamilySyncAccessEndedNotification(
@@ -1805,7 +1858,7 @@ final class NotificationManager: NSObject, ObservableObject {
             content: buildFamilySyncAccessEndedNotificationContent(reason: reason),
             trigger: nil
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        try? await addTrackingAwareNotification(request)
     }
 
     func buildFamilySyncAccessEndedNotificationContent(
@@ -1937,7 +1990,7 @@ final class NotificationManager: NSObject, ObservableObject {
                 content: content,
                 trigger: Self.oneShotTrigger(at: fireDate)
             )
-            try? await UNUserNotificationCenter.current().add(request)
+            try? await addTrackingAwareNotification(request)
             let profileID = (content.userInfo["profileID"] as? String)
                 .flatMap(UUID.init(uuidString:))
             var state = state(profileID: profileID)
@@ -2030,6 +2083,9 @@ final class NotificationManager: NSObject, ObservableObject {
         isSleeping: Bool = false,
         now: Date = Date()
     ) -> String {
+        guard CareTrackingPreferenceStore.allows(.sleep, profileID: profileID) else {
+            return "Sleep tracking is paused"
+        }
         let decision = Self.schedulingDecision(
             prediction: prediction,
             settings: settings,
@@ -2164,10 +2220,14 @@ final class NotificationManager: NSObject, ObservableObject {
     static func sleepPressureStatusText(
         pressure: SleepPressure?,
         enabled: Bool,
+        profileID: UUID? = nil,
         isSleeping: Bool = false,
         authorizationStatus: UNAuthorizationStatus = .authorized,
         now: Date = Date()
     ) -> String {
+        guard CareTrackingPreferenceStore.allows(.sleep, profileID: profileID) else {
+            return "Sleep tracking is paused"
+        }
         let decision = sleepPressureAlertDecision(
             pressure: pressure,
             enabled: enabled,
@@ -2740,6 +2800,7 @@ enum SystemIntegrationReconciler {
                 regimen.remindersEnabled &&
                 regimen.scheduleKind.isScheduled &&
                 regimen.profileID.map(activeProfileIDs.contains) == true &&
+                CareTrackingPreferenceStore.allows(.medicine, profileID: regimen.profileID) &&
                 medicationByID[regimen.medicationID].map { !$0.isArchived } == true
         }.sorted { $0.id.uuidString < $1.id.uuidString }
         let eligibleRegimenIDs = Set(eligibleRegimens.map(\.id))

@@ -114,7 +114,8 @@ enum WatchStateFactory {
         let hiddenCategoriesByProfile = Dictionary(uniqueKeysWithValues: profiles.map {
             (
                 $0.id,
-                Set(CareCategoryPreferenceStore.hiddenTypes(profileID: $0.id).map(\.rawValue))
+                Set(CareCategoryPreferenceStore.hiddenTypes(profileID: $0.id)
+                    .union(CareTrackingPreferenceStore.preferences(profileID: $0.id).pausedTypes).map(\.rawValue))
             )
         })
         let priorSnapshot = WidgetSnapshotService.read()
@@ -197,7 +198,7 @@ enum WatchStateFactory {
         let hasRunningSleep = events.contains {
             $0.isSleepBlock && $0.isTimerRunning
         }
-        let currentPrediction = hasRunningSleep ? nil : prediction.flatMap {
+        let currentPrediction = hasRunningSleep || !CareTrackingPreferenceStore.allows(.sleep, profileID: profileID) ? nil : prediction.flatMap {
             $0.windowEnd >= now ? $0 : nil
         }
         let metrics = orderedMetrics(
@@ -212,6 +213,7 @@ enum WatchStateFactory {
             )
         }
         let upcomingMedication = selectedProfile.profileType == .adult
+            && CareTrackingPreferenceStore.allows(.medicine, profileID: profileID)
             ? upcomingMedication(
                 profileID: profileID,
                 context: context,
@@ -251,6 +253,7 @@ enum WatchStateFactory {
         profileID: UUID,
         context: ModelContext,
         now: Date = Date(),
+        lookbackHours: Int = 12,
         snoozeDefaults: UserDefaults = .standard
     ) -> WatchMedicationSnapshot? {
         let medications = ((try? context.fetch(FetchDescriptor<Medication>(
@@ -278,8 +281,8 @@ enum WatchStateFactory {
             predicate: #Predicate { $0.profileID == profileID }
         ))) ?? [])
         let calendar = MedicationScheduleDate.currentCalendar()
-        let searchStart = calendar.date(byAdding: .hour, value: -12, to: now)
-            ?? now.addingTimeInterval(-12 * 60 * 60)
+        let searchStart = calendar.date(byAdding: .hour, value: -lookbackHours, to: now)
+            ?? now.addingTimeInterval(Double(-lookbackHours) * 60 * 60)
         let searchEnd = calendar.date(byAdding: .day, value: 7, to: now)
             ?? now.addingTimeInterval(7 * 24 * 60 * 60)
         var candidates: [WatchMedicationSnapshot] = []

@@ -63,9 +63,15 @@ private struct TodaySummaryWidgetView: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.48))
                     }
-                    HStack(spacing: 10) {
-                        ForEach(widgetMetrics) { item in
-                            metric(item.value, item.title, item.systemImage, tint(named: item.tintName))
+                    if widgetMetrics.isEmpty {
+                        Text("No active tracking categories")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                    } else {
+                        HStack(spacing: 10) {
+                            ForEach(widgetMetrics) { item in
+                                metric(item.value, item.title, item.systemImage, tint(named: item.tintName))
+                            }
                         }
                     }
                 }
@@ -75,14 +81,7 @@ private struct TodaySummaryWidgetView: View {
     }
 
     private var widgetMetrics: [CareSummaryMetricSnapshot] {
-        if let metrics = snapshot.todaySummary.summaryMetrics, !metrics.isEmpty {
-            let preferredIDs = snapshot.todaySummary.isDog
-                ? ["food", "water", "potty", "walks"]
-                : ["sleep-total", "sleep-naps", "feed-total", "diapers"]
-            return preferredIDs.compactMap { id in
-                metrics.first { $0.id == id }
-            }
-        }
+        if let metrics = snapshot.todaySummary.widgetMetrics { return metrics }
 
         if snapshot.todaySummary.isDog {
             return [
