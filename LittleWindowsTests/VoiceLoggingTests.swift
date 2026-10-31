@@ -208,6 +208,83 @@ final class VoiceLoggingTests: XCTestCase {
         XCTAssertThrowsError(try conflicting.resolvedEntryKind())
     }
 
+    func testPromotedCareAndDiaperCatalogsPartitionEveryExistingCareKind() {
+        let general = Set(VoiceGeneralCareEntry.allCases.map(\.kind))
+        let diapers = Set(VoiceDiaperEntry.allCases.map(\.kind)).union([.diaper])
+        XCTAssertTrue(general.isDisjoint(with: diapers))
+        XCTAssertEqual(general.union(diapers), Set(VoiceCareKind.allCases))
+    }
+
+    func testDedicatedDiaperRoutePreservesStructuredAmountsAndDetails() throws {
+        let container = try store()
+        let child = try profile(.child, in: container)
+        for entry in VoiceDiaperEntry.allCases {
+            let intent = LogDiaperByVoiceIntent()
+            intent.diaperEntry = entry
+            intent.diaperRash = true
+            intent.notes = "Sample note"
+            let log = try intent.careLog(profileID: child.id, at: now)
+            XCTAssertEqual(log.profileID, child.id)
+            XCTAssertEqual(log.date, now)
+            let event = try VoiceLoggingService.makeEvent(log, profile: child, now: now)
+            XCTAssertEqual(event.type, .diaper)
+            XCTAssertNil(event.sleepKind)
+            XCTAssertEqual(event.diaperKind, entry.kind.diaperKind)
+            XCTAssertEqual(event.peeAmount, entry.kind.diaperKind?.hasPee == true ? entry.kind.diaperAmount : nil)
+            XCTAssertEqual(event.pooAmount, entry.kind.diaperKind?.hasPoo == true ? entry.kind.diaperAmount : nil)
+            XCTAssertEqual(event.diaperRash, true)
+            XCTAssertEqual(event.notes, "Sample note")
+        }
+        let generic = LogDiaperByVoiceIntent()
+        XCTAssertThrowsError(try generic.resolvedEntryKind())
+        generic.diaperKind = .both
+        generic.peeAmount = .little
+        generic.pooAmount = .big
+        let event = try VoiceLoggingService.makeEvent(try generic.careLog(profileID: child.id, at: now), profile: child, now: now)
+        XCTAssertEqual(event.peeAmount, .little)
+        XCTAssertEqual(event.pooAmount, .big)
+        generic.diaperEntry = .bigPee
+        generic.diaperKind = .dirty
+        XCTAssertThrowsError(try VoiceLoggingService.makeEvent(try generic.careLog(profileID: child.id, at: now), profile: child, now: now))
+    }
+
+    func testDiaperPhraseFormsKeepTheirAmountAndGenericFormsAskForDetails() throws {
+        let container = try store()
+        let child = try profile(.child, in: container)
+        for phrase in VoiceDiaperPhrase.allCases {
+            let intent = LogDiaperByVoiceIntent()
+            intent.spokenEntry = phrase
+            if phrase.kind == .diaper {
+                XCTAssertThrowsError(try intent.resolvedEntryKind())
+                intent.diaperEntry = .mediumPoo
+                XCTAssertEqual(try intent.resolvedEntryKind(), .mediumPoo)
+            } else {
+                let event = try VoiceLoggingService.makeEvent(try intent.careLog(profileID: child.id, at: now), profile: child, now: now)
+                XCTAssertEqual(event.type, .diaper)
+                XCTAssertNil(event.sleepKind)
+                XCTAssertEqual(event.diaperKind, phrase.kind.diaperKind)
+                XCTAssertEqual(event.peeAmount, phrase.kind.diaperKind?.hasPee == true ? phrase.kind.diaperAmount : nil)
+                XCTAssertEqual(event.pooAmount, phrase.kind.diaperKind?.hasPoo == true ? phrase.kind.diaperAmount : nil)
+            }
+        }
+        let conflict = LogDiaperByVoiceIntent()
+        conflict.spokenEntry = .aBigPee
+        conflict.diaperEntry = .mediumPoo
+        XCTAssertThrowsError(try conflict.resolvedEntryKind())
+    }
+
+    func testGeneralVoiceRouteRequiresAnEntryAndKeepsLegacyShortcutCategories() throws {
+        let intent = LogCareByVoiceIntent()
+        XCTAssertThrowsError(try intent.resolvedEntryKind())
+        intent.entry = .sleep
+        XCTAssertEqual(try intent.resolvedEntryKind(), .sleep)
+        intent.kind = .diaper
+        XCTAssertThrowsError(try intent.resolvedEntryKind())
+        intent.entry = nil
+        intent.diaperEntry = .bigPee
+        XCTAssertEqual(try intent.resolvedEntryKind(), .bigPee)
+    }
+
     func testLastPeeAndPooIncludeMixedDiapersAndRespectTheRequestedAmount() async throws {
         let container = try store()
         let child = try profile(.child, in: container)

@@ -22,9 +22,9 @@ extension VoiceCareKind: AppEnum {
         .brushTeeth: DisplayRepresentation(title: "Tooth brushing", synonyms: ["Brushing teeth"]),
         .indoorPlay: "Indoor play", .outdoorPlay: "Outdoor play", .screenTime: "Screen time", .bath: "Bath",
         .exercise: "Exercise", .physicalTherapy: "Physical therapy", .socialActivity: "Social activity",
-        .littlePee: DisplayRepresentation(title: "Little pee", synonyms: ["Small pee", "Little wet diaper", "Small wet diaper"]),
-        .mediumPee: DisplayRepresentation(title: "Medium pee", synonyms: ["Medium wet diaper"]),
-        .bigPee: DisplayRepresentation(title: "Big pee", synonyms: ["Large pee", "Big wet diaper", "Large wet diaper"]),
+        .littlePee: DisplayRepresentation(title: "Little pee", synonyms: ["Small pee", "Little wet diaper", "Small wet diaper", "Little P", "Small P"]),
+        .mediumPee: DisplayRepresentation(title: "Medium pee", synonyms: ["Medium wet diaper", "Medium P"]),
+        .bigPee: DisplayRepresentation(title: "Big pee", synonyms: ["Large pee", "Big wet diaper", "Large wet diaper", "Big P", "Large P"]),
         .littlePoo: DisplayRepresentation(title: "Little poo", synonyms: ["Small poo", "Little poop", "Small poop", "Little dirty diaper", "Small dirty diaper"]),
         .mediumPoo: DisplayRepresentation(title: "Medium poo", synonyms: ["Medium poop", "Medium dirty diaper"]),
         .bigPoo: DisplayRepresentation(title: "Big poo", synonyms: ["Large poo", "Big poop", "Large poop", "Big dirty diaper", "Large dirty diaper"]),
@@ -64,15 +64,199 @@ enum VoiceDiaperEntry: String, CaseIterable, AppEnum {
         .wetDiaper: DisplayRepresentation(title: "Wet diaper", synonyms: ["Pee", "Pee diaper"]),
         .dirtyDiaper: DisplayRepresentation(title: "Dirty diaper", synonyms: ["Poo", "Poop", "Poo diaper", "Poop diaper", "Poopy diaper"]),
         .mixedDiaper: DisplayRepresentation(title: "Mixed diaper", synonyms: ["Pee and poo", "Pee and poop", "Pee and poo diaper", "Pee and poop diaper", "Wet and dirty diaper"]),
-        .littlePee: DisplayRepresentation(title: "Little pee", synonyms: ["Small pee", "Little wet diaper", "Small wet diaper"]),
-        .mediumPee: DisplayRepresentation(title: "Medium pee", synonyms: ["Medium wet diaper"]),
-        .bigPee: DisplayRepresentation(title: "Big pee", synonyms: ["Large pee", "Big wet diaper", "Large wet diaper"]),
+        .littlePee: DisplayRepresentation(title: "Little pee", synonyms: ["Small pee", "Little wet diaper", "Small wet diaper", "Little P", "Small P"]),
+        .mediumPee: DisplayRepresentation(title: "Medium pee", synonyms: ["Medium wet diaper", "Medium P"]),
+        .bigPee: DisplayRepresentation(title: "Big pee", synonyms: ["Large pee", "Big wet diaper", "Large wet diaper", "Big P", "Large P"]),
         .littlePoo: DisplayRepresentation(title: "Little poo", synonyms: ["Small poo", "Little poop", "Small poop", "Little dirty diaper", "Small dirty diaper"]),
         .mediumPoo: DisplayRepresentation(title: "Medium poo", synonyms: ["Medium poop", "Medium dirty diaper"]),
         .bigPoo: DisplayRepresentation(title: "Big poo", synonyms: ["Large poo", "Big poop", "Large poop", "Big dirty diaper", "Large dirty diaper"]),
         .littleMixedDiaper: DisplayRepresentation(title: "Little mixed diaper", synonyms: ["Small mixed diaper"]),
         .mediumMixedDiaper: "Medium mixed diaper",
         .bigMixedDiaper: DisplayRepresentation(title: "Big mixed diaper", synonyms: ["Large mixed diaper"]),
+    ]
+}
+
+/// Canonical phrase values keep the whole entry (including an article and
+/// amount) together. The follow-up menu remains the concise VoiceDiaperEntry.
+enum VoiceDiaperPhrase: String, CaseIterable, AppEnum {
+    case diaper, aDiaper
+    case wetDiaper, aWetDiaper, pee, aPee, peeDiaper, aPeeDiaper
+    case dirtyDiaper, aDirtyDiaper, poo, aPoo, poop, aPoop, pooDiaper, aPooDiaper, poopDiaper, aPoopDiaper, poopyDiaper, aPoopyDiaper
+    case mixedDiaper, aMixedDiaper, peeAndPoo, aPeeAndPoo, peeAndPoop, aPeeAndPoop, peeAndPooDiaper, aPeeAndPooDiaper, peeAndPoopDiaper, aPeeAndPoopDiaper, wetAndDirtyDiaper, aWetAndDirtyDiaper
+    case littlePee, aLittlePee, smallPee, aSmallPee, littleWetDiaper, aLittleWetDiaper, smallWetDiaper, aSmallWetDiaper, littleP, aLittleP, smallP, aSmallP
+    case mediumPee, aMediumPee, mediumWetDiaper, aMediumWetDiaper, mediumP, aMediumP
+    case bigPee, aBigPee, largePee, aLargePee, bigWetDiaper, aBigWetDiaper, largeWetDiaper, aLargeWetDiaper, bigP, aBigP, largeP, aLargeP
+    case littlePoo, aLittlePoo, smallPoo, aSmallPoo, littlePoop, aLittlePoop, smallPoop, aSmallPoop, littleDirtyDiaper, aLittleDirtyDiaper, smallDirtyDiaper, aSmallDirtyDiaper
+    case mediumPoo, aMediumPoo, mediumPoop, aMediumPoop, mediumDirtyDiaper, aMediumDirtyDiaper
+    case bigPoo, aBigPoo, largePoo, aLargePoo, bigPoop, aBigPoop, largePoop, aLargePoop, bigDirtyDiaper, aBigDirtyDiaper, largeDirtyDiaper, aLargeDirtyDiaper
+    case littleMixedDiaper, aLittleMixedDiaper, smallMixedDiaper, aSmallMixedDiaper
+    case mediumMixedDiaper, aMediumMixedDiaper
+    case bigMixedDiaper, aBigMixedDiaper, largeMixedDiaper, aLargeMixedDiaper
+
+    var kind: VoiceCareKind {
+        switch self {
+        case .diaper, .aDiaper: .diaper
+        case .wetDiaper, .aWetDiaper, .pee, .aPee, .peeDiaper, .aPeeDiaper: .wetDiaper
+        case .dirtyDiaper, .aDirtyDiaper, .poo, .aPoo, .poop, .aPoop, .pooDiaper, .aPooDiaper, .poopDiaper, .aPoopDiaper, .poopyDiaper, .aPoopyDiaper: .dirtyDiaper
+        case .mixedDiaper, .aMixedDiaper, .peeAndPoo, .aPeeAndPoo, .peeAndPoop, .aPeeAndPoop, .peeAndPooDiaper, .aPeeAndPooDiaper, .peeAndPoopDiaper, .aPeeAndPoopDiaper, .wetAndDirtyDiaper, .aWetAndDirtyDiaper: .mixedDiaper
+        case .littlePee, .aLittlePee, .smallPee, .aSmallPee, .littleWetDiaper, .aLittleWetDiaper, .smallWetDiaper, .aSmallWetDiaper, .littleP, .aLittleP, .smallP, .aSmallP: .littlePee
+        case .mediumPee, .aMediumPee, .mediumWetDiaper, .aMediumWetDiaper, .mediumP, .aMediumP: .mediumPee
+        case .bigPee, .aBigPee, .largePee, .aLargePee, .bigWetDiaper, .aBigWetDiaper, .largeWetDiaper, .aLargeWetDiaper, .bigP, .aBigP, .largeP, .aLargeP: .bigPee
+        case .littlePoo, .aLittlePoo, .smallPoo, .aSmallPoo, .littlePoop, .aLittlePoop, .smallPoop, .aSmallPoop, .littleDirtyDiaper, .aLittleDirtyDiaper, .smallDirtyDiaper, .aSmallDirtyDiaper: .littlePoo
+        case .mediumPoo, .aMediumPoo, .mediumPoop, .aMediumPoop, .mediumDirtyDiaper, .aMediumDirtyDiaper: .mediumPoo
+        case .bigPoo, .aBigPoo, .largePoo, .aLargePoo, .bigPoop, .aBigPoop, .largePoop, .aLargePoop, .bigDirtyDiaper, .aBigDirtyDiaper, .largeDirtyDiaper, .aLargeDirtyDiaper: .bigPoo
+        case .littleMixedDiaper, .aLittleMixedDiaper, .smallMixedDiaper, .aSmallMixedDiaper: .littleMixedDiaper
+        case .mediumMixedDiaper, .aMediumMixedDiaper: .mediumMixedDiaper
+        case .bigMixedDiaper, .aBigMixedDiaper, .largeMixedDiaper, .aLargeMixedDiaper: .bigMixedDiaper
+        }
+    }
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Diaper entry"
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .diaper: "Diaper",
+        .aDiaper: "A diaper",
+        .wetDiaper: "Wet diaper",
+        .aWetDiaper: "A wet diaper",
+        .pee: "Pee",
+        .aPee: "A pee",
+        .peeDiaper: "Pee diaper",
+        .aPeeDiaper: "A pee diaper",
+        .dirtyDiaper: "Dirty diaper",
+        .aDirtyDiaper: "A dirty diaper",
+        .poo: "Poo",
+        .aPoo: "A poo",
+        .poop: "Poop",
+        .aPoop: "A poop",
+        .pooDiaper: "Poo diaper",
+        .aPooDiaper: "A poo diaper",
+        .poopDiaper: "Poop diaper",
+        .aPoopDiaper: "A poop diaper",
+        .poopyDiaper: "Poopy diaper",
+        .aPoopyDiaper: "A poopy diaper",
+        .mixedDiaper: "Mixed diaper",
+        .aMixedDiaper: "A mixed diaper",
+        .peeAndPoo: "Pee and poo",
+        .aPeeAndPoo: "A pee and poo",
+        .peeAndPoop: "Pee and poop",
+        .aPeeAndPoop: "A pee and poop",
+        .peeAndPooDiaper: "Pee and poo diaper",
+        .aPeeAndPooDiaper: "A pee and poo diaper",
+        .peeAndPoopDiaper: "Pee and poop diaper",
+        .aPeeAndPoopDiaper: "A pee and poop diaper",
+        .wetAndDirtyDiaper: "Wet and dirty diaper",
+        .aWetAndDirtyDiaper: "A wet and dirty diaper",
+        .littlePee: "Little pee",
+        .aLittlePee: "A little pee",
+        .smallPee: "Small pee",
+        .aSmallPee: "A small pee",
+        .littleWetDiaper: "Little wet diaper",
+        .aLittleWetDiaper: "A little wet diaper",
+        .smallWetDiaper: "Small wet diaper",
+        .aSmallWetDiaper: "A small wet diaper",
+        .littleP: "Little P",
+        .aLittleP: "A little p",
+        .smallP: "Small P",
+        .aSmallP: "A small p",
+        .mediumPee: "Medium pee",
+        .aMediumPee: "A medium pee",
+        .mediumWetDiaper: "Medium wet diaper",
+        .aMediumWetDiaper: "A medium wet diaper",
+        .mediumP: "Medium P",
+        .aMediumP: "A medium p",
+        .bigPee: "Big pee",
+        .aBigPee: "A big pee",
+        .largePee: "Large pee",
+        .aLargePee: "A large pee",
+        .bigWetDiaper: "Big wet diaper",
+        .aBigWetDiaper: "A big wet diaper",
+        .largeWetDiaper: "Large wet diaper",
+        .aLargeWetDiaper: "A large wet diaper",
+        .bigP: "Big P",
+        .aBigP: "A big p",
+        .largeP: "Large P",
+        .aLargeP: "A large p",
+        .littlePoo: "Little poo",
+        .aLittlePoo: "A little poo",
+        .smallPoo: "Small poo",
+        .aSmallPoo: "A small poo",
+        .littlePoop: "Little poop",
+        .aLittlePoop: "A little poop",
+        .smallPoop: "Small poop",
+        .aSmallPoop: "A small poop",
+        .littleDirtyDiaper: "Little dirty diaper",
+        .aLittleDirtyDiaper: "A little dirty diaper",
+        .smallDirtyDiaper: "Small dirty diaper",
+        .aSmallDirtyDiaper: "A small dirty diaper",
+        .mediumPoo: "Medium poo",
+        .aMediumPoo: "A medium poo",
+        .mediumPoop: "Medium poop",
+        .aMediumPoop: "A medium poop",
+        .mediumDirtyDiaper: "Medium dirty diaper",
+        .aMediumDirtyDiaper: "A medium dirty diaper",
+        .bigPoo: "Big poo",
+        .aBigPoo: "A big poo",
+        .largePoo: "Large poo",
+        .aLargePoo: "A large poo",
+        .bigPoop: "Big poop",
+        .aBigPoop: "A big poop",
+        .largePoop: "Large poop",
+        .aLargePoop: "A large poop",
+        .bigDirtyDiaper: "Big dirty diaper",
+        .aBigDirtyDiaper: "A big dirty diaper",
+        .largeDirtyDiaper: "Large dirty diaper",
+        .aLargeDirtyDiaper: "A large dirty diaper",
+        .littleMixedDiaper: "Little mixed diaper",
+        .aLittleMixedDiaper: "A little mixed diaper",
+        .smallMixedDiaper: "Small mixed diaper",
+        .aSmallMixedDiaper: "A small mixed diaper",
+        .mediumMixedDiaper: "Medium mixed diaper",
+        .aMediumMixedDiaper: "A medium mixed diaper",
+        .bigMixedDiaper: "Big mixed diaper",
+        .aBigMixedDiaper: "A big mixed diaper",
+        .largeMixedDiaper: "Large mixed diaper",
+        .aLargeMixedDiaper: "A large mixed diaper",
+    ]
+}
+
+/// The promoted care vocabulary excludes diapers, which have their own action.
+/// Keep VoiceCareKind unchanged for existing saved Shortcuts and history queries.
+enum VoiceGeneralCareEntry: String, CaseIterable, AppEnum {
+    case bottle, sleep, nursing, pumping, temperature, bloodPressure, heartRate, oxygenSaturation, respiratoryRate, glucose, weight, pain, symptom, activity, note, potty, pottyPee, pottyPoop, pottyBoth, solidMeal, otherFeed, height, headCircumference, tummyTime, storyTime, brushTeeth, indoorPlay, outdoorPlay, screenTime, bath, exercise, physicalTherapy, socialActivity
+    var kind: VoiceCareKind { VoiceCareKind(rawValue: rawValue)! }
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Care entry"
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .bottle: "Bottle",
+        .sleep: DisplayRepresentation(title: "Sleep", synonyms: ["Completed sleep"]),
+        .nursing: "Nursing",
+        .pumping: "Pumping",
+        .temperature: "Temperature",
+        .bloodPressure: "Blood pressure",
+        .heartRate: "Pulse",
+        .oxygenSaturation: "Oxygen saturation",
+        .respiratoryRate: "Breathing rate",
+        .glucose: "Blood glucose",
+        .weight: "Weight",
+        .pain: "Pain",
+        .symptom: "Symptom",
+        .activity: "Activity",
+        .note: "Note",
+        .potty: DisplayRepresentation(title: "Potty", synonyms: ["Potty visit"]),
+        .pottyPee: "Potty pee",
+        .pottyPoop: DisplayRepresentation(title: "Potty poo", synonyms: ["Potty poop"]),
+        .pottyBoth: DisplayRepresentation(title: "Potty pee and poo", synonyms: ["Potty pee and poop"]),
+        .solidMeal: DisplayRepresentation(title: "Solid meal", synonyms: ["Solids"]),
+        .otherFeed: "Other feed",
+        .height: DisplayRepresentation(title: "Height", synonyms: ["Length"]),
+        .headCircumference: "Head circumference",
+        .tummyTime: "Tummy time",
+        .storyTime: DisplayRepresentation(title: "Story time", synonyms: ["Reading"]),
+        .brushTeeth: DisplayRepresentation(title: "Tooth brushing", synonyms: ["Brushing teeth"]),
+        .indoorPlay: "Indoor play",
+        .outdoorPlay: "Outdoor play",
+        .screenTime: "Screen time",
+        .bath: "Bath",
+        .exercise: "Exercise",
+        .physicalTherapy: "Physical therapy",
+        .socialActivity: "Social activity",
     ]
 }
 
@@ -95,7 +279,7 @@ extension ChildPottyLocation: AppEnum {
 extension DiaperAmount: AppEnum {
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "Pee or poo amount"
     static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
-        .little: DisplayRepresentation(title: "Little", synonyms: ["Small"]), .medium: "Medium",
+        .little: DisplayRepresentation(title: "Small", synonyms: ["Little"]), .medium: "Medium",
         .big: DisplayRepresentation(title: "Big", synonyms: ["Large"]), .unknown: "Unknown"
     ]
 }
@@ -353,7 +537,8 @@ struct LogCareByVoiceIntent: AppIntent {
     static var openAppWhenRun: Bool { true }
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
-    @Parameter(title: "Entry", requestValueDialog: "What would you like to log?") var kind: VoiceCareKind
+    @Parameter(title: "Entry", requestValueDialog: "What would you like to log?") var kind: VoiceCareKind?
+    @Parameter(title: "Care entry") var entry: VoiceGeneralCareEntry?
     @Parameter(title: "Profile") var profile: VoiceCareProfileEntity?
     @Parameter(title: "Amount or reading") var value: Double?
     @Parameter(title: "Unit") var unit: VoiceCareUnit?
@@ -378,33 +563,59 @@ struct LogCareByVoiceIntent: AppIntent {
     @Parameter(title: "Diaper rash") var diaperRash: Bool?
 
     static var parameterSummary: some ParameterSummary {
-        Switch(\.$kind) {
-            Case([.diaper, .wetDiaper, .dirtyDiaper, .mixedDiaper,
-                  .littlePee, .mediumPee, .bigPee, .littlePoo, .mediumPoo, .bigPoo,
-                  .littleMixedDiaper, .mediumMixedDiaper, .bigMixedDiaper]) {
-                Summary("Log \(\.$kind) for \(\.$profile)") {
-                    \.$diaperEntry; \.$diaperKind; \.$peeAmount; \.$pooAmount; \.$pooColor; \.$pooTexture; \.$diaperRash; \.$date; \.$notes
+        When(\.$entry, .hasAnyValue) {
+            Switch(\.$entry) {
+                Case([.potty, .pottyPee, .pottyPoop, .pottyBoth]) {
+                    Summary("Log \(\.$entry) for \(\.$profile)") { \.$pottyKind; \.$pottyLocation; \.$pottyAccident; \.$peeAmount; \.$pooAmount; \.$pooColor; \.$pooTexture; \.$date; \.$notes }
                 }
+                Case(.sleep) { Summary("Log \(\.$entry) for \(\.$profile)") { \.$durationMinutes; \.$sleepKind; \.$date; \.$notes } }
+                Case(.nursing) { Summary("Log \(\.$entry) for \(\.$profile)") { \.$nursingSide; \.$durationMinutes; \.$date; \.$notes } }
+                Case(.bloodPressure) { Summary("Log \(\.$entry) for \(\.$profile)") { \.$value; \.$secondValue; \.$pulse; \.$date; \.$notes } }
+                Case(.symptom) { Summary("Log \(\.$entry) for \(\.$profile)") { \.$text; \.$value; \.$date; \.$notes } }
+                Case(.pain) { Summary("Log \(\.$entry) for \(\.$profile)") { \.$value; \.$text; \.$date; \.$notes } }
+                Case(.note) { Summary("Log \(\.$entry) for \(\.$profile)") { \.$text; \.$date } }
+                Case([.activity, .tummyTime, .storyTime, .brushTeeth, .indoorPlay, .outdoorPlay, .screenTime, .bath,
+                      .exercise, .physicalTherapy, .socialActivity]) {
+                    Summary("Log \(\.$entry) for \(\.$profile)") { \.$text; \.$durationMinutes; \.$date; \.$notes }
+                }
+                Case([.solidMeal, .otherFeed]) { Summary("Log \(\.$entry) for \(\.$profile)") { \.$text; \.$durationMinutes; \.$date; \.$notes } }
+                DefaultCase { Summary("Log \(\.$entry) for \(\.$profile)") { \.$value; \.$unit; \.$durationMinutes; \.$date; \.$notes } }
             }
-            Case([.potty, .pottyPee, .pottyPoop, .pottyBoth]) {
-                Summary("Log \(\.$kind) for \(\.$profile)") { \.$pottyKind; \.$pottyLocation; \.$pottyAccident; \.$peeAmount; \.$pooAmount; \.$pooColor; \.$pooTexture; \.$date; \.$notes }
+        } otherwise: {
+            Switch(\.$kind) {
+                Case([.diaper, .wetDiaper, .dirtyDiaper, .mixedDiaper,
+                      .littlePee, .mediumPee, .bigPee, .littlePoo, .mediumPoo, .bigPoo,
+                      .littleMixedDiaper, .mediumMixedDiaper, .bigMixedDiaper]) {
+                    Summary("Log \(\.$kind) for \(\.$profile)") {
+                        \.$diaperEntry; \.$diaperKind; \.$peeAmount; \.$pooAmount; \.$pooColor; \.$pooTexture; \.$diaperRash; \.$date; \.$notes
+                    }
+                }
+                Case([.potty, .pottyPee, .pottyPoop, .pottyBoth]) {
+                    Summary("Log \(\.$kind) for \(\.$profile)") { \.$pottyKind; \.$pottyLocation; \.$pottyAccident; \.$peeAmount; \.$pooAmount; \.$pooColor; \.$pooTexture; \.$date; \.$notes }
+                }
+                Case(.sleep) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$durationMinutes; \.$sleepKind; \.$date; \.$notes } }
+                Case(.nursing) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$nursingSide; \.$durationMinutes; \.$date; \.$notes } }
+                Case(.bloodPressure) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$value; \.$secondValue; \.$pulse; \.$date; \.$notes } }
+                Case(.symptom) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$value; \.$date; \.$notes } }
+                Case(.pain) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$value; \.$text; \.$date; \.$notes } }
+                Case(.note) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$date } }
+                Case([.activity, .tummyTime, .storyTime, .brushTeeth, .indoorPlay, .outdoorPlay, .screenTime, .bath,
+                      .exercise, .physicalTherapy, .socialActivity]) {
+                    Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$durationMinutes; \.$date; \.$notes }
+                }
+                Case([.solidMeal, .otherFeed]) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$durationMinutes; \.$date; \.$notes } }
+                DefaultCase { Summary("Log \(\.$kind) for \(\.$profile)") { \.$value; \.$unit; \.$durationMinutes; \.$date; \.$notes } }
             }
-            Case(.sleep) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$durationMinutes; \.$sleepKind; \.$date; \.$notes } }
-            Case(.nursing) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$nursingSide; \.$durationMinutes; \.$date; \.$notes } }
-            Case(.bloodPressure) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$value; \.$secondValue; \.$pulse; \.$date; \.$notes } }
-            Case(.symptom) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$value; \.$date; \.$notes } }
-            Case(.pain) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$value; \.$text; \.$date; \.$notes } }
-            Case(.note) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$date } }
-            Case([.activity, .tummyTime, .storyTime, .brushTeeth, .indoorPlay, .outdoorPlay, .screenTime, .bath,
-                  .exercise, .physicalTherapy, .socialActivity]) {
-                Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$durationMinutes; \.$date; \.$notes }
-            }
-            Case([.solidMeal, .otherFeed]) { Summary("Log \(\.$kind) for \(\.$profile)") { \.$text; \.$durationMinutes; \.$date; \.$notes } }
-            DefaultCase { Summary("Log \(\.$kind) for \(\.$profile)") { \.$value; \.$unit; \.$durationMinutes; \.$date; \.$notes } }
         }
     }
 
     func resolvedEntryKind() throws -> VoiceCareKind {
+        guard let kind = kind ?? entry?.kind else {
+            throw $kind.needsValueError("What would you like to log?")
+        }
+        if let entry, kind != entry.kind {
+            throw VoiceLoggingError("The care entry and saved category conflict. Choose one entry.")
+        }
         if let diaperEntry, kind != .diaper && kind != diaperEntry.kind {
             throw VoiceLoggingError("The diaper entry and spoken details conflict. Choose one diaper entry.")
         }
@@ -415,6 +626,8 @@ struct LogCareByVoiceIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let requestedAt = date ?? Date()
         self.date = requestedAt
+        let kind = try resolvedEntryKind()
+        self.kind = kind
         let choices = try await VoiceIntentProfiles.choices(kind: kind)
         let target: VoiceCareProfileEntity
         if let profile {
@@ -493,8 +706,78 @@ struct LogCareByVoiceIntent: AppIntent {
     }
 }
 
-/// A literal phrase gets its own action so Siri never has to infer an entry
-/// category (or offer the app's action picker) for the common sleep workflow.
+/// A focused action gives flexible matching a diaper-specific route. Its
+/// parameters use the same structured writer and validation as general care.
+struct LogDiaperByVoiceIntent: AppIntent {
+    static let title: LocalizedStringResource = "Log Diaper, Pee or Poop"
+    static let description = IntentDescription("Records a wet, dirty or mixed diaper, including pee and poop amounts, color, consistency and rash. Big pee and medium poop describe diapers.")
+    static var openAppWhenRun: Bool { true }
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    @Parameter(title: "Diaper entry") var spokenEntry: VoiceDiaperPhrase?
+    @Parameter(title: "Diaper details") var diaperEntry: VoiceDiaperEntry?
+    @Parameter(title: "Profile") var profile: VoiceCareProfileEntity?
+    @Parameter(title: "Diaper type") var diaperKind: DiaperKind?
+    @Parameter(title: "Pee amount") var peeAmount: DiaperAmount?
+    @Parameter(title: "Poo amount") var pooAmount: DiaperAmount?
+    @Parameter(title: "Poo color") var pooColor: PooColor?
+    @Parameter(title: "Poo consistency") var pooTexture: PooTexture?
+    @Parameter(title: "Diaper rash") var diaperRash: Bool?
+    @Parameter(title: "When") var date: Date?
+    @Parameter(title: "Notes") var notes: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Log \(\.$spokenEntry) for \(\.$profile)") {
+            \.$diaperEntry; \.$diaperKind; \.$peeAmount; \.$pooAmount; \.$pooColor; \.$pooTexture; \.$diaperRash; \.$date; \.$notes
+        }
+    }
+
+    func resolvedEntryKind() throws -> VoiceCareKind {
+        if let spokenEntry, spokenEntry.kind != .diaper {
+            if let diaperEntry, spokenEntry.kind != diaperEntry.kind {
+                throw VoiceLoggingError("The spoken entry and diaper details conflict. Choose one diaper entry.")
+            }
+            return spokenEntry.kind
+        }
+        guard diaperEntry != nil || diaperKind != nil else {
+            throw $diaperEntry.needsValueError("Pee, poo, or mixed? You can include an amount, like big pee or medium poop.")
+        }
+        return diaperEntry?.kind ?? .diaper
+    }
+
+    func careLog(profileID: UUID, at date: Date) throws -> VoiceCareLog {
+        VoiceCareLog(profileID: profileID, kind: try resolvedEntryKind(), date: date,
+            notes: notes, diaperKind: diaperKind, peeAmount: peeAmount, pooAmount: pooAmount,
+            pooColor: pooColor, pooTexture: pooTexture, diaperRash: diaperRash)
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let requestedAt = date ?? Date()
+        self.date = requestedAt
+        // Resolve diaper details before asking for a person; a missing entry
+        // must never turn into an unrelated category's follow-up.
+        _ = try resolvedEntryKind()
+        let choices = try await VoiceIntentProfiles.choices(kind: .diaper)
+        let target: VoiceCareProfileEntity
+        if let profile {
+            guard choices.contains(where: { $0.id == profile.id }) else {
+                throw VoiceLoggingError("Choose an available child profile.")
+            }
+            target = profile
+        } else if choices.count == 1 {
+            target = choices[0]
+        } else {
+            target = try await $profile.requestDisambiguation(among: choices, dialog: "Whose diaper would you like to record?")
+        }
+        self.profile = target
+        let container = try await VoiceLoggingService.container()
+        let message = try await VoiceLoggingService.log(try careLog(profileID: target.id, at: requestedAt), in: container)
+        return .result(dialog: IntentDialog(stringLiteral: message))
+    }
+}
+
+/// Retained for saved Shortcuts; promoted sleep phrases use general care.
 struct LogSleepByVoiceIntent: AppIntent {
     static let title: LocalizedStringResource = "Log Sleep"
     static let description = IntentDescription("Records completed sleep for a child or adult. Asks who, nap or night sleep, and how many minutes; an omitted end time means now.")
@@ -883,7 +1166,7 @@ struct LittleWindowsShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: LogCareByVoiceIntent(),
-            phrases: ["Log care in \(.applicationName)", "Log \(\.$kind) in \(.applicationName)", "Log a \(\.$kind) in \(.applicationName)", "Record \(\.$kind) in \(.applicationName)"],
+            phrases: ["Log care in \(.applicationName)", "Log \(\.$entry) in \(.applicationName)", "Log a \(\.$entry) in \(.applicationName)", "Record \(\.$entry) in \(.applicationName)"],
             shortTitle: "Log Care", systemImageName: "mic.fill"
         )
         AppShortcut(
@@ -935,10 +1218,10 @@ struct LittleWindowsShortcuts: AppShortcutsProvider {
             systemImageName: "clock.arrow.circlepath"
         )
         AppShortcut(
-            intent: LogSleepByVoiceIntent(),
-            phrases: ["Log sleep in \(.applicationName)", "Record sleep in \(.applicationName)"],
-            shortTitle: "Log Sleep",
-            systemImageName: "bed.double.fill"
+            intent: LogDiaperByVoiceIntent(),
+            phrases: ["Log \(\.$spokenEntry) in \(.applicationName)", "Record \(\.$spokenEntry) in \(.applicationName)"],
+            shortTitle: "Log Diaper",
+            systemImageName: "drop.fill"
         )
         AppShortcut(
             intent: LogMedicationDoseByVoiceIntent(),
