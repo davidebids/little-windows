@@ -64,19 +64,24 @@ struct TodayTrackingSettingsView: View {
                     NavigationLink("Activities & Button Order") {
                         TodayEssentialsActivitiesView(profile: profile)
                     }
-                }
-                NavigationLink("Visible Sections") {
-                    TodaySectionSettingsView(profile: profile)
-                }
-                NavigationLink("Tracking & Reminders") {
-                    TodayTrackingCategoriesView(profile: profile)
-                }
-                if preferences.layout == .full {
+                } else {
                     NavigationLink("Full Layout Quick Actions") {
                         CareCategoryCustomizationView(profileID: profile.id, profileType: profile.profileType) {
                             SystemIntegrationReconciler.requestReconciliation()
                         }
                     }
+                }
+            } header: {
+                Text("\(preferences.layout.title) layout")
+            }
+            .id(preferences.layout)
+
+            Section {
+                NavigationLink("Visible Sections") {
+                    TodaySectionSettingsView(profile: profile)
+                }
+                NavigationLink("Tracking & Reminders") {
+                    TodayTrackingCategoriesView(profile: profile)
                 }
             } footer: {
                 Text("These choices follow this profile on devices signed into the same Apple Account when iCloud Sync is on. Offline changes apply here immediately and merge when iCloud becomes available.")
