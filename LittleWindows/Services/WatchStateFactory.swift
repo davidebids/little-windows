@@ -277,9 +277,6 @@ enum WatchStateFactory {
         let phases = ((try? context.fetch(FetchDescriptor<MedicationSchedulePhase>(
             predicate: #Predicate { $0.profileID == profileID }
         ))) ?? [])
-        let records = ((try? context.fetch(FetchDescriptor<MedicationDoseRecord>(
-            predicate: #Predicate { $0.profileID == profileID }
-        ))) ?? [])
         let calendar = MedicationScheduleDate.currentCalendar()
         let searchStart = calendar.date(byAdding: .hour, value: -lookbackHours, to: now)
             ?? now.addingTimeInterval(Double(-lookbackHours) * 60 * 60)
@@ -293,21 +290,29 @@ enum WatchStateFactory {
             let regimenPhases = phases.filter {
                 $0.regimenID == regimen.id && $0.profileID == profileID
             }
-            let regimenRecords = records.filter {
-                $0.regimenID == regimen.id
-                    && $0.medicationID == medication.id
-                    && $0.profileID == profileID
-            }
-            let occurrences = MedicationScheduleEngine.unloggedOccurrences(
-                MedicationScheduleEngine.occurrences(
-                    regimen: regimen,
-                    phases: regimenPhases,
-                    from: searchStart,
-                    through: searchEnd,
-                    calendar: calendar
-                ),
-                records: regimenRecords
+            let scheduled = MedicationScheduleEngine.occurrences(
+                regimen: regimen,
+                phases: regimenPhases,
+                from: searchStart,
+                through: searchEnd,
+                calendar: calendar
             )
+            // Match exact occurrence keys, including older records with no
+            // scheduledAt. Reading years of dose history on Today's minute
+            // tick used to fault every record on the main actor.
+            let keys = scheduled.map(\.occurrenceKey)
+            var regimenRecords: [MedicationDoseRecord] = []
+            let regimenID = regimen.id
+            let medicationID = medication.id
+            for start in stride(from: 0, to: keys.count, by: 300) {
+                let batch: [String?] = keys[start..<min(start + 300, keys.count)].map { $0 }
+                let descriptor = FetchDescriptor<MedicationDoseRecord>(predicate: #Predicate {
+                    $0.profileID == profileID && $0.regimenID == regimenID &&
+                        $0.medicationID == medicationID && batch.contains($0.occurrenceKey)
+                })
+                regimenRecords += (try? context.fetch(descriptor)) ?? []
+            }
+            let occurrences = MedicationScheduleEngine.unloggedOccurrences(scheduled, records: regimenRecords)
             candidates.append(contentsOf: occurrences.map { occurrence in
                 WatchMedicationSnapshot(
                     profileID: profileID,

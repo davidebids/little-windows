@@ -71,7 +71,7 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
         Set(EventType.allCases.filter { fields["paused.\($0.rawValue)"]?.value == ["true"] })
     }
 
-    func allows(_ type: EventType) -> Bool { !pausedTypes.contains(type) }
+    func allows(_ type: EventType) -> Bool { fields["paused.\(type.rawValue)"]?.value != ["true"] }
 
     func allowsRoutineStep(eventType: EventType?, action: CareRoutineStepAction) -> Bool {
         (eventType.map(allows) ?? true) && (action.trackingPromptSection.map(allowsPrompts) ?? true)
@@ -153,6 +153,7 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
     }
 
     mutating func set(_ key: String, value: [String], now: Date = Date(), revision: String = UUID().uuidString) {
+        guard fields[key]?.value != value else { return }
         // A deliberate edit must follow a value already observed from another
         // device, even if that device's wall clock is ahead of this one.
         let observed = fields[key]?.updatedAt.addingTimeInterval(0.001) ?? now
@@ -223,6 +224,7 @@ enum CareTrackingPreferenceStore {
         var value = preferences(profileID: profileID, defaults: defaults)
         let previous = value
         change(&value)
+        guard value != previous else { return }
         save(value, profileID: profileID, defaults: defaults)
         if PersistenceService.isICloudSyncEnabled(defaults: defaults) {
             reconcile(profileID: profileID, defaults: defaults, store: store)

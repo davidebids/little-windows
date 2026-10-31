@@ -38,9 +38,11 @@ enum QuickLogActionPreferenceStore {
 enum CareCategoryPreferenceStore {
     nonisolated private static let prefix = "careCategory.hiddenTypeRawValues"
 
-    nonisolated static func hiddenTypes(profileID: UUID?) -> Set<EventType> {
+    nonisolated static func hiddenTypes(
+        profileID: UUID?, preferences suppliedPreferences: CareTrackingPreferences? = nil
+    ) -> Set<EventType> {
         var hidden = Set((UserDefaults.standard.stringArray(forKey: key(profileID: profileID)) ?? []).compactMap(EventType.init(rawValue:)))
-        let preferences = CareTrackingPreferenceStore.preferences(profileID: profileID)
+        let preferences = suppliedPreferences ?? CareTrackingPreferenceStore.preferences(profileID: profileID)
         for type in EventType.allCases {
             if let value = preferences.fields["hidden.\(type.rawValue)"]?.value.first {
                 if value == "true" { hidden.insert(type) } else { hidden.remove(type) }
@@ -85,9 +87,10 @@ enum CareCategoryPreferenceStore {
     }
 
     static func visibleTypes(for profileType: CareProfileType, profileID: UUID?) -> [EventType] {
-        let hidden = hiddenTypes(profileID: profileID)
+        let preferences = CareTrackingPreferenceStore.preferences(profileID: profileID)
+        let hidden = hiddenTypes(profileID: profileID, preferences: preferences)
         return EventType.cases(for: profileType).filter {
-            !hidden.contains($0) && CareTrackingPreferenceStore.allows($0, profileID: profileID)
+            !hidden.contains($0) && preferences.allows($0)
         }
     }
 

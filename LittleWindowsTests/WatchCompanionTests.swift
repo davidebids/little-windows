@@ -246,6 +246,39 @@ final class WatchCompanionTests: XCTestCase {
     }
 
     @MainActor
+    func testUpcomingMedicationExcludesLoggedKeysWithoutLoadingHistoricDoseRecords() throws {
+        let container = try makeInMemoryContainer()
+        let now = Date()
+        let fixture = try makeAdultMedicationFixture(container: container, scheduledAt: now, remindersEnabled: true)
+        let context = container.mainContext
+        let first = try XCTUnwrap(WatchStateFactory.upcomingMedication(
+            profileID: fixture.profile.id, context: context, now: now))
+        let nextDay = now.addingTimeInterval(86_400)
+        let second = try XCTUnwrap(WatchStateFactory.upcomingMedication(
+            profileID: fixture.profile.id, context: context, now: nextDay))
+        XCTAssertNotEqual(first.occurrenceKey, second.occurrenceKey)
+        for (index, snapshot) in [first, second].enumerated() {
+            context.insert(MedicationDoseRecord(
+                profileID: fixture.profile.id, medicationID: fixture.medication.id, regimenID: fixture.regimen.id,
+                occurrenceKey: snapshot.occurrenceKey, scheduledAt: nil,
+                status: index == 0 ? .taken : .skipped,
+                loggedAt: now.addingTimeInterval(-90 * 86_400), doseAmount: 1, doseUnit: "tablet"))
+        }
+        for index in 1...1_000 {
+            context.insert(MedicationDoseRecord(
+                profileID: fixture.profile.id, medicationID: fixture.medication.id, regimenID: fixture.regimen.id,
+                occurrenceKey: "historic.\(index)", scheduledAt: now.addingTimeInterval(Double(-index) * 86_400),
+                status: .taken, doseAmount: 1, doseUnit: "tablet"))
+        }
+        try context.save()
+        let result = try XCTUnwrap(WatchStateFactory.upcomingMedication(
+            profileID: fixture.profile.id, context: context, now: now))
+        XCTAssertNotEqual(result.occurrenceKey, first.occurrenceKey)
+        XCTAssertNotEqual(result.occurrenceKey, second.occurrenceKey)
+        XCTAssertGreaterThan(result.scheduledAt, second.scheduledAt)
+    }
+
+    @MainActor
     func testAdultWatchStateHidesSnoozeUntilTheActiveSnoozeFires() throws {
         let container = try makeInMemoryContainer()
         let now = Date()

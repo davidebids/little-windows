@@ -117,6 +117,85 @@ final class CareTrackingPreferenceTests: XCTestCase {
         XCTAssertEqual(cloud.synchronizations, 0)
     }
 
+    func testUnchangedLayoutAndOrderDoNotRewriteOrRepublishPreferences() throws {
+        let cloud = CloudStore(), defaults = try device()
+        let id = UUID()
+        PersistenceService.setICloudSyncEnabled(true, defaults: defaults)
+        CareTrackingPreferenceStore.update(profileID: id, defaults: defaults, store: cloud) {
+            $0.selectLayout(.essentials, for: .child)
+        }
+        let before = defaults.data(forKey: CareTrackingPreferenceStore.key(id))
+        let writes = cloud.writes
+        for _ in 0..<10 {
+            CareTrackingPreferenceStore.update(profileID: id, defaults: defaults, store: cloud) {
+                $0.selectLayout(.essentials, for: .child)
+                $0.set("essentials", value: ["sleep", "feed", "diaper"])
+            }
+        }
+        XCTAssertEqual(defaults.data(forKey: CareTrackingPreferenceStore.key(id)), before)
+        XCTAssertEqual(cloud.writes, writes)
+    }
+
+    func testEssentialsRenderWorkIsLimitedToVisibleSectionsAndMedicationButtons() {
+        var preferences = CareTrackingPreferences()
+        preferences.selectLayout(.essentials, for: .child)
+        func requirements(_ type: CareProfileType = .child) -> TodayCareRenderRequirements {
+            TodayCareRenderRequirements(preferences: preferences, profileType: type, hiddenTypes: [])
+        }
+        XCTAssertFalse(requirements().sleepAnalysis)
+        XCTAssertFalse(requirements().smartActions)
+        XCTAssertFalse(requirements().historyOnMinuteTick)
+        for section in [CareTodaySection.routines, .guides, .appointments, .solids] {
+            XCTAssertFalse(requirements().includes(section))
+        }
+        XCTAssertTrue(requirements().medication)
+        preferences.set("section.essentials.medicationDue", value: ["false"])
+        XCTAssertFalse(requirements().medication)
+        preferences.set("essentials", value: ["medicine"])
+        XCTAssertTrue(requirements().medication, "A visible medication button still needs its due dose")
+        preferences.set("paused.medicine", value: ["true"])
+        XCTAssertFalse(requirements().medication)
+        preferences.set("section.essentials.prediction", value: ["true"])
+        XCTAssertTrue(requirements().sleepAnalysis)
+        XCTAssertTrue(requirements().historyOnMinuteTick)
+        XCTAssertFalse(requirements(.dog).sleepAnalysis)
+        preferences.set("paused.sleep", value: ["true"])
+        XCTAssertFalse(requirements().sleepAnalysis)
+        preferences.selectLayout(.full, for: .child)
+        XCTAssertTrue(requirements().smartActions)
+        XCTAssertTrue(requirements().historyOnMinuteTick)
+    }
+
+    func testEssentialsTimeSummaryKeepsRestSeparateAndTracksFutureEntries() {
+        let childSleep = CareEvent(type: .sleep, startDate: now.addingTimeInterval(-200))
+        childSleep.endDate = now.addingTimeInterval(-100)
+        let dogRest = CareEvent(type: .rest, startDate: now.addingTimeInterval(-400))
+        dogRest.endDate = now.addingTimeInterval(-300)
+        let future = CareEvent(type: .feed, startDate: now.addingTimeInterval(60), endDate: now.addingTimeInterval(60))
+        let summary = TodayEssentialsHistorySummary.make(events: [dogRest, future, childSleep], now: now)
+        XCTAssertEqual(summary.lastEndedDates[.sleep], childSleep.endDate)
+        XCTAssertEqual(summary.lastEndedDates[.rest], dogRest.endDate)
+        XCTAssertEqual(summary.nextTransition, future.startDate)
+        let later = TodayEssentialsHistorySummary.make(events: [dogRest, future, childSleep], now: now.addingTimeInterval(61))
+        XCTAssertNil(later.nextTransition)
+    }
+
+    func testRepeatedTrackingPolicyLookupsPerformance() {
+        var preferences = CareTrackingPreferences()
+        for type in EventType.allCases {
+            preferences.set("paused.\(type.rawValue)", value: [String(type == .feed || type == .sleep)])
+        }
+        let types = EventType.allCases
+        let expected = types.count - 2
+        measure {
+            var allowed = 0
+            for _ in 0..<2_000 {
+                for type in types where preferences.allows(type) { allowed += 1 }
+            }
+            XCTAssertEqual(allowed, expected * 2_000)
+        }
+    }
+
     func testResetOnlyChangesCurrentLayoutAndKeepsTrackingPauses() {
         var preferences = CareTrackingPreferences()
         preferences.set("essentials", value: ["diaper", "feed"])

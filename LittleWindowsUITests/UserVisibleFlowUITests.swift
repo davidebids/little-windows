@@ -226,6 +226,63 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertLessThan(app.buttons["today.essential.diaper"].frame.minY, app.buttons["today.essential.nursing"].frame.minY)
     }
 
+    func testProductionScaleEssentialsLayoutSwitchesLoggingAndScrollingStayResponsive() {
+        continueAfterFailure = false
+        func appears(_ element: XCUIElement) -> Bool {
+            // XCTest's existence wait adds a one-second polling quantum even
+            // when tap() already returned with the destination rendered.
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while !element.exists, ContinuousClock.now < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            }
+            return element.exists
+        }
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-performance")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        for _ in 0..<2 {
+            app.buttons["today.menu"].tap()
+            app.buttons["Customize Today"].tap()
+            for layout in ["Full", "Essentials"] {
+                let started = ContinuousClock.now
+                app.segmentedControls.buttons[layout].tap()
+                let route = layout == "Full" ? "Full Layout Quick Actions" : "Activities & Button Order"
+                XCTAssertTrue(appears(app.buttons[route]))
+                XCTAssertLessThan(started.duration(to: .now), .seconds(3))
+            }
+            let dismissed = ContinuousClock.now
+            app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+            XCTAssertTrue(appears(app.buttons["today.essential.diaper"]))
+            app.buttons["today.essential.diaper"].tap()
+            XCTAssertTrue(appears(app.navigationBars["Add Event"]))
+            XCTAssertLessThan(dismissed.duration(to: .now), .seconds(4),
+                              "Returning from customization must not block the next logging tap")
+            app.buttons["Cancel"].firstMatch.tap()
+        }
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.buttons["Activities & Button Order"].tap()
+        for title in ["Nursing", "Pumping"] {
+            let add = app.buttons[title]
+            for _ in 0..<4 where !add.isHittable { app.swipeUp() }
+            XCTAssertTrue(add.isHittable)
+            add.tap()
+        }
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 3))
+        let options = XCTMeasureOptions()
+        options.iterationCount = 3
+        measure(metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric], options: options) {
+            app.swipeUp(velocity: .fast)
+            app.swipeDown(velocity: .fast)
+        }
+        app.open(URL(string: "littlewindows://profile/00000000-0000-0000-0000-000000000101/routines")!)
+        XCTAssertTrue(app.navigationBars["Routines"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Bedtime routine"].exists,
+                      "Direct navigation must load routine data even while its Today section is hidden")
+    }
+
     func testEssentialsUseProfileAppropriateChoicesAndLoggingRoutes() {
         continueAfterFailure = false
         launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")

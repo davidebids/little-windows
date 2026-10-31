@@ -55,6 +55,52 @@ enum TodayEssentialsTimerPresentation {
     }
 }
 
+/// Time labels read this tiny value instead of scanning history on every tick.
+struct TodayEssentialsHistorySummary {
+    var lastEndedDates: [EventType: Date] = [:]
+    var nextTransition: Date?
+
+    mutating func include(_ event: CareEvent, now: Date) {
+        guard !event.isTimerDraft else { return }
+        let logDate = event.endDate ?? event.startDate
+        if logDate > now {
+            nextTransition = min(nextTransition ?? logDate, logDate)
+        }
+        if (event.type == .sleep || event.type == .rest), let end = event.endDate, end <= now {
+            lastEndedDates[event.type] = max(lastEndedDates[event.type] ?? end, end)
+        }
+    }
+
+    static func make(events: [CareEvent], now: Date) -> Self {
+        var summary = Self()
+        for event in events { summary.include(event, now: now) }
+        return summary
+    }
+}
+
+/// A hidden section must not keep its SwiftData queries and builders active.
+struct TodayCareRenderRequirements {
+    let preferences: CareTrackingPreferences
+    let profileType: CareProfileType
+    let hiddenTypes: Set<EventType>
+
+    func includes(_ section: CareTodaySection) -> Bool {
+        section.applies(to: profileType) && preferences.shows(section)
+    }
+
+    var sleepAnalysis: Bool { includes(.prediction) || includes(.sleepPlan) }
+    var smartActions: Bool { preferences.layout == .full && includes(.actions) }
+    var medication: Bool {
+        preferences.allows(.medicine) && (includes(.medicationDue) ||
+            (preferences.layout == .essentials && includes(.actions) &&
+             preferences.essentialTypes(for: profileType, hidden: hiddenTypes).contains(.medicine)))
+    }
+    var historyOnMinuteTick: Bool {
+        [.timeline, .prediction, .sleepPlan, .solids, .routines, .guides, .appointments, .summary]
+            .contains(where: includes)
+    }
+}
+
 private struct TodayRenderState {
     var profile: CareProfile?
     var profileID: UUID?
@@ -94,6 +140,14 @@ private struct TodayRenderState {
     var dueSolidAllergenProgress: SolidAllergenProgress?
     var hasSolidHistory: Bool
     var upcomingMedication: WatchMedicationSnapshot? = nil
+    var trackingPreferences = CareTrackingPreferences()
+    var hiddenCareTypes: Set<EventType> = []
+    var essentialsHistory = TodayEssentialsHistorySummary()
+
+    var renderRequirements: TodayCareRenderRequirements {
+        TodayCareRenderRequirements(preferences: trackingPreferences,
+            profileType: profile?.profileType ?? .child, hiddenTypes: hiddenCareTypes)
+    }
 
     func shows(_ type: EventType) -> Bool {
         visibleCareTypes.contains(type)
@@ -114,7 +168,7 @@ private struct TodayRenderState {
         return TodayEssentialsTimerPresentation.compactTimers(events: activeEvents, represented: represented)
     }
 
-    func visibleCareSections(preferences: CareTrackingPreferences, hidden: Set<EventType>) -> Set<CareTodaySection> {
+    func visibleCareSections(preferences: CareTrackingPreferences, hidden: Set<EventType>, now: Date = Date()) -> Set<CareTodaySection> {
         guard let profile else { return [] }
         return Set(CareTodaySection.allCases.filter { section in
             guard section.applies(to: profile.profileType), preferences.shows(section) else { return false }
@@ -129,7 +183,7 @@ private struct TodayRenderState {
                     : !activeEvents.isEmpty
             case .medicationDue:
                 return preferences.showsMedicationDueCard(scheduledAt: upcomingMedication?.scheduledAt,
-                                                          profileType: profile.profileType, hidden: hidden)
+                                                          profileType: profile.profileType, hidden: hidden, now: now)
             case .prediction:
                 return !activeEvents.contains(where: { $0.isSleepBlock })
             case .sleepPlan:
@@ -265,6 +319,7 @@ struct TodayView: View {
     @State private var repeatFeedback: RepeatFeedback?
     @State private var showingCareCustomization = false
     @State private var cachedRenderState = TodayRenderState.empty
+    @State private var displayDate = Date()
     @State private var hasCompletedInitialSetup = false
     @State private var renderStateRefreshTask: Task<Void, Never>?
     @State private var integrationAnalysisTask: Task<Void, Never>?
@@ -490,6 +545,7 @@ struct TodayView: View {
         integrationAnalysisTask?.cancel()
         guard let profile = cachedRenderState.profile,
               profile.profileType == .child,
+              cachedRenderState.renderRequirements.sleepAnalysis,
               cachedRenderState.activeEvents.isEmpty else {
             // A timer draft already carries the exact live state needed by
             // Today, widgets, and Live Activities. Fetching and faulting up to
@@ -563,13 +619,17 @@ struct TodayView: View {
         let scopedEvents = EventVisibilityStore.visibleEvents(
             in: activeTimerEvents + allEvents
         ).sorted { $0.startDate > $1.startDate }
-        let scopedRecords = records
-        let scopedAppointments = appointments
-        let scopedAgeGuideReadStates = ageGuideReadStates
-        let scopedPuppyGuideReadStates = puppyStageGuideReadStates
-        let currentHouseholdID = households.first?.id
         let trackingPreferences = CareTrackingPreferenceStore.preferences(profileID: profileID)
-        let visibleCareRoutines = CareRoutineService.visibleRoutines(
+        let hiddenCareTypes = CareCategoryPreferenceStore.hiddenTypes(profileID: profileID, preferences: trackingPreferences)
+        let requirements = TodayCareRenderRequirements(preferences: trackingPreferences,
+            profileType: profile?.profileType ?? .child, hiddenTypes: hiddenCareTypes)
+        let scopedRecords = requirements.sleepAnalysis ? records : []
+        let scopedAppointments = requirements.includes(.appointments) ? appointments : []
+        let scopedAgeGuideReadStates = requirements.includes(.guides) ? ageGuideReadStates : []
+        let scopedPuppyGuideReadStates = requirements.includes(.guides) ? puppyStageGuideReadStates : []
+        let currentHouseholdID = households.first?.id
+        let needsRoutines = requirements.includes(.routines) || showingRoutineManager
+        let visibleCareRoutines = needsRoutines ? CareRoutineService.visibleRoutines(
             routines: careRoutines,
             profileID: profileID,
             profileType: profile?.profileType,
@@ -577,7 +637,7 @@ struct TodayView: View {
         ).filter { routine in
             CareRoutineService.activeRun(for: routine, runs: careRoutineRuns) != nil
                 || CareTrackingPreferenceStore.allowsRoutine(routine, steps: careRoutineSteps)
-        }
+        } : []
         let careRoutineTodayItems = visibleCareRoutines.prefix(3).map { routine in
             CareRoutineTodayItem(
                 routine: routine,
@@ -587,12 +647,12 @@ struct TodayView: View {
             )
         }
         let existingRoutineKinds = Set(visibleCareRoutines.compactMap(\.templateKind))
-        let suggestedRoutineTemplates = CareRoutineService.templates(for: profile?.profileType).filter {
+        let suggestedRoutineTemplates = needsRoutines ? CareRoutineService.templates(for: profile?.profileType).filter {
             !existingRoutineKinds.contains($0.kind)
                 && trackingPreferences.allowsPrompts(.routines)
                 && $0.steps.allSatisfy { trackingPreferences.allowsRoutineStep(eventType: $0.eventType, action: $0.action) }
-        }
-        let currentAgeGuide = profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) }
+        } : []
+        let currentAgeGuide = requirements.includes(.guides) ? profile.flatMap { AgeGuideService.shared.currentAgeGuide(for: $0) } : nil
         let shouldShowAgeGuideCard: Bool
         if let profile, let currentAgeGuide {
             let state = scopedAgeGuideReadStates.first { $0.guideID == currentAgeGuide.id }
@@ -603,7 +663,7 @@ struct TodayView: View {
         } else {
             shouldShowAgeGuideCard = false
         }
-        let currentPuppyGuide = profile.flatMap { PuppyStageGuideService.shared.currentGuide(for: $0) }
+        let currentPuppyGuide = requirements.includes(.guides) ? profile.flatMap { PuppyStageGuideService.shared.currentGuide(for: $0) } : nil
         let shouldShowPuppyGuideCard: Bool
         if let profile, let currentPuppyGuide {
             let state = scopedPuppyGuideReadStates.first { $0.guideID == currentPuppyGuide.id }
@@ -626,7 +686,9 @@ struct TodayView: View {
         var dogPottyLastLoggedDates: [DogPottySubtitleKey: Date] = [:]
         var hasSolidHistory = false
 
+        var essentialsHistory = TodayEssentialsHistorySummary()
         for event in scopedEvents {
+            essentialsHistory.include(event, now: now)
             if event.isTimerDraft {
                 activeEvents.append(event)
                 if !event.isTimerRunning, event.updatedAt <= now, latestStoppedDraftSleepEnd.map({ event.updatedAt > $0 }) ?? true {
@@ -748,38 +810,38 @@ struct TodayView: View {
         }
         _ = pinnedQuickActionRevision
         _ = categoryPreferenceRevision
-        let visibleCareTypes = Set(CareCategoryPreferenceStore.visibleTypes(
-            for: profile?.profileType ?? .child,
-            profileID: profileID
-        ))
-        let pinnedQuickActionIDs = QuickLogActionPreferenceStore.pinnedActionIDs(profileID: profileID)
-        let smartQuickActions = WidgetSnapshotService.makeQuickActions(
+        let visibleCareTypes = Set(EventType.cases(for: profile?.profileType ?? .child).filter {
+            !hiddenCareTypes.contains($0) && trackingPreferences.allows($0)
+        })
+        let pinnedQuickActionIDs = requirements.smartActions
+            ? QuickLogActionPreferenceStore.pinnedActionIDs(profileID: profileID) : []
+        let smartQuickActions = requirements.smartActions ? WidgetSnapshotService.makeQuickActions(
             profileID: profileID,
             profileType: profile?.profileType ?? .child,
             events: scopedEvents,
             pinnedActionIDs: pinnedQuickActionIDs,
             now: now
-        )
-        let solidsProfileState = profileID.flatMap { targetProfileID in
+        ) : []
+        let solidsProfileState = requirements.includes(.solids) ? profileID.flatMap { targetProfileID in
             solidsProfileStates.first { $0.profileID == targetProfileID }
-        }
-        let solidsAccessLevel = profile.map {
+        } : nil
+        let solidsAccessLevel = requirements.includes(.solids) ? profile.map {
             SolidsTrackingService.accessLevel(
                 for: $0,
                 events: scopedEvents,
                 state: solidsProfileState
             )
-        } ?? .hidden
+        } ?? .hidden : .hidden
         let endOfToday = calendar.date(
             byAdding: DateComponents(day: 1, second: -1),
             to: todayStart
         ) ?? now
-        let nextPlannedSolidMeal = profileID.flatMap { targetProfileID in
+        let nextPlannedSolidMeal = requirements.includes(.solids) ? profileID.flatMap { targetProfileID in
             plannedSolidMeals.first {
                 $0.profileID == targetProfileID && !$0.isCompleted && $0.scheduledAt <= endOfToday
             }
-        }
-        let dueSolidAllergenProgress = profileID.flatMap { targetProfileID in
+        } : nil
+        let dueSolidAllergenProgress = requirements.includes(.solids) ? profileID.flatMap { targetProfileID in
             solidAllergenProgress
                 .lazy
                 .filter {
@@ -791,7 +853,7 @@ struct TodayView: View {
                 .min {
                     ($0.nextExposureDueAt ?? .distantFuture) < ($1.nextExposureDueAt ?? .distantFuture)
                 }
-        }
+        } : nil
         return TodayRenderState(
             profile: profile,
             profileID: profileID,
@@ -831,10 +893,13 @@ struct TodayView: View {
             dueSolidAllergenProgress: dueSolidAllergenProgress,
             hasSolidHistory: hasSolidHistory,
             upcomingMedication: profileID.flatMap {
-                (trackingPreferences.layout == .essentials || trackingPreferences.shows(.medicationDue)) && trackingPreferences.allows(.medicine)
+                requirements.medication
                     ? WatchStateFactory.upcomingMedication(profileID: $0, context: modelContext, now: now, lookbackHours: 24)
                     : nil
-            }
+            },
+            trackingPreferences: trackingPreferences,
+            hiddenCareTypes: hiddenCareTypes,
+            essentialsHistory: essentialsHistory
         )
     }
 
@@ -856,10 +921,10 @@ struct TodayView: View {
         let activeEvents = state.activeEvents
         let prediction = state.prediction
         let profile = state.profile
-        let trackingPreferences = CareTrackingPreferenceStore.preferences(profileID: state.profileID)
+        let trackingPreferences = state.trackingPreferences
         let visibleSections = state.visibleCareSections(
             preferences: trackingPreferences,
-            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)
+            hidden: state.hiddenCareTypes, now: displayDate
         )
 
         let listContent = ScrollViewReader { scrollProxy in
@@ -1383,7 +1448,9 @@ struct TodayView: View {
         .onChange(of: deepLinkRouter.pendingAction) { _, _ in
             handlePendingDeepLink()
         }
-        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { notification in
+            guard notification.object as? UUID == state.profileID,
+                  !showingCareCustomization else { return }
             categoryPreferenceRevision += 1
             scheduleRenderStateRefresh()
         }
@@ -1472,9 +1539,19 @@ struct TodayView: View {
                 // does not. Refresh that bounded history scan every five
                 // minutes, while model saves still refresh it after real data
                 // changes.
-                refreshCachedRenderState(
-                    refreshesAnalysis: elapsedMinutes.isMultiple(of: 5)
-                )
+                let now = Date()
+                let crossedDay = !Calendar.current.isDate(displayDate, inSameDayAs: now)
+                displayDate = now
+                let reachedFutureEntry = cachedRenderState.essentialsHistory.nextTransition.map { $0 <= now } ?? false
+                if cachedRenderState.renderRequirements.historyOnMinuteTick || crossedDay || reachedFutureEntry {
+                    refreshCachedRenderState(refreshesAnalysis: elapsedMinutes.isMultiple(of: 5))
+                } else if !renderStateRefreshIsDeferred, cachedRenderState.renderRequirements.medication,
+                          let profileID = cachedRenderState.profileID {
+                    // Relative labels have their own TimelineView; only dose
+                    // availability can change without a care-history save.
+                    cachedRenderState.upcomingMedication = WatchStateFactory.upcomingMedication(
+                        profileID: profileID, context: modelContext, now: now, lookbackHours: 24)
+                }
             }
         }
     }
@@ -1877,7 +1954,7 @@ struct TodayView: View {
     @ViewBuilder
     private func essentialsTimersSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
         let timers = state.compactEssentialTimers(preferences: preferences,
-            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID))
+            hidden: state.hiddenCareTypes)
         if !timers.isEmpty {
             Section {
                 ForEach(timers) { event in
@@ -1932,7 +2009,7 @@ struct TodayView: View {
         if preferences.showsMedicationDueCard(
             scheduledAt: state.upcomingMedication?.scheduledAt,
             profileType: state.profile?.profileType ?? .child,
-            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)
+            hidden: state.hiddenCareTypes
         ) {
             Section {
                 EssentialsActionButton(
@@ -1953,7 +2030,7 @@ struct TodayView: View {
     private func essentialsActionsSection(_ state: TodayRenderState, preferences: CareTrackingPreferences) -> some View {
         let types = preferences.essentialTypes(
             for: state.profile?.profileType ?? .child,
-            hidden: CareCategoryPreferenceStore.hiddenTypes(profileID: state.profileID)
+            hidden: state.hiddenCareTypes
         )
         return Section {
             ForEach(types) { type in
@@ -1990,8 +2067,7 @@ struct TodayView: View {
             return "\(dose.medicationName) · \(dose.scheduledAt <= now ? "Due" : "Next") \(time)"
         }
         if type == .sleep || type == .rest,
-           let endedAt = state.scopedEvents.filter({ $0.type == type && !$0.isTimerDraft })
-            .compactMap(\.endDate).filter({ $0 <= now }).max() {
+           let endedAt = state.essentialsHistory.lastEndedDates[type] {
             if now.timeIntervalSince(endedAt) < 60 { return "\(type.displayName) just ended" }
             return "Last \(type.displayName.lowercased()) ended \(DurationFormatting.string(seconds: now.timeIntervalSince(endedAt))) ago"
         }
@@ -2568,7 +2644,7 @@ struct TodayView: View {
             archiveRoutine: archiveRoutine,
             cancelRun: cancelRoutineRun,
             openRun: openRoutineRun,
-            manage: { showingRoutineManager = true }
+            manage: { presentRoutineManager() }
         )
     }
 
@@ -3382,6 +3458,8 @@ struct TodayView: View {
             state.sleepPressure = nil
             state.sleepMiniPlan = nil
         }
+        state.essentialsHistory = .make(events: state.scopedEvents, now: now)
+        state.essentialsHistory.include(event, now: now)
         cachedRenderState = state
     }
 
@@ -3781,10 +3859,17 @@ struct TodayView: View {
         puppyGuideToOpen = guide
     }
 
+    private func presentRoutineManager() {
+        showingRoutineManager = true
+        // A direct routine link still loads the manager when its Today card is
+        // hidden; hiding presentation must not disable the feature itself.
+        refreshCachedRenderState(refreshesAnalysis: false)
+    }
+
     private func handlePendingRoutineDeepLink() {
         guard deepLinkRouter.isDataReady else { return }
         guard deepLinkRouter.consumeRoutineCommand() != nil else { return }
-        showingRoutineManager = true
+        presentRoutineManager()
     }
 
     private func dogProfileForPuppyGuide() -> CareProfile? {
@@ -3843,6 +3928,7 @@ struct TodayView: View {
                 state.hasSolidHistory = true
             }
         }
+        state.essentialsHistory = .make(events: state.scopedEvents, now: Date())
         cachedRenderState = state
     }
 
@@ -4012,6 +4098,7 @@ struct TodayView: View {
                 .filter { $0 <= now }
                 .max()
         }
+        state.essentialsHistory = .make(events: state.scopedEvents, now: Date())
         cachedRenderState = state
     }
 
