@@ -1820,12 +1820,12 @@ struct TodayView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 16))
-                        .contentShape(RoundedRectangle(cornerRadius: 16))
+                        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 24))
+                        .contentShape(RoundedRectangle(cornerRadius: 24))
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("today.running-timer.\(event.type.rawValue)")
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
