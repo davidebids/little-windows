@@ -104,6 +104,14 @@ struct TodayTrackingSettingsView: View {
 }
 
 private struct TodayEssentialsActivitiesView: View {
+    private struct ActivityOption: Identifiable {
+        let type: EventType
+        let isSelected: Bool
+
+        // An Add row must become a new, movable row when selected.
+        var id: String { "\(isSelected ? "selected" : "available").\(type.rawValue)" }
+    }
+
     let profile: CareProfile
     @State private var preferences = CareTrackingPreferences()
 
@@ -117,7 +125,8 @@ private struct TodayEssentialsActivitiesView: View {
     var body: some View {
         List {
             Section {
-                ForEach(selected) { type in
+                ForEach(selected.map { ActivityOption(type: $0, isSelected: true) }) { option in
+                    let type = option.type
                     HStack {
                         Button {
                             save(selected.filter { $0 != type })
@@ -145,7 +154,10 @@ private struct TodayEssentialsActivitiesView: View {
                 Text("Drag to reorder or remove a button. Fewer activities leave more room for each button. Removing a button does not pause tracking. Paused activities stay in this list and return to Today when resumed.")
             }
             Section("Add an activity") {
-                ForEach(EventType.cases(for: profile.profileType).filter { !selected.contains($0) }) { type in
+                ForEach(EventType.cases(for: profile.profileType)
+                    .filter { !selected.contains($0) }
+                    .map { ActivityOption(type: $0, isSelected: false) }) { option in
+                    let type = option.type
                     Button {
                         save(selected + [type])
                     } label: {

@@ -53,6 +53,37 @@ final class UserVisibleFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["today.essential.feed"].waitForExistence(timeout: 8))
     }
 
+    func testNewEssentialActivityCanBeReorderedImmediatelyAndKeepsItsOrder() {
+        continueAfterFailure = false
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
+        launchTodayEssentialsTest(startURL: "littlewindows://debug/seed-smoke")
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        app.buttons["today.menu"].tap()
+        app.buttons["Customize Today"].tap()
+        app.segmentedControls.buttons["Essentials"].tap()
+        let activities = app.buttons["Activities & Button Order"]
+        for _ in 0..<4 where !activities.isHittable { app.swipeUp() }
+        activities.tap()
+        app.buttons["today-settings.remove.feed"].tap()
+        app.buttons["Nursing"].tap()
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Essentials ordering immediately after adding Nursing"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let nursingHandle = app.buttons["Reorder Remove Nursing"]
+        XCTAssertTrue(nursingHandle.waitForExistence(timeout: 5), "A newly selected activity needs a reorder handle immediately")
+        nursingHandle.press(forDuration: 0.5, thenDragTo: app.buttons["Reorder Remove Sleep"])
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars["Today & Tracking"].buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["today.essential.nursing"].waitForExistence(timeout: 5))
+        XCTAssertLessThan(app.buttons["today.essential.nursing"].frame.minY, app.buttons["today.essential.sleep"].frame.minY)
+
+        launchTodayEssentialsTest(startURL: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today")
+        XCTAssertTrue(app.buttons["today.essential.nursing"].waitForExistence(timeout: 5))
+        XCTAssertLessThan(app.buttons["today.essential.nursing"].frame.minY, app.buttons["today.essential.sleep"].frame.minY)
+    }
+
     func testThreeEssentialsStayVisibleWithAllTimersRunning() {
         continueAfterFailure = false
         launchTodayEssentialsTest(startURL: "littlewindows://debug/reset-empty")
