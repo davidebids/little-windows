@@ -76,9 +76,6 @@ struct WeatherCityPicker: View {
                         }
                         WeatherDailyForecastView(surface: surface, selectedDay: $selectedDay).equatable()
                         WeatherMetricsGrid(surface: surface, now: now)
-                        WeatherDataCredit(attribution: surface.forecast.attribution, sourceDetailsOnly: true)
-                        Text("\(surface.updatedLabel(at: now)) · \(surface.timeZoneIdentifier)")
-                            .font(.caption2).foregroundStyle(.secondary)
                     } else {
                         ContentUnavailableView(weather.isLoading ? "Loading weather" : "Your local weather",
                             systemImage: "cloud.sun.fill",
@@ -101,6 +98,17 @@ struct WeatherCityPicker: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("weather.outdoor-preferences")
+                    if let surface = weather.surface {
+                        VStack(spacing: 6) {
+                            WeatherDataCredit(attribution: surface.forecast.attribution, sourceDetailsOnly: true)
+                                .tint(.blue).buttonStyle(.borderless)
+                            Text("\(surface.updatedLabel(at: now)) · \(surface.timeZoneIdentifier)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.bottom, 8)
+                    }
                 }
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
