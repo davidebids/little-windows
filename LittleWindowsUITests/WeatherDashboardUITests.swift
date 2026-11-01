@@ -384,15 +384,22 @@ final class WeatherDashboardUITests: XCTestCase {
         plot.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 87, dy: 60)).tap()
         XCTAssertNotEqual(readout.label, initial)
         capture(app, "Hourly selected temperature and pinned axis")
+        let scroll = app.scrollViews["weather.hourly.scroll"]
+        let beforeTemperatureScroll = readout.label
+        let start = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: scroll.frame.maxX - 20, dy: plot.frame.midY))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -min(180, scroll.frame.width - 40), dy: 0)))
+        XCTAssertNotEqual(readout.label, beforeTemperatureScroll, "Dragging the graph must inspect later hours without a tap")
         let measure = app.segmentedControls["weather.hourly.measure"]
         measure.buttons["Precipitation"].tap()
         XCTAssertTrue(readout.label.contains("Precipitation chance"))
         XCTAssertTrue(readout.label.contains("%"))
         let beforeScroll = readout.label
-        let scroll = app.scrollViews["weather.hourly.scroll"]
         scroll.swipeLeft()
-        plot.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: max(87, scroll.frame.minX - plot.frame.minX + 60), dy: 60)).tap()
-        XCTAssertNotEqual(readout.label, beforeScroll)
+        XCTAssertNotEqual(readout.label, beforeScroll, "Precipitation readings must follow scrolling without a tap")
+        let later = readout.label
+        scroll.swipeRight()
+        XCTAssertNotEqual(readout.label, later, "Readings must follow scrolling in both directions")
         let hour = scroll.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'weather.hourly.hour.'")).allElementsBoundByIndex.first { $0.isHittable }
         XCTAssertNotNil(hour)
         hour?.tap()
@@ -414,8 +421,6 @@ final class WeatherDashboardUITests: XCTestCase {
         let initial = readout.label
         let scroll = app.scrollViews["weather.hourly.scroll"]
         scroll.swipeLeft()
-        plot.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: scroll.frame.minX - plot.frame.minX + scroll.frame.width / 2, dy: 60)).tap()
         XCTAssertNotEqual(readout.label, initial)
         capture(app, "Hourly accessibility plot and scale")
     }

@@ -519,6 +519,7 @@ struct WeatherHourlyView: View, Equatable {
     @State private var feelsLike = false
     @State private var precipitation = false
     @State private var selectedDate: Date?
+    @State private var scrolledDate: Date?
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.hours == rhs.hours && lhs.surface.fahrenheit == rhs.surface.fahrenheit
             && lhs.surface.timeZoneIdentifier == rhs.surface.timeZoneIdentifier
@@ -566,7 +567,7 @@ struct WeatherHourlyView: View, Equatable {
                 .background(AppTheme.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("weather.hourly.readout")
-                Text("Tap to inspect · Swipe for later hours")
+                Text("Swipe to explore hourly weather")
                     .font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
                 HStack(alignment: .top, spacing: 10) {
                     WeatherPlotAxis(range: range, unit: unit)
@@ -594,10 +595,18 @@ struct WeatherHourlyView: View, Equatable {
                                     .accessibilityLabel("\(dayLabel(hour.date)), \(surface.time(hour.date)), \(hour.condition), \(surface.temperature(feelsLike ? hour.feelsLike : hour.temperature)), \(Int(hour.rainChance * 100))% precipitation")
                                     .accessibilityAddTraits(hour.date == selected.date ? .isSelected : [])
                                     .accessibilityIdentifier("weather.hourly.hour.\(hour.date.timeIntervalSince1970)")
+                                    .id(hour.date)
                                 }
-                            }.frame(width: CGFloat(hours.count) * columnWidth, alignment: .leading)
+                            }
+                            .scrollTargetLayout()
+                            .frame(width: CGFloat(hours.count) * columnWidth, alignment: .leading)
                         }
-                    }.scrollIndicators(.hidden).accessibilityIdentifier("weather.hourly.scroll")
+                    }
+                    .scrollPosition(id: $scrolledDate, anchor: .center)
+                    .onChange(of: scrolledDate) { _, date in
+                        if let date, date != selectedDate { selectedDate = date }
+                    }
+                    .scrollIndicators(.hidden).accessibilityIdentifier("weather.hourly.scroll")
                 }
             } else {
                 Text("Hourly forecast unavailable for this day.").font(.caption).foregroundStyle(.secondary)
