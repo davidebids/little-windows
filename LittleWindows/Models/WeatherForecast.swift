@@ -42,6 +42,7 @@ struct WeatherMinute: Codable, Hashable, Identifiable, Sendable {
     var intensityMMPerHour: Double
     var type: String
     var id: Date { date }
+    var hasExpectedPrecipitation: Bool { intensityMMPerHour > 0 && probability >= 0.3 }
 }
 
 struct DailyWeatherSnapshot: Codable, Hashable, Sendable {
@@ -420,12 +421,12 @@ struct WeatherSurfaceState: Codable, Hashable, Sendable {
     }
     func rainSummary(at now: Date) -> String? {
         guard let minutes = forecast.validMinutes(at: now) else { return nil }
-        guard let first = minutes.first(where: { $0.intensityMMPerHour > 0 && $0.probability >= 0.3 }) else { return "Staying dry" }
+        guard let first = minutes.first(where: { $0.hasExpectedPrecipitation }) else { return "Staying dry" }
         let offset = max(0, Int(first.date.timeIntervalSince(now) / 60))
         let timing = offset <= 1 ? "now" : "in about \(offset) minutes"
         let intensity = first.intensityMMPerHour < 2.5 ? "Light" : first.intensityMMPerHour < 7.5 ? "Moderate" : "Heavy"
         var summary = "\(intensity) \(first.type.lowercased()) possible \(timing)."
-        if let dry = minutes.first(where: { $0.date > first.date && ($0.intensityMMPerHour <= 0 || $0.probability < 0.3) }) {
+        if let dry = minutes.first(where: { $0.date > first.date && !$0.hasExpectedPrecipitation }) {
             summary += " May ease around \(time(dry.date))."
         }
         return summary

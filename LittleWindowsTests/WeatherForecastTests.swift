@@ -204,6 +204,20 @@ final class WeatherForecastTests: XCTestCase {
         continuous.forecast.minutes = (0..<60).map { WeatherMinute(date: now.addingTimeInterval(Double($0) * 60), probability: 0.8, intensityMMPerHour: 1, type: "Rain") }
         XCTAssertFalse(continuous.rainSummary(at: now)?.contains("May ease") == true)
     }
+    func testDryMinuteForecastDiffersFromExpectedSnowAndUnavailableData() {
+        var s = state()
+        s.forecast.minutes = [.init(date: now, probability: 0, intensityMMPerHour: 0, type: "Rain")]
+        XCTAssertEqual(s.rainSummary(at: now), "Staying dry")
+        XCTAssertFalse(s.forecast.validMinutes(at: now)!.contains { $0.hasExpectedPrecipitation })
+        s.forecast.minutes = [.init(date: now, probability: 0.29, intensityMMPerHour: 1, type: "Rain")]
+        XCTAssertEqual(s.rainSummary(at: now), "Staying dry")
+        s.forecast.minutes = [.init(date: now, probability: 0.3, intensityMMPerHour: 1, type: "Snow")]
+        XCTAssertTrue(s.forecast.validMinutes(at: now)!.contains { $0.hasExpectedPrecipitation })
+        XCTAssertTrue(s.rainSummary(at: now)?.contains("snow possible") == true)
+        s.forecast.minuteAvailability = "unsupported"
+        XCTAssertNil(s.rainSummary(at: now))
+        XCTAssertNil(s.forecast.validMinutes(at: now))
+    }
     func testRainOutlookUsesPrecipitationTypeAndDoesNotDescribePastTiming() {
         var s = state()
         s.forecast.hours[0].rainChance = 0.7

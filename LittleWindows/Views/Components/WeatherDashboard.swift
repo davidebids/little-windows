@@ -54,14 +54,18 @@ struct WeatherCityPicker: View {
                         }
                         WeatherOutlookPanel(surface: surface, now: now)
                         if let summary = surface.rainSummary(at: now), let minutes = surface.forecast.validMinutes(at: now) {
-                            WeatherPanel(title: "Next hour", symbol: "cloud.rain.fill", tint: .blue, subtitle: "Precipitation, minute by minute") {
+                            let hasPrecipitation = minutes.contains { $0.hasExpectedPrecipitation }
+                            WeatherPanel(title: "Next hour", symbol: hasPrecipitation ? "cloud.rain.fill" : "drop", tint: .blue,
+                                         subtitle: hasPrecipitation ? "Precipitation, minute by minute" : nil) {
                                 Text(summary)
                                     .font(.subheadline)
                                     .multilineTextAlignment(.center)
                                     .frame(maxWidth: .infinity)
-                                let points = minutes.map { WeatherPlotPoint(date: $0.date, value: surface.precipitationUnit == "in" ? $0.intensityMMPerHour / 25.4 : $0.intensityMMPerHour) }
-                                WeatherForecastPlot(points: points, range: 0...max(0.01, points.map(\.value).max() ?? 0), title: "Precipitation intensity",
-                                    unit: surface.precipitationUnit == "in" ? "in/h" : "mm/h", timeZone: surface.timeZone, bars: true)
+                                if hasPrecipitation {
+                                    let points = minutes.map { WeatherPlotPoint(date: $0.date, value: surface.precipitationUnit == "in" ? $0.intensityMMPerHour / 25.4 : $0.intensityMMPerHour) }
+                                    WeatherForecastPlot(points: points, range: 0...max(0.01, points.map(\.value).max() ?? 0), title: "Precipitation intensity",
+                                        unit: surface.precipitationUnit == "in" ? "in/h" : "mm/h", timeZone: surface.timeZone, bars: true)
+                                }
                             }
                         }
                         WeatherOutdoorSection(surface: surface, participants: $participants, windows: windows)
