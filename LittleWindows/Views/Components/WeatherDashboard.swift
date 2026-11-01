@@ -92,7 +92,6 @@ struct WeatherCityPicker: View {
                                 Text("Activities & comfort for each profile").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 4)
-                            Image(systemName: "chevron.right").font(.caption.weight(.bold))
                         }
                         .padding(16).modifier(WeatherSolidSurface())
                     }
