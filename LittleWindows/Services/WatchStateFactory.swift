@@ -54,6 +54,12 @@ enum WatchFavoritePreferenceStore {
 }
 
 enum WatchStateFactory {
+    static func makeInBackground(container: ModelContainer) async -> WatchCompanionState {
+        await Task.detached(priority: .userInitiated) {
+            make(context: ModelContext(container))
+        }.value
+    }
+
     static func make(context: ModelContext, now: Date = Date()) -> WatchCompanionState {
         let fetchedProfiles = ((try? context.fetch(FetchDescriptor<CareProfile>(
             predicate: #Predicate { !$0.isArchived },
@@ -80,7 +86,8 @@ enum WatchStateFactory {
                 prediction: nil,
                 todayMetrics: [],
                 favoriteActions: [],
-                allActions: []
+                allActions: [],
+                weather: WeatherSurfaceCache.read()?.watchSnapshot(profileID: nil, now: now)
             )
         }
 
@@ -245,8 +252,15 @@ enum WatchStateFactory {
             todayMetrics: Array(metrics),
             favoriteActions: favoriteActions,
             allActions: allActions,
-            upcomingMedication: upcomingMedication
+            upcomingMedication: upcomingMedication,
+            weather: weatherState(selectedProfileID: profileID, now: now)
         )
+    }
+
+    private static func weatherState(selectedProfileID: UUID, now: Date) -> WeatherSurfaceState? {
+        guard var weather = WeatherSurfaceCache.read() else { return nil }
+        weather.selectedProfileID = selectedProfileID
+        return weather.watchSnapshot(profileID: selectedProfileID, now: now)
     }
 
     static func upcomingMedication(

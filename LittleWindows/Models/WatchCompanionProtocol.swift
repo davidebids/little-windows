@@ -253,6 +253,7 @@ struct WatchCompanionState: Codable, Hashable, Sendable {
     var favoriteActions: [WatchActionSnapshot]
     var allActions: [WatchActionSnapshot]
     var upcomingMedication: WatchMedicationSnapshot? = nil
+    var weather: WeatherSurfaceState? = nil
 
     static let empty = WatchCompanionState(
         schemaVersion: WatchCompanionProtocol.schemaVersion,

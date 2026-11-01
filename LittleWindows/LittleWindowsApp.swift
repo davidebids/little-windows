@@ -131,7 +131,6 @@ final class PersistenceStartupController: ObservableObject {
         isDataReady = false
         DeepLinkRouter.shared.isDataReady = false
         CloudKitSharingService.install(container: container)
-        WatchConnectivityService.shared.install(container: container)
         IntegrationCommandStore.installInAppHandler { url in
             let processed = await IntegrationCommandProcessor.process(
                 url,
@@ -160,75 +159,63 @@ struct LittleWindowsApp: App {
     @StateObject private var startupController = PersistenceStartupController.shared
     @UIApplicationDelegateAdaptor(LittleWindowsAppDelegate.self) private var appDelegate
 
+    init() { InteractionPerformanceAudit.start() }
+
     var body: some Scene {
         WindowGroup {
-            if let modelContainer = startupController.modelContainer {
-                ZStack {
-                    RootView()
-                        .modelContainer(modelContainer)
-                        .opacity(startupController.isDataReady ? 1 : 0)
-                        .allowsHitTesting(startupController.isDataReady)
-
-                    if !startupController.isDataReady {
-                        LittleWindowsLaunchView()
-                            .transition(.opacity)
-                    }
-                }
-                .animation(.easeOut(duration: 0.25), value: startupController.isDataReady)
-                .task {
-                    if !startupController.isDataReady {
-                        CaregiverIdentityService.startICloudSync()
-                        CareTrackingPreferenceStore.startICloudSync()
-                        await SampleData.seedIfNeeded(in: modelContainer.mainContext)
-                        if PersistenceService.isICloudSyncEnabled() {
-                            CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)
-                        }
-                        DeepLinkRouter.shared.isDataReady = true
-                        startupController.markDataReady()
-                        scheduleLaunchMaintenance(container: modelContainer)
-                    }
-                }
-            } else if startupController.failure != nil {
-                PersistenceRecoveryView(controller: startupController)
-            } else {
-                LittleWindowsLaunchView()
-                    .task {
-                        await startupController.start()
-                    }
-            }
+            #if DEBUG && targetEnvironment(simulator)
+            if InteractionPerformanceAudit.referenceEnabled {
+                InteractionAuditReferenceView().interactionPerformanceAudit()
+            } else if InteractionPerformanceAudit.referenceScrollEnabled {
+                InteractionAuditScrollReferenceView()
+            } else { applicationContent }
+            #else
+            applicationContent
+            #endif
         }
+    }
+
+    private var applicationContent: some View {
+        Group {
+        if let modelContainer = startupController.modelContainer {
+            ZStack {
+                RootView()
+                    .modelContainer(modelContainer)
+                    .opacity(startupController.isDataReady ? 1 : 0)
+                    .allowsHitTesting(startupController.isDataReady)
+
+                if !startupController.isDataReady {
+                    LittleWindowsLaunchView()
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.25), value: startupController.isDataReady)
+            .task {
+                if !startupController.isDataReady {
+                    CaregiverIdentityService.startICloudSync()
+                    CareTrackingPreferenceStore.startICloudSync()
+                    await SampleData.seedIfNeeded(in: modelContainer.mainContext)
+                    if PersistenceService.isICloudSyncEnabled() {
+                        CloudMigrationService.ensureMigrated(context: modelContainer.mainContext)
+                    }
+                    DeepLinkRouter.shared.isDataReady = true
+                    startupController.markDataReady()
+                    scheduleLaunchMaintenance(container: modelContainer)
+                }
+            }
+        } else if startupController.failure != nil {
+            PersistenceRecoveryView(controller: startupController)
+        } else {
+            LittleWindowsLaunchView()
+                .task {
+                    await startupController.start()
+                }
+        }
+        }.interactionPerformanceAudit()
     }
 
     @MainActor
     private func scheduleLaunchMaintenance(container modelContainer: ModelContainer) {
-        let operationalDefaults = PersistenceService.operationalDefaults()
-        let lastDuplicateRepairAt = operationalDefaults.object(
-            forKey: FoodHomeDuplicateRepairService.lastLaunchMaintenanceAtKey
-        ) as? Date
-        if FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
-            lastCompletedAt: lastDuplicateRepairAt
-        ) {
-            Task(priority: .utility) { @MainActor in
-                // Duplicate rows are already coalesced defensively in the UI.
-                // Keep this physical cleanup away from store opening and the
-                // initial CloudKit import, and do not repeat it every launch.
-                do {
-                    try await Task.sleep(for: .seconds(20))
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled,
-                      UIApplication.shared.applicationState == .active else { return }
-                let worker = FoodHomeDuplicateRepairWorker(modelContainer: modelContainer)
-                _ = await worker.repair()
-                guard !Task.isCancelled else { return }
-                operationalDefaults.set(
-                    Date(),
-                    forKey: FoodHomeDuplicateRepairService.lastLaunchMaintenanceAtKey
-                )
-            }
-        }
-
         Task(priority: .utility) { @MainActor in
             await Task.yield()
             await NotificationManager.shared.configure()

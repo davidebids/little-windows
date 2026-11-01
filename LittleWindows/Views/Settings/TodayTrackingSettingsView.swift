@@ -1,15 +1,109 @@
 import SwiftUI
+import os
+
+/// Keeps presentation state out of Today's care/history state. SwiftUI can still
+/// evaluate the underlying view when the sheet changes its environment.
+@MainActor
+final class TodayCustomizationPresentation: ObservableObject {
+    @Published var isPresented = false
+}
+
+struct TodayCustomizationSheet: ViewModifier {
+    @ObservedObject var presentation: TodayCustomizationPresentation
+    let profile: CareProfile
+    let onDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: $presentation.isPresented, onDismiss: onDismiss) {
+            #if DEBUG && targetEnvironment(simulator)
+            if InteractionPerformanceAudit.referenceFormEnabled {
+                InteractionAuditReferenceForm { presentation.isPresented = false }
+                    .interactionPaintProbe("customize")
+                    .interactionPerformanceAudit()
+            } else {
+                customization
+            }
+            #else
+            customization
+            #endif
+        }
+    }
+
+    private var customization: some View {
+        NavigationStack {
+            TodayTrackingSettingsView(profile: profile)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { presentation.isPresented = false }
+                    }
+                }
+        }
+        .interactionPerformanceAudit()
+    }
+}
+
+/// Owns the menu and sheet boundary independently of Today's care/history view.
+struct TodayProfileMenu: View {
+    struct Timer: Identifiable {
+        let id: UUID
+        let title: String
+    }
+    let profile: CareProfile
+    let timers: [Timer]
+    let labelWidth: CGFloat
+    let presentation: TodayCustomizationPresentation
+    let logActivity: (EventType) -> Void
+    let editTimer: (UUID) -> Void
+    let openSettings: () -> Void
+    let customizationDismissed: () -> Void
+
+    var body: some View {
+        let _ = TodayPresentationAudit.event("ProfileMenuBody")
+        Menu {
+            Button("Customize Today", systemImage: "slider.horizontal.3") {
+                TodayPresentationAudit.event("CustomizeSelected")
+                InteractionPerformanceAudit.begin("customize")
+                presentation.isPresented = true
+            }
+            Menu("Log Another Activity", systemImage: "plus.circle") {
+                ForEach(EventType.cases(for: profile.profileType)) { type in
+                    Button(type.displayName, systemImage: type.systemImage(for: profile.profileType)) { logActivity(type) }
+                }
+            }
+            if !timers.isEmpty {
+                Section("Active timers") {
+                    ForEach(timers) { timer in
+                        Button(timer.title, systemImage: "timer") { editTimer(timer.id) }
+                    }
+                }
+            }
+            Button("Settings & Profiles", systemImage: "gearshape", action: openSettings)
+        } label: {
+            ProfileAvatarView(profile: profile, size: 34)
+                .frame(width: labelWidth, height: 44)
+        }
+        .buttonStyle(.plain)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel("\(profile.name) settings")
+        .accessibilityHint("Opens Today customization, active timers, and settings")
+        .accessibilityIdentifier("today.menu")
+        .modifier(TodayCustomizationSheet(presentation: presentation, profile: profile, onDismiss: customizationDismissed))
+    }
+}
 
 struct TodayTrackingSettingsView: View {
+    private enum Route: Hashable { case activities, quickActions, sections, tracking }
     let profile: CareProfile
     @State private var preferences = CareTrackingPreferences()
 
     init(profile: CareProfile) {
         self.profile = profile
+        TodayPresentationAudit.event("CustomizeInit")
         _preferences = State(initialValue: CareTrackingPreferenceStore.preferences(profileID: profile.id))
     }
 
     var body: some View {
+        let _ = TodayPresentationAudit.event("CustomizeBody")
         Form {
             Section {
                 Picker("Layout", selection: Binding(
@@ -32,15 +126,9 @@ struct TodayTrackingSettingsView: View {
             }
             Section {
                 if preferences.layout == .essentials {
-                    NavigationLink("Activities & Button Order") {
-                        TodayEssentialsActivitiesView(profile: profile)
-                    }
+                    NavigationLink("Activities & Button Order", value: Route.activities)
                 } else {
-                    NavigationLink("Full Layout Quick Actions") {
-                        CareCategoryCustomizationView(profileID: profile.id, profileType: profile.profileType) {
-                            SystemIntegrationReconciler.requestReconciliation()
-                        }
-                    }
+                    NavigationLink("Full Layout Quick Actions", value: Route.quickActions)
                 }
             } header: {
                 Text("\(preferences.layout.title) layout")
@@ -48,12 +136,8 @@ struct TodayTrackingSettingsView: View {
             .id(preferences.layout)
 
             Section {
-                NavigationLink("Visible Sections") {
-                    TodaySectionSettingsView(profile: profile)
-                }
-                NavigationLink("Tracking & Reminders") {
-                    TodayTrackingCategoriesView(profile: profile)
-                }
+                NavigationLink("Visible Sections", value: Route.sections)
+                NavigationLink("Tracking & Reminders", value: Route.tracking)
             } footer: {
                 Text("These choices follow this profile on devices signed into the same Apple Account when iCloud Sync is on. Offline changes apply here immediately and merge when iCloud becomes available.")
             }
@@ -74,24 +158,21 @@ struct TodayTrackingSettingsView: View {
                              : "Your chosen activities are paused. Resume them in Tracking & Reminders.")
                             .foregroundStyle(.secondary)
                     } else {
-                        VStack(spacing: 12) {
-                            ForEach(types.prefix(3)) { type in
-                                EssentialsActionButton(
-                                    type: type, profileType: profile.profileType,
-                                    detail: "Recent record or running timer", count: types.count,
-                                    action: {}
-                                )
-                                .allowsHitTesting(false)
-                            }
-                            if types.count > 3 {
-                                Text("Plus \(types.count - 3) more below these buttons")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                        ForEach(types.prefix(3)) { type in
+                            EssentialsActionButton(
+                                type: type, profileType: profile.profileType,
+                                detail: "Recent record or running timer", count: types.count,
+                                action: {}
+                            )
+                            .allowsHitTesting(false)
+                            .padding(.vertical, 6)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Preview: large \(type.displayName) button")
                         }
-                        .padding(.vertical, 6)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Preview: large buttons for \(types.map(\.displayName).joined(separator: ", "))")
+                        if types.count > 3 {
+                            Text("Plus \(types.count - 3) more below these buttons")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -103,13 +184,31 @@ struct TodayTrackingSettingsView: View {
                 Text("Resets buttons and section visibility. Paused tracking and reminder choices stay as you set them.")
             }
         }
+        .navigationDestination(for: Route.self) { route in
+            switch route {
+            case .activities: TodayEssentialsActivitiesView(profile: profile)
+            case .quickActions:
+                CareCategoryCustomizationView(profileID: profile.id, profileType: profile.profileType) {
+                    SystemIntegrationReconciler.requestReconciliation()
+                }
+            case .sections: TodaySectionSettingsView(profile: profile)
+            case .tracking: TodayTrackingCategoriesView(profile: profile)
+            }
+        }
         .navigationTitle("Today & Tracking")
+        .interactionPaintProbe("customize")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: reload)
-        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in reload() }
+        .onAppear { TodayPresentationAudit.event("CustomizeAppear"); reload() }
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { notification in
+            guard notification.object as? UUID == profile.id else { return }
+            reload()
+        }
     }
 
-    private func reload() { preferences = CareTrackingPreferenceStore.preferences(profileID: profile.id) }
+    private func reload() {
+        let latest = CareTrackingPreferenceStore.preferences(profileID: profile.id)
+        if latest != preferences { preferences = latest }
+    }
     private func update(_ change: (inout CareTrackingPreferences) -> Void) {
         CareTrackingPreferenceStore.update(profileID: profile.id, change)
         reload()
@@ -349,12 +448,47 @@ private struct TodayTrackingCategoriesView: View {
     }
 }
 
+/// Keep the duration atomic even when the surrounding sentence needs two lines.
+struct EssentialsElapsedTimeText: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .allowsTightening(true)
+    }
+}
+
+private struct EssentialsDetailLabel: View {
+    let text: String
+    let elapsedDuration: String?
+
+    var body: some View {
+        Group {
+            if let elapsedDuration, let range = text.range(of: elapsedDuration) {
+                let prefix = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let suffix = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                ViewThatFits(in: .horizontal) {
+                    Text(text).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !prefix.isEmpty { Text(prefix) }
+                        EssentialsElapsedTimeText(text: elapsedDuration + (suffix.isEmpty ? "" : " " + suffix))
+                    }
+                }
+            } else { Text(text) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+    }
+}
+
 struct EssentialsActionButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let type: EventType
     let profileType: CareProfileType
     let detail: String
+    var elapsedDuration: String? = nil
     var timerStart: Date? = nil
     var stoppedTimerElapsed: TimeInterval? = nil
     let count: Int
@@ -386,15 +520,17 @@ struct EssentialsActionButton: View {
                     Text(type == .medicine ? "Medication" : type.displayName)
                         .font(.title2.bold())
                 }
-                Text(detail)
+                EssentialsDetailLabel(text: detail, elapsedDuration: elapsedDuration)
                     .font(.body)
                     .foregroundStyle(.secondary)
                 if let timerStart {
                     Text(timerStart, style: .timer)
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 } else if let stoppedTimerElapsed {
                     Text(DurationFormatting.liveString(seconds: stoppedTimerElapsed))
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 }
@@ -415,16 +551,18 @@ struct EssentialsActionButton: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(type == .medicine ? "Medication" : type.displayName)
                     .font(.title2.bold())
-                Text(detail)
+                EssentialsDetailLabel(text: detail, elapsedDuration: elapsedDuration)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let timerStart {
                     Text(timerStart, style: .timer)
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 } else if let stoppedTimerElapsed {
                     Text(DurationFormatting.liveString(seconds: stoppedTimerElapsed))
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 }
@@ -435,5 +573,17 @@ struct EssentialsActionButton: View {
                 .foregroundStyle(type.tint)
                 .accessibilityHidden(true)
         }
+    }
+}
+
+/// Simulator-only timing events; no profile data or production logging.
+enum TodayPresentationAudit {
+    private static let logger = Logger(subsystem: "com.debidia.LittleWindows.presentation-audit", category: "Timing")
+    static func event(_ name: String) {
+        InteractionPerformanceAudit.count(name)
+        #if DEBUG && targetEnvironment(simulator)
+        guard ProcessInfo.processInfo.environment["LITTLE_WINDOWS_PRESENTATION_AUDIT"] == "1" else { return }
+        logger.info("\(name, privacy: .public)")
+        #endif
     }
 }

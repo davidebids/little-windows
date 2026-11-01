@@ -1,9 +1,11 @@
 import SwiftUI
+import SwiftData
 
 /// Compact weather context presented with the Today greeting.
 struct TodayWeatherHeader: View {
     @ObservedObject private var weather = DailyWeatherStore.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.modelContext) private var modelContext
     let chooseCity: () -> Void
 
     var body: some View {
@@ -29,12 +31,14 @@ struct TodayWeatherHeader: View {
                 .contentShape(RoundedRectangle(cornerRadius: 14))
             }
             .buttonStyle(.plain)
-            .accessibilityHint("Change weather location")
+            .accessibilityHint("Open weather forecast")
+            .accessibilityValue(weather.snapshot?.detailedForecastPending == true ? "Updating forecast" : "")
             .accessibilityIdentifier("today.weather.header")
         }
         .font(.caption)
         .foregroundStyle(.secondary)
         .task(id: weather.requestID) {
+            weather.updateContext(modelContext)
             await weather.refresh()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(30 * 60)) } catch { return }
@@ -42,8 +46,10 @@ struct TodayWeatherHeader: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await weather.refresh() } }
+            if phase == .active { Task { weather.updateContext(modelContext); await weather.refresh() } }
         }
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in weather.updateContext(modelContext) }
+        .onReceive(NotificationCenter.default.publisher(for: SystemIntegrationReconciler.reconciliationRequestedNotification)) { _ in weather.updateContext(modelContext) }
         .contextMenu {
             Button("Weather location", systemImage: "location") { chooseCity() }
         }
@@ -64,15 +70,22 @@ struct TodayWeatherHeader: View {
         }
     }
 
-    @ViewBuilder private var temperatureSummary: some View {
+    private var temperatureSummary: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { timeline in
+            temperatureSummary(at: timeline.date)
+        }
+    }
+
+    @ViewBuilder private func temperatureSummary(at now: Date) -> some View {
         if let snapshot = weather.snapshot,
-           let day = snapshot.day(for: Date(), timeZone: weather.timeZone) {
+           let day = snapshot.day(for: now, timeZone: weather.timeZone) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(OutdoorTemperatureFormatting.string(snapshot.currentTemperatureCelsius, unit: weather.temperatureUnit))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.accent)
                 Text("H \(OutdoorTemperatureFormatting.string(day.highTemperatureCelsius, unit: weather.temperatureUnit))  L \(OutdoorTemperatureFormatting.string(day.lowTemperatureCelsius, unit: weather.temperatureUnit))")
                     .font(.caption2)
+                if !snapshot.isFresh(at: now) { Text("Earlier").font(.caption2) }
             }
             .monospacedDigit()
             .accessibilityElement(children: .combine)
@@ -85,7 +98,7 @@ struct TodayWeatherHeader: View {
     }
 }
 
-struct WeatherCityPicker: View {
+struct WeatherLocationSettings: View {
     @ObservedObject private var weather = DailyWeatherStore.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -110,6 +123,14 @@ struct WeatherCityPicker: View {
                     Text("Temperature units")
                 } footer: {
                     Text("Used for outdoor temperatures on Today and sleep logs.")
+                }
+                Section("Units") {
+                    Picker("Wind", selection: $weather.windUnit) {
+                        Text("mph").tag("mph"); Text("km/h").tag("km/h")
+                    }
+                    Picker("Precipitation", selection: $weather.precipitationUnit) {
+                        Text("Inches").tag("in"); Text("Millimeters").tag("mm")
+                    }
                 }
                 Section {
                     Button {
@@ -160,7 +181,7 @@ struct WeatherCityPicker: View {
                     }
                 }
                 if weather.isConfigured {
-                    Section("Weather location") {
+                    Section("Selected location") {
                         if let location = weather.location {
                             LabeledContent(weather.usesCurrentLocation ? "Current location" : "City", value: location.name)
                         }
@@ -177,7 +198,10 @@ struct WeatherCityPicker: View {
                     }
                 }
             }
-            .navigationTitle("Weather Location")
+            .navigationTitle("Location")
+            .interactionPaintProbe("units.edit", revision: weather.temperatureUnit.rawValue)
+            .interactionPaintProbe("location.open")
+            .interactionPerformanceAudit()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
             .task(id: query) {
@@ -223,27 +247,30 @@ struct WeatherFailureText: View {
 struct WeatherDataCredit: View {
     let attribution: TripWeatherAttribution
     var compact = false
+    var sourceDetailsOnly = false
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingAttribution = false
 
     var body: some View {
         HStack {
-            AsyncImage(url: colorScheme == .dark ? attribution.darkMarkURL : attribution.lightMarkURL) { image in
-                image.resizable().scaledToFit()
-            } placeholder: {
-                Text("Apple Weather").font(.caption2)
+            if !sourceDetailsOnly {
+                AsyncImage(url: colorScheme == .dark ? attribution.darkMarkURL : attribution.lightMarkURL) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    Text("Apple Weather").font(.caption2)
+                }
+                .frame(width: 80, height: 18)
+                .accessibilityLabel("Apple Weather")
+                if !compact { Spacer() }
             }
-            .frame(width: 80, height: 18)
-            .accessibilityLabel("Apple Weather")
-            if !compact { Spacer() }
             Button { showingAttribution = true } label: {
                 if compact {
                     Image(systemName: "info.circle").font(.caption2)
                 } else {
-                    Text("About weather data").font(.caption)
+                    Text(sourceDetailsOnly ? "Data sources" : "About weather data").font(.caption)
                 }
             }
-            .accessibilityLabel("About weather data")
+            .accessibilityLabel(sourceDetailsOnly ? "Data sources" : "About weather data")
         }
         .sheet(isPresented: $showingAttribution) {
             NavigationStack {
@@ -255,7 +282,7 @@ struct WeatherDataCredit: View {
                     }
                     .padding()
                 }
-                .navigationTitle("About Weather Data")
+                .navigationTitle("Data Sources")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingAttribution = false } } }
             }

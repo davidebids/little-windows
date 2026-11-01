@@ -7,8 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B8B000000000000000000001 /* Services/FoodReactionReportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000001 /* Services/FoodReactionReportService.swift */; };
-		B8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift */; };
+		BA7200000000000000000002 /* Views/Components/WeatherForecastPlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7200000000000000000002; };
+		BA7300000000000000000001 /* Views/Components/WeatherAtmosphere.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7300000000000000000001; };
+		BA7200000000000000000001 /* Services/InteractionPerformanceAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7200000000000000000001; };
 		A40000000000000000000001 /* Models/WatchCompanionProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */; };
 		A40000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */; };
 		A40000000000000000000003 /* Models/LittleWindowsActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */; };
@@ -173,6 +174,35 @@
 		B20000000000000000000005 /* Models/TripItineraryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* Models/TripItineraryModels.swift */; };
 		B20000000000000000000006 /* Services/TripItineraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000006 /* Services/TripItineraryService.swift */; };
 		B20000000000000000000007 /* Views/Trips/TripItineraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* Views/Trips/TripItineraryViews.swift */; };
+		B8A000000000000000000001 /* Models/SleepConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000001 /* Models/SleepConditions.swift */; };
+		B8A000000000000000000002 /* Services/DailyWeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000002 /* Services/DailyWeatherService.swift */; };
+		B8A000000000000000000003 /* Views/Components/SleepConditionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000003 /* Views/Components/SleepConditionsView.swift */; };
+		B8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift */; };
+		B8A000000000000000000005 /* SleepConditionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000005 /* SleepConditionsTests.swift */; };
+		B8A000000000000000000006 /* Services/WeatherLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000006 /* Services/WeatherLocationService.swift */; };
+		B8B000000000000000000001 /* Services/FoodReactionReportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000001 /* Services/FoodReactionReportService.swift */; };
+		B8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift */; };
+		B8C000000000000000000001 /* Models/VoiceLoggingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000001 /* Models/VoiceLoggingModels.swift */; };
+		B8C000000000000000000002 /* Services/VoiceLoggingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000002 /* Services/VoiceLoggingService.swift */; };
+		B8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */; };
+		B8C000000000000000000004 /* VoiceLoggingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000004 /* VoiceLoggingTests.swift */; };
+		B8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift */; };
+		B8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift */; };
+		B8D000000000000000000003 /* CareTrackingPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000003 /* CareTrackingPreferenceTests.swift */; };
+		BA7100000000000000000001 /* Models/WeatherForecast.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* Models/WeatherForecast.swift */; };
+		BA7100000000000000000002 /* Models/WeatherForecast.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* Models/WeatherForecast.swift */; };
+		BA7100000000000000000003 /* Models/WeatherForecast.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* Models/WeatherForecast.swift */; };
+		BA7100000000000000000004 /* Models/WeatherForecast.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* Models/WeatherForecast.swift */; };
+		BA7100000000000000000005 /* Services/WeatherForecastClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000002 /* Services/WeatherForecastClient.swift */; };
+		BA7100000000000000000006 /* Services/WeatherForecastClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000002 /* Services/WeatherForecastClient.swift */; };
+		BA7100000000000000000007 /* Services/OutdoorContextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000003 /* Services/OutdoorContextService.swift */; };
+		BA7100000000000000000008 /* Views/Components/WeatherDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000004 /* Views/Components/WeatherDashboard.swift */; };
+		BA7100000000000000000009 /* WatchWeatherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000005 /* WatchWeatherView.swift */; };
+		BA710000000000000000000A /* WeatherWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000006 /* WeatherWidget.swift */; };
+		BA7100000000000000000020 /* WeatherForecastTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000007 /* WeatherForecastTests.swift */; };
+		BA7100000000000000000021 /* WeatherDashboardUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000008 /* WeatherDashboardUITests.swift */; };
+		BA7100000000000000000022 /* Views/Components/WeatherWidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000009 /* Views/Components/WeatherWidgetView.swift */; };
+		BA7100000000000000000023 /* Views/Components/WeatherWidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000009 /* Views/Components/WeatherWidgetView.swift */; };
 		C10000000000000000000001 /* Models/SolidsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* Models/SolidsModels.swift */; };
 		C10000000000000000000002 /* Services/SolidsReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* Services/SolidsReferenceCatalog.swift */; };
 		C10000000000000000000003 /* Services/SolidsTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Services/SolidsTrackingService.swift */; };
@@ -193,19 +223,6 @@
 		F40000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */; };
 		F90000000000000000000001 /* SUPPORT.md in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000011 /* SUPPORT.md */; };
 		F90000000000000000000002 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000012 /* PRIVACY.md */; };
-		B8A000000000000000000001 /* Models/SleepConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000001 /* Models/SleepConditions.swift */; };
-		B8A000000000000000000002 /* Services/DailyWeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000002 /* Services/DailyWeatherService.swift */; };
-		B8A000000000000000000003 /* Views/Components/SleepConditionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000003 /* Views/Components/SleepConditionsView.swift */; };
-		B8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift */; };
-		B8A000000000000000000005 /* SleepConditionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000005 /* SleepConditionsTests.swift */; };
-		B8A000000000000000000006 /* Services/WeatherLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000006 /* Services/WeatherLocationService.swift */; };
-		B8C000000000000000000001 /* Models/VoiceLoggingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000001 /* Models/VoiceLoggingModels.swift */; };
-		B8C000000000000000000002 /* Services/VoiceLoggingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000002 /* Services/VoiceLoggingService.swift */; };
-		B8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */; };
-		B8C000000000000000000004 /* VoiceLoggingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000004 /* VoiceLoggingTests.swift */; };
-		B8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift */; };
-		B8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift */; };
-		B8D000000000000000000003 /* CareTrackingPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000003 /* CareTrackingPreferenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -290,8 +307,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		F8B000000000000000000001 /* Services/FoodReactionReportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/FoodReactionReportService.swift; sourceTree = "<group>"; };
-		F8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/FoodReactionReportView.swift; sourceTree = "<group>"; };
+		FA7200000000000000000002 /* Views/Components/WeatherForecastPlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/WeatherForecastPlot.swift; sourceTree = "<group>"; };
+		FA7300000000000000000001 /* Views/Components/WeatherAtmosphere.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/WeatherAtmosphere.swift; sourceTree = "<group>"; };
+		FA7200000000000000000001 /* Services/InteractionPerformanceAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/InteractionPerformanceAudit.swift; sourceTree = "<group>"; };
 		A50000000000000000000001 /* Models/WatchCompanionProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/WatchCompanionProtocol.swift; sourceTree = "<group>"; };
 		A50000000000000000000002 /* Models/LittleWindowsActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/LittleWindowsActivityAttributes.swift; sourceTree = "<group>"; };
 		A50000000000000000000003 /* Services/WatchStateFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WatchStateFactory.swift; sourceTree = "<group>"; };
@@ -301,8 +319,6 @@
 		A50000000000000000000007 /* WatchCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCompanionApp.swift; sourceTree = "<group>"; };
 		A50000000000000000000008 /* WatchConnectivityClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConnectivityClient.swift; sourceTree = "<group>"; };
 		A50000000000000000000009 /* WatchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHomeView.swift; sourceTree = "<group>"; };
-		A50000000000000000000015 /* WatchNightLightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchNightLightView.swift; sourceTree = "<group>"; };
-		A50000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A5000000000000000000000A /* WatchAppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAppIntents.swift; sourceTree = "<group>"; };
 		A5000000000000000000000B /* WatchSharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSharedStorage.swift; sourceTree = "<group>"; };
 		A5000000000000000000000C /* LittleWindowsWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LittleWindowsWatch.entitlements; sourceTree = "<group>"; };
@@ -313,6 +329,8 @@
 		A50000000000000000000011 /* LittleWindowsWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LittleWindowsWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A50000000000000000000012 /* WatchCompanionProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCompanionProtocolTests.swift; sourceTree = "<group>"; };
 		A50000000000000000000013 /* LittleWindowsWatchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LittleWindowsWatchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A50000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A50000000000000000000015 /* WatchNightLightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchNightLightView.swift; sourceTree = "<group>"; };
 		C20000000000000000000001 /* Models/SolidsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SolidsModels.swift; sourceTree = "<group>"; };
 		C20000000000000000000002 /* Services/SolidsReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SolidsReferenceCatalog.swift; sourceTree = "<group>"; };
 		C20000000000000000000003 /* Services/SolidsTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SolidsTrackingService.swift; sourceTree = "<group>"; };
@@ -473,14 +491,14 @@
 		F30000000000000000000003 /* BodyLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyLocationTests.swift; sourceTree = "<group>"; };
 		F30000000000000000000004 /* Resources/BodyAnatomy */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/BodyAnatomy; sourceTree = "<group>"; };
 		F30000000000000000000005 /* Views/Health/AnatomicalBodySceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Health/AnatomicalBodySceneView.swift; sourceTree = "<group>"; };
-		F90000000000000000000011 /* SUPPORT.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SUPPORT.md; sourceTree = "<group>"; };
-		F90000000000000000000012 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = "<group>"; };
 		F8A000000000000000000001 /* Models/SleepConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/SleepConditions.swift; sourceTree = "<group>"; };
 		F8A000000000000000000002 /* Services/DailyWeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/DailyWeatherService.swift; sourceTree = "<group>"; };
 		F8A000000000000000000003 /* Views/Components/SleepConditionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/SleepConditionsView.swift; sourceTree = "<group>"; };
 		F8A000000000000000000004 /* Views/Components/TodayWeatherSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/TodayWeatherSection.swift; sourceTree = "<group>"; };
 		F8A000000000000000000005 /* SleepConditionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepConditionsTests.swift; sourceTree = "<group>"; };
 		F8A000000000000000000006 /* Services/WeatherLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WeatherLocationService.swift; sourceTree = "<group>"; };
+		F8B000000000000000000001 /* Services/FoodReactionReportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/FoodReactionReportService.swift; sourceTree = "<group>"; };
+		F8B000000000000000000002 /* Views/Settings/FoodReactionReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/FoodReactionReportView.swift; sourceTree = "<group>"; };
 		F8C000000000000000000001 /* Models/VoiceLoggingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/VoiceLoggingModels.swift; sourceTree = "<group>"; };
 		F8C000000000000000000002 /* Services/VoiceLoggingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/VoiceLoggingService.swift; sourceTree = "<group>"; };
 		F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents/VoiceLoggingIntents.swift; sourceTree = "<group>"; };
@@ -488,6 +506,17 @@
 		F8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareTrackingPreferenceStore.swift; sourceTree = "<group>"; };
 		F8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/TodayTrackingSettingsView.swift; sourceTree = "<group>"; };
 		F8D000000000000000000003 /* CareTrackingPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareTrackingPreferenceTests.swift; sourceTree = "<group>"; };
+		F90000000000000000000011 /* SUPPORT.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SUPPORT.md; sourceTree = "<group>"; };
+		F90000000000000000000012 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = "<group>"; };
+		FA7100000000000000000001 /* Models/WeatherForecast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/WeatherForecast.swift; sourceTree = "<group>"; };
+		FA7100000000000000000002 /* Services/WeatherForecastClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/WeatherForecastClient.swift; sourceTree = "<group>"; };
+		FA7100000000000000000003 /* Services/OutdoorContextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/OutdoorContextService.swift; sourceTree = "<group>"; };
+		FA7100000000000000000004 /* Views/Components/WeatherDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/WeatherDashboard.swift; sourceTree = "<group>"; };
+		FA7100000000000000000005 /* WatchWeatherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWeatherView.swift; sourceTree = "<group>"; };
+		FA7100000000000000000006 /* WeatherWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherWidget.swift; sourceTree = "<group>"; };
+		FA7100000000000000000007 /* WeatherForecastTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherForecastTests.swift; sourceTree = "<group>"; };
+		FA7100000000000000000008 /* WeatherDashboardUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherDashboardUITests.swift; sourceTree = "<group>"; };
+		FA7100000000000000000009 /* Views/Components/WeatherWidgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Components/WeatherWidgetView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -552,6 +581,7 @@
 		A60000000000000000000001 /* LittleWindowsWatch */ = {
 			isa = PBXGroup;
 			children = (
+				FA7100000000000000000005 /* WatchWeatherView.swift */,
 				A50000000000000000000007 /* WatchCompanionApp.swift */,
 				A50000000000000000000008 /* WatchConnectivityClient.swift */,
 				A50000000000000000000009 /* WatchHomeView.swift */,
@@ -602,6 +632,14 @@
 		D00000000000000000000006 /* LittleWindows */ = {
 			isa = PBXGroup;
 			children = (
+				FA7100000000000000000009 /* Views/Components/WeatherWidgetView.swift */,
+				FA7100000000000000000004 /* Views/Components/WeatherDashboard.swift */,
+				FA7200000000000000000001 /* Services/InteractionPerformanceAudit.swift */,
+				FA7200000000000000000002 /* Views/Components/WeatherForecastPlot.swift */,
+				FA7300000000000000000001 /* Views/Components/WeatherAtmosphere.swift */,
+				FA7100000000000000000003 /* Services/OutdoorContextService.swift */,
+				FA7100000000000000000002 /* Services/WeatherForecastClient.swift */,
+				FA7100000000000000000001 /* Models/WeatherForecast.swift */,
 				F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */,
 				F8C000000000000000000002 /* Services/VoiceLoggingService.swift */,
 				F8C000000000000000000001 /* Models/VoiceLoggingModels.swift */,
@@ -758,6 +796,7 @@
 		D00000000000000000000007 /* LittleWindowsTests */ = {
 			isa = PBXGroup;
 			children = (
+				FA7100000000000000000007 /* WeatherForecastTests.swift */,
 				F8C000000000000000000004 /* VoiceLoggingTests.swift */,
 				F8D000000000000000000003 /* CareTrackingPreferenceTests.swift */,
 				A50000000000000000000006 /* WatchCompanionTests.swift */,
@@ -801,6 +840,7 @@
 		D00000000000000000000027 /* LittleWindowsWidgets */ = {
 			isa = PBXGroup;
 			children = (
+				FA7100000000000000000006 /* WeatherWidget.swift */,
 				F00000000000000000000040 /* LittleWindowsWidgetsBundle.swift */,
 				F00000000000000000000041 /* WidgetSnapshotReader.swift */,
 				F00000000000000000000042 /* ActiveTimerWidget.swift */,
@@ -820,6 +860,7 @@
 		D00000000000000000000029 /* LittleWindowsUITests */ = {
 			isa = PBXGroup;
 			children = (
+				FA7100000000000000000008 /* WeatherDashboardUITests.swift */,
 				F0000000000000000000008C /* UserVisibleFlowUITests.swift */,
 			);
 			path = LittleWindowsUITests;
@@ -964,7 +1005,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					A70000000000000000000001 = {
 						CreatedOnToolsVersion = 26.3;
@@ -993,6 +1034,11 @@
 					};
 					D00000000000000000000020 = {
 						CreatedOnToolsVersion = 16.0;
+						SystemCapabilities = {
+							com.apple.WeatherKit = {
+								enabled = 1;
+							};
+						};
 					};
 					D0000000000000000000002A = {
 						CreatedOnToolsVersion = 16.0;
@@ -1090,6 +1136,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BA7100000000000000000009 /* WatchWeatherView.swift in Sources */,
+				BA7100000000000000000003 /* Models/WeatherForecast.swift in Sources */,
 				A40000000000000000000008 /* Models/WatchCompanionProtocol.swift in Sources */,
 				A40000000000000000000009 /* WatchSharedStorage.swift in Sources */,
 				A4000000000000000000000A /* WatchConnectivityClient.swift in Sources */,
@@ -1104,6 +1152,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BA7100000000000000000004 /* Models/WeatherForecast.swift in Sources */,
 				A40000000000000000000010 /* WatchCompanionWidgets.swift in Sources */,
 				A40000000000000000000011 /* Models/WatchCompanionProtocol.swift in Sources */,
 				A40000000000000000000012 /* WatchSharedStorage.swift in Sources */,
@@ -1122,6 +1171,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BA7100000000000000000022 /* Views/Components/WeatherWidgetView.swift in Sources */,
+				BA7100000000000000000008 /* Views/Components/WeatherDashboard.swift in Sources */,
+				BA7200000000000000000001 /* Services/InteractionPerformanceAudit.swift in Sources */,
+				BA7200000000000000000002 /* Views/Components/WeatherForecastPlot.swift in Sources */,
+				BA7300000000000000000001 /* Views/Components/WeatherAtmosphere.swift in Sources */,
+				BA7100000000000000000007 /* Services/OutdoorContextService.swift in Sources */,
+				BA7100000000000000000005 /* Services/WeatherForecastClient.swift in Sources */,
+				BA7100000000000000000001 /* Models/WeatherForecast.swift in Sources */,
 				B8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift in Sources */,
 				B8C000000000000000000002 /* Services/VoiceLoggingService.swift in Sources */,
 				B8C000000000000000000001 /* Models/VoiceLoggingModels.swift in Sources */,
@@ -1272,6 +1329,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BA7100000000000000000020 /* WeatherForecastTests.swift in Sources */,
 				B8C000000000000000000004 /* VoiceLoggingTests.swift in Sources */,
 				B8D000000000000000000003 /* CareTrackingPreferenceTests.swift in Sources */,
 				A40000000000000000000007 /* WatchCompanionTests.swift in Sources */,
@@ -1289,6 +1347,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BA7100000000000000000023 /* Views/Components/WeatherWidgetView.swift in Sources */,
+				BA710000000000000000000A /* WeatherWidget.swift in Sources */,
+				BA7100000000000000000006 /* Services/WeatherForecastClient.swift in Sources */,
+				BA7100000000000000000002 /* Models/WeatherForecast.swift in Sources */,
 				A40000000000000000000003 /* Models/LittleWindowsActivityAttributes.swift in Sources */,
 				B00000000000000000000040 /* LittleWindowsWidgetsBundle.swift in Sources */,
 				B00000000000000000000041 /* WidgetSnapshotReader.swift in Sources */,
@@ -1312,6 +1374,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BA7100000000000000000021 /* WeatherDashboardUITests.swift in Sources */,
 				B0000000000000000000008C /* UserVisibleFlowUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1358,18 +1421,18 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LittleWindowsWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Little Windows";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.debidia.LittleWindows;
-				INFOPLIST_FILE = LittleWindowsWatch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
 				PRODUCT_NAME = LittleWindowsWatch;
 				SDKROOT = watchos;
@@ -1388,18 +1451,18 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatch/LittleWindowsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LittleWindowsWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Little Windows";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.debidia.LittleWindows;
-				INFOPLIST_FILE = LittleWindowsWatch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp;
 				PRODUCT_NAME = LittleWindowsWatch;
 				SDKROOT = watchos;
@@ -1418,11 +1481,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
 				PRODUCT_NAME = LittleWindowsWatchWidgets;
 				SDKROOT = watchos;
@@ -1441,11 +1504,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWatchWidgets/LittleWindowsWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.watchkitapp.widgets;
 				PRODUCT_NAME = LittleWindowsWatchWidgets;
 				SDKROOT = watchos;
@@ -1496,6 +1559,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -1560,6 +1624,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -1622,13 +1687,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1648,13 +1713,13 @@
 				CODE_SIGN_ENTITLEMENTS = LittleWindows/LittleWindows.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				DEVELOPMENT_TEAM = A3H3Y9PUP3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindows/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1702,11 +1767,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1722,11 +1787,11 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LittleWindowsWidgets/LittleWindowsWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.4.5;
+				CURRENT_PROJECT_VERSION = 1.4.6;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LittleWindowsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4.5;
+				MARKETING_VERSION = 1.4.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.debidia.LittleWindows.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

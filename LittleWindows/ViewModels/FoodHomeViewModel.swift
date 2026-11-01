@@ -89,7 +89,7 @@ enum InventorySort: String, CaseIterable, Identifiable {
     }
 }
 
-enum SolidsTrackerFilter: String, CaseIterable, Identifiable, Hashable, Codable {
+enum SolidsTrackerFilter: String, CaseIterable, Identifiable, Hashable, Codable, Sendable {
     case all
     case tried
     case favorites
@@ -175,7 +175,7 @@ struct FoodNavigationRestorationState: Codable, Equatable {
     }
 }
 
-enum FoodRouteCommand: Equatable {
+enum FoodRouteCommand: Equatable, Sendable {
     case food
     case solids
     case solidsDatabase
