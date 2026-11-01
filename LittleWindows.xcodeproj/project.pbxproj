@@ -203,6 +203,9 @@
 		B8C000000000000000000002 /* Services/VoiceLoggingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000002 /* Services/VoiceLoggingService.swift */; };
 		B8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */; };
 		B8C000000000000000000004 /* VoiceLoggingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000004 /* VoiceLoggingTests.swift */; };
+		B8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift */; };
+		B8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift */; };
+		B8D000000000000000000003 /* CareTrackingPreferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000003 /* CareTrackingPreferenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -482,6 +485,9 @@
 		F8C000000000000000000002 /* Services/VoiceLoggingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/VoiceLoggingService.swift; sourceTree = "<group>"; };
 		F8C000000000000000000003 /* AppIntents/VoiceLoggingIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents/VoiceLoggingIntents.swift; sourceTree = "<group>"; };
 		F8C000000000000000000004 /* VoiceLoggingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceLoggingTests.swift; sourceTree = "<group>"; };
+		F8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CareTrackingPreferenceStore.swift; sourceTree = "<group>"; };
+		F8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Settings/TodayTrackingSettingsView.swift; sourceTree = "<group>"; };
+		F8D000000000000000000003 /* CareTrackingPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareTrackingPreferenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -662,6 +668,7 @@
 				F00000000000000000000081 /* Services/SyncDiagnosticsService.swift */,
 				F00000000000000000000082 /* Services/CloudKitSharingService.swift */,
 				F0000000000000000000008E /* Services/CaregiverIdentityService.swift */,
+				F8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift */,
 				F00000000000000000000089 /* Services/FoodHomeServices.swift */,
 				F00000000000000000000092 /* Services/CareRoutineService.swift */,
 				F00000000000000000000095 /* Services/CareReportExportService.swift */,
@@ -691,6 +698,7 @@
 				F00000000000000000000056 /* Views/MilestonesView.swift */,
 				F00000000000000000000014 /* Views/EventEditorView.swift */,
 				F00000000000000000000016 /* Views/SettingsView.swift */,
+				F8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift */,
 				F00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift */,
 				F00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift */,
 				F00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift */,
@@ -751,6 +759,7 @@
 			isa = PBXGroup;
 			children = (
 				F8C000000000000000000004 /* VoiceLoggingTests.swift */,
+				F8D000000000000000000003 /* CareTrackingPreferenceTests.swift */,
 				A50000000000000000000006 /* WatchCompanionTests.swift */,
 				F0000000000000000000001B /* SleepPredictionEngineTests.swift */,
 				F8A000000000000000000005 /* SleepConditionsTests.swift */,
@@ -1179,6 +1188,7 @@
 				B00000000000000000000081 /* Services/SyncDiagnosticsService.swift in Sources */,
 				B00000000000000000000082 /* Services/CloudKitSharingService.swift in Sources */,
 				B0000000000000000000008E /* Services/CaregiverIdentityService.swift in Sources */,
+				B8D000000000000000000001 /* Services/CareTrackingPreferenceStore.swift in Sources */,
 				B00000000000000000000089 /* Services/FoodHomeServices.swift in Sources */,
 				B00000000000000000000092 /* Services/CareRoutineService.swift in Sources */,
 				B00000000000000000000095 /* Services/CareReportExportService.swift in Sources */,
@@ -1208,6 +1218,7 @@
 				B00000000000000000000057 /* Views/MilestonesView.swift in Sources */,
 				B00000000000000000000014 /* Views/EventEditorView.swift in Sources */,
 				B00000000000000000000016 /* Views/SettingsView.swift in Sources */,
+				B8D000000000000000000002 /* Views/Settings/TodayTrackingSettingsView.swift in Sources */,
 				B00000000000000000000085 /* Views/Settings/ICloudSyncSettingsView.swift in Sources */,
 				B00000000000000000000086 /* Views/Settings/FamilySyncSettingsView.swift in Sources */,
 				B00000000000000000000087 /* Views/Settings/SyncDiagnosticsView.swift in Sources */,
@@ -1262,6 +1273,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B8C000000000000000000004 /* VoiceLoggingTests.swift in Sources */,
+				B8D000000000000000000003 /* CareTrackingPreferenceTests.swift in Sources */,
 				A40000000000000000000007 /* WatchCompanionTests.swift in Sources */,
 				C10000000000000000000005 /* SolidsFeatureTests.swift in Sources */,
 				B0000000000000000000001B /* SleepPredictionEngineTests.swift in Sources */,
