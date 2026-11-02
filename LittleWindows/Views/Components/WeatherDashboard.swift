@@ -52,21 +52,6 @@ struct WeatherCityPicker: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         WeatherOutlookPanel(surface: surface, now: now)
-                        if let summary = surface.rainSummary(at: now), let minutes = surface.forecast.validMinutes(at: now) {
-                            let hasPrecipitation = minutes.contains { $0.hasExpectedPrecipitation }
-                            WeatherPanel(title: "Next hour", symbol: hasPrecipitation ? "cloud.rain.fill" : "drop", tint: .blue,
-                                         subtitle: hasPrecipitation ? "Precipitation, minute by minute" : nil) {
-                                Text(summary)
-                                    .font(.subheadline)
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: .infinity)
-                                if hasPrecipitation {
-                                    let points = minutes.map { WeatherPlotPoint(date: $0.date, value: surface.precipitationUnit == "in" ? $0.intensityMMPerHour / 25.4 : $0.intensityMMPerHour) }
-                                    WeatherForecastPlot(points: points, range: 0...max(0.01, points.map(\.value).max() ?? 0), title: "Precipitation intensity",
-                                        unit: surface.precipitationUnit == "in" ? "in/h" : "mm/h", timeZone: surface.timeZone, bars: true)
-                                }
-                            }
-                        }
                         WeatherOutdoorSection(surface: surface,
                             participants: Binding(get: { outingSelection.participants }, set: { outingSelection.choose($0) }), windows: windows)
                         WeatherPanel(title: "Next 48 hours", symbol: "clock.fill", subtitle: "Your day, hour by hour") {
@@ -220,6 +205,20 @@ private struct WeatherOutlookPanel: View {
         let s = surface
         WeatherPanel(title: "At a glance", symbol: "sparkles", tint: .orange) {
             Text(s.outlook(at: now)).font(.subheadline.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+            if let summary = s.rainSummary(at: now), let minutes = s.forecast.validMinutes(at: now) {
+                let hasPrecipitation = minutes.contains { $0.hasExpectedPrecipitation }
+                Divider()
+                Label("Next hour · \(summary)", systemImage: hasPrecipitation ? "cloud.rain.fill" : "drop")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.blue)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                if hasPrecipitation {
+                    let points = minutes.map { WeatherPlotPoint(date: $0.date, value: s.precipitationUnit == "in" ? $0.intensityMMPerHour / 25.4 : $0.intensityMMPerHour) }
+                    WeatherForecastPlot(points: points, range: 0...max(0.01, points.map(\.value).max() ?? 0), title: "Precipitation intensity",
+                        unit: s.precipitationUnit == "in" ? "in/h" : "mm/h", timeZone: s.timeZone, bars: true)
+                }
+            }
             let tonight = s.tonight(at: now)
             if let low = tonight.map(\.temperature).min(), let feels = tonight.map(\.feelsLike).min(), let rain = tonight.map(\.rainChance).max() {
                 Divider()
