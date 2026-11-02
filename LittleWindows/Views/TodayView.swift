@@ -326,7 +326,11 @@ private struct TodayPreferenceRevision: Equatable {
 @MainActor
 private final class TodayRouteObservation: ObservableObject {
     private var subscriptions = Set<AnyCancellable>()
-    init(router: DeepLinkRouter = .shared) {
+    convenience init() {
+        self.init(router: .shared)
+    }
+
+    init(router: DeepLinkRouter) {
         router.$todayDisplayMode.removeDuplicates().dropFirst().sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &subscriptions)
