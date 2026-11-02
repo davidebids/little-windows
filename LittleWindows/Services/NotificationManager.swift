@@ -2648,14 +2648,15 @@ enum SystemIntegrationReconciler {
         let analysisProfileIDs = Array(Set(
             childProfileIDs + [profile?.id].compactMap { $0 }
         ))
-        let reminderWorker = SystemIntegrationSnapshotWorker(
-            modelContainer: context.container
-        )
+        let container = context.container
         let currentCaregiverName = CaregiverIdentityService.currentCaregiverName()
-        async let reminderSnapshotTask = reminderWorker.reminderSnapshots(
-            activeProfileIDs: activeProfileIDSet,
-            currentCaregiverName: currentCaregiverName
-        )
+        // ModelActor's executor follows the context created by its initializer.
+        // Construct it off the UI actor as well as awaiting its work there.
+        async let reminderSnapshotTask = Task.detached(priority: .utility) {
+            let worker = SystemIntegrationSnapshotWorker(modelContainer: container)
+            return await worker.reminderSnapshots(activeProfileIDs: activeProfileIDSet,
+                currentCaregiverName: currentCaregiverName)
+        }.value
         let predictionSettings = PredictionSettings(
             feedAdjustmentEnabled: UserDefaults.standard.object(
                 forKey: "feedAdjustmentEnabled"

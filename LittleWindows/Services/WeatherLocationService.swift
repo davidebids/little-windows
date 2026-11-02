@@ -4,8 +4,15 @@ import MapKit
 
 @MainActor
 protocol WeatherLocationClient {
+    func currentPosition(requestAuthorization: Bool) async throws -> TripDestinationSelection
     func currentCity(requestAuthorization: Bool) async throws -> TripDestinationSelection
     func resolveCity(_ location: TripDestinationSelection) async throws -> TripDestinationSelection
+}
+
+extension WeatherLocationClient {
+    func currentPosition(requestAuthorization: Bool) async throws -> TripDestinationSelection {
+        try await currentCity(requestAuthorization: requestAuthorization)
+    }
 }
 
 enum WeatherLocationFailure: Error, Equatable {
@@ -43,6 +50,10 @@ final class LiveWeatherLocationClient: NSObject, WeatherLocationClient, @preconc
     private var isRequestingFix = false
 
     func currentCity(requestAuthorization: Bool) async throws -> TripDestinationSelection {
+        let position = try await currentPosition(requestAuthorization: requestAuthorization)
+        return (try? await resolveCity(position)) ?? position
+    }
+    func currentPosition(requestAuthorization: Bool) async throws -> TripDestinationSelection {
         let location: CLLocation = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CLLocation, Error>) in
                 guard self.continuation == nil else {
@@ -82,7 +93,7 @@ final class LiveWeatherLocationClient: NSObject, WeatherLocationClient, @preconc
             name: "Current location", latitude: approximate.coordinate.latitude,
             longitude: approximate.coordinate.longitude, timeZoneIdentifier: TimeZone.current.identifier
         )
-        return (try? await resolveCity(initial)) ?? initial
+        return initial
     }
 
     func resolveCity(_ location: TripDestinationSelection) async throws -> TripDestinationSelection {
@@ -123,8 +134,17 @@ final class LiveWeatherLocationClient: NSObject, WeatherLocationClient, @preconc
         finish(.failure(failure))
     }
 
+    nonisolated static func isUsableRecentPosition(_ location: CLLocation, now: Date = Date()) -> Bool {
+        let age = now.timeIntervalSince(location.timestamp)
+        return (-60...120).contains(age) && (0...10_000).contains(location.horizontalAccuracy)
+    }
+
     private func requestFix(_ manager: CLLocationManager) {
         guard !isRequestingFix else { return }
+        if let cached = manager.location, Self.isUsableRecentPosition(cached) {
+            finish(.success(cached))
+            return
+        }
         isRequestingFix = true
         manager.requestLocation()
         timeout = Task { @MainActor in

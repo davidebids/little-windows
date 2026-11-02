@@ -63,6 +63,12 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
     var version = 1
     var fields: [String: CareTrackingPreferenceValue] = [:]
 
+    func hasSameCareContent(as previous: Self) -> Bool {
+        version == previous.version && Set(fields.keys).union(previous.fields.keys).allSatisfy { key in
+            key.hasPrefix("outdoor.") || fields[key]?.value == previous.fields[key]?.value
+        }
+    }
+
     var layout: CareTodayLayout {
         fields["layout"]?.value.first.flatMap(CareTodayLayout.init(rawValue:)) ?? .full
     }
@@ -176,7 +182,7 @@ struct CareTrackingPreferences: Codable, Equatable, Sendable {
         return Set(fields.keys).union(previous.fields.keys).contains { key in
             // Today layout, section visibility, and ordering do not change
             // reminder policy or the widgets' independent action choices.
-            guard key != "layout", key != "essentials", !key.hasPrefix("section.") else { return false }
+            guard key != "layout", key != "essentials", !key.hasPrefix("section."), !key.hasPrefix("outdoor.") else { return false }
             return fields[key]?.value != previous.fields[key]?.value
         }
     }
@@ -196,13 +202,13 @@ enum CareTrackingPreferenceStore {
     nonisolated static let changedNotification = Notification.Name("CareTrackingPreferences.changed")
     nonisolated static let prefix = "careTracking.v1."
     private static var observer: NSObjectProtocol?
+    private nonisolated static let decoded = TrackingPreferenceDecodeCache()
 
     nonisolated static func preferences(profileID: UUID?, defaults: UserDefaults = .standard) -> CareTrackingPreferences {
+        InteractionPerformanceAudit.count(Thread.isMainThread ? "preferences.read.main" : "preferences.read.background")
         guard let profileID,
-              let data = defaults.data(forKey: key(profileID)),
-              let value = try? JSONDecoder().decode(CareTrackingPreferences.self, from: data),
-              value.version == 1 else { return CareTrackingPreferences() }
-        return value
+              let data = defaults.data(forKey: key(profileID)) else { return CareTrackingPreferences() }
+        return decoded.preferences(in: data)
     }
 
     nonisolated static func allows(_ type: EventType, profileID: UUID?) -> Bool {
@@ -230,7 +236,7 @@ enum CareTrackingPreferenceStore {
             reconcile(profileID: profileID, defaults: defaults, store: store)
         }
         if defaults === UserDefaults.standard {
-            notify(profileID, needsSystemReconciliation: value.needsSystemReconciliation(comparedTo: previous))
+            notify(profileID, needsSystemReconciliation: value.needsSystemReconciliation(comparedTo: previous), careChanged: !value.hasSameCareContent(as: previous))
         }
     }
 
@@ -273,7 +279,7 @@ enum CareTrackingPreferenceStore {
         if merged != local {
             save(merged, profileID: profileID, defaults: defaults)
             if defaults === UserDefaults.standard {
-                notify(profileID, needsSystemReconciliation: merged.needsSystemReconciliation(comparedTo: local))
+                notify(profileID, needsSystemReconciliation: merged.needsSystemReconciliation(comparedTo: local), careChanged: !merged.hasSameCareContent(as: local))
             }
         }
         if merged != remote, let data = try? JSONEncoder().encode(merged) {
@@ -288,8 +294,10 @@ enum CareTrackingPreferenceStore {
         defaults.set(data, forKey: key(profileID))
     }
 
-    private static func notify(_ profileID: UUID, needsSystemReconciliation: Bool) {
-        NotificationCenter.default.post(name: changedNotification, object: profileID)
+    nonisolated static func affectsCare(_ notification: Notification) -> Bool { notification.userInfo?["careChanged"] as? Bool ?? true }
+
+    private static func notify(_ profileID: UUID, needsSystemReconciliation: Bool, careChanged: Bool) {
+        NotificationCenter.default.post(name: changedNotification, object: profileID, userInfo: ["careChanged": careChanged])
         guard needsSystemReconciliation else { return }
         Task { await NotificationManager.shared.cancelPausedTrackingReminders() }
         SystemIntegrationReconciler.requestReconciliation()
@@ -297,7 +305,7 @@ enum CareTrackingPreferenceStore {
 
     nonisolated static func key(_ profileID: UUID) -> String { prefix + profileID.uuidString }
 
-    static func allowsRoutine(_ routine: CareRoutine, steps: [CareRoutineStep]? = nil) -> Bool {
+    nonisolated static func allowsRoutine(_ routine: CareRoutine, steps: [CareRoutineStep]? = nil) -> Bool {
         guard let profileID = routine.profileID else { return true }
         let preferences = preferences(profileID: profileID)
         let routineID = routine.id
@@ -337,5 +345,29 @@ enum CareTrackingPreferenceStore {
                 && sections.allSatisfy(preferences.allowsPrompts)
         }
         return true
+    }
+}
+
+/// The encoded value is the key, so external defaults/cloud edits are visible
+/// on the very next read. No time-based expiration or notification dependency.
+private final class TrackingPreferenceDecodeCache: @unchecked Sendable {
+    private final class Entry {
+        let preferences: CareTrackingPreferences
+        init(_ preferences: CareTrackingPreferences) { self.preferences = preferences }
+    }
+    private let cache: NSCache<NSData, Entry> = {
+        let cache = NSCache<NSData, Entry>()
+        cache.countLimit = 256; cache.totalCostLimit = 2 * 1024 * 1024
+        return cache
+    }()
+    func preferences(in data: Data) -> CareTrackingPreferences {
+        let key = data as NSData
+        if let entry = cache.object(forKey: key) { return entry.preferences }
+        InteractionPerformanceAudit.count(Thread.isMainThread ? "preferences.decode.main" : "preferences.decode.background")
+        let decoded = try? JSONDecoder().decode(CareTrackingPreferences.self, from: data)
+        let value: CareTrackingPreferences
+        if let decoded, decoded.version == 1 { value = decoded } else { value = CareTrackingPreferences() }
+        cache.setObject(Entry(value), forKey: key, cost: data.count * 2)
+        return value
     }
 }

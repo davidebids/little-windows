@@ -81,12 +81,15 @@ enum MedicationAsNeededDecision: Equatable {
 enum MedicationSnoozeStateStore {
     private static let storageKey = "medication.activeSnoozes.v1"
     private static let maximumEntryCount = 256
+    private static let lock = NSRecursiveLock()
 
     static func isSnoozed(
         occurrenceKey: String,
         now: Date = Date(),
         defaults: UserDefaults = .standard
     ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
         let entries = activeEntries(now: now, defaults: defaults)
         return entries[occurrenceKey].map { $0 > now.timeIntervalSince1970 } ?? false
     }
@@ -95,7 +98,9 @@ enum MedicationSnoozeStateStore {
         now: Date = Date(),
         defaults: UserDefaults = .standard
     ) -> Set<String> {
-        Set(activeEntries(now: now, defaults: defaults).keys)
+        lock.lock()
+        defer { lock.unlock() }
+        return Set(activeEntries(now: now, defaults: defaults).keys)
     }
 
     static func markSnoozed(
@@ -104,6 +109,8 @@ enum MedicationSnoozeStateStore {
         now: Date = Date(),
         defaults: UserDefaults = .standard
     ) {
+        lock.lock()
+        defer { lock.unlock() }
         guard !occurrenceKey.isEmpty, fireDate > now else { return }
         var entries = activeEntries(now: now, defaults: defaults)
         entries[occurrenceKey] = fireDate.timeIntervalSince1970
@@ -122,6 +129,8 @@ enum MedicationSnoozeStateStore {
         occurrenceKey: String,
         defaults: UserDefaults = .standard
     ) {
+        lock.lock()
+        defer { lock.unlock() }
         var entries = storedEntries(defaults: defaults)
         guard entries.removeValue(forKey: occurrenceKey) != nil else { return }
         defaults.set(entries, forKey: storageKey)
@@ -131,6 +140,8 @@ enum MedicationSnoozeStateStore {
         regimenID: UUID,
         defaults: UserDefaults = .standard
     ) {
+        lock.lock()
+        defer { lock.unlock() }
         var entries = storedEntries(defaults: defaults)
         let prefix = "\(regimenID.uuidString)|"
         let matchingKeys = entries.keys.filter { $0.hasPrefix(prefix) }
@@ -146,6 +157,8 @@ enum MedicationSnoozeStateStore {
         for regimenID: UUID,
         defaults: UserDefaults = .standard
     ) {
+        lock.lock()
+        defer { lock.unlock() }
         var entries = storedEntries(defaults: defaults)
         let prefix = "\(regimenID.uuidString)|"
         let discardedKeys = entries.keys.filter {
@@ -1374,7 +1387,7 @@ enum MedicationService {
     /// Calculates projections for a screen's medication collection in one pass
     /// through dose history. This avoids rescanning the same 60-day history for
     /// every medication on Home and trip surfaces.
-    static func supplyProjections(
+    nonisolated static func supplyProjections(
         medications: [Medication],
         doseRecords: [MedicationDoseRecord],
         now: Date = Date(),
@@ -1443,7 +1456,7 @@ enum MedicationService {
         var doseCount: Int
     }
 
-    private static func makeSupplyProjection(
+    nonisolated private static func makeSupplyProjection(
         currentSupply: Double,
         usage: MedicationSupplyUsage,
         now: Date,

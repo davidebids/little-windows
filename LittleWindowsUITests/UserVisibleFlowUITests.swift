@@ -4697,6 +4697,8 @@ final class UserVisibleFlowUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         weather.tap()
+        XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 5))
+        app.buttons["Location"].tap()
         XCTAssertTrue(app.buttons["weather.use-current-location"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.textFields["weather.city-search"].exists)
     }
@@ -4708,6 +4710,8 @@ final class UserVisibleFlowUITests: XCTestCase {
         let weather = app.buttons["today.weather.header"]
         XCTAssertTrue(weather.waitForExistence(timeout: 8))
         weather.tap()
+        XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 5))
+        app.buttons["Location"].tap()
         let search = app.textFields["weather.city-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
@@ -4715,6 +4719,8 @@ final class UserVisibleFlowUITests: XCTestCase {
         let city = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "New York")).firstMatch
         XCTAssertTrue(city.waitForExistence(timeout: 20), "A ZIP search should resolve to its city instead of retaining a numeric label.")
         city.tap()
+        XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 5))
+        app.buttons["weather.dashboard.done"].tap()
         XCTAssertTrue(weather.waitForExistence(timeout: 5))
         XCTAssertTrue(weather.label.contains("New York"))
         XCTAssertFalse(weather.label.contains("10001"))

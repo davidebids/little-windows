@@ -7,6 +7,141 @@ import XCTest
 final class CareTrackingPreferenceTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testDecodedPreferenceCacheTracksExternalDataChangesWithoutNotification() throws {
+        let defaults = try device(), first = UUID(), second = UUID()
+        var value = CareTrackingPreferences(); value.set("outdoor.activity", value: ["Walk"], now: now)
+        let original = try JSONEncoder().encode(value)
+        defaults.set(original, forKey: CareTrackingPreferenceStore.key(first))
+        defaults.set(original, forKey: CareTrackingPreferenceStore.key(second))
+        for _ in 0..<20 { XCTAssertEqual(CareTrackingPreferenceStore.preferences(profileID: first, defaults: defaults), value) }
+        value.set("outdoor.activity", value: ["Fetch"], now: now.addingTimeInterval(1))
+        defaults.set(try JSONEncoder().encode(value), forKey: CareTrackingPreferenceStore.key(first))
+        XCTAssertEqual(CareTrackingPreferenceStore.preferences(profileID: first, defaults: defaults), value)
+        XCTAssertEqual(CareTrackingPreferenceStore.preferences(profileID: second, defaults: defaults).fields["outdoor.activity"]?.value, ["Walk"])
+        defaults.set(Data("invalid".utf8), forKey: CareTrackingPreferenceStore.key(first))
+        XCTAssertEqual(CareTrackingPreferenceStore.preferences(profileID: first, defaults: defaults), CareTrackingPreferences())
+        defaults.set(original, forKey: CareTrackingPreferenceStore.key(first))
+        XCTAssertEqual(CareTrackingPreferenceStore.preferences(profileID: first, defaults: defaults).fields["outdoor.activity"]?.value, ["Walk"])
+    }
+
+    func testOutdoorEditsAndRevisionOnlyMergesDoNotInvalidateCareContent() {
+        let original = CareTrackingPreferences()
+        var outdoor = original; outdoor.set("outdoor.wind", value: ["20"], now: now)
+        XCTAssertTrue(outdoor.hasSameCareContent(as: original))
+        var care = outdoor; care.set("layout", value: ["essentials"], now: now)
+        XCTAssertFalse(care.hasSameCareContent(as: outdoor))
+        var newer = care; newer.set("layout", value: ["essentials"], now: now.addingTimeInterval(1))
+        XCTAssertTrue(newer.hasSameCareContent(as: care))
+        newer.set("paused.sleep", value: ["true"], now: now)
+        XCTAssertFalse(newer.hasSameCareContent(as: care))
+        XCTAssertFalse(CareTrackingPreferenceStore.affectsCare(Notification(name: CareTrackingPreferenceStore.changedNotification, userInfo: ["careChanged": false])))
+        XCTAssertTrue(CareTrackingPreferenceStore.affectsCare(Notification(name: CareTrackingPreferenceStore.changedNotification)))
+    }
+
+    func testAvatarCacheHitDoesNotReadEncodedPhotoAndRevisionInvalidatesIt() throws {
+        let data = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 240, height: 100)).image { renderer in
+            UIColor.systemBlue.setFill(); renderer.fill(CGRect(x: 0, y: 0, width: 240, height: 100))
+        }.jpegData(compressionQuality: 0.9))
+        let key = ProfileAvatarImageCache.Key(id: UUID(), revision: now, diameter: 34, scale: 3)
+        var reads = 0
+        let first = try XCTUnwrap(ProfileAvatarImageCache.image(key) { reads += 1; return data })
+        let hit = ProfileAvatarImageCache.image(key) { XCTFail("A toolbar redraw must not read the photo blob"); return nil }
+        XCTAssertTrue(first === hit)
+        let changed = ProfileAvatarImageCache.Key(id: key.id, revision: now.addingTimeInterval(1), diameter: 34, scale: 3)
+        let replacement = try XCTUnwrap(ProfileAvatarImageCache.image(changed) { reads += 1; return data })
+        XCTAssertFalse(first === replacement)
+        XCTAssertEqual(reads, 2)
+        XCTAssertEqual(replacement.cgImage?.width, 102)
+        XCTAssertEqual(replacement.size.width, 34)
+    }
+
+    func testLargeAvatarIsDownsampledToDisplayPixelsAndKeepsCircularMask() async throws {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let data = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 4000, height: 3000), format: format).image { renderer in
+            UIColor.systemBlue.setFill(); renderer.fill(CGRect(x: 0, y: 0, width: 4000, height: 3000))
+        }.jpegData(compressionQuality: 0.9))
+        let key = ProfileAvatarImageCache.Key(id: UUID(), revision: now, diameter: 40, scale: 2)
+        let image = await Task.detached {
+            XCTAssertFalse(Thread.isMainThread)
+            return ProfileAvatarImageCache.image(key) { data }
+        }.value
+        let bitmap = try XCTUnwrap(image?.cgImage)
+        XCTAssertEqual(bitmap.width, 80); XCTAssertEqual(bitmap.height, 80)
+        XCTAssertLessThanOrEqual(bitmap.bytesPerRow * bitmap.height, 80 * 80 * 4)
+        var pixels = [UInt8](repeating: 0, count: 80 * 80 * 4)
+        let context = try XCTUnwrap(CGContext(data: &pixels, width: 80, height: 80, bitsPerComponent: 8,
+            bytesPerRow: 80 * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(bitmap, in: CGRect(x: 0, y: 0, width: 80, height: 80))
+        XCTAssertEqual(pixels[3], 0)
+        XCTAssertEqual(pixels[(40 * 80 + 40) * 4 + 3], 255)
+    }
+
+    func testDownsampledAvatarKeepsExistingCenterCropAndOrientation() throws {
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 100)).image { renderer in
+            UIColor.red.setFill(); renderer.fill(CGRect(x: 0, y: 0, width: 240, height: 50))
+            UIColor.blue.setFill(); renderer.fill(CGRect(x: 0, y: 50, width: 240, height: 50))
+        }
+        let data = try XCTUnwrap(source.pngData())
+        let expected = try XCTUnwrap(ThumbnailImageCache.circularImage(attachmentID: UUID(), data: data, size: 40))
+        let key = ProfileAvatarImageCache.Key(id: UUID(), revision: now, diameter: 40, scale: expected.scale)
+        let actual = try XCTUnwrap(ProfileAvatarImageCache.image(key) { data })
+        func redAboveBlue(_ image: UIImage) throws -> [Bool] {
+            let bitmap = try XCTUnwrap(image.cgImage), width = bitmap.width, height = bitmap.height
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            let context = try XCTUnwrap(CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(bitmap, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return [height / 4, height * 3 / 4].map { row in
+                let offset = (row * width + width / 2) * 4
+                return pixels[offset] > pixels[offset + 2]
+            }
+        }
+        XCTAssertEqual(try redAboveBlue(actual), try redAboveBlue(expected))
+        XCTAssertNotEqual(try redAboveBlue(actual).first, try redAboveBlue(actual).last)
+    }
+
+    func testAvatarLoaderReadsItsOwnContextAndRejectsStaleUncachedRevision() async throws {
+        let container = try ModelContainer(for: PersistenceService.schema, configurations: [
+            ModelConfiguration(schema: PersistenceService.schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)])
+        let data = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 80, height: 80)).image { renderer in
+            UIColor.systemGreen.setFill(); renderer.fill(CGRect(x: 0, y: 0, width: 80, height: 80))
+        }.pngData())
+        let photo = PhotoAttachment(ownerKind: .profilePhoto, imageData: data, updatedAt: now)
+        container.mainContext.insert(photo); try container.mainContext.save()
+        let stale = ProfileAvatarImageCache.Key(id: photo.id, revision: now.addingTimeInterval(-1), diameter: 34, scale: 2)
+        let staleImage = await ProfileAvatarImageCache.load(stale, container: container)
+        XCTAssertNil(staleImage)
+        let current = ProfileAvatarImageCache.Key(id: photo.id, revision: now, diameter: 34, scale: 2)
+        let image = await ProfileAvatarImageCache.load(current, container: container)
+        XCTAssertEqual(image?.cgImage?.width, 68)
+    }
+
+    func testProfileAvatarViewLoadsSavedPhotoThroughMetadataQuery() async throws {
+        let container = try ModelContainer(for: PersistenceService.schema, configurations: [
+            ModelConfiguration(schema: PersistenceService.schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)])
+        let data = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 240, height: 100)).image { renderer in
+            UIColor.systemOrange.setFill(); renderer.fill(CGRect(x: 0, y: 0, width: 240, height: 100))
+        }.pngData())
+        let photo = PhotoAttachment(ownerKind: .profilePhoto, imageData: data, updatedAt: now)
+        let profile = CareProfile(name: "Test Child", profilePhotoAttachmentID: photo.id)
+        container.mainContext.insert(photo); container.mainContext.insert(profile)
+        try container.mainContext.save()
+        let host = UIHostingController(rootView: ProfileAvatarView(profile: profile, size: 34)
+            .environment(\.displayScale, 2).modelContainer(container))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        window.rootViewController = host; window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        let key = ProfileAvatarImageCache.Key(id: photo.id, revision: now, diameter: 34, scale: 2)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while ProfileAvatarImageCache.cached(key) == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(ProfileAvatarImageCache.cached(key)?.cgImage?.width, 68,
+            "The metadata-only query must still start the saved-photo load in a rendered avatar")
+    }
+
+
     private final class CloudStore: CareTrackingCloudStore {
         var dictionaryRepresentation: [String: Any] = [:]
         var writes = 0
@@ -599,6 +734,39 @@ final class CareTrackingPreferenceTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<PlannedSolidMeal>()), 1)
         XCTAssertFalse(plan.isCompleted)
         XCTAssertTrue(routine.reminderEnabled)
+    }
+
+    func testLongEssentialsDurationKeepsOneLineAtAvailableTextWidths() {
+        let duration = TodayEssentialsEventDetail.durationText(seconds: 998 * 3600 + 37 * 60)
+        for (size, width) in [(DynamicTypeSize.large, CGFloat(100)), (.xxxLarge, 130), (.accessibility3, 244)] {
+            let reference = UIHostingController(rootView: EssentialsElapsedTimeText(text: duration + " ago")
+                .font(.body).dynamicTypeSize(size))
+            let oneLine = reference.sizeThatFits(in: CGSize(width: 1000, height: 2000))
+            let constrained = reference.sizeThatFits(in: CGSize(width: width, height: 2000))
+            XCTAssertLessThanOrEqual(constrained.height, oneLine.height + 1, "Long duration must remain a single line at \(size)")
+            XCTAssertLessThanOrEqual(constrained.width, width + 1)
+        }
+    }
+
+    func testEssentialsLongDurationButtonLayoutsRenderWithoutSplittingTime() throws {
+        let duration = TodayEssentialsEventDetail.durationText(seconds: 998 * 3600 + 37 * 60)
+        for (size, width) in [(DynamicTypeSize.large, CGFloat(288)), (.xxxLarge, 288), (.accessibility3, 288)] {
+            let renderer = ImageRenderer(content: VStack(spacing: 12) {
+                EssentialsActionButton(type: .sleep, profileType: .child,
+                    detail: "Last sleep ended \(duration) ago", elapsedDuration: duration, count: 3, action: {})
+                EssentialsActionButton(type: .diaper, profileType: .child,
+                    detail: "Pee & poo · \(duration) ago", elapsedDuration: duration, count: 3, action: {})
+                EssentialsActionButton(type: .nursing, profileType: .child,
+                    detail: "Right · \(duration) ago", elapsedDuration: duration, count: 3, action: {})
+            }.dynamicTypeSize(size).padding(16).frame(width: width + 32).background(Color(uiColor: .systemBackground)))
+            renderer.scale = 2
+            let image = try XCTUnwrap(renderer.uiImage)
+            XCTAssertEqual(image.size.width, width + 32, accuracy: 1)
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "Essentials 998h 37m at \(size)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
     }
 
     func testEssentialsButtonsKeepLargeTouchAreasAtNarrowWidthsAndAccessibilityText() throws {

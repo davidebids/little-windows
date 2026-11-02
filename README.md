@@ -76,7 +76,7 @@ Today is the main operational screen for care. It includes:
 - Smart quick actions ranked from recent history, active timers, prediction context, and user-pinned actions.
 - Per-profile Today action customization so caregivers can hide categories they do not use without affecting history, reports, backup/import, widgets, or other profiles.
 - Active timer cards and saved timer drafts for review before logging.
-- Compact current temperature and daily high/low beside the greeting in both Today modes, with automatic updates. Tap the weather line to use current location, choose a city/ZIP code, switch outdoor temperatures between °F and °C, or turn weather off. The unit choice is saved on the device and also applies to outdoor sleep temperatures. ZIP searches display city names. The location choice stays on the device; current-location coordinates are not persisted.
+- Compact current temperature and daily high/low beside the greeting in both Today modes, with automatic updates. Tap the weather line to open the Weather dashboard, including hourly/daily forecasts, location selection, outdoor preferences, units, and turn-off controls. The unit choice is saved on the device and also applies to outdoor sleep temperatures. ZIP searches display city names. The location choice stays on the device; current-location coordinates are not persisted.
 - Household and profile-scoped routines, routine templates, custom routine steps, start/skip/complete flows, reminders, duplication, reordering, archiving, and an explicit Done button in the routines manager.
 - A child sleep day-ahead card below Log Something, generated from recent sleep history and confidence-aware planning windows.
 
@@ -242,3 +242,8 @@ ruby -c Scripts/convert_legacy_tracker.rb
 ```
 
 Live Activities, Dynamic Island, App Groups, Control Center controls, notifications, CloudKit private sync, and Family Sync should be verified on signed physical devices. Simulator support varies by runtime and does not fully reproduce those surfaces.
+
+
+### Weather And Outdoor Planning
+
+Tap Today’s weather line for current conditions, feels like, 48-hour forecasts, next-hour precipitation where available, seven days expandable to ten, and detailed wind, humidity, UV, precipitation, daylight, and tonight’s conditions. Outdoor suggestions use each participant’s editable comfort preferences and relevant profile/schedule context; unmatched suggestions stay hidden. Outdoor preferences follow the same Apple Account across devices when iCloud sync is enabled. Apple Watch offers compact weather and six-hour details; configurable Home Screen and Lock Screen weather widgets open the dashboard. Cached displays show their update time, and live service/background delivery require signed-device validation. See `SYSTEM_INTEGRATIONS.md` for data coverage, privacy, refresh, and provisioning details.

@@ -1,4 +1,5 @@
 import Combine
+import CoreData
 import SwiftData
 import SwiftUI
 import UIKit
@@ -320,12 +321,56 @@ private struct TodayPreferenceRevision: Equatable {
     var categoryPreferenceRevision: Int
 }
 
+/// Observe only routes that Today actually consumes. Weather presentation and
+/// unrelated workspace navigation must not invalidate its query-backed content.
+@MainActor
+private final class TodayRouteObservation: ObservableObject {
+    private var subscriptions = Set<AnyCancellable>()
+    convenience init() {
+        self.init(router: .shared)
+    }
+
+    init(router: DeepLinkRouter) {
+        router.$todayDisplayMode.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$pendingAction.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$pendingProfileID.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$pendingAppointmentCommand.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$pendingPuppyGuideCommand.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$pendingRoutineCommand.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$pendingAgeGuideCommand.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$isDataReady.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$showingSettings.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+        router.$selectedTab.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &subscriptions)
+    }
+}
+
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
+    private let deepLinkRouter = DeepLinkRouter.shared
+    @StateObject private var routeObservation = TodayRouteObservation()
     @Query(sort: \CareProfile.createdAt) private var profiles: [CareProfile]
     @Query private var allEvents: [CareEvent]
     @Query private var activeTimerEvents: [CareEvent]
@@ -351,7 +396,6 @@ struct TodayView: View {
     @AppStorage("customWakeMinimum") private var customWakeMinimum = 0.0
     @AppStorage("customWakeMaximum") private var customWakeMaximum = 0.0
 
-    @State private var showingWeatherCityPicker = false
     @State private var editorRoute: EventEditorRoute?
     @State private var pendingActivityEditorRoute: EventEditorRoute?
     @State private var activeTimerToEdit: CareEvent?
@@ -378,11 +422,12 @@ struct TodayView: View {
     @State private var pinnedQuickActionRevision = 0
     @State private var categoryPreferenceRevision = 0
     @State private var repeatFeedback: RepeatFeedback?
-    @State private var showingCareCustomization = false
+    @State private var careCustomization = TodayCustomizationPresentation()
     @State private var cachedRenderState = TodayRenderState.empty
     @State private var displayDate = Date()
     @State private var hasCompletedInitialSetup = false
     @State private var renderStateRefreshTask: Task<Void, Never>?
+    @State private var renderStateRefreshPending = false
     @State private var integrationAnalysisTask: Task<Void, Never>?
     @State private var integrationAnalysisRevision = UUID()
     @State private var timerMutationRenderDeferralActive = false
@@ -431,6 +476,7 @@ struct TodayView: View {
     }
 
     init(profileID: UUID? = nil) {
+        InteractionPerformanceAudit.count("TodayInit")
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
         let recentCutoff = calendar.date(byAdding: .day, value: -45, to: todayStart) ?? todayStart
@@ -583,7 +629,7 @@ struct TodayView: View {
     }
 
     private var renderStateRefreshIsDeferred: Bool {
-        deepLinkRouter.showingSettings || showingProfileEditor || showingCareCustomization
+        deepLinkRouter.showingSettings || showingProfileEditor || careCustomization.isPresented
     }
 
     private func refreshCachedRenderState() {
@@ -595,7 +641,7 @@ struct TodayView: View {
         // its bounded event timeline while the user saves a profile needlessly
         // faults and sorts hundreds of rows on the main actor, delaying the
         // visible sheet. The dismissal path schedules one coalesced refresh.
-        guard !renderStateRefreshIsDeferred else { return }
+        guard !renderStateRefreshIsDeferred else { renderStateRefreshPending = true; return }
         cachedRenderState = makeRenderState()
         if refreshesAnalysis {
             scheduleIntegrationAnalysisRefresh()
@@ -623,15 +669,8 @@ struct TodayView: View {
         let revision = UUID()
         integrationAnalysisRevision = revision
         integrationAnalysisTask = Task.detached(priority: .utility) {
-            // SwiftData/Core Data can publish a burst of saves while importing
-            // CloudKit changes. Cancellation cannot interrupt a fetch that has
-            // already entered the persistence framework, so debounce before
-            // starting it instead of leaving overlapping 60-day scans alive.
-            do {
-                try await Task.sleep(for: .milliseconds(1_250))
-            } catch {
-                return
-            }
+            // The persistence actor serializes reads and checks cancellation
+            // before fetching; newer requests replace queued work immediately.
             guard !Task.isCancelled else { return }
             let analysis = await EventMutationService.integrationAnalysis(
                 profileID: profileID,
@@ -643,6 +682,7 @@ struct TodayView: View {
                 guard integrationAnalysisRevision == revision,
                       cachedRenderState.profileID == profileID,
                       cachedRenderState.isSleeping == analysis.isSleeping else { return }
+                guard !renderStateRefreshIsDeferred else { return }
                 applyIntegrationAnalysis(analysis)
                 integrationAnalysisTask = nil
             }
@@ -666,6 +706,7 @@ struct TodayView: View {
     }
 
     private func makeRenderState() -> TodayRenderState {
+        InteractionPerformanceAudit.count("today.history-build")
         let profile = profileService.selectedProfile(in: profiles)
         let profileID = profile?.id
         let now = Date()
@@ -977,12 +1018,14 @@ struct TodayView: View {
     }
 
     var body: some View {
+        let _ = TodayPresentationAudit.event("TodayBody")
         let state = cachedRenderState
         let todayEvents = state.todayEvents
         let activeEvents = state.activeEvents
         let prediction = state.prediction
         let profile = state.profile
         let trackingPreferences = state.trackingPreferences
+        let _ = InteractionPerformanceAudit.count("today.layout.\(trackingPreferences.layout.rawValue)")
         let visibleSections = state.visibleCareSections(
             preferences: trackingPreferences,
             hidden: state.hiddenCareTypes, now: displayDate
@@ -1029,6 +1072,7 @@ struct TodayView: View {
                         }
                     }
                     .padding(.horizontal, 8)
+                    .interactionScrollAudit("today")
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(
                         top: trackingPreferences.layout == .essentials ? 4 : 8,
@@ -1038,7 +1082,10 @@ struct TodayView: View {
                     ))
                     .listRowSeparator(.hidden)
                     if trackingPreferences.shows(.weather) {
-                        TodayWeatherHeader(chooseCity: { showingWeatherCityPicker = true })
+                        TodayWeatherHeader(chooseCity: {
+                            DeepLinkRouter.shared.weatherProfileID = ProfileService.shared.selectedProfileID
+                            DeepLinkRouter.shared.showingWeather = true
+                        })
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
                             .listRowSeparator(.hidden)
@@ -1177,13 +1224,19 @@ struct TodayView: View {
 
         let presentedContent = VStack(spacing: 0) {
             if profile != nil {
-                TodayDisplayModePicker(selection: $deepLinkRouter.todayDisplayMode)
+                TodayDisplayModePicker(selection: Binding(get: { deepLinkRouter.todayDisplayMode }, set: { deepLinkRouter.todayDisplayMode = $0 }))
                     .padding(.horizontal, todayContentHorizontalMargin)
                 Divider()
             }
 
-            if effectiveDisplayMode == .care {
+            // The empty render cache is not a Home-mode request. Resolve the
+            // initial profile first instead of building and querying Home only
+            // to discard it when the care snapshot arrives in this update cycle.
+            if !hasCompletedInitialSetup {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if effectiveDisplayMode == .care {
                 listContent
+                    .interactionPaintProbe("today.ready")
             } else if let householdID = households.first?.id {
                 TodayHomeSummaryDataLoader(
                     householdID: householdID,
@@ -1216,41 +1269,19 @@ struct TodayView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if let profile {
-                    Menu {
-                        Button("Customize Today", systemImage: "slider.horizontal.3") {
-                            showingCareCustomization = true
-                        }
-                        Menu("Log Another Activity", systemImage: "plus.circle") {
-                            ForEach(EventType.cases(for: profile.profileType)) { type in
-                                Button(type.displayName, systemImage: type.systemImage(for: profile.profileType)) {
-                                    performEssentialAction(type, state: state)
-                                }
-                            }
-                        }
-                        if !activeEvents.isEmpty {
-                            Section("Active timers") {
-                                ForEach(activeEvents) { event in
-                                    Button(event.type.displayName, systemImage: "timer") {
-                                        activeTimerToEdit = editableTimer(event)
-                                    }
-                                }
-                            }
-                        }
-                        Button("Settings & Profiles", systemImage: "gearshape") {
-                            deepLinkRouter.presentSettings()
-                        }
-                    } label: {
-                        ProfileAvatarView(profile: profile, size: 34)
-                            // Menu adds 12pt of horizontal toolbar chrome.
-                            // The avatar can overflow this label into that
-                            // padding while the resulting target stays round.
-                            .frame(width: todayMenuLabelWidth, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("\(profile.name) settings")
-                    .accessibilityHint("Opens Today customization, active timers, and settings")
-                    .accessibilityIdentifier("today.menu")
+                    TodayProfileMenu(profile: profile,
+                        timers: activeEvents.map { .init(id: $0.id, title: $0.type.displayName) },
+                        labelWidth: todayMenuLabelWidth, presentation: careCustomization,
+                        logActivity: { type in performEssentialAction(type, state: cachedRenderState) },
+                        editTimer: { id in
+                            guard let event = cachedRenderState.activeEvents.first(where: { $0.id == id }) else { return }
+                            activeTimerToEdit = editableTimer(event)
+                        }, openSettings: { deepLinkRouter.presentSettings() },
+                        customizationDismissed: {
+                            guard renderStateRefreshPending else { return }
+                            categoryPreferenceRevision += 1
+                            scheduleRenderStateRefresh()
+                        })
                 } else {
                     ProfileToolbarSettingsButton(profile: nil) {
                         deepLinkRouter.presentSettings()
@@ -1258,7 +1289,6 @@ struct TodayView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
         .sheet(item: $editorRoute) { route in
             NavigationStack {
                 EventEditorView(
@@ -1352,18 +1382,6 @@ struct TodayView: View {
         .sheet(isPresented: $showingProfileEditor) {
             NavigationStack {
                 ProfileEditorView()
-            }
-        }
-        .sheet(isPresented: $showingCareCustomization) {
-            NavigationStack {
-                if let profile {
-                    TodayTrackingSettingsView(profile: profile)
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { showingCareCustomization = false }
-                            }
-                        }
-                }
             }
         }
         .sheet(isPresented: $showingExplanation) {
@@ -1511,15 +1529,22 @@ struct TodayView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { notification in
             guard notification.object as? UUID == state.profileID,
-                  !showingCareCustomization else { return }
+                  CareTrackingPreferenceStore.affectsCare(notification) else { return }
+            if careCustomization.isPresented {
+                renderStateRefreshPending = true
+                return
+            }
             categoryPreferenceRevision += 1
             scheduleRenderStateRefresh()
         }
-        .onChange(of: showingCareCustomization) { _, showing in
-            if !showing { categoryPreferenceRevision += 1; scheduleRenderStateRefresh() }
-        }
         .onChange(of: preferenceRevision) { _, _ in
             scheduleRenderStateRefresh()
+        }
+        .onChange(of: deepLinkRouter.showingSettings) { _, showing in
+            if !showing && renderStateRefreshPending { scheduleRenderStateRefresh() }
+        }
+        .onChange(of: showingProfileEditor) { _, showing in
+            if !showing && renderStateRefreshPending { scheduleRenderStateRefresh() }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: ModelContext.didSave)
@@ -1605,6 +1630,7 @@ struct TodayView: View {
                 displayDate = now
                 let reachedFutureEntry = cachedRenderState.essentialsHistory.nextTransition.map { $0 <= now } ?? false
                 if cachedRenderState.renderRequirements.historyOnMinuteTick || crossedDay || reachedFutureEntry {
+                    InteractionPerformanceAudit.count("today.minute-history-build")
                     refreshCachedRenderState(refreshesAnalysis: elapsedMinutes.isMultiple(of: 5))
                 } else if !renderStateRefreshIsDeferred, cachedRenderState.renderRequirements.medication,
                           let profileID = cachedRenderState.profileID {
@@ -2006,7 +2032,7 @@ struct TodayView: View {
                 Text("Your visible sections have no updates. Customize Today to show logging buttons or other sections. Your records are still available in Reports.")
             }
         } actions: {
-            Button("Customize Today") { showingCareCustomization = true }
+            Button("Customize Today") { careCustomization.isPresented = true }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("today.empty.customize")
         }
@@ -2100,6 +2126,7 @@ struct TodayView: View {
                         type: type,
                         profileType: state.profile?.profileType ?? .child,
                         detail: essentialDetail(type, state: state, now: context.date),
+                        elapsedDuration: essentialElapsedDuration(type, state: state, now: context.date),
                         timerStart: state.activeTimer(of: type).flatMap {
                             $0.isTimerRunning ? $0.timerDisplayStartDate(at: context.date) : nil
                         },
@@ -2117,6 +2144,17 @@ struct TodayView: View {
             }
         }
         .listSectionSpacing(12)
+    }
+
+    private func essentialElapsedDuration(_ type: EventType, state: TodayRenderState, now: Date) -> String? {
+        guard state.activeTimer(of: type) == nil else { return nil }
+        if type == .medicine, state.upcomingMedication != nil { return nil }
+        let date: Date?
+        if type == .sleep || type == .rest {
+            date = state.essentialsHistory.lastEndedDates[type] ?? state.essentialsHistory.latestRecords[type]?.date
+        } else { date = state.essentialsHistory.latestRecords[type]?.date }
+        guard let date, now.timeIntervalSince(date) >= 60 else { return nil }
+        return TodayEssentialsEventDetail.durationText(seconds: now.timeIntervalSince(date))
     }
 
     private func essentialDetail(_ type: EventType, state: TodayRenderState, now: Date) -> String {
@@ -3261,28 +3299,15 @@ struct TodayView: View {
     }
 
     private func scheduleRenderStateRefresh() {
-        renderStateRefreshTask?.cancel()
+        renderStateRefreshPending = true
+        guard renderStateRefreshTask == nil, !renderStateRefreshIsDeferred else { return }
+        // Coalesce notifications in this update cycle. A covering editor owns
+        // its UI; dismissal explicitly requests the pending refresh, without a
+        // polling timer or an arbitrary wait after saving.
         renderStateRefreshTask = Task { @MainActor in
-            // CloudKit imports can deliver multiple saves per second. Wait for
-            // a short quiet period so the main actor faults the bounded Today
-            // rows once for the batch rather than once per transaction.
-            do {
-                try await Task.sleep(for: .milliseconds(350))
-            } catch {
-                return
-            }
-            // A save performed by a covering sheet still needs to reach Today,
-            // but only after that sheet is gone. Waiting here avoids faulting
-            // the hidden timeline and coalesces every save notification into a
-            // single visible refresh after dismissal.
-            while renderStateRefreshIsDeferred {
-                do {
-                    try await Task.sleep(for: .milliseconds(200))
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-            }
+            renderStateRefreshTask = nil
+            guard !Task.isCancelled, renderStateRefreshPending, !renderStateRefreshIsDeferred else { return }
+            renderStateRefreshPending = false
             refreshCachedRenderState()
             timerMutationRenderDeferralActive = false
         }
@@ -4731,421 +4756,40 @@ private struct TodayDisplayModePicker: View {
 }
 
 private struct TodayHomeSummaryRefreshKey: Equatable {
-    var dataFingerprint: Int
-    var timeRevision: Int
+    var householdID: UUID
+    var caregiverName: String
+    var caregiverIdentifier: String
+    var familySyncEnabled: Bool
+    var revision: Int
 }
 
 private struct TodayHomeSummaryDataLoader<Content: View>: View {
-    @Query private var todoLists: [HomeTodoList]
-    @Query private var todoItems: [HomeTodoItem]
-    @Query private var shoppingLists: [ShoppingList]
-    @Query private var shoppingItems: [ShoppingListItem]
-    @Query private var inventoryItems: [InventoryItem]
-    @Query private var mealPrepItems: [MealPrepItem]
-    @Query private var mealPrepUsages: [MealPrepUsage]
-    @Query private var packingTrips: [PackingTrip]
-    @Query private var packingItems: [PackingItem]
-    @Query private var itineraryItems: [TripItineraryItem]
-    @Query private var returnRequests: [ReturnRequest]
-    @Query private var returnItems: [ReturnItem]
-    @Query private var returnPackages: [ReturnPackage]
-    @Query private var reminders: [FoodReminder]
-    @Query private var profiles: [CareProfile]
-    @Query private var medications: [Medication]
-    @Query private var medicationRegimens: [MedicationRegimen]
-    @Query private var medicationPhases: [MedicationSchedulePhase]
-    @Query private var medicationDoseRecords: [MedicationDoseRecord]
-    @Query private var medicationRefillTasks: [MedicationRefillTask]
-    @Query private var appointmentFollowUps: [AppointmentFollowUp]
-    @Query private var careRoutines: [CareRoutine]
-    @Query private var careRoutineRuns: [CareRoutineRun]
-    @Query private var plannedSolidMeals: [PlannedSolidMeal]
-    @Query private var solidAllergenProgress: [SolidAllergenProgress]
-    @Query private var acknowledgements: [HouseholdAttentionAcknowledgement]
-    @Query private var attentionClaims: [HouseholdAttentionClaim]
-    @Query private var handoffNotes: [CaregiverHandoffNote]
-    @Query private var familyCaregiverIdentities: [FamilyCaregiverIdentity]
-
     @Environment(\.modelContext) private var modelContext
     @AppStorage(PersistenceService.familySyncModeKey)
     private var syncModeRawValue = FamilySyncMode.privateICloudSync.rawValue
-
+    @State private var reader = TodayHomeSummaryReader()
     @State private var cachedSummary: TodayHomeSummary?
-    @State private var summaryTimeRevision = 0
-
-    private let householdID: UUID
-    private let currentCaregiverName: String
-    private let content: (TodayHomeSummary) -> Content
-
-    init(
-        householdID: UUID,
-        currentCaregiverName: String,
-        @ViewBuilder content: @escaping (TodayHomeSummary) -> Content
-    ) {
-        self.householdID = householdID
-        self.currentCaregiverName = currentCaregiverName
-        self.content = content
-        let todayStart = Calendar.current.startOfDay(for: Date())
-        let medicationRecordStart = Calendar.current.date(byAdding: .day, value: -60, to: todayStart)
-            ?? todayStart
-        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: todayStart)
-            ?? Date().addingTimeInterval(86_400)
-        let upcomingTripState = PackingTripStatus.upcoming.rawValue
-        let activeRoutineState = CareRoutineRunState.active.rawValue
-
-        var todoListDescriptor = FetchDescriptor<HomeTodoList>(
-            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
-            sortBy: [SortDescriptor(\HomeTodoList.sortOrder), SortDescriptor(\HomeTodoList.updatedAt, order: .reverse)]
-        )
-        todoListDescriptor.fetchLimit = 100
-        _todoLists = Query(todoListDescriptor)
-
-        var todoItemDescriptor = FetchDescriptor<HomeTodoItem>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\HomeTodoItem.updatedAt, order: .reverse)]
-        )
-        todoItemDescriptor.fetchLimit = 750
-        _todoItems = Query(todoItemDescriptor)
-
-        var shoppingListDescriptor = FetchDescriptor<ShoppingList>(
-            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
-            sortBy: [SortDescriptor(\ShoppingList.updatedAt, order: .reverse)]
-        )
-        shoppingListDescriptor.fetchLimit = 100
-        _shoppingLists = Query(shoppingListDescriptor)
-
-        var shoppingItemDescriptor = FetchDescriptor<ShoppingListItem>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\ShoppingListItem.updatedAt, order: .reverse)]
-        )
-        shoppingItemDescriptor.fetchLimit = 1_000
-        _shoppingItems = Query(shoppingItemDescriptor)
-
-        var inventoryDescriptor = FetchDescriptor<InventoryItem>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
-        )
-        inventoryDescriptor.fetchLimit = 500
-        _inventoryItems = Query(inventoryDescriptor)
-
-        var mealPrepDescriptor = FetchDescriptor<MealPrepItem>(
-            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
-            sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
-        )
-        mealPrepDescriptor.fetchLimit = 200
-        _mealPrepItems = Query(mealPrepDescriptor)
-
-        var usageDescriptor = FetchDescriptor<MealPrepUsage>(
-            predicate: #Predicate { $0.householdID == householdID && $0.dateTime >= todayStart },
-            sortBy: [SortDescriptor(\MealPrepUsage.dateTime, order: .reverse)]
-        )
-        usageDescriptor.fetchLimit = 200
-        _mealPrepUsages = Query(usageDescriptor)
-
-        var tripDescriptor = FetchDescriptor<PackingTrip>(
-            predicate: #Predicate {
-                $0.householdID == householdID && !$0.isArchived && $0.statusRawValue == upcomingTripState
-            },
-            sortBy: [SortDescriptor(\PackingTrip.startDate)]
-        )
-        tripDescriptor.fetchLimit = 100
-        _packingTrips = Query(tripDescriptor)
-
-        var packingDescriptor = FetchDescriptor<PackingItem>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\PackingItem.updatedAt, order: .reverse)]
-        )
-        packingDescriptor.fetchLimit = 1_500
-        _packingItems = Query(packingDescriptor)
-
-        var itineraryDescriptor = FetchDescriptor<TripItineraryItem>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\TripItineraryItem.startDate), SortDescriptor(\TripItineraryItem.sortOrder)]
-        )
-        itineraryDescriptor.fetchLimit = 750
-        _itineraryItems = Query(itineraryDescriptor)
-
-        var returnRequestDescriptor = FetchDescriptor<ReturnRequest>(
-            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived && $0.completedAt == nil },
-            sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
-        )
-        returnRequestDescriptor.fetchLimit = 200
-        _returnRequests = Query(returnRequestDescriptor)
-
-        var returnItemDescriptor = FetchDescriptor<ReturnItem>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\ReturnItem.updatedAt, order: .reverse)]
-        )
-        returnItemDescriptor.fetchLimit = 500
-        _returnItems = Query(returnItemDescriptor)
-
-        var returnPackageDescriptor = FetchDescriptor<ReturnPackage>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\ReturnPackage.updatedAt, order: .reverse)]
-        )
-        returnPackageDescriptor.fetchLimit = 500
-        _returnPackages = Query(returnPackageDescriptor)
-
-        var reminderDescriptor = FetchDescriptor<FoodReminder>(
-            predicate: #Predicate { $0.householdID == householdID && $0.isEnabled },
-            sortBy: [SortDescriptor(\FoodReminder.dateTime)]
-        )
-        reminderDescriptor.fetchLimit = 200
-        _reminders = Query(reminderDescriptor)
-
-        var profileDescriptor = FetchDescriptor<CareProfile>(
-            predicate: #Predicate { !$0.isArchived },
-            sortBy: [SortDescriptor(\CareProfile.createdAt)]
-        )
-        profileDescriptor.fetchLimit = 100
-        _profiles = Query(profileDescriptor)
-
-        var medicationDescriptor = FetchDescriptor<Medication>(
-            predicate: #Predicate { !$0.isArchived },
-            sortBy: [SortDescriptor(\Medication.updatedAt, order: .reverse)]
-        )
-        medicationDescriptor.fetchLimit = 500
-        _medications = Query(medicationDescriptor)
-
-        var regimenDescriptor = FetchDescriptor<MedicationRegimen>(
-            predicate: #Predicate { $0.isActive },
-            sortBy: [SortDescriptor(\MedicationRegimen.updatedAt, order: .reverse)]
-        )
-        regimenDescriptor.fetchLimit = 500
-        _medicationRegimens = Query(regimenDescriptor)
-
-        var phaseDescriptor = FetchDescriptor<MedicationSchedulePhase>(
-            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
-        )
-        phaseDescriptor.fetchLimit = 1_000
-        _medicationPhases = Query(phaseDescriptor)
-
-        var doseRecordDescriptor = FetchDescriptor<MedicationDoseRecord>(
-            predicate: #Predicate { $0.loggedAt >= medicationRecordStart },
-            sortBy: [SortDescriptor(\MedicationDoseRecord.updatedAt, order: .reverse)]
-        )
-        doseRecordDescriptor.fetchLimit = 10_000
-        _medicationDoseRecords = Query(doseRecordDescriptor)
-
-        var refillTaskDescriptor = FetchDescriptor<MedicationRefillTask>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\MedicationRefillTask.updatedAt, order: .reverse)]
-        )
-        refillTaskDescriptor.fetchLimit = 500
-        _medicationRefillTasks = Query(refillTaskDescriptor)
-
-        var followUpDescriptor = FetchDescriptor<AppointmentFollowUp>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\AppointmentFollowUp.dueDate), SortDescriptor(\AppointmentFollowUp.updatedAt)]
-        )
-        followUpDescriptor.fetchLimit = 500
-        _appointmentFollowUps = Query(followUpDescriptor)
-
-        var careRoutineDescriptor = FetchDescriptor<CareRoutine>(
-            predicate: #Predicate { !$0.isArchived },
-            sortBy: [SortDescriptor(\CareRoutine.sortOrder)]
-        )
-        careRoutineDescriptor.fetchLimit = 300
-        _careRoutines = Query(careRoutineDescriptor)
-
-        var routineRunDescriptor = FetchDescriptor<CareRoutineRun>(
-            predicate: #Predicate {
-                $0.stateRawValue == activeRoutineState || $0.startedAt >= todayStart
-            },
-            sortBy: [SortDescriptor(\CareRoutineRun.updatedAt, order: .reverse)]
-        )
-        routineRunDescriptor.fetchLimit = 500
-        _careRoutineRuns = Query(routineRunDescriptor)
-
-        var solidPlanDescriptor = FetchDescriptor<PlannedSolidMeal>(
-            predicate: #Predicate { $0.completedEventID == nil && $0.scheduledAt < dayEnd },
-            sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
-        )
-        solidPlanDescriptor.fetchLimit = 300
-        _plannedSolidMeals = Query(solidPlanDescriptor)
-
-        var allergenDescriptor = FetchDescriptor<SolidAllergenProgress>(
-            sortBy: [SortDescriptor(\SolidAllergenProgress.nextExposureDueAt)]
-        )
-        allergenDescriptor.fetchLimit = 500
-        _solidAllergenProgress = Query(allergenDescriptor)
-
-        var acknowledgementDescriptor = FetchDescriptor<HouseholdAttentionAcknowledgement>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\HouseholdAttentionAcknowledgement.updatedAt, order: .reverse)]
-        )
-        acknowledgementDescriptor.fetchLimit = 1_000
-        _acknowledgements = Query(acknowledgementDescriptor)
-
-        var claimDescriptor = FetchDescriptor<HouseholdAttentionClaim>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\HouseholdAttentionClaim.updatedAt, order: .reverse)]
-        )
-        claimDescriptor.fetchLimit = 500
-        _attentionClaims = Query(claimDescriptor)
-
-        var noteDescriptor = FetchDescriptor<CaregiverHandoffNote>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\CaregiverHandoffNote.createdAt, order: .reverse)]
-        )
-        noteDescriptor.fetchLimit = 200
-        _handoffNotes = Query(noteDescriptor)
-
-        var caregiverDescriptor = FetchDescriptor<FamilyCaregiverIdentity>(
-            predicate: #Predicate { $0.householdID == householdID },
-            sortBy: [SortDescriptor(\FamilyCaregiverIdentity.displayName)]
-        )
-        caregiverDescriptor.fetchLimit = 50
-        _familyCaregiverIdentities = Query(caregiverDescriptor)
-    }
-
-    private func combineRevision<T>(
-        _ values: [T],
-        id: KeyPath<T, UUID>,
-        updatedAt: KeyPath<T, Date>,
-        into hasher: inout Hasher
-    ) {
-        hasher.combine(values.count)
-        for value in values {
-            hasher.combine(value[keyPath: id])
-            hasher.combine(value[keyPath: updatedAt])
-        }
-    }
-
-    private func combineLatestRevision<T>(
-        _ values: [T],
-        id: KeyPath<T, UUID>,
-        updatedAt: KeyPath<T, Date>,
-        into hasher: inout Hasher
-    ) {
-        hasher.combine(values.count)
-        guard let latest = values.first else { return }
-        hasher.combine(latest[keyPath: id])
-        hasher.combine(latest[keyPath: updatedAt])
-    }
-
-    private func dataFingerprint(caregiverIdentifier: String) -> Int {
-        var hasher = Hasher()
-        hasher.combine(householdID)
-        hasher.combine(currentCaregiverName)
-        hasher.combine(caregiverIdentifier)
-        hasher.combine(syncModeRawValue)
-        combineRevision(todoLists, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(todoItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(shoppingLists, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(shoppingItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(inventoryItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(mealPrepItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(mealPrepUsages, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(packingTrips, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(packingItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(itineraryItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(returnRequests, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(returnItems, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(returnPackages, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(reminders, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(profiles, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(medications, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(medicationRegimens, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(medicationPhases, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        // This query is sorted by updatedAt descending, so count plus the newest
-        // mutation detects inserts, edits, and deletes without hashing up to
-        // 10,000 records on every unrelated view invalidation.
-        combineLatestRevision(
-            medicationDoseRecords,
-            id: \.id,
-            updatedAt: \.updatedAt,
-            into: &hasher
-        )
-        combineRevision(medicationRefillTasks, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(appointmentFollowUps, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(careRoutines, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(careRoutineRuns, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(plannedSolidMeals, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(solidAllergenProgress, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(acknowledgements, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(attentionClaims, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(handoffNotes, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        combineRevision(familyCaregiverIdentities, id: \.id, updatedAt: \.updatedAt, into: &hasher)
-        hasher.combine(CaregiverHandoffCheckpointStore.date(
-            caregiverIdentifier: caregiverIdentifier
-        ))
-        return hasher.finalize()
-    }
-
-    private func makeSummary(
-        familySyncEnabled: Bool,
-        caregiverIdentifier: String,
-        now: Date
-    ) -> TodayHomeSummary {
-        // Keep this aggregation out of body: sheet and keyboard environment changes can
-        // invalidate the view even when none of the underlying household records changed.
-        TodayHomeSummaryService.summary(
-            householdID: householdID,
-            currentCaregiverName: currentCaregiverName,
-            todoLists: todoLists,
-            todoItems: todoItems,
-            shoppingLists: shoppingLists,
-            shoppingItems: shoppingItems,
-            inventoryItems: inventoryItems,
-            mealPrepItems: mealPrepItems,
-            mealPrepUsages: mealPrepUsages,
-            packingTrips: packingTrips,
-            packingItems: packingItems,
-            itineraryItems: itineraryItems,
-            returnRequests: returnRequests,
-            returnItems: returnItems,
-            returnPackages: returnPackages,
-            reminders: reminders,
-            profiles: profiles,
-            medications: medications,
-            medicationRegimens: medicationRegimens,
-            medicationPhases: medicationPhases,
-            medicationDoseRecords: medicationDoseRecords,
-            medicationRefillTasks: medicationRefillTasks,
-            appointmentFollowUps: appointmentFollowUps,
-            careRoutines: careRoutines,
-            careRoutineRuns: careRoutineRuns,
-            plannedSolidMeals: plannedSolidMeals,
-            solidAllergenProgress: solidAllergenProgress,
-            acknowledgements: acknowledgements,
-            claims: attentionClaims,
-            handoffNotes: handoffNotes,
-            familyCaregiverIdentities: familyCaregiverIdentities,
-            currentCaregiverIdentifier: caregiverIdentifier,
-            familySyncEnabled: familySyncEnabled,
-            handoffCheckpoint: CaregiverHandoffCheckpointStore.date(
-                caregiverIdentifier: caregiverIdentifier
-            ),
-            now: now
-        )
-    }
-
-    private func refreshSummary(
-        familySyncEnabled: Bool,
-        caregiverIdentifier: String,
-        now: Date = Date()
-    ) {
-        let nextSummary = makeSummary(
-            familySyncEnabled: familySyncEnabled,
-            caregiverIdentifier: caregiverIdentifier,
-            now: now
-        )
-        if cachedSummary != nextSummary {
-            cachedSummary = nextSummary
-        }
-    }
+    @State private var summaryRevision = 0
+    @State private var summaryFailed = false
+    let householdID: UUID
+    let currentCaregiverName: String
+    @ViewBuilder var content: (TodayHomeSummary) -> Content
 
     var body: some View {
         let familySyncEnabled = FamilySyncMode(rawValue: syncModeRawValue) == .sharedFamilySync
         let caregiverIdentifier = CaregiverIdentityService.stableCaregiverIdentifier()
-        let refreshKey = TodayHomeSummaryRefreshKey(
-            dataFingerprint: dataFingerprint(caregiverIdentifier: caregiverIdentifier),
-            timeRevision: summaryTimeRevision
-        )
+        let refreshKey = TodayHomeSummaryRefreshKey(householdID: householdID,
+            caregiverName: currentCaregiverName, caregiverIdentifier: caregiverIdentifier,
+            familySyncEnabled: familySyncEnabled, revision: summaryRevision)
         Group {
             if let cachedSummary {
                 content(cachedSummary)
+            } else if summaryFailed {
+                ContentUnavailableView {
+                    Label("Home couldn't load", systemImage: "house")
+                } actions: {
+                    Button("Try again") { summaryRevision &+= 1 }
+                }
             } else {
                 ProgressView("Loading home…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -5153,30 +4797,38 @@ private struct TodayHomeSummaryDataLoader<Content: View>: View {
             }
         }
         .task(id: refreshKey) {
-            refreshSummary(
-                familySyncEnabled: familySyncEnabled,
-                caregiverIdentifier: caregiverIdentifier
-            )
+            do {
+                let summary = try await reader.read(container: modelContext.container,
+                    householdID: householdID, currentCaregiverName: currentCaregiverName,
+                    caregiverIdentifier: caregiverIdentifier, familySyncEnabled: familySyncEnabled)
+                guard !Task.isCancelled, let summary else { return }
+                if cachedSummary != summary { cachedSummary = summary }
+                summaryFailed = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                summaryFailed = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)
+            .receive(on: RunLoop.main)) { notification in
+            if TodayHomeSummaryReader.isRelevantSave(notification) { summaryRevision &+= 1 }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
+            .receive(on: RunLoop.main)) { _ in summaryRevision &+= 1 }
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { notification in
+            guard CareTrackingPreferenceStore.affectsCare(notification) else { return }
+            summaryRevision &+= 1
         }
         .task {
             while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(60))
-                } catch {
-                    return
-                }
-                summaryTimeRevision &+= 1
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                summaryRevision &+= 1
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in
-            summaryTimeRevision &+= 1
         }
         .task(id: familySyncEnabled) {
             guard familySyncEnabled else { return }
             _ = HouseholdAttentionService.registerCurrentFamilyCaregiver(
-                householdID: householdID,
-                context: modelContext
-            )
+                householdID: householdID, context: modelContext)
         }
     }
 }
@@ -5191,7 +4843,6 @@ private struct TodayHomeSummaryView: View {
     let open: (TodayHomeSummaryRoute) -> Void
     let openMedicationDose: (MedicationDoseRouteCommand) -> Void
 
-    @State private var showingWeatherCityPicker = false
     @State private var sessionSnoozes = [String: TodaySnoozedAttentionItem]()
     @State private var unsnoozedSourceKeys = Set<String>()
     @State private var attentionNow = Date()
@@ -5305,7 +4956,10 @@ private struct TodayHomeSummaryView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 8)
-                    TodayWeatherHeader(chooseCity: { showingWeatherCityPicker = true })
+                    TodayWeatherHeader(chooseCity: {
+                        DeepLinkRouter.shared.weatherProfileID = ProfileService.shared.selectedProfileID
+                        DeepLinkRouter.shared.showingWeather = true
+                    })
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 12, trailing: 0))
@@ -5446,7 +5100,6 @@ private struct TodayHomeSummaryView: View {
             _ = HouseholdAttentionSnoozeStore.activeSnoozes(now: now)
             attentionNow = now
         }
-        .sheet(isPresented: $showingWeatherCityPicker) { WeatherCityPicker() }
         .sheet(isPresented: $showingAllAttention) {
             NavigationStack {
                 ScrollView {

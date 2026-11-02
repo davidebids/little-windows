@@ -327,6 +327,14 @@ private struct AppActionSheetRow: View {
     }
 }
 
+/// Root presentation flags must not reconstruct Today's query descriptors.
+private struct TodayTabContent: View, Equatable {
+    let profileID: UUID?
+    let queryDay: Date
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.profileID == rhs.profileID && lhs.queryDay == rhs.queryDay }
+    var body: some View { NavigationStack { TodayView(profileID: profileID) } }
+}
+
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -383,7 +391,7 @@ struct RootView: View {
         TabView(selection: $router.selectedTab) {
             Group {
                 if router.selectedTab == .today {
-                    NavigationStack { TodayView(profileID: selectedProfile?.id) }
+                    TodayTabContent(profileID: selectedProfile?.id, queryDay: Calendar.current.startOfDay(for: Date())).equatable()
                 } else {
                     Color.clear
                 }
@@ -473,6 +481,7 @@ struct RootView: View {
             )
             .interactiveDismissDisabled()
         }
+        .sheet(isPresented: $router.showingWeather) { WeatherCityPicker(profileID: router.weatherProfileID) }
         .sheet(isPresented: $router.showingSettings) {
             NavigationStack {
                 SettingsView()
@@ -618,12 +627,13 @@ struct RootView: View {
 
     private var tabsWithLifecycleWork: some View {
         tabsWithStateObservers
-        .task(id: "profile-duplicate-repair-\(profiles.count)") {
-            guard profiles.count > 1 else { return }
-            let worker = ProfileDuplicateRepairWorker(
-                modelContainer: modelContext.container
-            )
-            let removedCount = await worker.repair()
+        .task(id: "profile-duplicate-repair-\(profiles.count)-\(hasCheckedInitialOnboardingState)") {
+            guard hasCheckedInitialOnboardingState, profiles.count > 1 else { return }
+            let container = modelContext.container
+            let removedCount = await Task.detached(priority: .utility) {
+                let worker = ProfileDuplicateRepairWorker(modelContainer: container)
+                return await worker.repair()
+            }.value
             guard !Task.isCancelled, removedCount > 0 else { return }
             let currentProfiles = (try? modelContext.fetch(
                 FetchDescriptor<CareProfile>()
@@ -668,22 +678,37 @@ struct RootView: View {
             CareTrackingPreferenceStore.startICloudSync()
             await pollFamilyTimerChangesWhileActive()
         }
-        .task(id: "system-integrations-\(scenePhase)") {
-            guard scenePhase == .active else { return }
-            // Let the initial SwiftData queries and any CloudKit import burst
-            // settle before faulting history for widgets, predictions, and
-            // notification reconciliation. These surfaces are not needed for
-            // the first interactive frame.
-            do {
-                try await Task.sleep(for: .seconds(4))
-            } catch {
-                return
+        .task(id: "weather-\(scenePhase)-\(hasCheckedInitialOnboardingState)") {
+            guard scenePhase == .active, hasCheckedInitialOnboardingState else { return }
+            // Keep companion surfaces current even when Today's weather line is hidden.
+            while !Task.isCancelled {
+                DailyWeatherStore.shared.updateContext(modelContext)
+                await DailyWeatherStore.shared.refresh()
+                do { try await Task.sleep(for: .seconds(300)) } catch { return }
             }
+        }
+        .task(id: "system-integrations-\(scenePhase)-\(hasCheckedInitialOnboardingState)") {
+            guard scenePhase == .active, hasCheckedInitialOnboardingState else { return }
             await SystemIntegrationReconciler.reconcileIfNeeded(context: modelContext)
+        }
+        .task(id: "duplicate-maintenance-\(scenePhase)-\(hasCheckedInitialOnboardingState)", priority: .utility) {
+            guard scenePhase == .active, hasCheckedInitialOnboardingState else { return }
+            let defaults = PersistenceService.operationalDefaults()
+            let key = FoodHomeDuplicateRepairService.lastLaunchMaintenanceAtKey
+            guard FoodHomeDuplicateRepairService.launchMaintenanceIsDue(
+                lastCompletedAt: defaults.object(forKey: key) as? Date) else { return }
+            let container = modelContext.container
+            _ = await Task.detached(priority: .utility) {
+                let worker = FoodHomeDuplicateRepairWorker(modelContainer: container)
+                return await worker.repair()
+            }.value
+            guard !Task.isCancelled else { return }
+            defaults.set(Date(), forKey: key)
         }
     }
 
     var body: some View {
+        let _ = InteractionPerformanceAudit.count("root.body")
         tabsWithLifecycleWork
             .overlay(alignment: .top) {
                 if familySyncAcceptanceIsInProgress {
@@ -704,6 +729,13 @@ struct RootView: View {
     }
 
     private func performInitialSetup() {
+        // Install consumers after bootstrap and navigation resolve, so they
+        // never scan an intermediate store and repeat the same work afterward.
+        defer {
+            WatchConnectivityService.shared.install(container: modelContext.container)
+            DailyWeatherStore.shared.install(container: modelContext.container)
+            hasCheckedInitialOnboardingState = true
+        }
         let launchURL = uiTestingLaunchURL
         if let launchURL {
             route(launchURL)
@@ -713,14 +745,12 @@ struct RootView: View {
                 // The query arrays still describe the pre-reset store in this
                 // render pass. Let their updates drive onboarding instead of
                 // marking that stale data as an existing setup.
-                hasCheckedInitialOnboardingState = true
                 return
             }
             #endif
         }
         recoverCaregiverIdentityIfNeeded()
         markOnboardingCompleteForExistingData()
-        hasCheckedInitialOnboardingState = true
         ensureHouseholdWorkspaceIfNeeded()
         handleNavigationRequestForCurrentExperience()
         if ProcessInfo.processInfo.environment["LITTLE_WINDOWS_START_TAB"] == "insights" {
@@ -1757,6 +1787,8 @@ enum DebugSimulatorSmokeSeedService {
         now: Date = Date()
     ) {
         seedIfNeeded(context: context, now: now)
+        // Exercise due maintenance as part of the large-fixture launch audit.
+        PersistenceService.operationalDefaults().removeObject(forKey: FoodHomeDuplicateRepairService.lastLaunchMaintenanceAtKey)
         guard !UserDefaults.standard.bool(forKey: performanceSeededKey) else { return }
         guard let profile = fetch(CareProfile.self, id: childProfileID, context: context) else {
             return
@@ -3084,13 +3116,10 @@ enum DebugSimulatorSmokeSeedService {
         id: UUID,
         context: ModelContext
     ) -> Model? where Model.ID == UUID {
-        var descriptor = FetchDescriptor<Model>(
-            predicate: #Predicate<Model> { model in
-                model.id == id
-            }
-        )
-        descriptor.fetchLimit = 1
-        return try? context.fetch(descriptor).first
+        // A predicate over Identifiable.id builds an abstract protocol key
+        // path that SwiftData cannot resolve in optimized builds. This helper
+        // only prepares the small, neutral simulator fixture.
+        return ((try? context.fetch(FetchDescriptor<Model>())) ?? []).first { $0.id == id }
     }
 }
 #endif

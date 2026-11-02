@@ -31,7 +31,7 @@ enum WatchCommandProcessor {
             return acknowledgement(
                 for: command,
                 status: .duplicate,
-                state: WatchStateFactory.make(context: context)
+                state: await WatchStateFactory.makeInBackground(container: container)
             )
         }
         guard let profile = fetchProfile(command.profileID, context: context) else {
@@ -39,7 +39,7 @@ enum WatchCommandProcessor {
                 for: command,
                 status: .rejected,
                 message: "That profile is no longer available.",
-                state: WatchStateFactory.make(context: context)
+                state: await WatchStateFactory.makeInBackground(container: container)
             )
         }
 
@@ -71,14 +71,14 @@ enum WatchCommandProcessor {
                 for: command,
                 status: .rejected,
                 message: message,
-                state: WatchStateFactory.make(context: context)
+                state: await WatchStateFactory.makeInBackground(container: container)
             )
         case .duplicate:
             rememberProcessed(command.id)
             return acknowledgement(
                 for: command,
                 status: .duplicate,
-                state: WatchStateFactory.make(context: context)
+                state: await WatchStateFactory.makeInBackground(container: container)
             )
         case .applied:
             if command.kind != .selectProfile,
@@ -91,13 +91,13 @@ enum WatchCommandProcessor {
                     for: command,
                     status: .rejected,
                     message: "The change could not be saved. Please try again.",
-                    state: WatchStateFactory.make(context: context)
+                    state: await WatchStateFactory.makeInBackground(container: container)
                 )
             }
         }
 
         rememberProcessed(command.id)
-        let state = WatchStateFactory.make(context: context)
+        let state = await WatchStateFactory.makeInBackground(container: container)
         if command.kind != .snoozeMedication {
             SystemIntegrationReconciler.requestReconciliation()
             if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {

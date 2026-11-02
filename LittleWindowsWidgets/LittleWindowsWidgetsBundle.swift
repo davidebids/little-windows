@@ -11,6 +11,7 @@ struct LittleWindowsWidgetsBundle: WidgetBundle {
         ShoppingListWidget()
         FoodQuickAddWidget()
         NightLightWidget()
+        WeatherWidget()
         LittleWindowsLiveActivity()
         if #available(iOSApplicationExtension 18.0, *) {
             StartSleepControl()

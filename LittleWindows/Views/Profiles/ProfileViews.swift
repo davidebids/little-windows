@@ -1,4 +1,6 @@
 import PhotosUI
+import ImageIO
+import CoreData
 import SwiftData
 import SwiftUI
 import UIKit
@@ -7,6 +9,12 @@ struct ProfileAvatarView: View {
     let profile: CareProfile
     var size: CGFloat = 42
     @Query private var photoAttachments: [PhotoAttachment]
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.displayScale) private var displayScale
+    @State private var loadedImage: LoadedAvatar?
+    @State private var retryGeneration = 0
+    private struct LoadedAvatar { let key: ProfileAvatarImageCache.Key; let image: UIImage }
+    private struct LoadRequest: Hashable { let key: ProfileAvatarImageCache.Key?; let retry: Int }
 
     init(profile: CareProfile, size: CGFloat = 42) {
         self.profile = profile
@@ -19,6 +27,7 @@ struct ProfileAvatarView: View {
                 }
             )
             descriptor.fetchLimit = 1
+            descriptor.propertiesToFetch = [\PhotoAttachment.id, \PhotoAttachment.updatedAt]
             _photoAttachments = Query(descriptor)
         } else {
             var descriptor = FetchDescriptor<PhotoAttachment>(
@@ -32,19 +41,15 @@ struct ProfileAvatarView: View {
     }
 
     var body: some View {
+        let key = imageKey
+        let bitmap = key.flatMap { ProfileAvatarImageCache.cached($0) ?? (loadedImage?.key == $0 ? loadedImage?.image : nil) }
         ZStack(alignment: .bottomTrailing) {
             ZStack {
                 Circle()
                     .fill(profileTint.gradient)
 
-                if let attachmentID = profile.profilePhotoAttachmentID,
-                   let profilePhotoData,
-                   let image = ThumbnailImageCache.circularImage(
-                    attachmentID: attachmentID,
-                    data: profilePhotoData,
-                    size: size
-                   ) {
-                    Image(uiImage: image)
+                if let bitmap {
+                    Image(uiImage: bitmap)
                         .resizable()
                         .interpolation(.high)
                         .frame(width: size, height: size)
@@ -68,11 +73,27 @@ struct ProfileAvatarView: View {
                 .padding(max(1, size * 0.025))
         }
         .frame(width: size, height: size)
+        .task(id: LoadRequest(key: key, retry: retryGeneration)) {
+            guard let key else { loadedImage = nil; return }
+            if let image = ProfileAvatarImageCache.cached(key) {
+                if loadedImage?.key != key { loadedImage = LoadedAvatar(key: key, image: image) }
+                return
+            }
+            let image = await ProfileAvatarImageCache.load(key, container: modelContext.container)
+            guard !Task.isCancelled, let image else { return }
+            loadedImage = LoadedAvatar(key: key, image: image)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange).receive(on: RunLoop.main)) { _ in
+            // An iCloud asset may arrive after its metadata. Retry a missing
+            // bitmap on a real store change, without polling or reading blobs in body.
+            if bitmap == nil { retryGeneration &+= 1 }
+        }
     }
 
-    private var profilePhotoData: Data? {
-        guard let id = profile.profilePhotoAttachmentID else { return nil }
-        return photoAttachments.first { $0.id == id }?.previewData
+    private var imageKey: ProfileAvatarImageCache.Key? {
+        guard let id = profile.profilePhotoAttachmentID,
+              let attachment = photoAttachments.first(where: { $0.id == id }) else { return nil }
+        return .init(id: id, revision: attachment.updatedAt, diameter: size, scale: displayScale)
     }
 
     private var profileTint: Color {
@@ -84,6 +105,83 @@ struct ProfileAvatarView: View {
         case "purple": .purple
         case "brown": .brown
         default: AppTheme.accent
+        }
+    }
+}
+
+/// Avatar redraws use only identity/revision metadata. Encoded image data is
+/// fetched and downsampled on a separate context, never by the toolbar's body.
+enum ProfileAvatarImageCache {
+    struct Key: Hashable, Sendable {
+        let id: UUID
+        let revision: Date
+        let diameter: CGFloat
+        let scale: CGFloat
+        var storageKey: NSString {
+            "\(id)-\(revision.timeIntervalSinceReferenceDate.bitPattern)-\(Double(diameter).bitPattern)-\(Double(scale).bitPattern)" as NSString
+        }
+    }
+    private static let cache: NSCache<NSString, UIImage> = {
+        let value = NSCache<NSString, UIImage>()
+        value.countLimit = 120
+        value.totalCostLimit = 8 * 1024 * 1024
+        return value
+    }()
+    static func cached(_ key: Key) -> UIImage? { cache.object(forKey: key.storageKey) }
+
+    static func load(_ key: Key, container: ModelContainer) async -> UIImage? {
+        if let image = cached(key) { return image }
+        return await ProfileAvatarReader.shared.load(key, container: container)
+    }
+
+    static func image(_ key: Key, data: () -> Data?) -> UIImage? {
+        if let image = cached(key) { return image }
+        let pixels = ceil(key.diameter * key.scale)
+        guard pixels.isFinite, pixels >= 1, pixels <= 4096, key.scale > 0,
+              let data = data(),
+              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              min(width, height) > 0 else { return nil }
+        // Preserve enough pixels for a center crop, with a bounded decode even
+        // for an unusually wide source. ImageIO applies the source orientation.
+        let sampleSize = min(4096, ceil(max(width, height) * min(1, Double(pixels) / min(width, height))))
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(sampleSize)]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              let context = CGContext(data: nil, width: Int(pixels), height: Int(pixels), bitsPerComponent: 8,
+                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: pixels, height: pixels)
+        context.clear(bounds); context.addEllipse(in: bounds); context.clip()
+        context.interpolationQuality = .high
+        let fill = pixels / CGFloat(min(thumbnail.width, thumbnail.height))
+        let widthOut = CGFloat(thumbnail.width) * fill, heightOut = CGFloat(thumbnail.height) * fill
+        context.draw(thumbnail, in: CGRect(x: (pixels - widthOut) / 2, y: (pixels - heightOut) / 2, width: widthOut, height: heightOut))
+        guard let bitmap = context.makeImage() else { return nil }
+        let image = UIImage(cgImage: bitmap, scale: key.scale, orientation: .up)
+        cache.setObject(image, forKey: key.storageKey, cost: bitmap.bytesPerRow * bitmap.height)
+        return image
+    }
+}
+
+/// Serial reads cap concurrent photo faults/decodes. A queued duplicate reuses
+/// the first bitmap; a canceled view does not start another storage read.
+private actor ProfileAvatarReader {
+    static let shared = ProfileAvatarReader()
+    func load(_ key: ProfileAvatarImageCache.Key, container: ModelContainer) -> UIImage? {
+        guard !Task.isCancelled else { return nil }
+        if let image = ProfileAvatarImageCache.cached(key) { return image }
+        let context = ModelContext(container), id = key.id
+        var query = FetchDescriptor<PhotoAttachment>(predicate: #Predicate { $0.id == id })
+        query.fetchLimit = 1
+        guard let attachment = try? context.fetch(query).first,
+              attachment.updatedAt == key.revision else { return nil }
+        return ProfileAvatarImageCache.image(key) {
+            TodayPresentationAudit.event("AvatarBlobRead")
+            return attachment.previewData
         }
     }
 }
