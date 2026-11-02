@@ -88,7 +88,10 @@ struct WeatherCityPicker: View {
                         Button("Choose Location") { showingLocation = true }.buttonStyle(.borderedProminent)
                         if let failure = weather.failure { WeatherFailureText(failure: failure) }
                     }
-                    NavigationLink(value: Route.outdoor) {
+                    Button {
+                        InteractionPerformanceAudit.begin("outdoor.open")
+                        path.append(.outdoor)
+                    } label: {
                         HStack(spacing: 12) {
                             WeatherSectionIcon(symbol: "slider.horizontal.3", tint: AppTheme.accent)
                             VStack(alignment: .leading, spacing: 3) {
@@ -96,6 +99,9 @@ struct WeatherCityPicker: View {
                                 Text("Activities & comfort for each profile").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .accessibilityHidden(true)
                         }
                         .padding(16).modifier(WeatherSolidSurface())
                     }

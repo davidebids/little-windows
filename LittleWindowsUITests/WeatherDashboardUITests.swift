@@ -486,7 +486,7 @@ final class WeatherDashboardUITests: XCTestCase {
         XCTAssertNotEqual(readout.label, initial)
         capture(app, "Hourly accessibility plot and scale")
     }
-    func testWeatherDashboardForecastPreferencesAndDayDetails() {
+    func testWeatherDashboardForecastPreferencesAndDayDetails() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
         launch(app, url: "littlewindows://debug/seed-smoke")
@@ -510,16 +510,17 @@ final class WeatherDashboardUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Show 7 days"].exists)
         }
         let day = app.buttons.matching(identifier: "weather.forecast-day").firstMatch
-        for _ in 0..<8 where !day.isHittable { app.swipeDown() }
-        XCTAssertTrue(day.isHittable)
+        try revealWeatherControl(day, in: app)
         day.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Precipitation chance'")).firstMatch.waitForExistence(timeout: 5))
         capture(app, "Weather selected day")
         app.buttons["weather.day.done"].tap()
         XCTAssertTrue(app.buttons["weather.day.done"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 5))
-        let preferences = app.buttons["weather.outdoor-toolbar"]
-        XCTAssertTrue(preferences.waitForExistence(timeout: 5))
+        let preferences = app.buttons["weather.outdoor-preferences"]
+        for _ in 0..<10 where !preferences.isHittable { app.swipeUp() }
+        XCTAssertTrue(preferences.isHittable)
+        capture(app, "Outdoor preferences dashboard button")
         preferences.tap()
         XCTAssertTrue(app.navigationBars["Outdoor Preferences"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.switches["Outdoor suggestions"].firstMatch.exists)
