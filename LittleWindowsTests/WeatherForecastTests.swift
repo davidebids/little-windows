@@ -21,6 +21,35 @@ final class WeatherForecastTests: XCTestCase {
         XCTAssertNotEqual(view, WeatherHourlyView(surface: changed, hours: changed.forecast.hours))
         changed = original; changed.timeZoneIdentifier = "America/New_York"
         XCTAssertNotEqual(view, WeatherHourlyView(surface: changed, hours: changed.forecast.hours))
+        changed = original; changed.forecast.detailedForecastPending = true
+        XCTAssertNotEqual(view, WeatherHourlyView(surface: changed, hours: changed.forecast.hours))
+    }
+    @MainActor
+    func testHourlyClockOnlyInvalidatesOnAnHourChange() {
+        let s = state()
+        let view = WeatherHourlyView(surface: s, hours: s.forecast.hours, now: now)
+        XCTAssertEqual(view, WeatherHourlyView(surface: s, hours: s.forecast.hours, now: now.addingTimeInterval(60)))
+        XCTAssertNotEqual(view, WeatherHourlyView(surface: s, hours: s.forecast.hours, now: now.addingTimeInterval(3600)))
+    }
+    func testDailyForecastDropsYesterdayAcrossLocationMidnight() throws {
+        let late = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-01T06:55:00Z"))
+        var s = state(); s.timeZoneIdentifier = "America/Los_Angeles"
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = s.timeZone
+        let start = calendar.startOfDay(for: late)
+        s.forecast.days = try (0..<10).map { offset in
+            var day = s.forecast.days[0]
+            day.date = try XCTUnwrap(calendar.date(byAdding: .day, value: offset, to: start))
+            return day
+        }
+        s.forecast.fetchedAt = late; s.forecast.expiresAt = late.addingTimeInterval(1800)
+        let later = late.addingTimeInterval(600)
+        XCTAssertTrue(s.forecast.isFresh(at: later))
+        XCTAssertEqual(s.upcomingDays(at: late).count, 10)
+        XCTAssertEqual(s.upcomingDays(at: later).count, 9)
+        XCTAssertTrue(calendar.isDate(try XCTUnwrap(s.upcomingDays(at: later).first).date, inSameDayAs: later))
+        XCTAssertEqual(s.widgetSnapshot(profileID: nil, now: late).upcomingDays(at: later).map(\.date), Array(s.upcomingDays(at: later).prefix(3)).map(\.date))
+        s.forecast.days = []
+        XCTAssertTrue(s.upcomingDays(at: later).isEmpty)
     }
     func testLightweightPlotsRetainNativeAudioGraphDataAndExcludeInvalidSamples() throws {
         let points = [WeatherPlotPoint(date: now, value: 10), WeatherPlotPoint(date: now.addingTimeInterval(3600), value: 25),
@@ -160,6 +189,22 @@ final class WeatherForecastTests: XCTestCase {
         XCTAssertNil(s.outdoor(profileIDs: [id], day: now, now: now))
         XCTAssertNil(state().outdoor(profileIDs: [], day: now, now: now))
         XCTAssertNil(state().outdoor(profileIDs: [UUID()], day: now, now: now))
+    }
+    func testOutingSelectionWaitsForRequestedProfileAndPreservesExplicitChoices() {
+        let first = UUID(), arriving = UUID()
+        var selection = OutdoorParticipantSelection()
+        selection.initialize(preferredID: arriving, availableIDs: [first])
+        XCTAssertTrue(selection.participants.isEmpty)
+        selection.initialize(preferredID: arriving, availableIDs: [first, arriving])
+        XCTAssertEqual(selection.participants, [arriving])
+        selection.choose([])
+        selection.initialize(preferredID: arriving, availableIDs: [first, arriving])
+        XCTAssertTrue(selection.participants.isEmpty, "Do not undo an explicit empty outing choice")
+        selection.choose([first, arriving])
+        selection.reconcile(availableIDs: [first])
+        XCTAssertEqual(selection.participants, [first], "Archived participants must leave the outing")
+        selection.reconcile(availableIDs: [])
+        XCTAssertTrue(selection.participants.isEmpty)
     }
     func testGroupUsesIntersectionAndDisabledProfileSuppressesSuggestion() {
         var s = state(); var dog = s.profiles[0]; dog.id = UUID(); dog.type = "dog"
@@ -368,6 +413,16 @@ final class WeatherForecastTests: XCTestCase {
             XCTAssertNil(s.outdoor(profileIDs: [s.profiles[0].id], day: now, now: now))
         }
     }
+    func testStormHoursAreExcludedEvenWhenComfortLimitsPass() {
+        var s = state(); let id = s.profiles[0].id
+        XCTAssertNotNil(s.nextOutdoorWindow(profileID: id, now: now))
+        for symbol in ["cloud.bolt.fill", "cloud.bolt.rain.fill", "tornado", "hurricane"] {
+            s.forecast.hours = s.forecast.hours.map { hour in var value = hour; value.symbol = symbol; return value }
+            XCTAssertNil(s.nextOutdoorWindow(profileID: id, now: now), "Exclude \(symbol) without relying on precipitation probability")
+        }
+        s.forecast.hours = s.forecast.hours.map { hour in var value = hour; value.symbol = "cloud.rain.fill"; return value }
+        XCTAssertNotNil(s.nextOutdoorWindow(profileID: id, now: now), "Ordinary rain still follows the edited comfort limits")
+    }
     func testWidgetForecastMergeKeepsLatestSettingsAndOnlyMatchesSameLocation() {
         var primary = state(); primary.manualLatitude = 1; primary.manualLongitude = 2
         var widget = primary; widget.forecast.fetchedAt = now.addingTimeInterval(60)
@@ -491,6 +546,22 @@ final class WeatherForecastTests: XCTestCase {
         XCTAssertEqual(store.location?.name, "Second City")
         XCTAssertNil(defaults.data(forKey: DailyWeatherStore.locationKey))
         XCTAssertNil(store.surface?.manualLatitude)
+    }
+    @MainActor
+    func testSleepAutofillHonorsProviderExpiryAndRejectsFutureSnapshots() async throws {
+        let clock = Date()
+        for scenario in 0..<3 {
+            var forecast = state().forecast
+            var day = forecast.days[0]; day.date = clock; forecast.days = [day]
+            forecast.fetchedAt = scenario == 2 ? clock.addingTimeInterval(3600) : clock.addingTimeInterval(-60)
+            forecast.expiresAt = scenario == 1 ? clock.addingTimeInterval(-1) : clock.addingTimeInterval(7200)
+            let store = DailyWeatherStore(defaults: try isolatedDefaults(), client: AuditWeatherClient(snapshot: forecast))
+            store.select(TripDestinationSelection(name: "Test City", latitude: 1, longitude: 2, timeZoneIdentifier: "UTC"))
+            await store.refresh(force: true, now: clock)
+            let value = store.cachedSleepConditions(for: clock, preserving: nil)
+            if scenario == 0 { XCTAssertEqual(value?.outdoorHighCelsius, day.highTemperatureCelsius) }
+            else { XCTAssertNil(value, "Expired/future data must not silently autofill a sleep log") }
+        }
     }
     @MainActor
     func testMinuteSensitiveRefreshAndBackgroundRequestDoesNotAcquireLocation() async throws {
@@ -768,6 +839,26 @@ final class WeatherForecastTests: XCTestCase {
         await store.refresh(now: Date().addingTimeInterval(121))
         let retriedCount = await client.count
         XCTAssertEqual(retriedCount, 3)
+    }
+    @MainActor
+    func testCurrentLocationCanReplaceAnInFlightManualForecast() async throws {
+        let client = ManualForecastSwitchProbe(full: state().forecast)
+        let locator = AuditLocationClient(); locator.city = "Current City"; locator.latitude = 3; locator.longitude = 4
+        let store = DailyWeatherStore(defaults: try isolatedDefaults(), client: client, locationClient: locator)
+        store.select(TripDestinationSelection(name: "Manual City", latitude: 1, longitude: 2, timeZoneIdentifier: "UTC"))
+        let manual = Task { await store.refresh(now: now) }
+        for _ in 0..<100 where store.snapshot == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(store.isLoading)
+        XCTAssertEqual(store.snapshot?.detailedForecastPending, true)
+        await store.useCurrentLocation()
+        XCTAssertTrue(store.usesCurrentLocation)
+        XCTAssertEqual(store.location?.name, "Current City")
+        XCTAssertEqual(store.snapshot?.currentTemperatureCelsius, 25)
+        await client.releaseManual()
+        await manual.value
+        XCTAssertEqual(store.location?.name, "Current City")
+        XCTAssertEqual(store.snapshot?.currentTemperatureCelsius, 25)
+        XCTAssertFalse(store.isLoading)
     }
     @MainActor
     func testLateProgressiveResultsCannotRestoreAChangedLocation() async throws {
@@ -1200,5 +1291,24 @@ private final class WatchDeliveryAuditProbe: @unchecked Sendable {
         Thread.sleep(forTimeInterval: 0.001)
         lock.withLock { active -= 1 }
         return true
+    }
+}
+
+private actor ManualForecastSwitchProbe: DailyWeatherClient {
+    let full: DailyWeatherSnapshot
+    let gate = ForecastTestGate()
+    init(full: DailyWeatherSnapshot) { self.full = full }
+    func releaseManual() async { await gate.release() }
+    func fetch(latitude: Double, longitude: Double) async throws -> DailyWeatherSnapshot { full }
+    func fetch(latitude: Double, longitude: Double, onUpdate: @escaping @Sendable (DailyWeatherSnapshot) async -> Void) async throws -> DailyWeatherSnapshot {
+        var result = full
+        if latitude == 1 {
+            result.hours = []; result.detailedForecastPending = true
+            await onUpdate(result)
+            await gate.wait()
+        } else { result.currentTemperatureCelsius = 25 }
+        result.detailedForecastPending = false
+        await onUpdate(result)
+        return result
     }
 }

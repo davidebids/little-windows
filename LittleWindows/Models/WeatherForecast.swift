@@ -34,6 +34,9 @@ struct WeatherHour: Codable, Hashable, Identifiable, Sendable {
     var daylight: Bool
     var precipitationType: String? = nil
     var id: Date { date }
+    var excludesOutdoorSuggestion: Bool {
+        symbol.contains("bolt") || symbol.contains("tornado") || symbol.contains("hurricane")
+    }
 }
 
 struct WeatherMinute: Codable, Hashable, Identifiable, Sendable {
@@ -213,6 +216,18 @@ struct OutdoorWindow: Codable, Hashable, Identifiable, Sendable {
     var id: Date { start }
 }
 
+/// Keeps an explicit outing choice separate from profiles still arriving in a snapshot.
+struct OutdoorParticipantSelection: Equatable {
+    private(set) var participants: Set<UUID> = []
+    private var hasChosen = false
+    mutating func initialize(preferredID: UUID?, availableIDs: Set<UUID>) {
+        guard !hasChosen, let preferredID, availableIDs.contains(preferredID) else { return }
+        participants = [preferredID]; hasChosen = true
+    }
+    mutating func choose(_ ids: Set<UUID>) { participants = ids; hasChosen = true }
+    mutating func reconcile(availableIDs: Set<UUID>) { participants.formIntersection(availableIDs) }
+}
+
 enum OutdoorWindowEngine {
     /// Comfort preferences are user choices, not medical or exercise limits.
     static func suggestion(weather: DailyWeatherSnapshot, profiles: [OutdoorProfileContext], day: Date,
@@ -257,7 +272,7 @@ enum OutdoorWindowEngine {
             var cursor = start
             var valid = !covered.isEmpty
             for hour in covered {
-                if hour.date > cursor || !hour.daylight { valid = false; break }
+                if hour.date > cursor || !hour.daylight || hour.excludesOutdoorSuggestion { valid = false; break }
                 cursor = max(cursor, min(end, hour.date.addingTimeInterval(3600)))
                 if !hour.feelsLike.isFinite || !hour.rainChance.isFinite || !hour.windKPH.isFinite
                     || !(0...1).contains(hour.rainChance) || hour.windKPH < 0 || hour.uv < 0
@@ -314,6 +329,11 @@ struct WeatherSurfaceState: Codable, Hashable, Sendable {
     var manualLatitude: Double? = nil
     var manualLongitude: Double? = nil
     var timeZone: TimeZone { TimeZone(identifier: timeZoneIdentifier) ?? .current }
+    func upcomingDays(at now: Date) -> [TripDailyWeather] {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = timeZone
+        let today = calendar.startOfDay(for: now)
+        return forecast.days.filter { $0.date >= today }
+    }
     func mergingWidgetForecast(_ cached: WeatherSurfaceState?) -> WeatherSurfaceState {
         guard let cached, manualLatitude != nil, manualLongitude != nil,
               city == cached.city, timeZoneIdentifier == cached.timeZoneIdentifier,
@@ -548,6 +568,12 @@ enum WeatherPreviewData {
         }
         forecast.minutes = minutes
         forecast.minuteAvailability = "available"; forecast.minuteExpiresAt = now.addingTimeInterval(300); forecast.expiresAt = now.addingTimeInterval(1800)
+        #if targetEnvironment(simulator)
+        if enabled, ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1",
+           ProcessInfo.processInfo.environment["LITTLE_WINDOWS_WEATHER_PENDING_DETAILS"] == "1" {
+            forecast.hours = []; forecast.detailedForecastPending = true
+        }
+        #endif
         let profile = OutdoorProfileContext(id: profileID, name: "Sample Child", type: "child", activities: OutdoorActivity.options(type: "child", ageMonths: 6).map(\.rawValue), preferences: .defaults(for: "child"), contextUpdatedAt: now)
         return WeatherSurfaceState(city: "Sample City", timeZoneIdentifier: c.timeZone.identifier, fahrenheit: true, windUnit: "mph", precipitationUnit: "in", forecast: forecast, selectedProfileID: profileID, profiles: [profile])
     }

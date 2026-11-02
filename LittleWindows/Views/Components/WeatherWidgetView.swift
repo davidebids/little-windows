@@ -77,7 +77,7 @@ struct WeatherWidgetView: View {
                     }
                     if family == .systemLarge {
                         Text(w.outlook(at: entry.date)).font(.caption).lineLimit(2)
-                        ForEach(Array(w.forecast.days.filter { $0.date >= calendar(w).startOfDay(for: entry.date) }.prefix(3)), id: \.date) { day in
+                        ForEach(Array(w.upcomingDays(at: entry.date).prefix(3)), id: \.date) { day in
                             HStack {
                                 Text(day.date.formatted(dayFormat(w))).frame(width: 40, alignment: .leading)
                                 Image(systemName: day.symbolName).symbolRenderingMode(.multicolor)
@@ -111,6 +111,5 @@ struct WeatherWidgetView: View {
             }
         }
     }
-    private func calendar(_ w: WeatherSurfaceState) -> Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = w.timeZone; return c }
     private func dayFormat(_ w: WeatherSurfaceState) -> Date.FormatStyle { var f = Date.FormatStyle().weekday(.abbreviated); f.timeZone = w.timeZone; return f }
 }

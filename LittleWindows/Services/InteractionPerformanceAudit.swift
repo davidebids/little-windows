@@ -5,7 +5,8 @@ import SwiftUI
 enum InteractionPerformanceAudit {
     #if DEBUG && targetEnvironment(simulator)
     static let enabled = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_INTERACTION_AUDIT"] == "1"
-    static let referenceEnabled = enabled && ProcessInfo.processInfo.environment["LITTLE_WINDOWS_INTERACTION_REFERENCE"] == "1"
+    static let referenceEnabled = (enabled && ProcessInfo.processInfo.environment["LITTLE_WINDOWS_INTERACTION_REFERENCE"] == "1")
+        || ProcessInfo.processInfo.environment["LITTLE_WINDOWS_NATIVE_MENU_REFERENCE"] == "1"
     static let referenceFormEnabled = enabled && ProcessInfo.processInfo.environment["LITTLE_WINDOWS_INTERACTION_REFERENCE"] == "2"
     static let referenceScrollEnabled = enabled && ProcessInfo.processInfo.environment["LITTLE_WINDOWS_INTERACTION_REFERENCE"] == "3"
     private static let counters = AuditCounters()
@@ -377,6 +378,14 @@ struct InteractionAuditReferenceView: View {
                 Button("Open reference form") { InteractionPerformanceAudit.begin("native.form"); showingForm = true }
                     .buttonStyle(.borderedProminent)
             }.navigationTitle("Native reference")
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Button("Open form from menu") { showingForm = true }
+                        } label: { Label("Reference menu", systemImage: "person.crop.circle") }
+                        .accessibilityIdentifier("performance.reference-menu")
+                    }
+                }
         }
         .sheet(isPresented: $showingForm) {
             InteractionAuditReferenceForm { showingForm = false }

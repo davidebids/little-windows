@@ -319,7 +319,7 @@ final class DailyWeatherStore: ObservableObject {
 
     func cachedSleepConditions(for date: Date, preserving existing: SleepConditions?) -> SleepConditions? {
         guard let snapshot, let location,
-              Date().timeIntervalSince(snapshot.fetchedAt) < 30 * 60 else { return existing }
+              snapshot.isFresh(at: Date()) else { return existing }
         return SleepWeatherAutofill.merging(existing, date: date, snapshot: snapshot, location: location)
     }
 

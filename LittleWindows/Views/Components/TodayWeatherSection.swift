@@ -145,7 +145,7 @@ struct WeatherLocationSettings: View {
                             if weather.isLoading, weather.usesCurrentLocation { ProgressView() }
                         }
                     }
-                    .disabled(weather.isLoading)
+                    .disabled(weather.isLoading && weather.usesCurrentLocation)
                     .accessibilityIdentifier("weather.use-current-location")
                     if let failure = weather.locationFailure {
                         Text(failure.message).font(.caption).foregroundStyle(.secondary)

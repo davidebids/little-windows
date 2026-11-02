@@ -100,6 +100,8 @@ def main():
         "LittleWindowsTests/WatchCompanionTests",
         "LittleWindowsTests/SleepConditionsTests",
         "LittleWindowsUITests/WeatherDashboardUITests",
+        "LittleWindowsUITests/UserVisibleFlowUITests/testWeatherHeaderIsCompactAndOffersLocationOrCity",
+        "LittleWindowsUITests/UserVisibleFlowUITests/testWeatherZIPSearchDisplaysAndSavesCityName",
         "LittleWindowsUITests/UserVisibleFlowUITests/testTodayEssentialsUsesLargeButtonsAndKeepsConfigurationInMenu",
         "LittleWindowsUITests/UserVisibleFlowUITests/testProductionScaleEssentialsLayoutSwitchesLoggingAndScrollingStayResponsive",
         "LittleWindowsUITests/UserVisibleFlowUITests/testEssentialsUseProfileAppropriateChoicesAndLoggingRoutes",

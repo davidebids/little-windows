@@ -15,8 +15,7 @@ struct WeatherCityPicker: View {
     @State private var showingLocation = false
     @State private var heroVisible = true
     @State private var selectedDay: Date?
-    @State private var participants: Set<UUID> = []
-    @State private var initializedParticipants = false
+    @State private var outingSelection = OutdoorParticipantSelection()
     @State private var now = Date()
     @State private var windows: [OutdoorWindow] = []
 
@@ -68,17 +67,18 @@ struct WeatherCityPicker: View {
                                 }
                             }
                         }
-                        WeatherOutdoorSection(surface: surface, participants: $participants, windows: windows)
+                        WeatherOutdoorSection(surface: surface,
+                            participants: Binding(get: { outingSelection.participants }, set: { outingSelection.choose($0) }), windows: windows)
                         WeatherPanel(title: "Next 48 hours", symbol: "clock.fill", subtitle: "Your day, hour by hour") {
                             if surface.forecast.detailedForecastPending == true {
                                 ProgressView("Loading hourly forecast")
                             } else {
                                 WeatherHourlyView(surface: surface, hours: Array(surface.forecast.hours.filter {
                                     $0.date.addingTimeInterval(3600) > now && $0.date < now.addingTimeInterval(48 * 3600)
-                                })).equatable()
+                                }), now: now).equatable()
                             }
                         }
-                        WeatherDailyForecastView(surface: surface, selectedDay: $selectedDay).equatable()
+                        WeatherDailyForecastView(surface: surface, now: now, selectedDay: $selectedDay).equatable()
                         WeatherMetricsGrid(surface: surface, now: now)
                     } else {
                         ContentUnavailableView(weather.isLoading ? "Loading weather" : "Your local weather",
@@ -144,7 +144,7 @@ struct WeatherCityPicker: View {
             }
             .sheet(isPresented: $showingLocation) { WeatherLocationSettings() }
             .sheet(isPresented: Binding(get: { selectedDay != nil }, set: { if !$0 { selectedDay = nil } })) {
-                if let day = selectedDay, let surface = weather.surface { WeatherDayDetail(surface: surface, date: day) }
+                if let day = selectedDay, let surface = weather.surface { WeatherDayDetail(surface: surface, date: day, now: now) }
             }
             .refreshable { now = Date(); await weather.refresh(force: true); refreshContext() }
             .task(id: weather.requestID) {
@@ -155,16 +155,29 @@ struct WeatherCityPicker: View {
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(60)) } catch { return }
                     if scenePhase == .active {
-                        now = Date()
                         await weather.refresh(minuteSensitive: true)
+                    }
+                }
+            }
+            .task {
+                // Expiry/day labels must advance even while a forecast request
+                // is waiting on the service. This clock does not await network work.
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                    if scenePhase == .active {
+                        now = Date()
                         refreshContext()
                     }
                 }
             }
             .onChange(of: weather.snapshot) { _, _ in recalculate() }
-            .onChange(of: weather.outdoorProfiles) { _, _ in initializeParticipants(); recalculate() }
-            .onChange(of: profileID) { _, _ in initializedParticipants = false; participants = []; windows = []; initializeParticipants() }
-            .onChange(of: participants) { _, _ in windows = []; recalculate() }
+            .onChange(of: weather.outdoorProfiles) { _, profiles in
+                outingSelection.reconcile(availableIDs: Set(profiles.map(\.id)))
+                initializeParticipants()
+                recalculate()
+            }
+            .onChange(of: profileID) { _, _ in outingSelection = OutdoorParticipantSelection(); windows = []; initializeParticipants() }
+            .onChange(of: outingSelection.participants) { _, _ in windows = []; recalculate() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { now = Date(); Task { await weather.refresh(minuteSensitive: true); refreshContext() } }
             }
@@ -181,14 +194,12 @@ struct WeatherCityPicker: View {
         recalculate()
     }
     private func initializeParticipants() {
-        guard !initializedParticipants, !weather.outdoorProfiles.isEmpty else { return }
-        initializedParticipants = true
-        if let id = profileID ?? ProfileService.shared.selectedProfileID ?? weather.surface?.selectedProfileID,
-           weather.outdoorProfiles.contains(where: { $0.id == id }) { participants = [id] }
+        outingSelection.initialize(preferredID: profileID ?? ProfileService.shared.selectedProfileID ?? weather.surface?.selectedProfileID,
+                                   availableIDs: Set(weather.outdoorProfiles.map(\.id)))
     }
     private func recalculate() {
         guard let surface = weather.surface else { windows = []; return }
-        windows = [surface.outdoor(profileIDs: participants, day: now, now: now, previous: windows.first)].compactMap { $0 }
+        windows = [surface.outdoor(profileIDs: outingSelection.participants, day: now, now: now, previous: windows.first)].compactMap { $0 }
     }
     private func weekdayFormat(_ surface: WeatherSurfaceState) -> Date.FormatStyle {
         var f = Date.FormatStyle().weekday(.wide); f.timeZone = surface.timeZone; return f
@@ -359,18 +370,23 @@ private struct WeatherHeroVisibilityKey: PreferenceKey {
 /// placement cycles when the forecast changes height during a scroll gesture.
 private struct WeatherDailyForecastView: View, Equatable {
     let surface: WeatherSurfaceState
+    let now: Date
     @Binding var selectedDay: Date?
     @State private var showTenDays = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.surface.forecast.days == rhs.surface.forecast.days && lhs.surface.fahrenheit == rhs.surface.fahrenheit
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = lhs.surface.timeZone
+        return lhs.surface.forecast.days == rhs.surface.forecast.days && lhs.surface.fahrenheit == rhs.surface.fahrenheit
             && lhs.surface.timeZoneIdentifier == rhs.surface.timeZoneIdentifier
+            && calendar.isDate(lhs.now, inSameDayAs: rhs.now)
     }
     var body: some View {
         let _ = InteractionPerformanceAudit.count("daily.body")
         let s = surface
-        WeatherPanel(title: showTenDays ? "10-day forecast" : "7-day forecast", symbol: "calendar", tint: .purple, subtitle: "Tap a day to explore") {
-            let days = Array(s.forecast.days.prefix(showTenDays ? 10 : 7))
+        let available = s.upcomingDays(at: now)
+        let days = Array(available.prefix(showTenDays ? 10 : 7))
+        WeatherPanel(title: days.isEmpty ? "Daily forecast" : "\(days.count)-day forecast", symbol: "calendar", tint: .purple,
+                     subtitle: days.isEmpty ? nil : "Tap a day to explore") {
             let low = days.map(\.lowTemperatureCelsius).min() ?? 0
             let high = days.map(\.highTemperatureCelsius).max() ?? 1
             ForEach(days, id: \.date) { day in
@@ -381,10 +397,11 @@ private struct WeatherDailyForecastView: View, Equatable {
                     .accessibilityIdentifier("weather.forecast-day")
                 if day.date != days.last?.date { Divider() }
             }
-            if s.forecast.days.count > 7 {
+            if days.isEmpty { Text("Daily forecast unavailable.").font(.caption).foregroundStyle(.secondary) }
+            if available.count > 7 {
                 Button { InteractionPerformanceAudit.begin("daily.change"); showTenDays.toggle() } label: {
                     HStack {
-                        Text(showTenDays ? "Show 7 days" : "Show 10 days")
+                        Text(showTenDays ? "Show 7 days" : "Show \(min(10, available.count)) days")
                         Spacer()
                         Image(systemName: "chevron.down")
                             .rotationEffect(.degrees(showTenDays ? 180 : 0))
@@ -526,18 +543,21 @@ struct WeatherCurrentCard: View, Equatable {
 struct WeatherHourlyView: View, Equatable {
     let surface: WeatherSurfaceState
     let hours: [WeatherHour]
+    var now: Date = Date()
     @ScaledMetric(relativeTo: .caption2) private var columnWidth: CGFloat = 58
     @State private var feelsLike = false
     @State private var precipitation = false
     @State private var selectedDate: Date?
     @State private var scrolledDate: Date?
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.hours == rhs.hours && lhs.surface.fahrenheit == rhs.surface.fahrenheit
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = lhs.surface.timeZone
+        return lhs.hours == rhs.hours && lhs.surface.fahrenheit == rhs.surface.fahrenheit
             && lhs.surface.timeZoneIdentifier == rhs.surface.timeZoneIdentifier
+            && lhs.surface.forecast.detailedForecastPending == rhs.surface.forecast.detailedForecastPending
+            && calendar.isDate(lhs.now, equalTo: rhs.now, toGranularity: .hour)
     }
     var body: some View {
         let _ = InteractionPerformanceAudit.count("hourly.body")
-        let now = Date()
         let values = hours.map(temperature).filter(\.isFinite)
         let domain = floor((values.min() ?? 0) - 3)...ceil((values.max() ?? 1) + 3)
         let range = precipitation ? 0...100 : domain
@@ -619,6 +639,9 @@ struct WeatherHourlyView: View, Equatable {
                     }
                     .scrollIndicators(.hidden).accessibilityIdentifier("weather.hourly.scroll")
                 }
+            } else if surface.forecast.detailedForecastPending == true {
+                ProgressView("Loading hourly forecast")
+                    .accessibilityIdentifier("weather.hourly.loading")
             } else {
                 Text("Hourly forecast unavailable for this day.").font(.caption).foregroundStyle(.secondary)
             }
@@ -630,8 +653,8 @@ struct WeatherHourlyView: View, Equatable {
     }
     private func dayLabel(_ date: Date) -> String {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = surface.timeZone
-        if calendar.isDate(date, inSameDayAs: Date()) { return "Today" }
-        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: Date()), calendar.isDate(date, inSameDayAs: tomorrow) { return "Tomorrow" }
+        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) { return "Tomorrow" }
         return date.formatted(dayFormat)
     }
     private var dayFormat: Date.FormatStyle { var f = Date.FormatStyle().weekday(.abbreviated); f.timeZone = surface.timeZone; return f }
@@ -694,6 +717,7 @@ private struct WeatherDailyRow: View {
 private struct WeatherDayDetail: View {
     let surface: WeatherSurfaceState
     let date: Date
+    let now: Date
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
@@ -708,7 +732,7 @@ private struct WeatherDayDetail: View {
                         }
                     }
                     WeatherPanel(title: "Hour by hour", symbol: "clock.fill") {
-                        WeatherHourlyView(surface: surface, hours: surface.forecast.hours.filter { calendar.isDate($0.date, inSameDayAs: date) })
+                        WeatherHourlyView(surface: surface, hours: surface.forecast.hours.filter { calendar.isDate($0.date, inSameDayAs: date) }, now: now)
                             .equatable()
                     }
                     WeatherDataCredit(attribution: surface.forecast.attribution, sourceDetailsOnly: true)
