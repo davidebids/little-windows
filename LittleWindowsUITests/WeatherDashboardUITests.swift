@@ -1,10 +1,36 @@
 import XCTest
 
 final class WeatherDashboardUITests: XCTestCase {
+    func testProfileMenuLargeTextDismissalAndSettingsRoute() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        launch(app, url: "littlewindows://debug/seed-performance")
+        XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
+        app.terminate()
+        launch(app, url: "littlewindows://profile/00000000-0000-0000-0000-000000000101/today", largeText: true)
+        let icon = app.buttons["today.menu"]
+        XCTAssertTrue(icon.waitForExistence(timeout: 15)); icon.tap()
+        XCTAssertTrue(app.buttons["Customize Today"].waitForExistence(timeout: 5))
+        capture(app, "Anchored profile menu with accessibility text")
+        app.buttons["Log Another Activity"].tap()
+        let custom = app.buttons["Custom"]
+        let menu = app.descendants(matching: .any).matching(identifier: "today.profile-menu").firstMatch
+        for _ in 0..<8 where !custom.isHittable { menu.swipeUp() }
+        XCTAssertTrue(custom.isHittable)
+        XCTAssertTrue(app.buttons["Back"].isHittable, "Activity navigation must stay visible while scrolling")
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.buttons["Customize Today"].exists)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.85)).tap()
+        XCTAssertTrue(app.buttons["Customize Today"].waitForNonExistence(timeout: 5))
+        icon.tap()
+        app.buttons["Settings & Profiles"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+    }
+
     func testOutdoorActivityChoicesSupportAccessibilityText() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.terminate(); launch(app, url: "littlewindows://weather", largeText: true)
         XCTAssertTrue(app.buttons["weather.outdoor-toolbar"].waitForExistence(timeout: 15))
@@ -88,7 +114,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testSelectedDayDistinguishesLoadingFromUnavailableHours() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.terminate(); launch(app, url: "littlewindows://weather", pendingDetails: true)
         let day = app.buttons.matching(identifier: "weather.forecast-day").firstMatch
@@ -109,7 +135,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testWeatherRepeatedPresentationAndDismissal() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.buttons["today.menu"].tap(); app.buttons["Customize Today"].tap()
         XCTAssertTrue(app.navigationBars["Today & Tracking"].waitForExistence(timeout: 5))
@@ -135,7 +161,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testHourlyControlsChangeDisplayedForecast() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.terminate(); launch(app, url: "littlewindows://weather")
         XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 5))
@@ -233,7 +259,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testWeatherAnimationScenesStayResponsiveAndStopWhenCovered() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         for symbol in ["sun.max.fill", "cloud.rain.fill", "cloud.snow.fill", "wind"] {
             app.terminate()
@@ -381,7 +407,9 @@ final class WeatherDashboardUITests: XCTestCase {
         let latestPaint = before.paints.last?.index ?? 0
         let paints = after.paints.filter { $0.index > latestPaint }
         let expectedPaints: Int
-        if phase.hasPrefix("hourly controls") { expectedPaints = 3 }
+        if phase.hasPrefix("profile menu") { expectedPaints = 1 }
+        else if phase.hasPrefix("cold Customize") { expectedPaints = 2 }
+        else if phase.hasPrefix("hourly controls") { expectedPaints = 3 }
         else if ["activity Nature walk", "activity Picnic", "activity Park visit"].contains(phase) { expectedPaints = 2 }
         else if phase.hasPrefix("forecast expansion") || phase.hasPrefix("comfort limits") || phase == "unit changes" { expectedPaints = 2 }
         else if phase.hasPrefix("Customize") || phase.hasPrefix("cold Customize") || phase.hasPrefix("cold weather") || phase.hasPrefix("native form") || phase.hasPrefix("open day") || phase.hasPrefix("activity") || phase == "outdoor preferences open" || phase == "location settings open" { expectedPaints = 1 }
@@ -434,12 +462,11 @@ final class WeatherDashboardUITests: XCTestCase {
     func testHourlyPlotSelectionAndScrolling() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.terminate(); launch(app, url: "littlewindows://weather")
         let plot = app.descendants(matching: .any).matching(identifier: "weather.hourly.plot").firstMatch
-        for _ in 0..<8 where !plot.isHittable || plot.frame.minY < 100 || plot.frame.maxY > app.frame.maxY - 180 { app.swipeUp() }
-        XCTAssertTrue(plot.isHittable)
+        try revealWeatherControl(plot, in: app)
         let readout = app.descendants(matching: .any).matching(identifier: "weather.hourly.readout").firstMatch
         let initial = readout.label
         plot.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 87, dy: 60)).tap()
@@ -470,7 +497,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testHourlyPlotSupportsAccessibilityText() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.terminate(); launch(app, url: "littlewindows://weather", largeText: true)
         let readout = app.descendants(matching: .any).matching(identifier: "weather.hourly.readout").firstMatch
@@ -489,23 +516,24 @@ final class WeatherDashboardUITests: XCTestCase {
     func testWeatherDashboardForecastPreferencesAndDayDetails() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 20))
         app.terminate()
         launch(app, url: "littlewindows://weather")
         XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "weather.current-conditions").firstMatch.waitForExistence(timeout: 10))
         capture(app, "Weather overview")
-        for _ in 0..<6 where !app.buttons["Show 10 days"].isHittable { app.swipeUp() }
-        XCTAssertTrue(app.buttons["Show 10 days"].isHittable)
+        try revealWeatherControl(app.buttons["Show 10 days"], in: app)
         app.buttons["Show 10 days"].tap()
         XCTAssertTrue(app.buttons["Show 7 days"].exists)
         capture(app, "Weather daily forecast")
         // Repeated expansion must settle before a day can be opened; a whole-
         // layout animation previously caused a lazy-stack update loop here.
         for _ in 0..<2 {
+            try revealWeatherControl(app.buttons["Show 7 days"], in: app)
             app.buttons["Show 7 days"].tap()
             XCTAssertTrue(app.buttons["Show 10 days"].exists)
+            try revealWeatherControl(app.buttons["Show 10 days"], in: app)
             app.buttons["Show 10 days"].tap()
             XCTAssertTrue(app.buttons["Show 7 days"].exists)
         }
@@ -518,8 +546,7 @@ final class WeatherDashboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["weather.day.done"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 5))
         let preferences = app.buttons["weather.outdoor-preferences"]
-        for _ in 0..<10 where !preferences.isHittable { app.swipeUp() }
-        XCTAssertTrue(preferences.isHittable)
+        try revealWeatherControl(preferences, in: app)
         capture(app, "Outdoor preferences dashboard button")
         preferences.tap()
         XCTAssertTrue(app.navigationBars["Outdoor Preferences"].waitForExistence(timeout: 5))
@@ -535,7 +562,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testWeatherLargeTextAndLocationSettings() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 20))
         app.terminate()
         launch(app, url: "littlewindows://weather", largeText: true)
@@ -561,7 +588,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testOutingProfilesAreDiscoverableAndSelectable() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.terminate(); launch(app, url: "littlewindows://weather")
         XCTAssertTrue(app.buttons["weather.dashboard.done"].waitForExistence(timeout: 15))
@@ -633,7 +660,7 @@ final class WeatherDashboardUITests: XCTestCase {
     func testCustomizeDestinationsAndSavedLayoutRemainAvailable() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        launch(app, url: "littlewindows://debug/seed-smoke")
+        launch(app, url: "littlewindows://debug/seed-performance")
         XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 20))
         app.buttons["today.menu"].tap(); app.buttons["Customize Today"].tap()
         let root = app.navigationBars["Today & Tracking"]
@@ -676,7 +703,9 @@ final class WeatherDashboardUITests: XCTestCase {
     }
     private func revealWeatherControl(_ element: XCUIElement, in app: XCUIApplication) throws {
         let top = app.navigationBars["Weather"].frame.maxY + 16
-        let bottom = app.frame.maxY - 100
+        // Keep taps above the home indicator, but allow the final rows of a
+        // fully scrolled list: they cannot move 100 points above its edge.
+        let bottom = app.frame.maxY - 44
         for _ in 0..<10 {
             let exists = element.exists
             let frame = exists ? element.frame : .zero

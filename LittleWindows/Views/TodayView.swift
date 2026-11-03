@@ -423,6 +423,7 @@ struct TodayView: View {
     @State private var categoryPreferenceRevision = 0
     @State private var repeatFeedback: RepeatFeedback?
     @State private var careCustomization = TodayCustomizationPresentation()
+    @State private var profileMenuPresentation = TodayProfileMenuPresentation()
     @State private var cachedRenderState = TodayRenderState.empty
     @State private var displayDate = Date()
     @State private var hasCompletedInitialSetup = false
@@ -1271,7 +1272,7 @@ struct TodayView: View {
                 if let profile {
                     TodayProfileMenu(profile: profile,
                         timers: activeEvents.map { .init(id: $0.id, title: $0.type.displayName) },
-                        labelWidth: todayMenuLabelWidth, presentation: careCustomization,
+                        labelWidth: todayMenuLabelWidth, presentation: careCustomization, menuPresentation: profileMenuPresentation,
                         logActivity: { type in performEssentialAction(type, state: cachedRenderState) },
                         editTimer: { id in
                             guard let event = cachedRenderState.activeEvents.first(where: { $0.id == id }) else { return }
@@ -1289,6 +1290,7 @@ struct TodayView: View {
                 }
             }
         }
+        .modifier(TodayProfileMenuHost(presentation: profileMenuPresentation))
         .sheet(item: $editorRoute) { route in
             NavigationStack {
                 EventEditorView(

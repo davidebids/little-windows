@@ -550,7 +550,8 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.terminate()
         app.launchEnvironment = [
             "LITTLE_WINDOWS_UI_TESTING": "1",
-            "LITTLE_WINDOWS_START_URL": startURL
+            "LITTLE_WINDOWS_START_URL": startURL == "littlewindows://debug/seed-smoke"
+                ? "littlewindows://debug/seed-performance" : startURL
         ]
         app.launchArguments = ["--little-windows-ui-testing"]
         app.launch()
@@ -4685,7 +4686,7 @@ final class UserVisibleFlowUITests: XCTestCase {
     func testWeatherHeaderIsCompactAndOffersLocationOrCity() {
         continueAfterFailure = false
         launch(startURL: "littlewindows://debug/reset-empty")
-        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://debug/seed-performance")
         let weather = app.buttons["today.weather.header"]
         XCTAssertTrue(weather.waitForExistence(timeout: 8))
         XCTAssertLessThan(weather.frame.maxY, app.frame.minY + app.frame.height * 0.5)
@@ -4706,7 +4707,7 @@ final class UserVisibleFlowUITests: XCTestCase {
     func testWeatherZIPSearchDisplaysAndSavesCityName() {
         continueAfterFailure = false
         launch(startURL: "littlewindows://debug/reset-empty")
-        launch(startURL: "littlewindows://debug/seed-smoke")
+        launch(startURL: "littlewindows://debug/seed-performance")
         let weather = app.buttons["today.weather.header"]
         XCTAssertTrue(weather.waitForExistence(timeout: 8))
         weather.tap()

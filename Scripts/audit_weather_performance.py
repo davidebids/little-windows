@@ -13,6 +13,79 @@ import tempfile
 import time
 
 
+def verify_load_fixture(report):
+    counts = report.get("fixtureEventCounts", {})
+    for profile in ("child", "dog", "adult"):
+        count = counts.get(profile)
+        if not isinstance(count, int) or count < 7_000:
+            raise RuntimeError(f"{profile} must have at least 7,000 persisted care events; prepare the load fixture first: {counts}")
+
+
+def cold_menu_benchmarks(simulator, derived_data, output):
+    """Open the actual menu action before XCTest's launch-idle/AX fence."""
+    app = Path(derived_data).resolve() / "Build/Products/Debug-iphonesimulator/LittleWindows.app"
+    if not app.is_dir():
+        raise RuntimeError(f"Build the Debug simulator app first: {app}")
+    subprocess.run(["xcrun", "simctl", "install", simulator, str(app)], check=True)
+    reports, failures = [], []
+    profiles = {"child": "00000000-0000-0000-0000-000000000101",
+                "dog": "00000000-0000-0000-0000-000000000102",
+                "adult": "00000000-0000-0000-0000-000000000103"}
+    for profile, repetition in ((profile, repetition) for profile in profiles for repetition in range(3)):
+        profile_id = profiles[profile]
+        environment = dict(os.environ)
+        for key, value in {
+            "LITTLE_WINDOWS_UI_TESTING": "1", "LITTLE_WINDOWS_WEATHER_PREVIEW": "1",
+            "LITTLE_WINDOWS_INTERACTION_AUDIT": "1", "LITTLE_WINDOWS_COLD_PROFILE_MENU": "1",
+            "LITTLE_WINDOWS_COLD_PROFILE_MENU_PROFILE_ID": profile_id,
+            "LITTLE_WINDOWS_START_URL": f"littlewindows://profile/{profile_id}/today",
+        }.items():
+            environment[f"SIMCTL_CHILD_{key}"] = value
+        log_path = output / f"cold-menu-{profile}-{repetition}.log"
+        with log_path.open("w") as log:
+            process = subprocess.Popen([
+                "xcrun", "simctl", "launch", "--terminate-running-process", "--console-pty",
+                simulator, "com.debidia.LittleWindows", "--little-windows-ui-testing", "--weather-preview",
+            ], env=environment, stdout=log, stderr=subprocess.STDOUT)
+            try:
+                deadline, report = time.monotonic() + 20, None
+                while time.monotonic() < deadline:
+                    match = re.search(r"COLD-PROFILE-MENU (\{[^\r\n]+\})", log_path.read_text(errors="replace"))
+                    if match:
+                        report = json.loads(match[1]); break
+                    if process.poll() is not None:
+                        break
+                    time.sleep(0.05)
+                if report is None:
+                    raise RuntimeError(f"No first-menu report; see {log_path}")
+            finally:
+                subprocess.run(["xcrun", "simctl", "terminate", simulator, "com.debidia.LittleWindows"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.terminate(); process.wait(timeout=5)
+        report["profile"] = profile
+        reports.append(report)
+        (output / "cold-menu-reports.json").write_text(json.dumps(reports, indent=2))
+        if report.get("error") or report.get("menuVisible") is not True:
+            raise RuntimeError(f"Menu did not draw: {report}")
+        verify_load_fixture(report)
+        if report.get("profileID") != profile_id:
+            raise RuntimeError(f"Wrong profile opened: {report}")
+        for metric in ("actionMS", "firstDrawMS", "maxGapMS"):
+            value = report.get(metric)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise RuntimeError(f"Missing/invalid {metric}: {report}")
+            if value > 100:
+                failures.append(f"{profile} run {repetition} {metric}: {value:.2f}ms")
+        print(f"FIRST MENU AUDIT {profile} {repetition}: action={report['actionMS']:.2f}ms "
+              f"draw={report['firstDrawMS']:.2f}ms max-gap={report['maxGapMS']:.2f}ms "
+              f"events={report['fixtureEventCounts']}", flush=True)
+    if failures:
+        raise RuntimeError(f"First-menu 100 ms budgets exceeded: {'; '.join(failures)}")
+
+
 def frame_benchmarks(simulator, derived_data, output):
     """Measure real list rendering without XCTest's main-thread AX snapshots."""
     app = Path(derived_data).resolve() / "Build/Products/Debug-iphonesimulator/LittleWindows.app"
@@ -61,6 +134,7 @@ def frame_benchmarks(simulator, derived_data, output):
             (output / "frame-reports.json").write_text(json.dumps(reports, indent=2))
             if report.get("error") or report.get("scenario") != scenario or len(report.get("samples", [])) != 4:
                 raise RuntimeError(f"{scenario}: incomplete benchmark: {report}")
+            verify_load_fixture(report)
             if scenario == "today" and not report["counts"].get("today.layout.full"):
                 raise RuntimeError("Prepare the neutral Full-layout performance fixture with the complete audit first.")
             for sample in report["samples"]:
@@ -83,6 +157,7 @@ def main():
     parser.add_argument("--repeat", type=int, choices=range(1, 6), default=1)
     parser.add_argument("--frames-only", action="store_true", help="Use the already built app and prepared neutral Full-layout performance fixture")
     parser.add_argument("--include-frames", action="store_true", help="Also investigate cold-scroll rendering; this diagnostic currently exceeds its budgets")
+    parser.add_argument("--cold-menu-only", action="store_true", help="Use the built app and prepared neutral profile to measure first-frame menu actions without XCTest")
     args = parser.parse_args()
     inventory = json.loads(subprocess.check_output(
         ["xcrun", "simctl", "list", "devices", "available", "--json"], text=True))
@@ -105,6 +180,7 @@ def main():
         "LittleWindowsUITests/UserVisibleFlowUITests/testTodayEssentialsUsesLargeButtonsAndKeepsConfigurationInMenu",
         "LittleWindowsUITests/UserVisibleFlowUITests/testProductionScaleEssentialsLayoutSwitchesLoggingAndScrollingStayResponsive",
         "LittleWindowsUITests/UserVisibleFlowUITests/testEssentialsUseProfileAppropriateChoicesAndLoggingRoutes",
+        "LittleWindowsUITests/UserVisibleFlowUITests/testTodayPauseAndResumeCategoryPreservesEssentialChoiceAndActiveTimerAccess",
         "LittleWindowsUITests/UserVisibleFlowUITests/testTodayHomeSummaryHandsOffToHomeAndRetainsModeForSession",
     ]
     command = [
@@ -117,6 +193,13 @@ def main():
     if args.repeat > 1:
         command += ["-test-iterations", str(args.repeat)]
     print(f"Simulator: {matches[0]['name']}\nResults: {output}", flush=True)
+    if args.cold_menu_only:
+        try:
+            cold_menu_benchmarks(args.simulator, args.derived_data, output)
+            return 0
+        except (RuntimeError, subprocess.SubprocessError) as error:
+            print(f"PERFORMANCE AUDIT FAILED: {error}", flush=True)
+            return 1
     if args.frames_only:
         try:
             frame_benchmarks(args.simulator, args.derived_data, output)
@@ -129,10 +212,16 @@ def main():
                                    stderr=subprocess.STDOUT, text=True, bufsize=1)
         for line in process.stdout:
             log.write(line)
-            if any(token in line for token in ("INTERACTION AUDIT", "SCROLL AUDIT", "error:", "Test Suite", "** TEST")):
+            if any(token in line for token in ("INTERACTION AUDIT", "SCROLL AUDIT", "LOAD-HISTORY-FIXTURE", "error:", "Test Suite", "** TEST")):
                 print(line, end="", flush=True)
         status = process.wait()
     print(f"Full log and XCTest attachments: {output}", flush=True)
+    if status == 0:
+        try:
+            cold_menu_benchmarks(args.simulator, args.derived_data, output)
+        except (RuntimeError, subprocess.SubprocessError) as error:
+            print(f"PERFORMANCE AUDIT FAILED: {error}", flush=True)
+            return 1
     if status == 0 and args.include_frames:
         try:
             frame_benchmarks(args.simulator, args.derived_data, output)

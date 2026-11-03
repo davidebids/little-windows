@@ -1707,6 +1707,10 @@ private struct FirstRunOnboardingView: View {
 #if DEBUG
 enum DebugSimulatorSmokeSeedService {
     private static let performanceSeededKey = "debug.performanceSeeded.v6"
+    private static let performanceHistoryCountsKey = "debug.performanceHistoryEventCounts"
+    static var performanceHistoryEventCounts: [String: Int] {
+        UserDefaults.standard.dictionary(forKey: performanceHistoryCountsKey) as? [String: Int] ?? [:]
+    }
     static var isEnabled: Bool {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1"
@@ -1778,6 +1782,7 @@ enum DebugSimulatorSmokeSeedService {
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v4")
         UserDefaults.standard.removeObject(forKey: "debug.performanceSeeded.v5")
         UserDefaults.standard.removeObject(forKey: performanceSeededKey)
+        UserDefaults.standard.removeObject(forKey: performanceHistoryCountsKey)
         PersistenceService.setICloudSyncEnabled(false)
     }
 
@@ -1789,7 +1794,10 @@ enum DebugSimulatorSmokeSeedService {
         seedIfNeeded(context: context, now: now)
         // Exercise due maintenance as part of the large-fixture launch audit.
         PersistenceService.operationalDefaults().removeObject(forKey: FoodHomeDuplicateRepairService.lastLaunchMaintenanceAtKey)
-        guard !UserDefaults.standard.bool(forKey: performanceSeededKey) else { return }
+        guard !UserDefaults.standard.bool(forKey: performanceSeededKey) else {
+            ensurePerformanceHistories(context: context, now: now)
+            return
+        }
         guard let profile = fetch(CareProfile.self, id: childProfileID, context: context) else {
             return
         }
@@ -2008,6 +2016,51 @@ enum DebugSimulatorSmokeSeedService {
 
         if PersistenceService.save(context: context) {
             UserDefaults.standard.set(true, forKey: performanceSeededKey)
+            ensurePerformanceHistories(context: context, now: now)
+        }
+    }
+
+    /// Keep every neutral profile above the load-test floor, including fixtures
+    /// created by older builds. Count persisted CareEvents, not related records.
+    @MainActor
+    private static func ensurePerformanceHistories(context: ModelContext, now: Date) {
+        guard isEnabled else { return }
+        let profiles: [(String, UUID, CareProfileType, [EventType])] = [
+            ("child", childProfileID, .child, [.sleep, .feed, .diaper, .activity]),
+            ("dog", dogProfileID, .dog, [.food, .walk, .potty, .training, .rest]),
+            ("adult", adultProfileID, .adult, [.sleep, .food, .water, .activity])
+        ]
+        do {
+            for (_, id, profileType, types) in profiles {
+                let descriptor = FetchDescriptor<CareEvent>(predicate: #Predicate { $0.profileID == id })
+                let count = try context.fetchCount(descriptor)
+                for index in count..<max(count, 7_500) {
+                    // Historical rows preserve the smoke fixture's explicit
+                    // current-day records and active timers.
+                    let date = now.addingTimeInterval(-Double(14 * 24 + index * 4) * 3600)
+                    let type = types[index % types.count]
+                    let event = CareEvent(profileID: id, type: type, startDate: date,
+                        endDate: type.supportsTimer ? date.addingTimeInterval(20 * 60) : nil,
+                        caregiverName: "Sample Caregiver")
+                    event.profileTypeSnapshot = profileType
+                    if type == .feed { event.feedKind = .bottle; event.amountOz = 4 }
+                    if type == .diaper { event.diaperKind = .wet }
+                    context.insert(event)
+                }
+            }
+            guard PersistenceService.save(context: context) else {
+                preconditionFailure("Load-test history could not be saved")
+            }
+            var counts: [String: Int] = [:]
+            for (label, id, _, _) in profiles {
+                let count = try context.fetchCount(FetchDescriptor<CareEvent>(predicate: #Predicate { $0.profileID == id }))
+                precondition(count >= 7_500, "Load-test profile must have at least 7,500 care events")
+                counts[label] = count
+            }
+            UserDefaults.standard.set(counts, forKey: performanceHistoryCountsKey)
+            print("LOAD-HISTORY-FIXTURE \(counts)")
+        } catch {
+            preconditionFailure("Load-test history could not be verified: \(error)")
         }
     }
 

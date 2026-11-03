@@ -7,6 +7,59 @@ import XCTest
 final class CareTrackingPreferenceTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testProfileMenuScopesActivitiesAndDispatchesSelectionOnlyOnce() {
+        let id = UUID(), menu = TodayProfileMenuPresentation(selectedProfileID: { id })
+        var actions: [TodayProfileMenuAction] = []
+        menu.open(.init(profileID: id, profileType: .child, timers: []), anchor: .zero) { actions.append($0) }
+        menu.select(.activity(.food))
+        XCTAssertTrue(actions.isEmpty)
+        XCTAssertNotNil(menu.snapshot)
+        menu.select(.activity(.feed))
+        menu.select(.activity(.feed))
+        XCTAssertEqual(actions, [.activity(.feed)])
+        XCTAssertNil(menu.snapshot)
+        menu.open(.init(profileID: id, profileType: .dog, timers: []), anchor: .zero) { actions.append($0) }
+        menu.select(.activity(.food))
+        XCTAssertEqual(actions.last, .activity(.food))
+    }
+
+    func testProfileMenuRejectsRemovedTimersAndClearsDismissedHandlers() {
+        let id = UUID(), old = UUID(), current = UUID()
+        var selectedID = id
+        let menu = TodayProfileMenuPresentation(selectedProfileID: { selectedID })
+        var actions: [TodayProfileMenuAction] = []
+        let open = { menu.open(.init(profileID: id, profileType: .child,
+            timers: [.init(id: old, title: "Nursing")]), anchor: .zero) { actions.append($0) } }
+        open()
+        menu.updateTimers([], profileID: UUID())
+        XCTAssertEqual(menu.snapshot?.timers.map(\.id), [old])
+        menu.updateTimers([.init(id: current, title: "Sleep")], profileID: id)
+        menu.select(.timer(old))
+        XCTAssertTrue(actions.isEmpty)
+        menu.select(.timer(current))
+        XCTAssertEqual(actions, [.timer(current)])
+        open(); menu.dismiss(); menu.select(.settings)
+        XCTAssertEqual(actions, [.timer(current)])
+        var replacement: TodayProfileMenuAction?
+        selectedID = UUID()
+        menu.open(.init(profileID: selectedID, profileType: .adult, timers: []), anchor: .zero) { replacement = $0 }
+        menu.select(.settings)
+        XCTAssertEqual(replacement, .settings)
+        XCTAssertEqual(actions, [.timer(current)])
+    }
+
+    func testProfileMenuCannotDispatchToAProfileSelectedAfterItOpened() {
+        let original = UUID()
+        var selectedID: UUID? = original
+        let menu = TodayProfileMenuPresentation(selectedProfileID: { selectedID })
+        var actions: [TodayProfileMenuAction] = []
+        menu.open(.init(profileID: original, profileType: .child, timers: []), anchor: .zero) { actions.append($0) }
+        selectedID = UUID()
+        menu.select(.activity(.feed))
+        XCTAssertTrue(actions.isEmpty)
+        XCTAssertNil(menu.snapshot)
+    }
+
     func testDecodedPreferenceCacheTracksExternalDataChangesWithoutNotification() throws {
         let defaults = try device(), first = UUID(), second = UUID()
         var value = CareTrackingPreferences(); value.set("outdoor.activity", value: ["Walk"], now: now)

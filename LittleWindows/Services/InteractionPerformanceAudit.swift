@@ -33,10 +33,27 @@ enum InteractionPerformanceAudit {
 }
 
 extension View {
+    func interactionColdProfileMenuProbe(profileID: UUID, action: @escaping () -> Void) -> some View { modifier(ColdProfileMenuModifier(profileID: profileID, action: action)) }
     func interactionPerformanceAudit() -> some View { modifier(InteractionAuditModifier()) }
     func interactionScrollAudit(_ name: String) -> some View { modifier(InteractionScrollModifier(name: name)) }
     func interactionPaintProbe(_ name: String, revision: String = "initial", alignment: Alignment = .topTrailing) -> some View {
         modifier(InteractionPaintModifier(name: name, revision: revision, alignment: alignment))
+    }
+}
+
+private struct ColdProfileMenuModifier: ViewModifier {
+    let profileID: UUID
+    let action: () -> Void
+    func body(content: Content) -> some View {
+        #if DEBUG && targetEnvironment(simulator)
+        if InteractionPerformanceAudit.enabled,
+           ProcessInfo.processInfo.environment["LITTLE_WINDOWS_UI_TESTING"] == "1",
+           ProcessInfo.processInfo.environment["LITTLE_WINDOWS_COLD_PROFILE_MENU"] == "1" {
+            content.background { ColdProfileMenuProbe(profileID: profileID, action: action).frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true) }
+        } else { content }
+        #else
+        content
+        #endif
     }
 }
 
@@ -97,6 +114,67 @@ private final class AuditCounters: @unchecked Sendable {
     private var values: [String: Int] = [:]
     func increment(_ name: String) { lock.lock(); defer { lock.unlock() }; values[name, default: 0] += 1 }
     func snapshot() -> [String: Int] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
+/// Invokes the same button action on the first data-ready display callback,
+/// without XCTest's launch-idle fence or accessibility snapshots warming it.
+/// Measures action-to-draw work; native gesture delivery remains a UI-test check.
+private struct ColdProfileMenuProbe: UIViewRepresentable {
+    let profileID: UUID
+    let action: () -> Void
+    func makeUIView(context: Context) -> Probe { let view = Probe(); view.profileID = profileID; view.action = action; return view }
+    func updateUIView(_ view: Probe, context: Context) { view.profileID = profileID; view.action = action }
+    static func dismantleUIView(_ view: Probe, coordinator: Void) { view.stop() }
+    final class Probe: UIView {
+        var profileID: UUID?
+        var action: (() -> Void)?
+        private var link: CADisplayLink?
+        private var start: CFTimeInterval?
+        private var previous = 0.0
+        private var largestGap = 0.0
+        private var actionMS = 0.0
+        private var firstFrame: CFTimeInterval?
+        private var finished = false
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window == nil { stop(); return }
+            guard window != nil, link == nil, !finished else { return }
+            let display = CADisplayLink(target: self, selector: #selector(frame(_:)))
+            display.add(to: .main, forMode: .common); link = display
+        }
+        func stop() { link?.invalidate(); link = nil }
+        @objc private func frame(_ display: CADisplayLink) {
+            let now = CACurrentMediaTime()
+            if firstFrame == nil { firstFrame = now }
+            if let start {
+                largestGap = max(largestGap, now - previous); previous = now
+                guard now - start >= 1 else { return }
+                let painted = (try? JSONSerialization.jsonObject(with: Data(InteractionRunLoopAudit.shared.report().utf8))) as? [String: Any]
+                let paint = (painted?["paints"] as? [[String: Any]])?.first { $0["name"] as? String == "profile.menu" }
+                let report: [String: Any] = ["actionMS": actionMS, "firstDrawMS": paint?["ms"] ?? NSNull(), "maxGapMS": largestGap * 1000,
+                    "menuVisible": paint != nil, "counts": InteractionPerformanceAudit.counts(),
+                    "profileID": profileID?.uuidString ?? "",
+                    "fixtureEventCounts": DebugSimulatorSmokeSeedService.performanceHistoryEventCounts]
+                if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+                   let text = String(data: data, encoding: .utf8) { print("COLD-PROFILE-MENU \(text)") }
+                finished = true; stop()
+                return
+            }
+            if let firstFrame, now - firstFrame > 10 {
+                print("COLD-PROFILE-MENU {\"error\":\"Today did not become ready\"}")
+                finished = true; stop(); return
+            }
+            guard PersistenceStartupController.shared.isDataReady else { return }
+            let requestedID = ProcessInfo.processInfo.environment["LITTLE_WINDOWS_COLD_PROFILE_MENU_PROFILE_ID"].flatMap(UUID.init(uuidString:))
+            guard let profileID, profileID == ProfileService.shared.selectedProfileID,
+                  requestedID == nil || requestedID == profileID else { return }
+            if let action {
+                start = now; previous = now
+                action()
+                actionMS = (CACurrentMediaTime() - now) * 1000
+            }
+        }
+    }
 }
 
 private struct InteractionScrollAnchor: UIViewRepresentable {
@@ -185,7 +263,8 @@ private final class InteractionScrollFrameAudit: NSObject {
     }
     private func finishBenchmark(error: String? = nil) {
         var result: [String: Any] = ["scenario": benchmark ?? "", "samples": samples,
-            "counts": InteractionPerformanceAudit.counts()]
+            "counts": InteractionPerformanceAudit.counts(),
+            "fixtureEventCounts": DebugSimulatorSmokeSeedService.performanceHistoryEventCounts]
         if let error { result["error"] = error }
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
            let text = String(data: data, encoding: .utf8) { print("SCROLL-BENCHMARK \(text)") }

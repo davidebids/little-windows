@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 import os
 
 /// Keeps presentation state out of Today's care/history state. SwiftUI can still
@@ -42,9 +43,65 @@ struct TodayCustomizationSheet: ViewModifier {
     }
 }
 
-/// Owns the menu and sheet boundary independently of Today's care/history view.
+enum TodayProfileMenuAction: Equatable {
+    case customize, activity(EventType), timer(UUID), settings
+}
+
+@MainActor @Observable
+final class TodayProfileMenuPresentation {
+    struct Snapshot {
+        let profileID: UUID
+        let profileType: CareProfileType
+        var timers: [TodayProfileMenu.Timer]
+    }
+    private(set) var snapshot: Snapshot?
+    private(set) var anchor = CGRect.zero
+    var choosingActivity = false
+    @ObservationIgnored private var handler: ((TodayProfileMenuAction) -> Void)?
+    private let selectedProfileID: () -> UUID?
+
+    convenience init() {
+        self.init(selectedProfileID: { ProfileService.shared.selectedProfileID })
+    }
+    init(selectedProfileID: @escaping () -> UUID?) { self.selectedProfileID = selectedProfileID }
+
+    func open(_ snapshot: Snapshot, anchor: CGRect, handler: @escaping (TodayProfileMenuAction) -> Void) {
+        InteractionPerformanceAudit.begin("profile.menu")
+        self.anchor = anchor
+        self.handler = handler
+        choosingActivity = false
+        self.snapshot = snapshot
+    }
+    func dismiss() { snapshot = nil; handler = nil; choosingActivity = false }
+    func select(_ action: TodayProfileMenuAction) {
+        guard let snapshot else { return }
+        guard selectedProfileID() == snapshot.profileID else { dismiss(); return }
+        if case .activity(let type) = action,
+           !EventType.cases(for: snapshot.profileType).contains(type) { return }
+        if case .timer(let id) = action,
+           !snapshot.timers.contains(where: { $0.id == id }) { return }
+        let handler = handler
+        dismiss()
+        handler?(action)
+    }
+    func updateTimers(_ timers: [TodayProfileMenu.Timer], profileID: UUID) {
+        guard snapshot?.profileID == profileID else { return }
+        snapshot?.timers = timers
+    }
+    func updateAnchor(_ anchor: CGRect, profileID: UUID) {
+        guard snapshot?.profileID == profileID else { return }
+        self.anchor = anchor
+    }
+}
+
+private struct TodayProfileMenuAnchorKey: PreferenceKey {
+    static let defaultValue = CGRect.zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+/// Owns menu presentation independently of Today's care/history state.
 struct TodayProfileMenu: View {
-    struct Timer: Identifiable {
+    struct Timer: Identifiable, Equatable {
         let id: UUID
         let title: String
     }
@@ -52,6 +109,8 @@ struct TodayProfileMenu: View {
     let timers: [Timer]
     let labelWidth: CGFloat
     let presentation: TodayCustomizationPresentation
+    let menuPresentation: TodayProfileMenuPresentation
+    @State private var anchor = CGRect.zero
     let logActivity: (EventType) -> Void
     let editTimer: (UUID) -> Void
     let openSettings: () -> Void
@@ -59,35 +118,158 @@ struct TodayProfileMenu: View {
 
     var body: some View {
         let _ = TodayPresentationAudit.event("ProfileMenuBody")
-        Menu {
-            Button("Customize Today", systemImage: "slider.horizontal.3") {
-                TodayPresentationAudit.event("CustomizeSelected")
-                InteractionPerformanceAudit.begin("customize")
-                presentation.isPresented = true
-            }
-            Menu("Log Another Activity", systemImage: "plus.circle") {
-                ForEach(EventType.cases(for: profile.profileType)) { type in
-                    Button(type.displayName, systemImage: type.systemImage(for: profile.profileType)) { logActivity(type) }
-                }
-            }
-            if !timers.isEmpty {
-                Section("Active timers") {
-                    ForEach(timers) { timer in
-                        Button(timer.title, systemImage: "timer") { editTimer(timer.id) }
-                    }
-                }
-            }
-            Button("Settings & Profiles", systemImage: "gearshape", action: openSettings)
-        } label: {
+        Button(action: openMenu) {
             ProfileAvatarView(profile: profile, size: 34)
                 .frame(width: labelWidth, height: 44)
+                .interactionColdProfileMenuProbe(profileID: profile.id, action: openMenu)
         }
         .buttonStyle(.plain)
         .buttonBorderShape(.circle)
         .accessibilityLabel("\(profile.name) settings")
         .accessibilityHint("Opens Today customization, active timers, and settings")
         .accessibilityIdentifier("today.menu")
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: TodayProfileMenuAnchorKey.self, value: proxy.frame(in: .global))
+            }
+        }
+        .onPreferenceChange(TodayProfileMenuAnchorKey.self) {
+            anchor = $0
+            menuPresentation.updateAnchor($0, profileID: profile.id)
+        }
+        .onChange(of: profile.id) { _, _ in menuPresentation.dismiss() }
+        .onChange(of: profile.profileType) { _, _ in menuPresentation.dismiss() }
+        .onChange(of: timers) { _, timers in menuPresentation.updateTimers(timers, profileID: profile.id) }
+        .onDisappear { menuPresentation.dismiss() }
         .modifier(TodayCustomizationSheet(presentation: presentation, profile: profile, onDismiss: customizationDismissed))
+    }
+
+    private func openMenu() {
+        if menuPresentation.snapshot != nil { menuPresentation.dismiss(); return }
+        menuPresentation.open(.init(profileID: profile.id, profileType: profile.profileType, timers: timers), anchor: anchor) { action in
+            switch action {
+            case .customize:
+                TodayPresentationAudit.event("CustomizeSelected")
+                InteractionPerformanceAudit.begin("customize")
+                presentation.isPresented = true
+            case .activity(let type): logActivity(type)
+            case .timer(let id): editTimer(id)
+            case .settings: openSettings()
+            }
+        }
+    }
+}
+
+/// Uses the existing window; opening the menu creates no context-menu or
+/// popover controller, and does not change when care/history work runs.
+struct TodayProfileMenuHost: ViewModifier {
+    let presentation: TodayProfileMenuPresentation
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(presentation.snapshot != nil)
+            .overlay {
+                if let snapshot = presentation.snapshot {
+                    GeometryReader { proxy in
+                        let origin = proxy.frame(in: .global).origin
+                        let availableWidth = max(0, proxy.size.width - 24)
+                        let width = typeSize.isAccessibilitySize ? availableWidth : min(320, availableWidth)
+                        let top = max(8, presentation.anchor.maxY - origin.y + 8)
+                        let left = max(12, min(proxy.size.width - width - 12, presentation.anchor.maxX - origin.x - width))
+                        ZStack(alignment: .topLeading) {
+                            Color.black.opacity(0.001).contentShape(Rectangle())
+                                .onTapGesture { presentation.dismiss() }
+                                .accessibilityHidden(true)
+                            TodayProfileMenuChoices(presentation: presentation, snapshot: snapshot,
+                                maximumHeight: max(44, proxy.size.height - top - 12))
+                                .frame(width: width)
+                                .offset(x: left, y: top)
+                        }
+                    }
+                    .zIndex(10)
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in if phase != .active { presentation.dismiss() } }
+            .onDisappear { presentation.dismiss() }
+    }
+}
+
+private struct TodayProfileMenuChoices: View {
+    let presentation: TodayProfileMenuPresentation
+    let snapshot: TodayProfileMenuPresentation.Snapshot
+    let maximumHeight: CGFloat
+    @AccessibilityFocusState private var isFocused: Bool
+    @FocusState private var keyboardFocused: Bool
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            panel(scrollable: false).fixedSize(horizontal: false, vertical: true)
+            panel(scrollable: true).frame(height: maximumHeight)
+        }
+        .frame(height: maximumHeight, alignment: .top)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape) { presentation.dismiss() }
+        .accessibilityIdentifier("today.profile-menu")
+        .interactionPaintProbe("profile.menu")
+        .onKeyPress(.escape) { presentation.dismiss(); return .handled }
+        .onAppear { isFocused = true; keyboardFocused = true }
+    }
+
+    private func panel(scrollable: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if presentation.choosingActivity {
+                row("Back", symbol: "chevron.left") { presentation.choosingActivity = false }
+                    .accessibilityFocused($isFocused)
+                    .focused($keyboardFocused)
+                Divider()
+            }
+            if scrollable { ScrollView { rows } }
+            else { rows }
+        }
+        .padding(10)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppTheme.line, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.16), radius: 16, y: 5)
+    }
+
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if presentation.choosingActivity {
+                ForEach(EventType.cases(for: snapshot.profileType)) { type in
+                    row(type.displayName, symbol: type.systemImage(for: snapshot.profileType)) { presentation.select(.activity(type)) }
+                }
+            } else {
+                row("Customize Today", symbol: "slider.horizontal.3") { presentation.select(.customize) }
+                    .accessibilityFocused($isFocused)
+                    .focused($keyboardFocused)
+                row("Log Another Activity", symbol: "plus.circle", disclosure: true) { presentation.choosingActivity = true }
+                if !snapshot.timers.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    Text("Active timers").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10)
+                    ForEach(snapshot.timers) { timer in
+                        row(timer.title, symbol: "timer") { presentation.select(.timer(timer.id)) }
+                    }
+                }
+                Divider().padding(.vertical, 4)
+                row("Settings & Profiles", symbol: "gearshape") { presentation.select(.settings) }
+            }
+        }
+    }
+    private func row(_ title: String, symbol: String, disclosure: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(AppTheme.accent).frame(width: 24)
+                Text(title).foregroundStyle(.primary).multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                if disclosure { Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
+            }
+            .font(.body).padding(10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
 }
 
