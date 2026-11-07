@@ -1,6 +1,44 @@
 import XCTest
+import UIKit
 
 final class WeatherDashboardUITests: XCTestCase {
+    func testProfileMenuIsAnchoredToToolbarButton() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        launch(app, url: "littlewindows://debug/seed-performance")
+        XCTAssertTrue(app.buttons["today.menu"].waitForExistence(timeout: 30))
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let orientations: [UIDeviceOrientation] = UIDevice.current.userInterfaceIdiom == .pad
+            ? [.portrait, .landscapeLeft] : [.portrait]
+        for orientation in orientations {
+            XCUIDevice.shared.orientation = orientation
+            let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                (app.frame.width > app.frame.height) == orientation.isLandscape
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [rotated], timeout: 5), .completed)
+            for scrolled in [false, true] {
+                if scrolled { app.swipeUp() }
+                let icon = app.buttons["today.menu"]
+                XCTAssertTrue(icon.isHittable)
+                let iconFrame = icon.frame
+                icon.tap()
+                let menu = app.descendants(matching: .any).matching(identifier: "today.profile-menu").firstMatch
+                XCTAssertTrue(menu.waitForExistence(timeout: 5))
+                let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                screenshot.name = "Profile menu anchored to toolbar · \(orientation.rawValue) · scrolled \(scrolled)"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+                XCTAssertTrue(app.buttons["Customize Today"].isHittable)
+                XCTAssertEqual(menu.frame.maxX, iconFrame.maxX, accuracy: 24, "Menu must align beneath the profile icon")
+                XCTAssertGreaterThanOrEqual(menu.frame.minY, iconFrame.maxY)
+                XCTAssertLessThanOrEqual(menu.frame.minY - iconFrame.maxY, 24, "Menu must open immediately below its button")
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.75)).tap()
+                XCTAssertTrue(menu.waitForNonExistence(timeout: 5))
+            }
+            app.swipeDown()
+        }
+    }
+
     func testProfileMenuLargeTextDismissalAndSettingsRoute() {
         continueAfterFailure = false
         let app = XCUIApplication()

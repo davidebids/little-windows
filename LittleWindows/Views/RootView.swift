@@ -331,8 +331,12 @@ private struct AppActionSheetRow: View {
 private struct TodayTabContent: View, Equatable {
     let profileID: UUID?
     let queryDay: Date
+    @State private var profileMenuPresentation = TodayProfileMenuPresentation()
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.profileID == rhs.profileID && lhs.queryDay == rhs.queryDay }
-    var body: some View { NavigationStack { TodayView(profileID: profileID) } }
+    var body: some View {
+        NavigationStack { TodayView(profileID: profileID, profileMenuPresentation: profileMenuPresentation) }
+            .modifier(TodayProfileMenuHost(presentation: profileMenuPresentation))
+    }
 }
 
 struct RootView: View {

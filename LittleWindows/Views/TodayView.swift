@@ -423,7 +423,7 @@ struct TodayView: View {
     @State private var categoryPreferenceRevision = 0
     @State private var repeatFeedback: RepeatFeedback?
     @State private var careCustomization = TodayCustomizationPresentation()
-    @State private var profileMenuPresentation = TodayProfileMenuPresentation()
+    private let profileMenuPresentation: TodayProfileMenuPresentation
     @State private var cachedRenderState = TodayRenderState.empty
     @State private var displayDate = Date()
     @State private var hasCompletedInitialSetup = false
@@ -476,7 +476,8 @@ struct TodayView: View {
         )
     }
 
-    init(profileID: UUID? = nil) {
+    init(profileID: UUID? = nil, profileMenuPresentation: TodayProfileMenuPresentation) {
+        self.profileMenuPresentation = profileMenuPresentation
         InteractionPerformanceAudit.count("TodayInit")
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
@@ -1290,7 +1291,6 @@ struct TodayView: View {
                 }
             }
         }
-        .modifier(TodayProfileMenuHost(presentation: profileMenuPresentation))
         .sheet(item: $editorRoute) { route in
             NavigationStack {
                 EventEditorView(

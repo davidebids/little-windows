@@ -361,13 +361,13 @@ final class UserVisibleFlowUITests: XCTestCase {
             }
             XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "today-settings.remove.")).count,
                            expected.count)
-            app.navigationBars.buttons.element(boundBy: 0).tap()
+            backFromTodayCustomization("Activities & Order")
             app.buttons["Visible Sections"].tap()
             if id != "101" {
                 XCTAssertFalse(app.switches["today-settings.section.prediction"].exists)
                 XCTAssertFalse(app.switches["today-settings.section.solids"].exists)
             }
-            app.navigationBars.buttons.element(boundBy: 0).tap()
+            backFromTodayCustomization("Visible Sections")
             if id == "103" {
                 app.buttons["Tracking & Reminders"].tap()
                 let medicine = app.switches["today-tracking.category.medicine"]
@@ -378,11 +378,11 @@ final class UserVisibleFlowUITests: XCTestCase {
                 medicine.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
                 app.alerts.buttons["Pause Medication Reminders"].tap()
                 XCTAssertEqual(medicine.value as? String, "0")
-                app.navigationBars.buttons.element(boundBy: 0).tap()
+                backFromTodayCustomization("Tracking & Reminders")
                 app.buttons["Visible Sections"].tap()
                 XCTAssertFalse(app.switches["today-settings.section.medicationDue"].isEnabled)
                 XCTAssertTrue(app.staticTexts["Paused in Tracking & Reminders"].exists)
-                app.navigationBars.buttons.element(boundBy: 0).tap()
+                backFromTodayCustomization("Visible Sections")
             }
             app.navigationBars["Today & Tracking"].buttons["Done"].tap()
             XCTAssertTrue(app.buttons["today.essential.\(logType)"].waitForExistence(timeout: 5))
@@ -544,6 +544,14 @@ final class UserVisibleFlowUITests: XCTestCase {
         app.navigationBars["Today & Tracking"].buttons["Done"].tap()
         XCTAssertTrue(app.buttons["today.essential.sleep"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["All sections are hidden"].exists)
+    }
+
+    private func backFromTodayCustomization(_ title: String) {
+        // Newer UIKit exposes the current sheet's back control directly while
+        // also exposing navigation buttons from the Today screen behind it.
+        let back = app.buttons["BackButton"].firstMatch
+        if back.exists && back.isHittable { back.tap() }
+        else { app.navigationBars[title].buttons.firstMatch.tap() }
     }
 
     private func launchTodayEssentialsTest(startURL: String) {

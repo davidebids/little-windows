@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import UIKit
 import os
 
 /// Keeps presentation state out of Today's care/history state. SwiftUI can still
@@ -58,6 +59,10 @@ final class TodayProfileMenuPresentation {
     private(set) var anchor = CGRect.zero
     var choosingActivity = false
     @ObservationIgnored private var handler: ((TodayProfileMenuAction) -> Void)?
+    @ObservationIgnored private weak var sourceView: UIView?
+    @ObservationIgnored private weak var hostView: UIView?
+    @ObservationIgnored private var sourceProfileID: UUID?
+    @ObservationIgnored private var geometryRefreshScheduled = false
     private let selectedProfileID: () -> UUID?
 
     convenience init() {
@@ -89,14 +94,63 @@ final class TodayProfileMenuPresentation {
         snapshot?.timers = timers
     }
     func updateAnchor(_ anchor: CGRect, profileID: UUID) {
-        guard snapshot?.profileID == profileID else { return }
+        guard snapshot?.profileID == profileID, self.anchor != anchor else { return }
         self.anchor = anchor
+    }
+
+    func registerGeometry(_ view: UIView, profileID: UUID?) {
+        if let profileID { sourceView = view; sourceProfileID = profileID }
+        else { hostView = view }
+        geometryDidChange()
+    }
+
+    func sourceRect(profileID: UUID) -> CGRect? {
+        guard sourceProfileID == profileID, let sourceView, let hostView,
+              let window = sourceView.window, hostView.window === window,
+              sourceView.bounds.width > 0, sourceView.bounds.height > 0 else { return nil }
+        // Toolbar items have their own SwiftUI hosting coordinate space. Both
+        // native views belong to the same window, so this conversion is shared.
+        return sourceView.convert(sourceView.bounds, to: hostView)
+    }
+
+    func geometryDidChange() {
+        guard snapshot != nil, !geometryRefreshScheduled else { return }
+        geometryRefreshScheduled = true
+        // Publish after UIKit finishes layout, never from a SwiftUI view update.
+        // Opening reads the current rectangle synchronously in the tap action.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.geometryRefreshScheduled = false
+            if let snapshot = self.snapshot, let rect = self.sourceRect(profileID: snapshot.profileID) {
+                self.updateAnchor(rect, profileID: snapshot.profileID)
+            }
+        }
     }
 }
 
-private struct TodayProfileMenuAnchorKey: PreferenceKey {
-    static let defaultValue = CGRect.zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+private struct TodayProfileMenuGeometry: UIViewRepresentable {
+    let presentation: TodayProfileMenuPresentation
+    var profileID: UUID? = nil
+
+    func makeUIView(context: Context) -> FrameObserver {
+        let view = FrameObserver()
+        view.isOpaque = false
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        view.presentation = presentation
+        presentation.registerGeometry(view, profileID: profileID)
+        return view
+    }
+    func updateUIView(_ view: FrameObserver, context: Context) {
+        view.presentation = presentation
+        presentation.registerGeometry(view, profileID: profileID)
+    }
+    final class FrameObserver: UIView {
+        weak var presentation: TodayProfileMenuPresentation?
+        override func layoutSubviews() { super.layoutSubviews(); presentation?.geometryDidChange() }
+        override func didMoveToWindow() { super.didMoveToWindow(); presentation?.geometryDidChange() }
+    }
 }
 
 /// Owns menu presentation independently of Today's care/history state.
@@ -110,7 +164,6 @@ struct TodayProfileMenu: View {
     let labelWidth: CGFloat
     let presentation: TodayCustomizationPresentation
     let menuPresentation: TodayProfileMenuPresentation
-    @State private var anchor = CGRect.zero
     let logActivity: (EventType) -> Void
     let editTimer: (UUID) -> Void
     let openSettings: () -> Void
@@ -129,13 +182,8 @@ struct TodayProfileMenu: View {
         .accessibilityHint("Opens Today customization, active timers, and settings")
         .accessibilityIdentifier("today.menu")
         .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: TodayProfileMenuAnchorKey.self, value: proxy.frame(in: .global))
-            }
-        }
-        .onPreferenceChange(TodayProfileMenuAnchorKey.self) {
-            anchor = $0
-            menuPresentation.updateAnchor($0, profileID: profile.id)
+            TodayProfileMenuGeometry(presentation: menuPresentation, profileID: profile.id)
+                .allowsHitTesting(false).accessibilityHidden(true)
         }
         .onChange(of: profile.id) { _, _ in menuPresentation.dismiss() }
         .onChange(of: profile.profileType) { _, _ in menuPresentation.dismiss() }
@@ -146,6 +194,7 @@ struct TodayProfileMenu: View {
 
     private func openMenu() {
         if menuPresentation.snapshot != nil { menuPresentation.dismiss(); return }
+        guard let anchor = menuPresentation.sourceRect(profileID: profile.id) else { return }
         menuPresentation.open(.init(profileID: profile.id, profileType: profile.profileType, timers: timers), anchor: anchor) { action in
             switch action {
             case .customize:
@@ -171,14 +220,15 @@ struct TodayProfileMenuHost: ViewModifier {
         content
             .accessibilityHidden(presentation.snapshot != nil)
             .overlay {
-                if let snapshot = presentation.snapshot {
-                    GeometryReader { proxy in
-                        let origin = proxy.frame(in: .global).origin
-                        let availableWidth = max(0, proxy.size.width - 24)
-                        let width = typeSize.isAccessibilitySize ? availableWidth : min(320, availableWidth)
-                        let top = max(8, presentation.anchor.maxY - origin.y + 8)
-                        let left = max(12, min(proxy.size.width - width - 12, presentation.anchor.maxX - origin.x - width))
-                        ZStack(alignment: .topLeading) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .topLeading) {
+                        TodayProfileMenuGeometry(presentation: presentation)
+                            .allowsHitTesting(false).accessibilityHidden(true)
+                        if let snapshot = presentation.snapshot {
+                            let availableWidth = max(0, proxy.size.width - 24)
+                            let width = typeSize.isAccessibilitySize ? availableWidth : min(320, availableWidth)
+                            let top = max(8, presentation.anchor.maxY + 8)
+                            let left = max(12, min(proxy.size.width - width - 12, presentation.anchor.maxX - width))
                             Color.black.opacity(0.001).contentShape(Rectangle())
                                 .onTapGesture { presentation.dismiss() }
                                 .accessibilityHidden(true)
@@ -188,8 +238,10 @@ struct TodayProfileMenuHost: ViewModifier {
                                 .offset(x: left, y: top)
                         }
                     }
-                    .zIndex(10)
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 }
+                .allowsHitTesting(presentation.snapshot != nil)
+                .zIndex(10)
             }
             .onChange(of: scenePhase) { _, phase in if phase != .active { presentation.dismiss() } }
             .onDisappear { presentation.dismiss() }
