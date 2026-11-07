@@ -43,7 +43,10 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
 
     private let lock = NSLock()
     private var modelContainer: ModelContainer?
-    private var lastPublishedState: WatchCompanionState?
+    private let publication = WatchStatePublicationCoordinator()
+    private var stateBuildInFlight = false
+    private var stateBuildPending = false
+    private var pendingForce = false
 
     private override init() {
         super.init()
@@ -58,31 +61,61 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
         WCSession.default.activate()
     }
 
-    @MainActor
     @discardableResult
-    func publishCurrentState(force: Bool = false) -> Bool {
+    func publishCurrentState(force: Bool = false) async -> Bool {
         guard let container = installedContainer(), canPublishState else {
             notifyStatusDidChange()
             return false
         }
-        return publish(
-            WatchStateFactory.make(context: container.mainContext),
-            force: force
-        )
+        return await Task.detached(priority: .userInitiated) { [self, container] in
+            publish(WatchStateFactory.make(context: ModelContext(container)), force: force)
+        }.value
     }
 
     /// Builds the Watch payload in its own SwiftData context. Automatic
     /// system-surface refreshes use this path so a paired Watch can never turn
     /// an event save, timer control, or Today scroll into a main-thread query.
-    func scheduleCurrentStatePublish(force: Bool = false) {
+    func scheduleCurrentStatePublish(force: Bool = false, onlyIfMissing: Bool = false) {
         guard let container = installedContainer(), canPublishState else {
             notifyStatusDidChange()
             return
         }
+        let startsWorker = lock.withLock {
+            if onlyIfMissing && stateBuildInFlight { return false }
+            stateBuildPending = true
+            pendingForce = pendingForce || force
+            guard !stateBuildInFlight else { return false }
+            stateBuildInFlight = true
+            return true
+        }
+        guard startsWorker else { return }
         Task.detached(priority: .utility) { [weak self, container] in
             guard let self else { return }
-            let state = WatchStateFactory.make(context: ModelContext(container))
-            _ = self.publish(state, force: force)
+            while true {
+                let force = self.lock.withLock {
+                    self.stateBuildPending = false
+                    let force = self.pendingForce
+                    self.pendingForce = false
+                    return force
+                }
+                let state = WatchStateFactory.make(context: ModelContext(container))
+                _ = self.publish(state, force: force)
+                let again = self.lock.withLock {
+                    if self.stateBuildPending { return true }
+                    self.stateBuildInFlight = false
+                    return false
+                }
+                if !again { return }
+            }
+        }
+    }
+
+    /// Forecast phases and minute rain update only the weather portion. Care
+    /// history is read once on activation, and again only for care changes.
+    func publishWeather(_ weather: WeatherSurfaceState?) {
+        guard canPublishState else { return }
+        if !publication.publishWeather(weather, deliver: deliver) {
+            scheduleCurrentStatePublish(onlyIfMissing: true)
         }
     }
 
@@ -98,24 +131,19 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
 
     @discardableResult
     func publish(_ state: WatchCompanionState, force: Bool = false) -> Bool {
-        guard WCSession.isSupported(),
-            WCSession.default.activationState == .activated,
-            WCSession.default.isPaired,
-            WCSession.default.isWatchAppInstalled else {
+        guard canPublishState else {
             notifyStatusDidChange()
             return false
         }
-        if !force,
-           let lastPublishedState = publishedState(),
-           state.hasSameContent(as: lastPublishedState) {
-            return true
-        }
+        return publication.publish(state, force: force, deliver: deliver)
+    }
+
+    private func deliver(_ state: WatchCompanionState) -> Bool {
         guard let data = try? JSONEncoder().encode(state) else { return false }
         do {
             try WCSession.default.updateApplicationContext([
                 WatchCompanionProtocol.stateMessageKey: data
             ])
-            setPublishedState(state)
             recordStateQueued(state)
             return true
         } catch {
@@ -201,12 +229,17 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
                     replyHandler([:])
                     return
                 }
+                // Reply from cache promptly; a slow weather request must not hold
+                // up the Watch's care state or exceed its message reply window.
                 let state = WatchStateFactory.make(context: ModelContext(container))
                 publish(state, force: true)
-                let data = try? JSONEncoder().encode(state)
+                let data = try? JSONEncoder().encode(publication.currentState ?? state)
                 replyHandler(data.map {
                     [WatchCompanionProtocol.stateMessageKey: $0]
                 } ?? [:])
+                // A successful refresh publishes a newer payload separately.
+                // Never acquire a background location fix or request permission.
+                await DailyWeatherStore.shared.refresh(minuteSensitive: true, resolveCurrentLocation: false)
             }
             return
         }
@@ -287,18 +320,6 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
         return modelContainer
     }
 
-    private func publishedState() -> WatchCompanionState? {
-        lock.lock()
-        defer { lock.unlock() }
-        return lastPublishedState
-    }
-
-    private func setPublishedState(_ state: WatchCompanionState) {
-        lock.lock()
-        lastPublishedState = state
-        lock.unlock()
-    }
-
     private func recordStateQueued(_ state: WatchCompanionState) {
         let defaults = Self.statusDefaults
         defaults.set(Date(), forKey: Self.lastStateQueuedAtKey)
@@ -333,6 +354,56 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
                 name: .watchConnectivityStatusDidChange,
                 object: nil
             )
+        }
+    }
+}
+
+/// Serializes payload comparison and delivery. A late care build cannot restore
+/// old weather or replace a newer care snapshot. Weather-only updates never
+/// fetch SwiftData, and a disabled forecast remains cleared across care builds.
+final class WatchStatePublicationCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastState: WatchCompanionState?
+    private var lastCareGeneratedAt = Date.distantPast
+    private var hasWeatherOverride = false
+    private var latestWeather: WeatherSurfaceState?
+    var currentState: WatchCompanionState? { lock.withLock { lastState } }
+
+    @discardableResult
+    func publish(_ state: WatchCompanionState, force: Bool = false, now: Date = Date(),
+                 deliver: (WatchCompanionState) -> Bool) -> Bool {
+        lock.withLock {
+            guard state.generatedAt >= lastCareGeneratedAt else { return true }
+            var next = state
+            if hasWeatherOverride {
+                next.weather = latestWeather?.watchSnapshot(profileID: state.selectedProfileID, now: now)
+            }
+            if let lastState, !force, next.hasSameContent(as: lastState) {
+                lastCareGeneratedAt = state.generatedAt
+                return true
+            }
+            guard deliver(next) else { return false }
+            lastCareGeneratedAt = state.generatedAt
+            lastState = next
+            return true
+        }
+    }
+
+    /// Returns false only when an initial care snapshot is needed.
+    @discardableResult
+    func publishWeather(_ weather: WeatherSurfaceState?, now: Date = Date(),
+                        deliver: (WatchCompanionState) -> Bool) -> Bool {
+        lock.withLock {
+            hasWeatherOverride = true
+            latestWeather = weather
+            guard let previous = lastState else { return false }
+            var next = previous
+            next.weather = weather?.watchSnapshot(profileID: next.selectedProfileID, now: now)
+            guard !next.hasSameContent(as: previous) else { return true }
+            next.generatedAt = now
+            next.revision = UUID()
+            if deliver(next) { lastState = next }
+            return true
         }
     }
 }

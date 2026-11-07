@@ -20,8 +20,12 @@ final class WatchConnectivityClient: NSObject, ObservableObject {
 
     private override init() {
         state = WatchSharedStorage.readState()
+
         pendingCommandIDs = Set(WatchSharedStorage.readOutbox().map(\.id))
         super.init()
+        #if DEBUG
+        if WeatherPreviewData.enabled { state.weather = WeatherPreviewData.make(); state.selectedProfileID = WeatherPreviewData.profileID }
+        #endif
     }
 
     func start() {

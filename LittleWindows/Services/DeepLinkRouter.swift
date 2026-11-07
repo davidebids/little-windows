@@ -99,7 +99,7 @@ enum AppNavigationPolicy {
         guard url.scheme == "littlewindows" else { return false }
         let components = destinationComponents(for: url)
         guard let destination = components.first else { return true }
-        return ["today", "food", "night-light", "settings"].contains(destination)
+        return ["today", "food", "night-light", "settings", "weather"].contains(destination)
             && careProfileRequirement(for: url) == nil
     }
 
@@ -126,7 +126,7 @@ enum AppNavigationPolicy {
         if destination == "food" {
             return components.dropFirst().first == "solids" ? .care : nil
         }
-        if destination == "night-light" || destination == "settings" {
+        if destination == "night-light" || destination == "settings" || destination == "weather" {
             return nil
         }
         if destination == "today" {
@@ -285,6 +285,10 @@ final class DeepLinkRouter: ObservableObject {
     @Published var selectedReportsMode: ReportsDisplayMode = ReportsDisplayMode(
         rawValue: UserDefaults.standard.string(forKey: "reportsDisplayMode") ?? ""
     ) ?? .day
+    @Published var showingWeather = false {
+        didSet { if showingWeather && !oldValue { InteractionPerformanceAudit.begin("weather.open") } }
+    }
+    @Published var weatherProfileID: UUID?
     @Published var showingSettings = false
     @Published var showingFamilySyncSettings = false
     @Published var showingBodyLocationPreview = false
@@ -578,6 +582,9 @@ final class DeepLinkRouter: ObservableObject {
                   let mode = ReportsDisplayMode(rawValue: components[1]) {
             selectedReportsMode = mode
             selectedTab = .reports
+        } else if components == ["weather"] {
+            weatherProfileID = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "profile" })?.value.flatMap(UUID.init(uuidString:))
+            showingWeather = true
         } else if components == ["settings"] {
             showingSettings = true
         } else if components == ["settings", "family-sync"] {

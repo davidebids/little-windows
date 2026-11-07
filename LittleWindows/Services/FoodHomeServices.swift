@@ -859,21 +859,25 @@ enum FoodHomeDuplicateRepairService {
         var duplicateCount = 0
         duplicateCount += deleteDuplicateModels(
             HomeTodoList.self,
+            properties: [\HomeTodoList.id, \HomeTodoList.createdAt, \HomeTodoList.updatedAt],
             context: context,
             maximumCount: maximumDeletesPerRun - duplicateCount
         )
         duplicateCount += deleteDuplicateModels(
             HomeTodoItem.self,
+            properties: [\HomeTodoItem.id, \HomeTodoItem.createdAt, \HomeTodoItem.updatedAt],
             context: context,
             maximumCount: maximumDeletesPerRun - duplicateCount
         )
         duplicateCount += deleteDuplicateModels(
             ShoppingList.self,
+            properties: [\ShoppingList.id, \ShoppingList.createdAt, \ShoppingList.updatedAt],
             context: context,
             maximumCount: maximumDeletesPerRun - duplicateCount
         )
         duplicateCount += deleteDuplicateModels(
             ShoppingListItem.self,
+            properties: [\ShoppingListItem.id, \ShoppingListItem.createdAt, \ShoppingListItem.updatedAt],
             context: context,
             maximumCount: maximumDeletesPerRun - duplicateCount
         )
@@ -885,52 +889,51 @@ enum FoodHomeDuplicateRepairService {
         return duplicateCount
     }
 
+    private struct RepairCandidate {
+        var identifier: PersistentIdentifier
+        var createdAt: Date
+        var updatedAt: Date
+    }
+
     nonisolated private static func deleteDuplicateModels<Model: SyncedDuplicateRepairModel>(
         _ modelType: Model.Type,
+        properties: [PartialKeyPath<Model>],
         context: ModelContext,
         maximumCount: Int
     ) -> Int {
         guard maximumCount > 0 else { return 0 }
-        let duplicates = duplicateModels(
-            (try? context.fetch(FetchDescriptor<Model>())) ?? [],
-            id: \.id,
-            createdAt: \.createdAt,
-            updatedAt: \.updatedAt
-        )
-        let boundedDuplicates = duplicates.prefix(maximumCount)
-        boundedDuplicates.forEach(context.delete)
-        return boundedDuplicates.count
-    }
-
-    nonisolated private static func duplicateModels<Model: PersistentModel>(
-        _ models: [Model],
-        id: KeyPath<Model, UUID>,
-        createdAt: KeyPath<Model, Date>,
-        updatedAt: KeyPath<Model, Date>
-    ) -> [Model] {
-        var canonicalByID = [UUID: Model]()
-        var duplicates = [Model]()
-
-        for model in models {
-            let modelID = model[keyPath: id]
-            guard let canonical = canonicalByID[modelID] else {
-                canonicalByID[modelID] = model
-                continue
+        var descriptor = FetchDescriptor<Model>()
+        // Concrete key paths come from each model's call site. Optimized
+        // protocol-property paths can differ from SwiftData's schema metadata.
+        descriptor.propertiesToFetch = properties
+        var canonicalByID: [UUID: RepairCandidate] = [:]
+        var duplicates: [PersistentIdentifier] = []
+        do {
+            // Compare only identity/revision metadata in bounded batches. Retain
+            // identifiers rather than every model and its potentially large payload.
+            try context.enumerate(descriptor, batchSize: 256) { model in
+                let candidate = RepairCandidate(identifier: model.persistentModelID,
+                    createdAt: model.createdAt, updatedAt: model.updatedAt)
+                guard let canonical = canonicalByID[model.id] else {
+                    canonicalByID[model.id] = candidate
+                    return
+                }
+                let preferred = candidate.updatedAt > canonical.updatedAt ||
+                    (candidate.updatedAt == canonical.updatedAt && candidate.createdAt < canonical.createdAt)
+                if duplicates.count < maximumCount {
+                    duplicates.append(preferred ? canonical.identifier : candidate.identifier)
+                }
+                if preferred { canonicalByID[model.id] = candidate }
             }
-            let modelIsPreferred = model[keyPath: updatedAt] > canonical[keyPath: updatedAt]
-                || (
-                    model[keyPath: updatedAt] == canonical[keyPath: updatedAt]
-                        && model[keyPath: createdAt] < canonical[keyPath: createdAt]
-                )
-            if modelIsPreferred {
-                duplicates.append(canonical)
-                canonicalByID[modelID] = model
-            } else {
-                duplicates.append(model)
-            }
+        } catch { return 0 }
+        // Mutate only after enumeration is complete. Every queued identifier is
+        // older than a surviving canonical row, even when more duplicates follow.
+        for identifier in duplicates {
+            if let model = context.model(for: identifier) as? Model { context.delete(model) }
         }
-        return duplicates
+        return duplicates.count
     }
+
 }
 
 @ModelActor
@@ -1528,7 +1531,7 @@ enum ReturnTrackingService {
         save(context)
     }
 
-    static func status(for request: ReturnRequest, packages: [ReturnPackage]) -> ReturnRequestStatus {
+    nonisolated static func status(for request: ReturnRequest, packages: [ReturnPackage]) -> ReturnRequestStatus {
         if request.isArchived { return .archived }
         let requestPackages = packages.filter { $0.returnRequestID == request.id }
         if request.completedAt != nil || (!requestPackages.isEmpty && requestPackages.allSatisfy { $0.completedAt != nil }) {
@@ -1626,7 +1629,7 @@ struct FoodInsightMetric: Identifiable, Equatable {
     var systemImage: String
 }
 
-enum TodayHomeSummaryCategory: String, CaseIterable, Identifiable {
+enum TodayHomeSummaryCategory: String, CaseIterable, Identifiable, Sendable {
     case todos
     case shopping
     case kitchen
@@ -1679,7 +1682,7 @@ enum TodayHomeSummaryCategory: String, CaseIterable, Identifiable {
     }
 }
 
-enum TodayHomeSummaryRoute: Equatable {
+enum TodayHomeSummaryRoute: Equatable, Sendable {
     case food(FoodRouteCommand)
     case appointment(UUID, profileID: UUID?)
     case medications(profileID: UUID)
@@ -1690,7 +1693,7 @@ enum TodayHomeSummaryRoute: Equatable {
     case todayCare
 }
 
-struct TodayMedicationAttention: Equatable {
+struct TodayMedicationAttention: Equatable, Sendable {
     var profileID: UUID
     var medicationID: UUID
     var regimenID: UUID
@@ -1701,13 +1704,13 @@ struct TodayMedicationAttention: Equatable {
     var doseUnit: String
 }
 
-enum TodayHomeSummaryUrgency: Int, Equatable {
+enum TodayHomeSummaryUrgency: Int, Equatable, Sendable {
     case normal
     case attention
     case urgent
 }
 
-struct TodayHomeSummaryItem: Identifiable, Equatable {
+struct TodayHomeSummaryItem: Identifiable, Equatable, Sendable {
     var id: String
     var category: TodayHomeSummaryCategory
     var title: String
@@ -1735,14 +1738,14 @@ struct TodayHomeSummaryItem: Identifiable, Equatable {
     var medicationAttention: TodayMedicationAttention?
 }
 
-struct TodaySnoozedAttentionItem: Identifiable, Equatable {
+struct TodaySnoozedAttentionItem: Identifiable, Equatable, Sendable {
     var item: TodayHomeSummaryItem
     var until: Date
 
     var id: String { item.id }
 }
 
-struct TodayHandoffNoteSummary: Identifiable, Equatable {
+struct TodayHandoffNoteSummary: Identifiable, Equatable, Sendable {
     var id: UUID
     var authorCaregiverIdentifier: String
     var authorName: String
@@ -1753,13 +1756,13 @@ struct TodayHandoffNoteSummary: Identifiable, Equatable {
     var updatedAt: Date
 }
 
-struct TodayHandoffActivitySummary: Identifiable, Equatable {
+struct TodayHandoffActivitySummary: Identifiable, Equatable, Sendable {
     var id: String
     var text: String
     var occurredAt: Date
 }
 
-struct TodayCaregiverHandoffSummary: Equatable {
+struct TodayCaregiverHandoffSummary: Equatable, Sendable {
     var activityCount: Int
     var newNoteCount: Int
     var recentActivities: [TodayHandoffActivitySummary]
@@ -1780,7 +1783,7 @@ struct TodayCaregiverHandoffSummary: Equatable {
     }
 }
 
-struct TodayHomeSummarySection: Identifiable, Equatable {
+struct TodayHomeSummarySection: Identifiable, Equatable, Sendable {
     var id: TodayHomeSummaryCategory { category }
     var category: TodayHomeSummaryCategory
     var countLabel: String
@@ -1790,7 +1793,7 @@ struct TodayHomeSummarySection: Identifiable, Equatable {
     var emptyMessage: String
 }
 
-struct TodayHomeSummary: Equatable {
+struct TodayHomeSummary: Equatable, Sendable {
     var attentionItems: [TodayHomeSummaryItem]
     var allAttentionItems: [TodayHomeSummaryItem]
     var snoozedAttentionItems: [TodaySnoozedAttentionItem]
@@ -1805,7 +1808,6 @@ struct TodayHomeSummary: Equatable {
     }
 }
 
-@MainActor
 enum TodayHomeSummaryService {
     static let visibleItemLimit = 3
     static let attentionItemLimit = 5
@@ -3492,4 +3494,327 @@ private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
+}
+
+
+/// A single actor owns each screen's summary reads. Superseded queued requests
+/// exit before fetching; model objects never leave their background context.
+actor TodayHomeSummaryReader {
+    func read(container: ModelContainer, householdID: UUID, currentCaregiverName: String,
+              caregiverIdentifier: String, familySyncEnabled: Bool, now: Date = Date()) throws -> TodayHomeSummary? {
+        guard !Task.isCancelled else { return nil }
+        return try Self.capture(context: ModelContext(container), householdID: householdID,
+            currentCaregiverName: currentCaregiverName, caregiverIdentifier: caregiverIdentifier,
+            familySyncEnabled: familySyncEnabled, now: now)
+    }
+
+    static func capture(context: ModelContext, householdID: UUID, currentCaregiverName: String,
+                        caregiverIdentifier: String, familySyncEnabled: Bool, now: Date) throws -> TodayHomeSummary {
+        let todayStart = Calendar.current.startOfDay(for: now)
+        let medicationRecordStart = Calendar.current.date(byAdding: .day, value: -60, to: todayStart)
+            ?? todayStart
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: todayStart)
+            ?? now.addingTimeInterval(86_400)
+        let upcomingTripState = PackingTripStatus.upcoming.rawValue
+        let activeRoutineState = CareRoutineRunState.active.rawValue
+
+        var todoListDescriptor = FetchDescriptor<HomeTodoList>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\HomeTodoList.sortOrder), SortDescriptor(\HomeTodoList.updatedAt, order: .reverse)]
+        )
+        todoListDescriptor.fetchLimit = 100
+        try Task.checkCancellation()
+        let todoLists = try context.fetch(todoListDescriptor)
+
+        var todoItemDescriptor = FetchDescriptor<HomeTodoItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\HomeTodoItem.updatedAt, order: .reverse)]
+        )
+        todoItemDescriptor.fetchLimit = 750
+        try Task.checkCancellation()
+        let todoItems = try context.fetch(todoItemDescriptor)
+
+        var shoppingListDescriptor = FetchDescriptor<ShoppingList>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\ShoppingList.updatedAt, order: .reverse)]
+        )
+        shoppingListDescriptor.fetchLimit = 100
+        try Task.checkCancellation()
+        let shoppingLists = try context.fetch(shoppingListDescriptor)
+
+        var shoppingItemDescriptor = FetchDescriptor<ShoppingListItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\ShoppingListItem.updatedAt, order: .reverse)]
+        )
+        shoppingItemDescriptor.fetchLimit = 1_000
+        try Task.checkCancellation()
+        let shoppingItems = try context.fetch(shoppingItemDescriptor)
+
+        var inventoryDescriptor = FetchDescriptor<InventoryItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\InventoryItem.updatedAt, order: .reverse)]
+        )
+        inventoryDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let inventoryItems = try context.fetch(inventoryDescriptor)
+
+        var mealPrepDescriptor = FetchDescriptor<MealPrepItem>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived },
+            sortBy: [SortDescriptor(\MealPrepItem.updatedAt, order: .reverse)]
+        )
+        mealPrepDescriptor.fetchLimit = 200
+        try Task.checkCancellation()
+        let mealPrepItems = try context.fetch(mealPrepDescriptor)
+
+        var usageDescriptor = FetchDescriptor<MealPrepUsage>(
+            predicate: #Predicate { $0.householdID == householdID && $0.dateTime >= todayStart },
+            sortBy: [SortDescriptor(\MealPrepUsage.dateTime, order: .reverse)]
+        )
+        usageDescriptor.fetchLimit = 200
+        try Task.checkCancellation()
+        let mealPrepUsages = try context.fetch(usageDescriptor)
+
+        var tripDescriptor = FetchDescriptor<PackingTrip>(
+            predicate: #Predicate {
+                $0.householdID == householdID && !$0.isArchived && $0.statusRawValue == upcomingTripState
+            },
+            sortBy: [SortDescriptor(\PackingTrip.startDate)]
+        )
+        tripDescriptor.fetchLimit = 100
+        try Task.checkCancellation()
+        let packingTrips = try context.fetch(tripDescriptor)
+
+        var packingDescriptor = FetchDescriptor<PackingItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\PackingItem.updatedAt, order: .reverse)]
+        )
+        packingDescriptor.fetchLimit = 1_500
+        try Task.checkCancellation()
+        let packingItems = try context.fetch(packingDescriptor)
+
+        var itineraryDescriptor = FetchDescriptor<TripItineraryItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\TripItineraryItem.startDate), SortDescriptor(\TripItineraryItem.sortOrder)]
+        )
+        itineraryDescriptor.fetchLimit = 750
+        try Task.checkCancellation()
+        let itineraryItems = try context.fetch(itineraryDescriptor)
+
+        var returnRequestDescriptor = FetchDescriptor<ReturnRequest>(
+            predicate: #Predicate { $0.householdID == householdID && !$0.isArchived && $0.completedAt == nil },
+            sortBy: [SortDescriptor(\ReturnRequest.updatedAt, order: .reverse)]
+        )
+        returnRequestDescriptor.fetchLimit = 200
+        try Task.checkCancellation()
+        let returnRequests = try context.fetch(returnRequestDescriptor)
+
+        var returnItemDescriptor = FetchDescriptor<ReturnItem>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\ReturnItem.updatedAt, order: .reverse)]
+        )
+        returnItemDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let returnItems = try context.fetch(returnItemDescriptor)
+
+        var returnPackageDescriptor = FetchDescriptor<ReturnPackage>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\ReturnPackage.updatedAt, order: .reverse)]
+        )
+        returnPackageDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let returnPackages = try context.fetch(returnPackageDescriptor)
+
+        var reminderDescriptor = FetchDescriptor<FoodReminder>(
+            predicate: #Predicate { $0.householdID == householdID && $0.isEnabled },
+            sortBy: [SortDescriptor(\FoodReminder.dateTime)]
+        )
+        reminderDescriptor.fetchLimit = 200
+        try Task.checkCancellation()
+        let reminders = try context.fetch(reminderDescriptor)
+
+        var profileDescriptor = FetchDescriptor<CareProfile>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\CareProfile.createdAt)]
+        )
+        profileDescriptor.fetchLimit = 100
+        try Task.checkCancellation()
+        let profiles = try context.fetch(profileDescriptor)
+
+        var medicationDescriptor = FetchDescriptor<Medication>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\Medication.updatedAt, order: .reverse)]
+        )
+        medicationDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let medications = try context.fetch(medicationDescriptor)
+
+        var regimenDescriptor = FetchDescriptor<MedicationRegimen>(
+            predicate: #Predicate { $0.isActive },
+            sortBy: [SortDescriptor(\MedicationRegimen.updatedAt, order: .reverse)]
+        )
+        regimenDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let medicationRegimens = try context.fetch(regimenDescriptor)
+
+        var phaseDescriptor = FetchDescriptor<MedicationSchedulePhase>(
+            sortBy: [SortDescriptor(\MedicationSchedulePhase.sequence)]
+        )
+        phaseDescriptor.fetchLimit = 1_000
+        try Task.checkCancellation()
+        let medicationPhases = try context.fetch(phaseDescriptor)
+
+        var doseRecordDescriptor = FetchDescriptor<MedicationDoseRecord>(
+            predicate: #Predicate { $0.loggedAt >= medicationRecordStart },
+            sortBy: [SortDescriptor(\MedicationDoseRecord.updatedAt, order: .reverse)]
+        )
+        doseRecordDescriptor.fetchLimit = 10_000
+        try Task.checkCancellation()
+        let medicationDoseRecords = try context.fetch(doseRecordDescriptor)
+
+        var refillTaskDescriptor = FetchDescriptor<MedicationRefillTask>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\MedicationRefillTask.updatedAt, order: .reverse)]
+        )
+        refillTaskDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let medicationRefillTasks = try context.fetch(refillTaskDescriptor)
+
+        var followUpDescriptor = FetchDescriptor<AppointmentFollowUp>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\AppointmentFollowUp.dueDate), SortDescriptor(\AppointmentFollowUp.updatedAt)]
+        )
+        followUpDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let appointmentFollowUps = try context.fetch(followUpDescriptor)
+
+        var careRoutineDescriptor = FetchDescriptor<CareRoutine>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\CareRoutine.sortOrder)]
+        )
+        careRoutineDescriptor.fetchLimit = 300
+        try Task.checkCancellation()
+        let careRoutines = try context.fetch(careRoutineDescriptor)
+
+        var routineRunDescriptor = FetchDescriptor<CareRoutineRun>(
+            predicate: #Predicate {
+                $0.stateRawValue == activeRoutineState || $0.startedAt >= todayStart
+            },
+            sortBy: [SortDescriptor(\CareRoutineRun.updatedAt, order: .reverse)]
+        )
+        routineRunDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let careRoutineRuns = try context.fetch(routineRunDescriptor)
+
+        var solidPlanDescriptor = FetchDescriptor<PlannedSolidMeal>(
+            predicate: #Predicate { $0.completedEventID == nil && $0.scheduledAt < dayEnd },
+            sortBy: [SortDescriptor(\PlannedSolidMeal.scheduledAt)]
+        )
+        solidPlanDescriptor.fetchLimit = 300
+        try Task.checkCancellation()
+        let plannedSolidMeals = try context.fetch(solidPlanDescriptor)
+
+        var allergenDescriptor = FetchDescriptor<SolidAllergenProgress>(
+            sortBy: [SortDescriptor(\SolidAllergenProgress.nextExposureDueAt)]
+        )
+        allergenDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let solidAllergenProgress = try context.fetch(allergenDescriptor)
+
+        var acknowledgementDescriptor = FetchDescriptor<HouseholdAttentionAcknowledgement>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\HouseholdAttentionAcknowledgement.updatedAt, order: .reverse)]
+        )
+        acknowledgementDescriptor.fetchLimit = 1_000
+        try Task.checkCancellation()
+        let acknowledgements = try context.fetch(acknowledgementDescriptor)
+
+        var claimDescriptor = FetchDescriptor<HouseholdAttentionClaim>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\HouseholdAttentionClaim.updatedAt, order: .reverse)]
+        )
+        claimDescriptor.fetchLimit = 500
+        try Task.checkCancellation()
+        let attentionClaims = try context.fetch(claimDescriptor)
+
+        var noteDescriptor = FetchDescriptor<CaregiverHandoffNote>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\CaregiverHandoffNote.createdAt, order: .reverse)]
+        )
+        noteDescriptor.fetchLimit = 200
+        try Task.checkCancellation()
+        let handoffNotes = try context.fetch(noteDescriptor)
+
+        var caregiverDescriptor = FetchDescriptor<FamilyCaregiverIdentity>(
+            predicate: #Predicate { $0.householdID == householdID },
+            sortBy: [SortDescriptor(\FamilyCaregiverIdentity.displayName)]
+        )
+        caregiverDescriptor.fetchLimit = 50
+        try Task.checkCancellation()
+        let familyCaregiverIdentities = try context.fetch(caregiverDescriptor)
+
+        return TodayHomeSummaryService.summary(
+            householdID: householdID,
+            currentCaregiverName: currentCaregiverName,
+            todoLists: todoLists,
+            todoItems: todoItems,
+            shoppingLists: shoppingLists,
+            shoppingItems: shoppingItems,
+            inventoryItems: inventoryItems,
+            mealPrepItems: mealPrepItems,
+            mealPrepUsages: mealPrepUsages,
+            packingTrips: packingTrips,
+            packingItems: packingItems,
+            itineraryItems: itineraryItems,
+            returnRequests: returnRequests,
+            returnItems: returnItems,
+            returnPackages: returnPackages,
+            reminders: reminders,
+            profiles: profiles,
+            medications: medications,
+            medicationRegimens: medicationRegimens,
+            medicationPhases: medicationPhases,
+            medicationDoseRecords: medicationDoseRecords,
+            medicationRefillTasks: medicationRefillTasks,
+            appointmentFollowUps: appointmentFollowUps,
+            careRoutines: careRoutines,
+            careRoutineRuns: careRoutineRuns,
+            plannedSolidMeals: plannedSolidMeals,
+            solidAllergenProgress: solidAllergenProgress,
+            acknowledgements: acknowledgements,
+            claims: attentionClaims,
+            handoffNotes: handoffNotes,
+            familyCaregiverIdentities: familyCaregiverIdentities,
+            currentCaregiverIdentifier: caregiverIdentifier,
+            familySyncEnabled: familySyncEnabled,
+            handoffCheckpoint: CaregiverHandoffCheckpointStore.date(
+                caregiverIdentifier: caregiverIdentifier
+            ),
+            now: now
+        )
+    }
+}
+
+extension TodayHomeSummaryReader {
+    nonisolated static func isRelevantSave(_ notification: Notification) -> Bool {
+        let keys: [ModelContext.NotificationKey] = [.insertedIdentifiers, .updatedIdentifiers, .deletedIdentifiers, .invalidatedAllIdentifiers]
+        var identifiers: [PersistentIdentifier] = []
+        for key in keys {
+            identifiers += (notification.userInfo?[key] as? [PersistentIdentifier])
+                ?? (notification.userInfo?[key] as? Set<PersistentIdentifier>).map(Array.init)
+                ?? (notification.userInfo?[key.rawValue] as? [PersistentIdentifier])
+                ?? (notification.userInfo?[key.rawValue] as? Set<PersistentIdentifier>).map(Array.init)
+                ?? []
+        }
+        guard !identifiers.isEmpty else { return true }
+        return identifiers.contains { identifier in
+            relevantEntityNames.contains { identifier.entityName == $0 || identifier.entityName.hasSuffix("." + $0) }
+        }
+    }
+    private static let relevantEntityNames: Set<String> = [
+        "HomeTodoList", "HomeTodoItem", "ShoppingList", "ShoppingListItem", "InventoryItem", "MealPrepItem", "MealPrepUsage",
+        "PackingTrip", "PackingItem", "TripItineraryItem", "ReturnRequest", "ReturnItem", "ReturnPackage", "FoodReminder",
+        "CareProfile", "Medication", "MedicationRegimen", "MedicationSchedulePhase", "MedicationDoseRecord", "MedicationRefillTask",
+        "AppointmentFollowUp", "CareRoutine", "CareRoutineStep", "CareRoutineRun", "PlannedSolidMeal", "SolidAllergenProgress",
+        "HouseholdAttentionAcknowledgement", "HouseholdAttentionClaim", "CaregiverHandoffNote", "FamilyCaregiverIdentity"
+    ]
 }

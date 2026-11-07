@@ -5,6 +5,7 @@ import SwiftData
 enum HouseholdAttentionSnoozeStore {
     private static let storageKey = "householdAttention.personalSnoozes.v1"
     private static let maximumEntryCount = 256
+    private static let lock = NSRecursiveLock()
 
     static func isSnoozed(
         sourceKey: String,
@@ -18,7 +19,9 @@ enum HouseholdAttentionSnoozeStore {
         now: Date = Date(),
         defaults: UserDefaults = .standard
     ) -> [String: Date] {
-        activeEntries(now: now, defaults: defaults).mapValues {
+        lock.lock()
+        defer { lock.unlock() }
+        return activeEntries(now: now, defaults: defaults).mapValues {
             Date(timeIntervalSince1970: $0)
         }
     }
@@ -29,6 +32,8 @@ enum HouseholdAttentionSnoozeStore {
         now: Date = Date(),
         defaults: UserDefaults = .standard
     ) {
+        lock.lock()
+        defer { lock.unlock() }
         guard !sourceKey.isEmpty, date > now else { return }
         var entries = activeEntries(now: now, defaults: defaults)
         entries[sourceKey] = date.timeIntervalSince1970
@@ -43,6 +48,8 @@ enum HouseholdAttentionSnoozeStore {
     }
 
     static func clear(sourceKey: String, defaults: UserDefaults = .standard) {
+        lock.lock()
+        defer { lock.unlock() }
         var entries = storedEntries(defaults: defaults)
         guard entries.removeValue(forKey: sourceKey) != nil else { return }
         defaults.set(entries, forKey: storageKey)

@@ -1,15 +1,291 @@
 import SwiftUI
+import Observation
+import os
+
+/// Keeps presentation state out of Today's care/history state. SwiftUI can still
+/// evaluate the underlying view when the sheet changes its environment.
+@MainActor
+final class TodayCustomizationPresentation: ObservableObject {
+    @Published var isPresented = false
+}
+
+struct TodayCustomizationSheet: ViewModifier {
+    @ObservedObject var presentation: TodayCustomizationPresentation
+    let profile: CareProfile
+    let onDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: $presentation.isPresented, onDismiss: onDismiss) {
+            #if DEBUG && targetEnvironment(simulator)
+            if InteractionPerformanceAudit.referenceFormEnabled {
+                InteractionAuditReferenceForm { presentation.isPresented = false }
+                    .interactionPaintProbe("customize")
+                    .interactionPerformanceAudit()
+            } else {
+                customization
+            }
+            #else
+            customization
+            #endif
+        }
+    }
+
+    private var customization: some View {
+        NavigationStack {
+            TodayTrackingSettingsView(profile: profile)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { presentation.isPresented = false }
+                    }
+                }
+        }
+        .interactionPerformanceAudit()
+    }
+}
+
+enum TodayProfileMenuAction: Equatable {
+    case customize, activity(EventType), timer(UUID), settings
+}
+
+@MainActor @Observable
+final class TodayProfileMenuPresentation {
+    struct Snapshot {
+        let profileID: UUID
+        let profileType: CareProfileType
+        var timers: [TodayProfileMenu.Timer]
+    }
+    private(set) var snapshot: Snapshot?
+    private(set) var anchor = CGRect.zero
+    var choosingActivity = false
+    @ObservationIgnored private var handler: ((TodayProfileMenuAction) -> Void)?
+    private let selectedProfileID: () -> UUID?
+
+    convenience init() {
+        self.init(selectedProfileID: { ProfileService.shared.selectedProfileID })
+    }
+    init(selectedProfileID: @escaping () -> UUID?) { self.selectedProfileID = selectedProfileID }
+
+    func open(_ snapshot: Snapshot, anchor: CGRect, handler: @escaping (TodayProfileMenuAction) -> Void) {
+        InteractionPerformanceAudit.begin("profile.menu")
+        self.anchor = anchor
+        self.handler = handler
+        choosingActivity = false
+        self.snapshot = snapshot
+    }
+    func dismiss() { snapshot = nil; handler = nil; choosingActivity = false }
+    func select(_ action: TodayProfileMenuAction) {
+        guard let snapshot else { return }
+        guard selectedProfileID() == snapshot.profileID else { dismiss(); return }
+        if case .activity(let type) = action,
+           !EventType.cases(for: snapshot.profileType).contains(type) { return }
+        if case .timer(let id) = action,
+           !snapshot.timers.contains(where: { $0.id == id }) { return }
+        let handler = handler
+        dismiss()
+        handler?(action)
+    }
+    func updateTimers(_ timers: [TodayProfileMenu.Timer], profileID: UUID) {
+        guard snapshot?.profileID == profileID else { return }
+        snapshot?.timers = timers
+    }
+    func updateAnchor(_ anchor: CGRect, profileID: UUID) {
+        guard snapshot?.profileID == profileID else { return }
+        self.anchor = anchor
+    }
+}
+
+private struct TodayProfileMenuAnchorKey: PreferenceKey {
+    static let defaultValue = CGRect.zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+/// Owns menu presentation independently of Today's care/history state.
+struct TodayProfileMenu: View {
+    struct Timer: Identifiable, Equatable {
+        let id: UUID
+        let title: String
+    }
+    let profile: CareProfile
+    let timers: [Timer]
+    let labelWidth: CGFloat
+    let presentation: TodayCustomizationPresentation
+    let menuPresentation: TodayProfileMenuPresentation
+    @State private var anchor = CGRect.zero
+    let logActivity: (EventType) -> Void
+    let editTimer: (UUID) -> Void
+    let openSettings: () -> Void
+    let customizationDismissed: () -> Void
+
+    var body: some View {
+        let _ = TodayPresentationAudit.event("ProfileMenuBody")
+        Button(action: openMenu) {
+            ProfileAvatarView(profile: profile, size: 34)
+                .frame(width: labelWidth, height: 44)
+                .interactionColdProfileMenuProbe(profileID: profile.id, action: openMenu)
+        }
+        .buttonStyle(.plain)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel("\(profile.name) settings")
+        .accessibilityHint("Opens Today customization, active timers, and settings")
+        .accessibilityIdentifier("today.menu")
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: TodayProfileMenuAnchorKey.self, value: proxy.frame(in: .global))
+            }
+        }
+        .onPreferenceChange(TodayProfileMenuAnchorKey.self) {
+            anchor = $0
+            menuPresentation.updateAnchor($0, profileID: profile.id)
+        }
+        .onChange(of: profile.id) { _, _ in menuPresentation.dismiss() }
+        .onChange(of: profile.profileType) { _, _ in menuPresentation.dismiss() }
+        .onChange(of: timers) { _, timers in menuPresentation.updateTimers(timers, profileID: profile.id) }
+        .onDisappear { menuPresentation.dismiss() }
+        .modifier(TodayCustomizationSheet(presentation: presentation, profile: profile, onDismiss: customizationDismissed))
+    }
+
+    private func openMenu() {
+        if menuPresentation.snapshot != nil { menuPresentation.dismiss(); return }
+        menuPresentation.open(.init(profileID: profile.id, profileType: profile.profileType, timers: timers), anchor: anchor) { action in
+            switch action {
+            case .customize:
+                TodayPresentationAudit.event("CustomizeSelected")
+                InteractionPerformanceAudit.begin("customize")
+                presentation.isPresented = true
+            case .activity(let type): logActivity(type)
+            case .timer(let id): editTimer(id)
+            case .settings: openSettings()
+            }
+        }
+    }
+}
+
+/// Uses the existing window; opening the menu creates no context-menu or
+/// popover controller, and does not change when care/history work runs.
+struct TodayProfileMenuHost: ViewModifier {
+    let presentation: TodayProfileMenuPresentation
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(presentation.snapshot != nil)
+            .overlay {
+                if let snapshot = presentation.snapshot {
+                    GeometryReader { proxy in
+                        let origin = proxy.frame(in: .global).origin
+                        let availableWidth = max(0, proxy.size.width - 24)
+                        let width = typeSize.isAccessibilitySize ? availableWidth : min(320, availableWidth)
+                        let top = max(8, presentation.anchor.maxY - origin.y + 8)
+                        let left = max(12, min(proxy.size.width - width - 12, presentation.anchor.maxX - origin.x - width))
+                        ZStack(alignment: .topLeading) {
+                            Color.black.opacity(0.001).contentShape(Rectangle())
+                                .onTapGesture { presentation.dismiss() }
+                                .accessibilityHidden(true)
+                            TodayProfileMenuChoices(presentation: presentation, snapshot: snapshot,
+                                maximumHeight: max(44, proxy.size.height - top - 12))
+                                .frame(width: width)
+                                .offset(x: left, y: top)
+                        }
+                    }
+                    .zIndex(10)
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in if phase != .active { presentation.dismiss() } }
+            .onDisappear { presentation.dismiss() }
+    }
+}
+
+private struct TodayProfileMenuChoices: View {
+    let presentation: TodayProfileMenuPresentation
+    let snapshot: TodayProfileMenuPresentation.Snapshot
+    let maximumHeight: CGFloat
+    @AccessibilityFocusState private var isFocused: Bool
+    @FocusState private var keyboardFocused: Bool
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            panel(scrollable: false).fixedSize(horizontal: false, vertical: true)
+            panel(scrollable: true).frame(height: maximumHeight)
+        }
+        .frame(height: maximumHeight, alignment: .top)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape) { presentation.dismiss() }
+        .accessibilityIdentifier("today.profile-menu")
+        .interactionPaintProbe("profile.menu")
+        .onKeyPress(.escape) { presentation.dismiss(); return .handled }
+        .onAppear { isFocused = true; keyboardFocused = true }
+    }
+
+    private func panel(scrollable: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if presentation.choosingActivity {
+                row("Back", symbol: "chevron.left") { presentation.choosingActivity = false }
+                    .accessibilityFocused($isFocused)
+                    .focused($keyboardFocused)
+                Divider()
+            }
+            if scrollable { ScrollView { rows } }
+            else { rows }
+        }
+        .padding(10)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(AppTheme.line, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.16), radius: 16, y: 5)
+    }
+
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if presentation.choosingActivity {
+                ForEach(EventType.cases(for: snapshot.profileType)) { type in
+                    row(type.displayName, symbol: type.systemImage(for: snapshot.profileType)) { presentation.select(.activity(type)) }
+                }
+            } else {
+                row("Customize Today", symbol: "slider.horizontal.3") { presentation.select(.customize) }
+                    .accessibilityFocused($isFocused)
+                    .focused($keyboardFocused)
+                row("Log Another Activity", symbol: "plus.circle", disclosure: true) { presentation.choosingActivity = true }
+                if !snapshot.timers.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    Text("Active timers").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10)
+                    ForEach(snapshot.timers) { timer in
+                        row(timer.title, symbol: "timer") { presentation.select(.timer(timer.id)) }
+                    }
+                }
+                Divider().padding(.vertical, 4)
+                row("Settings & Profiles", symbol: "gearshape") { presentation.select(.settings) }
+            }
+        }
+    }
+    private func row(_ title: String, symbol: String, disclosure: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(AppTheme.accent).frame(width: 24)
+                Text(title).foregroundStyle(.primary).multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                if disclosure { Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
+            }
+            .font(.body).padding(10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+}
 
 struct TodayTrackingSettingsView: View {
+    private enum Route: Hashable { case activities, quickActions, sections, tracking }
     let profile: CareProfile
     @State private var preferences = CareTrackingPreferences()
 
     init(profile: CareProfile) {
         self.profile = profile
+        TodayPresentationAudit.event("CustomizeInit")
         _preferences = State(initialValue: CareTrackingPreferenceStore.preferences(profileID: profile.id))
     }
 
     var body: some View {
+        let _ = TodayPresentationAudit.event("CustomizeBody")
         Form {
             Section {
                 Picker("Layout", selection: Binding(
@@ -32,15 +308,9 @@ struct TodayTrackingSettingsView: View {
             }
             Section {
                 if preferences.layout == .essentials {
-                    NavigationLink("Activities & Button Order") {
-                        TodayEssentialsActivitiesView(profile: profile)
-                    }
+                    NavigationLink("Activities & Button Order", value: Route.activities)
                 } else {
-                    NavigationLink("Full Layout Quick Actions") {
-                        CareCategoryCustomizationView(profileID: profile.id, profileType: profile.profileType) {
-                            SystemIntegrationReconciler.requestReconciliation()
-                        }
-                    }
+                    NavigationLink("Full Layout Quick Actions", value: Route.quickActions)
                 }
             } header: {
                 Text("\(preferences.layout.title) layout")
@@ -48,12 +318,8 @@ struct TodayTrackingSettingsView: View {
             .id(preferences.layout)
 
             Section {
-                NavigationLink("Visible Sections") {
-                    TodaySectionSettingsView(profile: profile)
-                }
-                NavigationLink("Tracking & Reminders") {
-                    TodayTrackingCategoriesView(profile: profile)
-                }
+                NavigationLink("Visible Sections", value: Route.sections)
+                NavigationLink("Tracking & Reminders", value: Route.tracking)
             } footer: {
                 Text("These choices follow this profile on devices signed into the same Apple Account when iCloud Sync is on. Offline changes apply here immediately and merge when iCloud becomes available.")
             }
@@ -74,24 +340,21 @@ struct TodayTrackingSettingsView: View {
                              : "Your chosen activities are paused. Resume them in Tracking & Reminders.")
                             .foregroundStyle(.secondary)
                     } else {
-                        VStack(spacing: 12) {
-                            ForEach(types.prefix(3)) { type in
-                                EssentialsActionButton(
-                                    type: type, profileType: profile.profileType,
-                                    detail: "Recent record or running timer", count: types.count,
-                                    action: {}
-                                )
-                                .allowsHitTesting(false)
-                            }
-                            if types.count > 3 {
-                                Text("Plus \(types.count - 3) more below these buttons")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                        ForEach(types.prefix(3)) { type in
+                            EssentialsActionButton(
+                                type: type, profileType: profile.profileType,
+                                detail: "Recent record or running timer", count: types.count,
+                                action: {}
+                            )
+                            .allowsHitTesting(false)
+                            .padding(.vertical, 6)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Preview: large \(type.displayName) button")
                         }
-                        .padding(.vertical, 6)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Preview: large buttons for \(types.map(\.displayName).joined(separator: ", "))")
+                        if types.count > 3 {
+                            Text("Plus \(types.count - 3) more below these buttons")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -103,13 +366,31 @@ struct TodayTrackingSettingsView: View {
                 Text("Resets buttons and section visibility. Paused tracking and reminder choices stay as you set them.")
             }
         }
+        .navigationDestination(for: Route.self) { route in
+            switch route {
+            case .activities: TodayEssentialsActivitiesView(profile: profile)
+            case .quickActions:
+                CareCategoryCustomizationView(profileID: profile.id, profileType: profile.profileType) {
+                    SystemIntegrationReconciler.requestReconciliation()
+                }
+            case .sections: TodaySectionSettingsView(profile: profile)
+            case .tracking: TodayTrackingCategoriesView(profile: profile)
+            }
+        }
         .navigationTitle("Today & Tracking")
+        .interactionPaintProbe("customize")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: reload)
-        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { _ in reload() }
+        .onAppear { TodayPresentationAudit.event("CustomizeAppear"); reload() }
+        .onReceive(NotificationCenter.default.publisher(for: CareTrackingPreferenceStore.changedNotification)) { notification in
+            guard notification.object as? UUID == profile.id else { return }
+            reload()
+        }
     }
 
-    private func reload() { preferences = CareTrackingPreferenceStore.preferences(profileID: profile.id) }
+    private func reload() {
+        let latest = CareTrackingPreferenceStore.preferences(profileID: profile.id)
+        if latest != preferences { preferences = latest }
+    }
     private func update(_ change: (inout CareTrackingPreferences) -> Void) {
         CareTrackingPreferenceStore.update(profileID: profile.id, change)
         reload()
@@ -349,12 +630,47 @@ private struct TodayTrackingCategoriesView: View {
     }
 }
 
+/// Keep the duration atomic even when the surrounding sentence needs two lines.
+struct EssentialsElapsedTimeText: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .allowsTightening(true)
+    }
+}
+
+private struct EssentialsDetailLabel: View {
+    let text: String
+    let elapsedDuration: String?
+
+    var body: some View {
+        Group {
+            if let elapsedDuration, let range = text.range(of: elapsedDuration) {
+                let prefix = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let suffix = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                ViewThatFits(in: .horizontal) {
+                    Text(text).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !prefix.isEmpty { Text(prefix) }
+                        EssentialsElapsedTimeText(text: elapsedDuration + (suffix.isEmpty ? "" : " " + suffix))
+                    }
+                }
+            } else { Text(text) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+    }
+}
+
 struct EssentialsActionButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let type: EventType
     let profileType: CareProfileType
     let detail: String
+    var elapsedDuration: String? = nil
     var timerStart: Date? = nil
     var stoppedTimerElapsed: TimeInterval? = nil
     let count: Int
@@ -386,15 +702,17 @@ struct EssentialsActionButton: View {
                     Text(type == .medicine ? "Medication" : type.displayName)
                         .font(.title2.bold())
                 }
-                Text(detail)
+                EssentialsDetailLabel(text: detail, elapsedDuration: elapsedDuration)
                     .font(.body)
                     .foregroundStyle(.secondary)
                 if let timerStart {
                     Text(timerStart, style: .timer)
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 } else if let stoppedTimerElapsed {
                     Text(DurationFormatting.liveString(seconds: stoppedTimerElapsed))
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 }
@@ -415,16 +733,18 @@ struct EssentialsActionButton: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(type == .medicine ? "Medication" : type.displayName)
                     .font(.title2.bold())
-                Text(detail)
+                EssentialsDetailLabel(text: detail, elapsedDuration: elapsedDuration)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let timerStart {
                     Text(timerStart, style: .timer)
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 } else if let stoppedTimerElapsed {
                     Text(DurationFormatting.liveString(seconds: stoppedTimerElapsed))
+                        .lineLimit(1).minimumScaleFactor(0.5)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(type.tint)
                 }
@@ -435,5 +755,17 @@ struct EssentialsActionButton: View {
                 .foregroundStyle(type.tint)
                 .accessibilityHidden(true)
         }
+    }
+}
+
+/// Simulator-only timing events; no profile data or production logging.
+enum TodayPresentationAudit {
+    private static let logger = Logger(subsystem: "com.debidia.LittleWindows.presentation-audit", category: "Timing")
+    static func event(_ name: String) {
+        InteractionPerformanceAudit.count(name)
+        #if DEBUG && targetEnvironment(simulator)
+        guard ProcessInfo.processInfo.environment["LITTLE_WINDOWS_PRESENTATION_AUDIT"] == "1" else { return }
+        logger.info("\(name, privacy: .public)")
+        #endif
     }
 }

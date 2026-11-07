@@ -33,22 +33,6 @@ struct TripWeatherSnapshot: Equatable, Sendable {
     }
 }
 
-struct TripDailyWeather: Equatable, Sendable {
-    var date: Date
-    var lowTemperatureCelsius: Double
-    var highTemperatureCelsius: Double
-    var precipitationChance: Double
-    var uvIndex: Int
-    var symbolName: String = "cloud.sun.fill"
-}
-
-struct TripWeatherAttribution: Equatable, Sendable {
-    var legalPageURL: URL
-    var lightMarkURL: URL
-    var darkMarkURL: URL
-    var legalAttributionText: String = ""
-}
-
 enum TripWeatherAvailability: Equatable, Sendable {
     case available
     case notYetAvailable

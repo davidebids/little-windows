@@ -1870,6 +1870,7 @@ private struct AppleWatchSettingsView: View {
     @StateObject private var profileService = ProfileService.shared
     @State private var status = WatchConnectivityService.shared.statusSnapshot()
     @State private var refreshMessage: String?
+    @State private var isSendingState = false
 
     private var selectedProfile: CareProfile? {
         profileService.selectedProfile(in: profiles)
@@ -1905,7 +1906,7 @@ private struct AppleWatchSettingsView: View {
                 } label: {
                     Label("Send Latest State", systemImage: "arrow.triangle.2.circlepath")
                 }
-                .disabled(!canSendState)
+                .disabled(!canSendState || isSendingState)
 
                 if let refreshMessage {
                     Text(refreshMessage)
@@ -2076,11 +2077,17 @@ private struct AppleWatchSettingsView: View {
     }
 
     private func sendLatestState() {
-        let queued = WatchConnectivityService.shared.publishCurrentState(force: true)
-        refreshMessage = queued
-            ? "Latest profile, favorites, timer, and summary queued for delivery."
-            : "The Watch is not ready for delivery yet."
-        refreshStatus()
+        guard !isSendingState else { return }
+        isSendingState = true
+        refreshMessage = "Preparing the latest update…"
+        Task { @MainActor in
+            let queued = await WatchConnectivityService.shared.publishCurrentState(force: true)
+            refreshMessage = queued
+                ? "Latest profile, favorites, timer, and summary queued for delivery."
+                : "The Watch is not ready for delivery yet."
+            isSendingState = false
+            refreshStatus()
+        }
     }
 
     private func refreshStatus() {
@@ -2349,7 +2356,7 @@ private struct WatchFavoritesSettingsView: View {
     }
 
     private func publishFavorites() {
-        WatchConnectivityService.shared.publishCurrentState(force: true)
+        WatchConnectivityService.shared.scheduleCurrentStatePublish(force: true)
     }
 
     private func watchActionTint(_ name: String) -> Color {

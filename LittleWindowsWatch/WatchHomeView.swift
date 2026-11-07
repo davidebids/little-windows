@@ -45,6 +45,7 @@ struct WatchHomeView: View {
                             VStack(spacing: 12) {
                                 brandHeader
                                 nightLightButton
+                                weatherCard
                                 unavailableView
                             }
                         }
@@ -71,6 +72,7 @@ struct WatchHomeView: View {
                 brandHeader
                 nightLightButton
                 profilePicker
+                weatherCard
 
                 if !connectivity.state.activeTimers.isEmpty {
                     WatchActiveTimersStack(timers: connectivity.state.activeTimers)
@@ -135,6 +137,28 @@ struct WatchHomeView: View {
             .padding(.bottom, 8)
         }
         .refreshable { connectivity.requestRefresh() }
+    }
+
+    @ViewBuilder private var weatherCard: some View {
+        if let weather = connectivity.state.weather {
+            TimelineView(.periodic(from: .now, by: 60)) { timeline in
+            NavigationLink { WatchWeatherView() } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Image(systemName: weather.forecast.symbolName).symbolRenderingMode(.multicolor)
+                        Text(weather.city).font(.caption).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text(weather.temperature(weather.forecast.currentTemperatureCelsius)).font(.title3.weight(.semibold))
+                    }
+                    if let feels = weather.forecast.feelsLike { Text("Feels like \(weather.temperature(feels))").font(.caption2).foregroundStyle(.secondary) }
+                    if let day = weather.forecast.day(for: timeline.date, timeZone: weather.timeZone) {
+                        Text("H \(weather.temperature(day.highTemperatureCelsius)) · L \(weather.temperature(day.lowTemperatureCelsius))").font(.caption2)
+                    }
+                    if !weather.forecast.isFresh(at: timeline.date) { Text("Earlier forecast · \(weather.time(weather.forecast.fetchedAt))").font(.caption2).foregroundStyle(.secondary) }
+                }.padding(10).watchSurface(cornerRadius: 15)
+            }.buttonStyle(.plain).accessibilityIdentifier("watch.weather.open")
+            }
+        }
     }
 
     private var nightLightButton: some View {
